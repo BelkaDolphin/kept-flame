@@ -55,7 +55,22 @@
 - TypeScript 7.0.2(native/Go port)採用によるstrict tsconfigオプション群の完全互換は、実コード(T2以降)を書くまで未検証。
 - `.claude/`は現状空ディレクトリ、`.claude_sessions`は0バイトファイル(いずれも.gitignore対象・実害なし)。
 
+- [2026-07-25] **T1完了**(Opus・コミットcaa2e38): engine純粋性ESLint(flat config)。禁止8種を`src/engine/**`のoverrides 1箇所に集約、免除はcanonicalize.ts/state・serialize系/domainTags.tsのみ。回帰テスト77件(違反53・許可8・免除8・線引き7)全pass。**注意点2つ**: ①typescript-eslint 8.65がTS7のJS API非対応→公式の側置き構成に変更(`typescript`=6系alias、`@typescript/native`=7.0.2、tscは7が走る) ②npm auditがeslint9系の推移依存でhigh 5件報告(修正はeslint10待ち、実行時影響なし)。lintで強制不能な項目はconfig冒頭に明記(content出自判定・domainTagレジストリ整合等はTS型/決定論ゲート/レビュー担保)。
+- [2026-07-25] GDD確認: ビットマップ画像素材は設計上不要(アイコン/バッジはSVG/CSS自己完結)。ユーザーに回答済み。
+
+- [2026-07-25] **T13前半完了**(Opus・コミット62dd02c): `docs/design/tags-spec.md`(653行)。7タグの色/記号/パターン/数値の4重符号化、全49 ink×面ペアがWCAG 4.5:1合格(最小4.62)、色覚3型を混同色線+CIEDE2000で検討(最小ΔE00: 1型10.4/2型10.4/3型8.2)。末尾に実装用の機械可読JSON(検証済み)。**未確定点8件**(spec§9): 主要は①格子全景時の実ズーム倍率が#9b実機計測待ち ②damp色`#1942E5`の彩度が浮いてる問題(彩度を落とすと3型のclean/damp分離が悪化、ユーザー判断事項・非ブロッキング) ③数値チャネル桁数はadjacency実装後に確定。
+
+- [2026-07-25] **T13後半完了**(Sonnet・コミットed192f1): `bench/tags.html`(判読テスト42試行・決定論的提示・結果JSONコピー)+`bench/tags-contrast.mjs`(spec突合、全68行合格・不一致ゼロ)+`npm run measure:contrast`。eslint.config.jsに.mjs用Nodeグローバル許可を追加(engine規則は無変更、Fable5がvitest 257件全passで確認済み)。#9aのツールは揃った(計測実行はT16)。
+
+- [2026-07-25] **T2完了**(Opus・コミット8cedb94): `src/engine/fp.ts`+テスト120件(手計算ベクタ23本・BigIntオラクル差分、アサーション約7〜8万件)。mulFixは**除算前**2^53ガード+BigInt自動フォールバック(常に厳密値)、証明済みホットパスのみmulFixProven(境界超過で即例外=証明破れ検出)。線引きと補題L1〜L4をファイル冒頭に明文化、早見表の数値はテストでBigInt検算。使用MathはfloorのみでMath.sqrt不使用(isqrt=整数ニュートン法)。設計上の結論: 資源ストック×係数は証明不能=BigInt経路、係数×係数・率×率は証明可能=number経路。propertyテスト量産はSonnet委譲(Opusが全文レビュー済み)。
+
+- [2026-07-25] **T3完了**(Sonnet・コミット69409ea): rng/3ファイル(xoshiro128\*\* v1.1+splitmix32同梱=ADRリポ構成に従う、fnv1a32+hashRngDomain、domainTagsレジストリ=ランタイムassert)。参照ベクタ出典: 公式C実装(prng.di.unimi.it)+rand_xoshiroクレート公開テスト+FNV公式テストスイート。Apache Commons RNGは旧v1.0(バグ版)と判明し不採用。テスト51件、全248件pass(Fable5再確認済み)。**要ユーザー判断**: ADR-007はMath.imul使用を明記だがADR-006許可リストに無くlint禁止→等価な`imul32`(16bit分割乗算、Math.imul相手に10万件一致確認)を自前実装で回避。ADR-006にMath.imul追加すればimul32を置換可能。
+- domainTagsレジストリは現状`exploration`のみ。production/raid等はT5以降で追加。
+
+- [2026-07-25] **セッション終了(ユーザー都合・時間とセッション上限)**。RAGに作業記録ingest済み(source: chat://2026-07-25/kept-flame-implementation-start)。**T4(state層=Opus)は実行中のまま中断** → src/engine/state/・canonicalize.ts・テストのuntrackedファイルがディスクに残っている可能性。次セッションはまず `git status` で残存物を確認し、T4を再投入(残存ファイルは新エージェントにレビューさせて活用or作り直し判断)。
+
 ## 次のステップ
-1. T1(lint規約設計=Opus): ESLint 9 flat configでengine純粋性ルール(DOM/Date/Math.random等の禁止)を実装。計画書§3.2/§4.2参照。
-2. T1完了後: T2以降、計画書§4.2の割当てと依存関係(§4.3)に従って進行。Fable5は統率と最終確認のみ。
-3. ユーザーの期限切れPAT削除(急ぎ不要・§未解決参照)。
+1. **次セッション最初**: git statusでT4残存ファイル確認 → T4再投入(計画書§4.2の指示内容で。eslint免除パスとの整合必須)。
+2. T4完了後: T5(最小tickエンジン=Opus、単一ボトルネック)。並行可: T6(schema+ダミーcontent=Sonnet)。
+3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
+4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
