@@ -1,0 +1,6 @@
+node_modules
+dist
+package-lock.json
+
+# hand-authored design docs / project notes: not run through Prettier
+*.md
