@@ -98,9 +98,17 @@
 
 - [2026-07-25] **セッション終了(第2実装セッション)**。ユーザーの5時間制限残40%(セッション消費50%)のためT7前半で区切り。本セッション完了: T5(0b15b74)+T6(e95948f)+T7前半(8817426)。実消費合計約1.03M(T5=407k/T6=228k/T7前半=390k、いずれもエージェント分。見積り比2〜2.8倍で推移=計測#11の一次データ)。RAG記録: chat://2026-07-25/kept-flame-implementation-start を更新。
 
+- [2026-07-26] **T7後半完了**(Sonnet・コミット431bef1): golden vector 生成器。`conformance/scenarios.ts`(15シナリオ)+ `conformance/vectorPlans.ts`(36プラン・spec §6 表そのまま)+ `tools/genGoldenVectors.ts`(生成器/検証器・`buildVector`/`diffVectors`/`loadStoredVector`をexport)+ `conformance/vectors/*.json`(36ベクタ+index.json+coverage-matrix.json)+ `tests/conformance/goldenVectors.test.ts`(39件: 再生成一致36+checkCoverage+重複なし+本数)+ npm script `golden:check`/`golden:write`。テスト707件(668+39)全pass・typecheck/lint/format全クリーン・`checkCoverage`空配列(49経路すべて被覆)。
+  - **実行方式の詰め**(spec 7.1 の「着手時にNode24で確認」指示への回答): `node --experimental-strip-types` だけでは tsconfig の `moduleResolution:"Bundler"` 前提の拡張子省略 import(engine/schema 全体で使われている)を解決できない(`ERR_MODULE_NOT_FOUND`)。`node:module` の `register()` フックで拡張子省略→`.ts`/`.js` を試すカスタムローダー(`tools/tsLoaderHook.mjs`+`tools/tsLoaderRegister.mjs`、`--import` で読み込む)を自作して解決。新規npm依存なし(tsx等は不使用、指示どおり)。
+  - **`@types/node` 非依存**: リポジトリに Node 型定義が無かった(ADR-001 依存最小の帰結)ため、`tools/nodeShims.d.ts` に実使用分のみの ambient 宣言(`node:fs`/`node:url`/`node:module`/`node:path`/`process`)を自前で書いた(新規パッケージではなく型宣言のみ)。
+  - **JSON整形は `JSON.stringify(...,null,2)` ではなく `prettier.format(text,{parser:"json",...})` を使用**(spec 7.2 規則7は素の `JSON.stringify` を指示していたが、実際に prettier で確認したところ短い配列を1行に畳む等 `JSON.stringify(...,null,2)` とは出力が異なり `npm run format` が失敗することを検証で確認したための調整。prettier は既存devDependencyで新規依存ではない)。
+  - **`algoVersion`(index.json)** は `content/balance.json` の値(=1)を読む(state 側のメタ3軸=固定リテラル1とは別物・spec §3.4落とし穴(1)は state 側だけの制約)。
+  - **要Opus/ユーザー判断として報告**: spec §4.3/§4.4 の sc11-overcrowd に内部不整合を発見。中心 cell 7 の8近傍リストに cell 0 が含まれる(§4.4 で明記済み)にもかかわらず、同じ行の「四隅(0/5/42/47)に hearth を配置」も cell 0 を使うため、smelter@7 の heat タグ近傍が §4.4 の例示(cell1,2,6,8の4件・先頭2件=cell1,2・超過2件)ではなく実際は5件(0,1,2,6,8・先頭2件=cell0,1・超過3件)になる。spec を勝手に修正せず**表の記述どおり文字どおりに実装**した(コード中に注記あり: `conformance/scenarios.ts` の `SC11_HEAT_NEIGHBOR_CELLS` 直前コメント)。golden vector 自体は実際の engine 実行結果を記録するので技術的には壊れていないが、§4.4 の説明文とは数値が合わない。
+  - **spec に無かった具体値の補完**(設計変更ではなく実装での穴埋め、要判断ではない): sc06 の研究entity名(researchFire/Pottery/BasketWeaving)、sc10 の4住民ID・facility/resource ID、sc11 の facility/resident ID 命名、sc12 の resident ID。いずれも spec 本文が個体名を明示していなかった箇所。
+
 ## 次のステップ
-1. **T7後半(生成器実装=Sonnet)**。指示書は `docs/design/golden-vector-spec.md` §7(作るもの・生成器の規則・禁止事項・完了条件)。実装対象: `conformance/scenarios.ts` / `conformance/vectorPlans.ts` / `tools/genGoldenVectors.ts` / `conformance/vectors/*.json` / `tests/conformance/goldenVectors.test.ts` / npm script `golden:check`・`golden:write`。
-2. T7後: T8(Playwright 3エンジンconformance=Sonnet)。T5完了によりT9(sim校正=Sonnet)・T10(perf計測境界=Opus→Sonnet)も並行可。
+1. ~~**T7後半(生成器実装=Sonnet)**~~ **[2026-07-26完了]** 上記参照。
+2. T8(Playwright 3エンジンconformance=Sonnet)。T5完了によりT9(sim校正=Sonnet)・T10(perf計測境界=Opus→Sonnet)も並行可。72h golden vector 生成時間の実測(sc01-steady-alpha 10ms・他は概ね1〜6ms、sc13-onemin-alphaのみ16ms=1分tick Fallbackで(C)判定数10倍のため)が計測#3のsec/run校正の一次データに使える。
 3. ユーザー保留(非ブロッキング): 上記⑨件の判断(うち⑤adjacency effect語彙はT7で実装済み)、damp色の彩度、期限切れPAT削除。T15(workflow)はT9後+§8-1承認。**T7で追加の要ユーザー判断5件**(詳細は `docs/design/golden-vector-spec.md` §8): ①schema省略可フィールド3種のADR注記 ②ローダー配置(`schema/engineContent.ts`)のADRリポ構成への追記 ③GDD 6.2 効果表の英字ID正本がGDDに無い ④GDD 6.2「学芸3連接」はタグペア行列で表現不能(成文化実装時にモデル見直し要) ⑤`adjacency.seedOffsetRange` に「揺らぎ無し」の表現が無い({0,0}を慣用表現とした)。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
