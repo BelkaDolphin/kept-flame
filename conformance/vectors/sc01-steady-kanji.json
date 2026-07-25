@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 933,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 432,
+      "stochasticStepCount": 432,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 6,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 1350308469600,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 4320
+    },
+    "stateDigest": "76adbeeee77f1962a3ea88a07db6249e"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["rng-worldseed-nonascii"],
+  "scenarioId": "sc01-steady",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 4320,
+  "vectorId": "sc01-steady-kanji",
+  "worldSeed": "種火",
+  "worldSeedU32": 380929134
+}

@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 668,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 10,
+      "stochasticStepCount": 10,
+      "stochasticTrialCount": 20
+    },
+    "probe": {
+      "entityCount": 4,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 8000000000,
+      "resourceStockSumRaw": 0,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 100
+    },
+    "stateDigest": "37451bfbb766db3fac99cf793870c0eb"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["b-research-at-horizon"],
+  "scenarioId": "sc03-research",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 100,
+  "vectorId": "sc03-horizon-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

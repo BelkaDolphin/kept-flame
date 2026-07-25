@@ -1,0 +1,47 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1362,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 2,
+      "segmentCount": 72,
+      "stochasticStepCount": 72,
+      "stochasticTrialCount": 648
+    },
+    "probe": {
+      "entityCount": 8,
+      "recallImpairedResidentCount": 2,
+      "recallImpairedUntilTickSum": 5721,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 208500000000,
+      "rngStateDomainCount": 1,
+      "rngStateWordsXor": 2204237653,
+      "tick": 720
+    },
+    "stateDigest": "5a3ed47d98cf6149d488e803e8bb874d"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["split-many"],
+  "scenarioId": "sc06-recall",
+  "splitCounters": {
+    "rateChangeEventCount": 0,
+    "recallOccurrenceCount": 2,
+    "segmentCount": 72,
+    "stochasticStepCount": 72,
+    "stochasticTrialCount": 648
+  },
+  "splitTicks": [
+    10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210,
+    220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340, 350, 360, 370, 380, 390, 400,
+    410, 420, 430, 440, 450, 460, 470, 480, 490, 500, 510, 520, 530, 540, 550, 560, 570, 580, 590,
+    600, 610, 620, 630, 640, 650, 660, 670, 680, 690, 700, 710
+  ],
+  "toTick": 720,
+  "vectorId": "sc06-split-many-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1385,
+    "counters": {
+      "rateChangeEventCount": 2,
+      "recallOccurrenceCount": 3,
+      "segmentCount": 434,
+      "stochasticStepCount": 432,
+      "stochasticTrialCount": 3888
+    },
+    "probe": {
+      "entityCount": 8,
+      "recallImpairedResidentCount": 1,
+      "recallImpairedUntilTickSum": 10321,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 805350000000,
+      "rngStateDomainCount": 1,
+      "rngStateWordsXor": 813177570,
+      "tick": 4320
+    },
+    "stateDigest": "bff81dfc54f7fcd04a60e7ca0d17ebac"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["c-memory-keeper"],
+  "scenarioId": "sc09-memkeeper",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 4320,
+  "vectorId": "sc09-memkeeper-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

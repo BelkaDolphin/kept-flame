@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 947,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 432,
+      "stochasticStepCount": 432,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 6,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 1316903387040,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 4320
+    },
+    "stateDigest": "744ec9f395a4a7b7b3d3afb1daed3cc3"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["fp-imul-wrap"],
+  "scenarioId": "sc01-steady",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 4320,
+  "vectorId": "sc01-steady-longz",
+  "worldSeed": "zzzzzzzzzzzzzzzz",
+  "worldSeedU32": 3264105797
+}

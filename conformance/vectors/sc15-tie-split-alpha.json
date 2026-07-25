@@ -1,0 +1,42 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1023,
+    "counters": {
+      "rateChangeEventCount": 4,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 201,
+      "stochasticStepCount": 200,
+      "stochasticTrialCount": 1200
+    },
+    "probe": {
+      "entityCount": 6,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 2000,
+      "researchCompletedCount": 2,
+      "researchProgressSumRaw": 80080000000,
+      "resourceStockSumRaw": 0,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 2000
+    },
+    "stateDigest": "91c76258788c025c544223761b59e308"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["split-at-recovery-tick", "split-at-completion-tick"],
+  "scenarioId": "sc15-tie",
+  "splitCounters": {
+    "rateChangeEventCount": 2,
+    "recallOccurrenceCount": 0,
+    "segmentCount": 201,
+    "stochasticStepCount": 200,
+    "stochasticTrialCount": 1200
+  },
+  "splitTicks": [1000],
+  "toTick": 2000,
+  "vectorId": "sc15-tie-split-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}
