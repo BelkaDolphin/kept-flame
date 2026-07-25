@@ -274,11 +274,12 @@ describe("engine 純粋性: 違反は必ずエラーになる", () => {
 
 const ALLOWED: readonly { readonly name: string; readonly code: string }[] = [
   {
-    name: "Math 許可リスト 8 関数(ADR-006)",
+    name: "Math 許可リスト 9 関数(ADR-006、2026-07-25改訂で imul 追加)",
     code: [
       "export const clampTick = (t: number): number => Math.max(0, Math.min(4320, Math.trunc(t)));",
       "export const norm = (a: number): number =>",
       "  Math.abs(a) + Math.sign(a) + Math.floor(a) + Math.ceil(a) + Math.round(a);",
+      "export const mul32 = (a: number, b: number): number => Math.imul(a, b);",
     ].join("\n"),
   },
   {

@@ -61,8 +61,8 @@ const EXEMPT_STATE_SERIALIZE = ["src/engine/state/serialize.ts"];
 /** domainTag レジストリの定義ファイル。文字列リテラルはここでのみ書ける(ADR-024(2))。 */
 const EXEMPT_DOMAIN_TAGS = ["src/engine/rng/domainTags.ts"];
 
-/** ADR-006 Math 許可リスト(ECMA-262 が exact を規定する 8 関数のみ)。 */
-const MATH_ALLOWLIST = ["abs", "sign", "floor", "ceil", "round", "trunc", "max", "min"];
+/** ADR-006 Math 許可リスト(ECMA-262 が exact を規定する 9 関数のみ)。 */
+const MATH_ALLOWLIST = ["abs", "sign", "floor", "ceil", "round", "trunc", "max", "min", "imul"];
 const MATH_ALLOWLIST_RE = `/^(${MATH_ALLOWLIST.join("|")})$/`;
 
 const restrict = (names, message) => names.map((name) => ({ name, message }));

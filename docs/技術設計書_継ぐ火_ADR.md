@@ -43,6 +43,7 @@ Math 超越関数の許可リストを具体名で確定し、engine 内で許�
 | 関数 | ECMA-262 精度規定 | 採否 |
 |---|---|---|
 | `Math.abs` / `sign` / `floor` / `ceil` / `round` / `trunc` / `max` / `min` | exact(正確結果を規定) | 採用 |
+| `Math.imul` | exact(ToInt32 変換後の32bit整数乗算を厳密規定、丸め誤差なし) | 採用。**[2026-07-25改訂]** Math.imulを許可リストへ追加(ユーザー承認済み)。根拠: ECMA-262で厳密規定の整数演算。ADR-007との矛盾解消 |
 | `Math.sqrt` | correctly-rounded | 原則不使用。整数演算で代替可能な限り避け、必要時は整数ニュートン法(`isqrt`)を自前実装 |
 | `Math.pow`(非整数指数) / `exp` / `log` / `log2` / `sin` / `cos` / `tan` / `atan2` / `cbrt` / `hypot` | implementation-approximated(エンジン間 ULP 差が仕様上許容・bit 不一致) | 禁止 |
 
