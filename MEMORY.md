@@ -87,7 +87,7 @@
 - [2026-07-25] **T5/T6の要ユーザー判断(未処理・文書追記が必要な差異)**: ①GDD11.7同一tick優先順位に想起困難の項なし(T5解釈: 回復22/抽選24を負傷反映→生産の間) ②p_step線形按分の式をGDD11.2/11.8(C)に明記すべき ③eventQueueSnapshot非セーブ方針(ADR-012と差異) ④rngState空なら直列化省略(ADR-012にない正準化) ⑤adjacency effect語彙: engineは`yieldMul`のみ、写せないeffectはcontentロードでreject方針(T7実装要。T6 schemaは自由文字列で広い) ⑥footprint 2×1/2×2未実装=全施設1×1扱い(MVPでstate拡張要) ⑦adjacencyクランプ±60%はengine定数(content化判断余地) ⑧contentはカテゴリごと1ファイル方式(ADR図はエンティティ個別とも読める) ⑨tech.prereqs長さ0許可(エラ起点用、ADRコメント「1-3」と差異)。
 - [2026-07-25] **T5/T6統合の残作業**: `schema/facility.ts`のFACILITY_TAGSとT5 adjacencyのタグレジストリが別物=突き合わせ要。T6 JSON→`src/engine/rules/types.ts`内部表現へのローダー未実装(**T7の前提**)。
 
-- [2026-07-25] **T7前半完了**(Opus): golden vector の被覆設計 + content ローダー。668件全pass(既存583件は無改変)・typecheck/lint/format クリーン。
+- [2026-07-25] **T7前半完了**(Opus・コミット8817426、Fable5検分済み: 668件全pass・typecheck/lint/formatクリーン・ツリークリーン。実消費約390k=見積り140kの約2.8倍): golden vector の被覆設計 + content ローダー。
   - **ローダー配置=`schema/engineContent.ts`**(engine外)。根拠は lint が機械的に強制している: ①内部表現化に必要な `Object.keys` は engine 内で canonicalize.ts のみ免除 ②engine→schema の非型 import は全面禁止。加えて `schema/` は CODEOWNERS 人間専用なので「engine が受け付ける content 語彙」を運営LLMが勝手に広げられない。
   - **reject 方針の実装**: 効果語彙レジストリ `ENGINE_EFFECT_BY_CONTENT_EFFECT`(forgeYield/efficiency/foodYield→yieldMul)と `UNREPRESENTABLE_CONTENT_EFFECTS`(health/codifySpeed/defense = GDD 6.2 にあるが engine 未実装)を分けて持ち、未知語彙と未実装語彙で別メッセージ。適用先は any/タグ7種/facility実在ID の3形のみ(タグ名と facility ID の衝突は曖昧として reject)。縮約必須フィールド欠落(harshWork/output/durationTicks*)も既定値で埋めず reject。engine の ADJACENCY_TAGS と schema の FACILITY_TAGS を**実際に突き合わせる唯一の場所**(T5/T6統合の残作業に対する回答)。
   - **人間可読値→1e6 は 10 進文字列経由で厳密変換**(`String(value)` の桁列を 6 桁ずらす整数演算のみ。浮動小数の乗算を 1 度も通らない)。小数第7位以降に有効桁がある値は reject。**この実装が実際にダミー content の欠陥を検出**: `content/facility.json` の `forge.lvCurve[4] = 262.3509375`(1.15⁴ の倍精度展開そのまま)は 1e6 で表現不能 → `262.350937`(floor)へ修正。オーサリングツール(T後続)は 6 桁 floor を組み込む必要あり。
@@ -95,6 +95,8 @@
   - **被覆設計**: `docs/design/golden-vector-spec.md`(経路58件・シナリオ15件・seed 6本・ベクタ36本の表 + Sonnet 向け実装指示書 §7)。機械可読レジストリ = `conformance/coverage.json`。フォーマット定義 = `conformance/goldenVector.ts`(128bit ダイジェスト・カウンタ・プローブ・ファイル名規則・被覆突合)。
   - **設計上の要点2つ**: ①**状態は分割不変だがカウンタは分割不変ではない**(回復tickちょうどで区切ると rateChangeEventCount が減る。テストで固定済み)。「カウンタも一致するはず」と書くとT5バグの検出器が壊れる ②**ダイジェストに algoVersion を入れない**。入れると bump で全 golden が変わり ADR-016 の「golden 変化 ⟺ bump」が恒真化して無意味になる → シナリオのメタ3軸は固定リテラル。
   - `observedBy` で「golden で観測できる経路」と「単体テスト/ローダー reject が担保する経路」を正直に分離(残余リスク#9 に対する honest な被覆宣言)。
+
+- [2026-07-25] **セッション終了(第2実装セッション)**。ユーザーの5時間制限残40%(セッション消費50%)のためT7前半で区切り。本セッション完了: T5(0b15b74)+T6(e95948f)+T7前半(8817426)。実消費合計約1.03M(T5=407k/T6=228k/T7前半=390k、いずれもエージェント分。見積り比2〜2.8倍で推移=計測#11の一次データ)。RAG記録: chat://2026-07-25/kept-flame-implementation-start を更新。
 
 ## 次のステップ
 1. **T7後半(生成器実装=Sonnet)**。指示書は `docs/design/golden-vector-spec.md` §7(作るもの・生成器の規則・禁止事項・完了条件)。実装対象: `conformance/scenarios.ts` / `conformance/vectorPlans.ts` / `tools/genGoldenVectors.ts` / `conformance/vectors/*.json` / `tests/conformance/goldenVectors.test.ts` / npm script `golden:check`・`golden:write`。
