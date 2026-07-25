@@ -67,10 +67,13 @@
 - [2026-07-25] **T3完了**(Sonnet・コミット69409ea): rng/3ファイル(xoshiro128\*\* v1.1+splitmix32同梱=ADRリポ構成に従う、fnv1a32+hashRngDomain、domainTagsレジストリ=ランタイムassert)。参照ベクタ出典: 公式C実装(prng.di.unimi.it)+rand_xoshiroクレート公開テスト+FNV公式テストスイート。Apache Commons RNGは旧v1.0(バグ版)と判明し不採用。テスト51件、全248件pass(Fable5再確認済み)。**要ユーザー判断**: ADR-007はMath.imul使用を明記だがADR-006許可リストに無くlint禁止→等価な`imul32`(16bit分割乗算、Math.imul相手に10万件一致確認)を自前実装で回避。ADR-006にMath.imul追加すればimul32を置換可能。
 - domainTagsレジストリは現状`exploration`のみ。production/raid等はT5以降で追加。
 
-- [2026-07-25] **セッション終了(ユーザー都合・時間とセッション上限)**。RAGに作業記録ingest済み(source: chat://2026-07-25/kept-flame-implementation-start)。**T4(state層=Opus)は実行中のまま中断** → src/engine/state/・canonicalize.ts・テストのuntrackedファイルがディスクに残っている可能性。次セッションはまず `git status` で残存物を確認し、T4を再投入(残存ファイルは新エージェントにレビューさせて活用or作り直し判断)。
+- [2026-07-25] **T4完了**(Opus・コミットc5358b8、Fable5検分済み: 360件全pass・ツリークリーン): state層4ファイル+テスト112件。設計要点: `entityStateById`は単一namespace+**Map反復順をID昇順の正準順に固定**(維持責務はcreateGameState/putEntity/fromSerializableの3箇所のみ)、toSerializableは最後にcanonicalizeJsonを通すので往復バイト同一性はcanonicalize側の性質として保証。entity=resident/facility/research/resourceの4種(計測rules3本が読む変数のみ)。**rngStateはT5送り**(domainTagsのproduction/研究ドメイン追加が先、理由はstate.ts§3)。eslint免除の拡張は不要だった(免除パスと完全一致)。
+- [2026-07-25] `.gitignore`に`models/`追加(eba846c)。RAG ingest時にlocal-ragが埋め込みモデル(Xenova)をプロジェクト直下にDLするため。
+- [2026-07-25] **セッション終了**。RAG記録: chat://2026-07-25/kept-flame-implementation-start(T4完了版に更新済み)。P0/P1のうちT0〜T4+T13完了、進捗は計画書§4.3のクリティカルパス上でT5直前まで。
 
 ## 次のステップ
-1. **次セッション最初**: git statusでT4残存ファイル確認 → T4再投入(計画書§4.2の指示内容で。eslint免除パスとの整合必須)。
-2. T4完了後: T5(最小tickエンジン=Opus、単一ボトルネック)。並行可: T6(schema+ダミーcontent=Sonnet)。
+1. **次セッション最初**: T5(最小tickエンジン=Opus、単一ボトルネック)を投入。advance/scheduler((A)(B)(C)区間分類・離散事象ヒープ・tie-break・72hクランプ)/stochastic段階1/rules縮約3本/adjacency。rngStateのGameState組込みとdomainTags追加(production/research/recall等)もT5の範囲。
+2. T5と並行可: T6(最小schema+ダミーcontent=Sonnet)。T5+T6完了後: T7(golden vector被覆設計=Opus)→T8(Playwright)、T9(sim校正)。
+3. ユーザー保留(非ブロッキング): damp色の彩度判断、期限切れPAT削除、GitHub Actions用workflow(T15)はT9後。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
