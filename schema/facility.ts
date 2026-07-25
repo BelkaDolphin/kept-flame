@@ -8,11 +8,28 @@
 //
 // タグ7種の英字IDは docs/design/tags-spec.md 末尾の機械可読 JSON(T13後半)を
 // 出典とする: heat/clean/foul/noise/damp/calm/lore。
+//
+// ---------------------------------------------------------------------------
+// [T7] 縮約 rules 向け追加フィールド `harshWork` / `output`(いずれも省略可)
+// ---------------------------------------------------------------------------
+// engine の縮約 rules(`src/engine/rules/types.ts` の FacilityDef)は
+//   harshWork : GDD 11.2 の loadW を ×2.0(過酷業務)/ ×0.5(通常)に振り分ける
+//   output    : GDD 11.1 の産出先(resource ストック / 研究点)
+// を要求するが、ADR「entity スキーマ」616行の facility スケッチにはどちらも無い
+// (最終形では産出先は recipe entity 側に載る想定であり、recipe カテゴリは
+// T6/T7 のロード対象外)。そこで本スキーマでは **省略可**(欠落は null)として
+// additive に受け付け、「engine へ写すのに必須」の強制は content ローダー
+// (schema/engineContent.ts)側で行う:
+//   - schema 段: 形式のみ検証(既存 content・既存テストを壊さない)
+//   - loader 段: 欠落を reject(縮約 rules が読む値を黙って既定値で埋めない)
+// recipe カテゴリを追加する際に `output` の出所をそちらへ移すこと。
 // ---------------------------------------------------------------------------
 
 import {
   IssueCollector,
   expectArray,
+  expectBoolean,
+  expectEnum,
   expectInteger,
   expectNumber,
   expectRecord,
@@ -54,6 +71,14 @@ export interface FacilityFootprint {
   readonly height: number;
 }
 
+/** GDD 11.1 の産出先。研究点は resource ストックではなく研究進行度へ入る。 */
+export const FACILITY_OUTPUT_KINDS = ["resource", "research"] as const;
+export type FacilityOutputKind = (typeof FACILITY_OUTPUT_KINDS)[number];
+
+/** `output`(省略可)。resource の場合のみ産出先 ID を持つ。 */
+export type FacilityOutputContent =
+  { readonly kind: "resource"; readonly resourceId: string } | { readonly kind: "research" };
+
 export interface FacilityContent {
   readonly id: string;
   readonly tags: readonly FacilityTag[];
@@ -61,6 +86,13 @@ export interface FacilityContent {
   readonly lvCurve: readonly number[];
   readonly overflowCapPolicy: string;
   readonly footprint: FacilityFootprint;
+  /**
+   * GDD 11.2 の過酷業務(製錬/鍛冶/高炉等)か。JSON に無ければ null
+   * (= engine へ写す段で reject。ファイル冒頭 [T7] の節を参照)。
+   */
+  readonly harshWork: boolean | null;
+  /** GDD 11.1 の産出先。JSON に無ければ null(同上)。 */
+  readonly output: FacilityOutputContent | null;
 }
 
 const SLOT_LEVEL_KEYS = ["lv1", "lv2", "lv3", "lv4", "lv5"] as const;
@@ -182,6 +214,26 @@ function validateFootprint(
   return { width, height };
 }
 
+/**
+ * `output`(省略可)の検証。`kind` が resource のときだけ `resourceId` を要求する。
+ * resource カテゴリは T6/T7 のロード対象外なので**実在確認は行わない**
+ * (産出先 entity の不在は engine 側の applyProduction が実行時に reject する)。
+ */
+function validateOutput(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): FacilityOutputContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const kind = expectEnum(obj["kind"], FACILITY_OUTPUT_KINDS, `${path}.kind`, issues);
+  if (kind === undefined) return undefined;
+  if (kind === "research") return { kind: "research" };
+  const resourceId = validateId(obj["resourceId"], `${path}.resourceId`, issues);
+  if (resourceId === undefined) return undefined;
+  return { kind: "resource", resourceId };
+}
+
 export function validateFacility(raw: unknown): ValidationResult<FacilityContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -194,16 +246,28 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
   const overflowCapPolicy = expectString(obj["overflowCapPolicy"], "$.overflowCapPolicy", issues);
   const footprint = validateFootprint(obj["footprint"], "$.footprint", issues);
 
+  // 省略可フィールド: キーが無ければ null、あれば形式を検証する。
+  const rawHarshWork = obj["harshWork"];
+  const harshWork =
+    rawHarshWork === undefined
+      ? null
+      : (expectBoolean(rawHarshWork, "$.harshWork", issues) ?? undefined);
+  const rawOutput = obj["output"];
+  const output =
+    rawOutput === undefined ? null : (validateOutput(rawOutput, "$.output", issues) ?? undefined);
+
   if (
     id === undefined ||
     tags === undefined ||
     slots === undefined ||
     lvCurve === undefined ||
     overflowCapPolicy === undefined ||
-    footprint === undefined
+    footprint === undefined ||
+    harshWork === undefined ||
+    output === undefined
   ) {
     return fail(issues.list());
   }
 
-  return ok({ id, tags, slots, lvCurve, overflowCapPolicy, footprint });
+  return ok({ id, tags, slots, lvCurve, overflowCapPolicy, footprint, harshWork, output });
 }

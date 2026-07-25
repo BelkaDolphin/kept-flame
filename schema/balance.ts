@@ -22,6 +22,7 @@ import {
   expectRecord,
   fail,
   ok,
+  validateId,
   type NumericRange,
   type ValidationResult,
 } from "./common";
@@ -37,6 +38,11 @@ const POSITIVE_INT: NumericRange = { min: 1, max: 1_000_000 };
 const UNIT_RANGE: NumericRange = { min: 0, max: 1 };
 const MORALE_SCALE_RANGE: NumericRange = { min: 0, max: 100 };
 const RESIST_RANGE: NumericRange = { min: -1, max: 1 };
+/**
+ * [T7] 想起困難の持続 tick(GDD 11.2「持続 d = 1〜2日」)の許容レンジ。
+ * 1 tick = 1 分なので 1 日 = 1440。上限は 1 週間(10080)を保守境界とする。
+ */
+const RECALL_DURATION_TICKS_RANGE: NumericRange = { min: 1, max: 10_080 };
 
 export interface RecallRiskParams {
   /** GDD 11.2 base_p。 */
@@ -61,6 +67,22 @@ export interface RecallRiskParams {
   readonly masteryResistMax: number;
   /** GDD 11.2 masteryResist: 記憶巧者 trait による追加軽減(-0.15)。 */
   readonly memoryKeeperResist: number;
+  /**
+   * [T7] 記憶巧者 trait の content ID(省略可・欠落は null)。
+   * GDD 11.2 は「記憶巧者trait −0.15」と効果量だけを定めており、どの trait entity が
+   * それに該当するかは content 側の対応付けなので balance に置く。省略時は
+   * 「この content には記憶巧者 trait が無い」= engine 側 memoryKeeperTraitId が null。
+   * 指定した場合の trait 実在確認は contentBundle.ts の cross-ref が行う。
+   */
+  readonly memoryKeeperTraitId: string | null;
+  /**
+   * [T7] 発生時の持続 tick の下限(GDD 11.2「d = 1〜2日」の 1 日 = 1440。省略可)。
+   * 省略可にしているのは既存 content/テストを壊さないため。engine へ写す段
+   * (schema/engineContent.ts)は欠落を reject する。
+   */
+  readonly durationTicksMin: number | null;
+  /** [T7] 発生時の持続 tick の上限(GDD 11.2 の 2 日 = 2880。省略可)。 */
+  readonly durationTicksMax: number | null;
 }
 
 export interface BalanceContent {
@@ -128,6 +150,33 @@ function validateRecallRiskParams(
     RESIST_RANGE,
   );
 
+  // 省略可フィールド(ファイル冒頭 [T7]): キーが無ければ null、あれば形式を検証する。
+  const rawTraitId = obj["memoryKeeperTraitId"];
+  const memoryKeeperTraitId =
+    rawTraitId === undefined
+      ? null
+      : (validateId(rawTraitId, `${path}.memoryKeeperTraitId`, issues) ?? undefined);
+  const rawDurationMin = obj["durationTicksMin"];
+  const durationTicksMin =
+    rawDurationMin === undefined
+      ? null
+      : (expectInteger(
+          rawDurationMin,
+          `${path}.durationTicksMin`,
+          issues,
+          RECALL_DURATION_TICKS_RANGE,
+        ) ?? undefined);
+  const rawDurationMax = obj["durationTicksMax"];
+  const durationTicksMax =
+    rawDurationMax === undefined
+      ? null
+      : (expectInteger(
+          rawDurationMax,
+          `${path}.durationTicksMax`,
+          issues,
+          RECALL_DURATION_TICKS_RANGE,
+        ) ?? undefined);
+
   if (
     base_p === undefined ||
     p_max === undefined ||
@@ -139,8 +188,30 @@ function validateRecallRiskParams(
     moraleBonusLow === undefined ||
     dispatchW === undefined ||
     masteryResistMax === undefined ||
-    memoryKeeperResist === undefined
+    memoryKeeperResist === undefined ||
+    memoryKeeperTraitId === undefined ||
+    durationTicksMin === undefined ||
+    durationTicksMax === undefined
   ) {
+    return undefined;
+  }
+
+  if (
+    durationTicksMin !== null &&
+    durationTicksMax !== null &&
+    durationTicksMin > durationTicksMax
+  ) {
+    issues.add(
+      path,
+      `durationTicksMin (${String(durationTicksMin)}) は durationTicksMax (${String(durationTicksMax)}) 以下が必須`,
+    );
+    return undefined;
+  }
+  if ((durationTicksMin === null) !== (durationTicksMax === null)) {
+    issues.add(
+      path,
+      "durationTicksMin / durationTicksMax は両方指定か両方省略のいずれか(片方だけの指定は持続レンジが決まらない)",
+    );
     return undefined;
   }
 
@@ -182,6 +253,9 @@ function validateRecallRiskParams(
     dispatchW,
     masteryResistMax,
     memoryKeeperResist,
+    memoryKeeperTraitId,
+    durationTicksMin,
+    durationTicksMax,
   };
 }
 

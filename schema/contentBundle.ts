@@ -5,8 +5,13 @@
 // raw JSON(カテゴリ別)を受け取り、(1) canonicalizeJson(engine の単一実装)
 // でロード時正準化を通し、(2) カテゴリ別スキーマ検証器を適用し、(3) 全
 // カテゴリ横断のグローバル ID 一意性を検証し、(4) カテゴリを跨ぐ参照整合性
-// (tech.prereqs / tech.fieldRequirement.facility / prereq 循環)を検証する。
+// (tech.prereqs / tech.fieldRequirement.facility / prereq 循環 /
+// balance.recallRiskParams.memoryKeeperTraitId → trait)を検証する。
 // この4段が「content はロード時に正準化パスを通す」配線の実体。
+//
+// 検証を通った ContentBundle を engine の内部表現(EngineContent)へ写すのは
+// `schema/engineContent.ts`(T7)であり、そこが「engine へ写せない語彙を reject する」
+// 最後の関門になる。本ファイルは engine 型に一切依存しない(= 語彙の写像を持たない)。
 //
 // 各段は個別に呼び出せる純関数として分離済み(collect/checkGlobalIdUniqueness
 // /checkCrossReferences)なので、T16 の計測ハーネスはどの段が計測コストの
@@ -71,9 +76,21 @@ function collect<T>(
 function checkCrossReferences(
   tech: readonly TechContent[],
   facility: readonly FacilityContent[],
+  trait: readonly TraitContent[],
+  balance: BalanceContent,
 ): readonly ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const facilityIds = new Set(facility.map((f) => f.id));
+
+  // [T7] balance.recallRiskParams.memoryKeeperTraitId は trait カテゴリの実在 ID を指す
+  // (省略時は null = 記憶巧者 trait を持たない content)。
+  const memoryKeeperTraitId = balance.recallRiskParams.memoryKeeperTraitId;
+  if (memoryKeeperTraitId !== null && !trait.some((t) => t.id === memoryKeeperTraitId)) {
+    issues.push({
+      path: "balance.recallRiskParams.memoryKeeperTraitId",
+      message: `trait "${memoryKeeperTraitId}" が trait カテゴリに存在しない`,
+    });
+  }
 
   for (const t of tech) {
     if (!facilityIds.has(t.fieldRequirement.facility)) {
@@ -168,7 +185,7 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
   });
   if (idIssues.length > 0) return { ok: false, issues: idIssues };
 
-  const crossRefIssues = checkCrossReferences(tech, facility);
+  const crossRefIssues = checkCrossReferences(tech, facility, trait, balanceResult.value);
   if (crossRefIssues.length > 0) return { ok: false, issues: crossRefIssues };
 
   return {

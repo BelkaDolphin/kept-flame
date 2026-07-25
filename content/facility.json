@@ -5,15 +5,19 @@
     "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
     "lvCurve": [100, 115, 132.25, 152.0875, 174.900625],
     "overflowCapPolicy": "convertToWaste",
-    "footprint": { "width": 1, "height": 1 }
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "output": { "kind": "resource", "resourceId": "firewood" }
   },
   {
     "id": "forge",
     "tags": ["heat"],
     "slots": { "lv1": 1, "lv2": 2, "lv3": 2, "lv4": 3, "lv5": 3 },
-    "lvCurve": [150, 172.5, 198.375, 228.13125, 262.3509375],
+    "lvCurve": [150, 172.5, 198.375, 228.13125, 262.350937],
     "overflowCapPolicy": "discardExcess",
-    "footprint": { "width": 2, "height": 1 }
+    "footprint": { "width": 2, "height": 1 },
+    "harshWork": true,
+    "output": { "kind": "resource", "resourceId": "iron" }
   },
   {
     "id": "workbench",
@@ -21,6 +25,8 @@
     "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
     "lvCurve": [80, 92, 105.8, 121.67, 139.9205],
     "overflowCapPolicy": "discardExcess",
-    "footprint": { "width": 1, "height": 1 }
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "output": { "kind": "research" }
   }
 ]

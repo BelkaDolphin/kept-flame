@@ -1,0 +1,418 @@
+{
+  "formatVersion": 1,
+  "paths": [
+    {
+      "id": "a-closed-form",
+      "title": "(A) 定常生産区間を区分求積の閉形式で飛ばす結果が逐次ループと一致する",
+      "refs": ["GDD 11.8(A)", "src/engine/rules/production.ts §1", "src/engine/scheduler.ts §1"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "a-zero-rate",
+      "title": "レート 0(稼働就労者ゼロ / 基礎産出ゼロ)の区間では状態が動かない",
+      "refs": ["src/engine/rules/production.ts computeProductionRates"],
+      "observedBy": ["digest", "counters"],
+      "note": ""
+    },
+    {
+      "id": "a-worker-scaling",
+      "title": "稼働就労者数に比例(派遣中・想起困難中は寄与 0)",
+      "refs": ["GDD 11.1", "src/engine/rules/production.ts §2 isWorkerActive"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "a-level-curve",
+      "title": "Lv 別産出はオーサリング時展開済みの個別 FP 値を引く(実行時べき乗なし)",
+      "refs": ["GDD 11.7", "ADR-006", "src/engine/rules/production.ts facilityOutputPerTick"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "b-research-on-grid",
+      "title": "(B) 研究完了 tick が粗粒度ステップのグリッド上に乗る",
+      "refs": ["GDD 11.8(B)", "src/engine/scheduler.ts syncResearchCompletionEvent"],
+      "observedBy": ["digest", "counters"],
+      "note": "同 tick に (B)(C) が並ぶので tie-break が効く"
+    },
+    {
+      "id": "b-research-off-grid",
+      "title": "(B) 研究完了 tick が粗粒度ステップのグリッド上に乗らない",
+      "refs": ["GDD 11.8(B)", "src/engine/scheduler.ts runSchedule"],
+      "observedBy": ["digest", "counters"],
+      "note": "グリッド外境界で区間が余分に 1 本切れることを counters で確認する"
+    },
+    {
+      "id": "b-research-at-horizon",
+      "title": "完了 tick == toTick のイベントは処理しない(半開区間の規約)",
+      "refs": ["src/engine/scheduler.ts §2"],
+      "observedBy": ["digest", "counters"],
+      "note": ""
+    },
+    {
+      "id": "b-research-ceil",
+      "title": "完了予測は ceil(残り / レート)。端数があると 1 tick 遅れ、余剰は progress に残る",
+      "refs": ["src/engine/rules/research.ts ticksUntilResearchComplete"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "b-research-preloaded",
+      "title": "ロード時点で進行度がコストに達している state は現在 tick で完了する",
+      "refs": ["src/engine/rules/research.ts §(i)", "src/engine/scheduler.ts §2"],
+      "observedBy": ["digest", "counters"],
+      "note": "T5 で分割不変性バグ②を生んだ経路"
+    },
+    {
+      "id": "b-research-queue-advance",
+      "title": "完了後は未完了 research の ID 昇順で次の 1 本へレートが向く(単一キュー)",
+      "refs": ["src/engine/rules/research.ts §2"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "b-research-zero-rate",
+      "title": "研究レート 0 では完了イベントを積まない(予測 null)",
+      "refs": ["src/engine/rules/research.ts ticksUntilResearchComplete"],
+      "observedBy": ["digest", "counters"],
+      "note": ""
+    },
+    {
+      "id": "b-recall-recovery-boundary",
+      "title": "想起困難の回復は (C) が生んだ (B) 境界。状態遷移を持たず区間だけ切る",
+      "refs": ["src/engine/rules/recall.ts 末尾", "src/engine/scheduler.ts §1"],
+      "observedBy": ["digest", "counters"],
+      "note": "T5 で分割不変性バグ①を生んだ経路"
+    },
+    {
+      "id": "c-step-grid",
+      "title": "(C) 粗粒度ステップは tick の絶対グリッド上で発火する(state.tick 起点でない)",
+      "refs": ["src/engine/stochastic.ts coarseStepIndexOf", "GDD 11.8(C)"],
+      "observedBy": ["counters"],
+      "note": ""
+    },
+    {
+      "id": "c-trial-count",
+      "title": "ベルヌーイ試行数 = ステップ数 × 住民数 × 技術数(ADR-014 の 138,240 判定/run)",
+      "refs": ["ADR-014(1)", "src/engine/rules/recall.ts §3(a)"],
+      "observedBy": ["counters"],
+      "note": ""
+    },
+    {
+      "id": "c-p-clamp-max",
+      "title": "発生確率が p_max でクランプされる",
+      "refs": ["GDD 11.2", "src/engine/rules/recall.ts recallRiskPerDay"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "c-p-zero",
+      "title": "発生確率 0 でも試行は全ペアぶん引く(段階1 の per-step 全再評価を崩さない)",
+      "refs": ["src/engine/rules/recall.ts §3 末尾", "ADR-018(1)"],
+      "observedBy": ["counters", "probe"],
+      "note": ""
+    },
+    {
+      "id": "c-morale-thresholds",
+      "title": "moraleW の閾値境界(士気 <15 / <30 / ちょうど 15 / ちょうど 30)",
+      "refs": ["GDD 11.2", "src/engine/rules/recall.ts recallRiskPerDay"],
+      "observedBy": ["digest"],
+      "note": "低位が中位より強い(排他)ことも同時に確認する"
+    },
+    {
+      "id": "c-mastery-cap",
+      "title": "masteryResist は上限で打ち止め(min)、負値は 0 で下限クランプ",
+      "refs": ["GDD 11.2", "src/engine/rules/recall.ts recallRiskPerDay"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "c-memory-keeper",
+      "title": "記憶巧者 trait 保持者は耐性(負値)が masteryResist へ加算される",
+      "refs": ["GDD 11.2", "src/engine/rules/recall.ts recallRiskPerDay"],
+      "observedBy": ["digest"],
+      "note": "content 側で balance.recallRiskParams.memoryKeeperTraitId が指す trait が必要"
+    },
+    {
+      "id": "c-dispatch-weight",
+      "title": "探索派遣中は dispatchW が加算され、かつ生産の稼働から外れる",
+      "refs": ["GDD 11.2", "src/engine/rules/production.ts isWorkerActive"],
+      "observedBy": ["digest", "probe"],
+      "note": ""
+    },
+    {
+      "id": "c-no-reroll-while-impaired",
+      "title": "想起困難中の住民は新規発生としない(持続を延長しない)",
+      "refs": ["src/engine/rules/recall.ts §3 末尾"],
+      "observedBy": ["probe"],
+      "note": "recallOccurrenceCount と recallImpairedUntilTickSum の両方で確認する"
+    },
+    {
+      "id": "c-linear-proration",
+      "title": "p_step = p_day × coarseTickMinutes / 1440 の floor 線形按分",
+      "refs": ["src/engine/stochastic.ts perCoarseStepProbability", "ADR-006"],
+      "observedBy": ["digest"],
+      "note": "非整数べき乗を使わない正準実装。GDD 11.2 への明記は要ユーザー判断項目"
+    },
+    {
+      "id": "c-duration-draw",
+      "title": "持続 tick の抽選が逐次ストリーム(domainTag recallDuration)を 1 歩進める",
+      "refs": ["src/engine/stochastic.ts §2(b)", "ADR-024(2)"],
+      "observedBy": ["probe", "digest"],
+      "note": ""
+    },
+    {
+      "id": "tie-multi-event-same-tick",
+      "title": "同一 tick に (B) 研究完了 / (C) 粗粒度ステップ / (B) 回復が並ぶときの処理順",
+      "refs": ["GDD 11.7", "src/engine/scheduler.ts §3 PIPELINE_STAGE"],
+      "observedBy": ["digest", "counters"],
+      "note": "回復(22) → 抽選(24) → 研究完了(40) の順。GDD 11.7 に想起困難の項が無い点は要ユーザー判断"
+    },
+    {
+      "id": "tie-same-stage-entity-order",
+      "title": "同 tick・同パイプライン段に複数 entity が来たときの entityId UTF-16 昇順",
+      "refs": ["GDD 11.7", "src/engine/scheduler.ts compareScheduledEvents"],
+      "observedBy": ["digest"],
+      "note": "2 人以上が同 tick に回復する盤面が必要"
+    },
+    {
+      "id": "split-at-recovery-tick",
+      "title": "分割不変性: 想起困難の回復 tick ちょうどで advance を区切る",
+      "refs": ["src/engine/advance.ts §3", "src/engine/rules/recall.ts 末尾"],
+      "observedBy": ["split-digest", "counters"],
+      "note": "T5 で実際にバグが出た区切り位置。counters は一括と一致しない(goldenVector.ts §2)"
+    },
+    {
+      "id": "split-at-completion-tick",
+      "title": "分割不変性: 研究完了 tick ちょうどで advance を区切る",
+      "refs": ["src/engine/advance.ts §3", "src/engine/rules/research.ts §(i)"],
+      "observedBy": ["split-digest", "counters"],
+      "note": "T5 で実際にバグが出た区切り位置"
+    },
+    {
+      "id": "split-at-step-tick",
+      "title": "分割不変性: 粗粒度ステップ境界ちょうどで区切る",
+      "refs": ["src/engine/stochastic.ts coarseStepIndexOf"],
+      "observedBy": ["split-digest"],
+      "note": ""
+    },
+    {
+      "id": "split-off-grid",
+      "title": "分割不変性: グリッドにもイベントにも乗らない任意 tick で区切る",
+      "refs": ["src/engine/advance.ts §3"],
+      "observedBy": ["split-digest"],
+      "note": ""
+    },
+    {
+      "id": "split-many",
+      "title": "分割不変性: 1 粗粒度ステップずつ刻んでも 72h 一括と一致する",
+      "refs": ["src/engine/advance.ts §3", "ADR-026(3)"],
+      "observedBy": ["split-digest"],
+      "note": "foreground live play と Worker catch-up が同結果である根拠(ADR-019/029 の二系統)"
+    },
+    {
+      "id": "rng-worldseed-variation",
+      "title": "worldSeed 差で adjacency 揺らぎと (C) 抽選の結果が変わる",
+      "refs": ["ADR-007", "GDD 6.4-2"],
+      "observedBy": ["digest"],
+      "note": "同一シナリオを 2 seed で回し digest が異なることを確認する"
+    },
+    {
+      "id": "rng-worldseed-empty",
+      "title": "worldSeed が空文字列(FNV offset basis そのまま = 畳み込み 0 回)",
+      "refs": ["src/engine/rng/fnv1a32.ts"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "rng-worldseed-nonascii",
+      "title": "非 ASCII worldSeed(UTF-16 コードユニット単位の FNV-1a を固定)",
+      "refs": ["src/engine/rng/fnv1a32.ts 冒頭", "ADR-010"],
+      "observedBy": ["digest"],
+      "note": "ブラウザ 3 エンジンで charCodeAt 経路が一致することの検出器(ADR-017)"
+    },
+    {
+      "id": "rng-worldseed-surrogate",
+      "title": "サロゲートペアを含む worldSeed(コードユニット 2 個として畳まれる)",
+      "refs": ["src/engine/canonicalize.ts §2", "src/engine/rng/fnv1a32.ts"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "rng-state-empty-roundtrip",
+      "title": "rngState が空のまま終わる run(直列化形からキーごと省略される)の往復",
+      "refs": ["src/engine/state/serialize.ts §3", "src/engine/state/state.ts §4"],
+      "observedBy": ["probe", "digest"],
+      "note": "canonicalJsonLength が rngState 無しの形であることも同時に固定される"
+    },
+    {
+      "id": "rng-state-nonempty-roundtrip",
+      "title": "rngState が非空になる run(recallDuration ストリームが進む)の往復",
+      "refs": ["src/engine/state/serialize.ts §3"],
+      "observedBy": ["probe", "digest"],
+      "note": "生成器は toSerializable → fromSerializable → 再 advance でも同じ digest になることを確認する"
+    },
+    {
+      "id": "rng-hash-address-order-free",
+      "title": "hash アドレス方式の draw は評価順に依存しない(per-step 全再評価の構造保証)",
+      "refs": ["src/engine/stochastic.ts §2(a)", "ADR-018(1)"],
+      "observedBy": ["unit-test"],
+      "note": "golden vector は「ある順序での結果」しか観測できない。順序非依存性は tests/engine/stochastic.test.ts が担保する"
+    },
+    {
+      "id": "adj-seed-offset-applied",
+      "title": "シード揺らぎが周回固定値としてタグペア係数へ焼き込まれる",
+      "refs": ["GDD 6.4-2", "src/engine/adjacency.ts §4 applySeedOffsets"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "adj-seed-offset-identity",
+      "title": "seedOffsetRange が {0, 0} なら揺らぎは恒等(係数が素の content 値と一致)",
+      "refs": ["src/engine/adjacency.ts applySeedOffsets"],
+      "observedBy": ["digest"],
+      "note": "engine は seedOffset=null で恒等になるが content からは null を表現できない(schema が必須フィールド)ため {0,0} で代替する"
+    },
+    {
+      "id": "adj-overcrowd-lexical-top2",
+      "title": "過密は方向順に列挙後セル ID 辞書順へ再ソートし先頭 2 件のみボーナス有効",
+      "refs": ["GDD 6.3", "src/engine/adjacency.ts §3(c) computeCellAdjacency"],
+      "observedBy": ["digest", "probe"],
+      "note": "threshold=3 のときの「先頭 (threshold-1) 件」= 2 件"
+    },
+    {
+      "id": "adj-overcrowd-multi-tag",
+      "title": "複数タグ施設は各タグの過密カウントへ同時参加する",
+      "refs": ["GDD 6.3", "src/engine/adjacency.ts §3(b)"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "adj-bonus-clamp",
+      "title": "ボーナス加算合計を ±60% でクランプ",
+      "refs": ["GDD 6.3(d)", "src/engine/adjacency.ts ADJACENCY_BONUS_CLAMP_FIX"],
+      "observedBy": ["digest"],
+      "note": "クランプ幅は engine 定数。content 化するかは要ユーザー判断項目"
+    },
+    {
+      "id": "adj-penalty-clamp",
+      "title": "過密ペナルティはボーナスのクランプ外で ±clampFP に別途クランプ",
+      "refs": ["GDD 6.3(d)", "src/engine/adjacency.ts computeCellAdjacency"],
+      "observedBy": ["digest"],
+      "note": ""
+    },
+    {
+      "id": "adj-target-resolution",
+      "title": "隣接効果の適用先 any / タグ / facility 定義の 3 形すべてが効く",
+      "refs": ["GDD 6.2", "src/engine/adjacency.ts effectApplies", "schema/engineContent.ts §1(b)"],
+      "observedBy": ["digest", "loader-reject"],
+      "note": "解決できない target はローダーが reject する"
+    },
+    {
+      "id": "adj-neighbor-edge",
+      "title": "盤端セルで 8 近傍が横方向へ回り込まない",
+      "refs": ["src/engine/adjacency.ts neighborCellIndices"],
+      "observedBy": ["digest"],
+      "note": "セル 0 / 5 / 42 / 47(四隅)に施設を置く盤面が必要"
+    },
+    {
+      "id": "fp-mulfix-bigint-fallback",
+      "title": "ストック × 係数で中間積が 2^53 を超え mulFix が BigInt 経路へ落ちる",
+      "refs": ["ADR-006", "src/engine/fp.ts §4 mulFix"],
+      "observedBy": ["digest", "probe"],
+      "note": "number 経路と BigInt 経路が同値であることの実挙動側の固定。値そのものの一致は tests/fp.spec.ts が担保"
+    },
+    {
+      "id": "fp-mulfixproven-bound",
+      "title": "mulFixProven の値域証明(隣接係数 ±2e6 上界)が破れたら即例外",
+      "refs": ["src/engine/adjacency.ts ADJACENCY_PAIR_VALUE_ABS_MAX", "ADR-006"],
+      "observedBy": ["loader-reject", "unit-test"],
+      "note": "上界超過の content はローダー経由の createAdjacencyMatrix が reject する。境界値自体は tests/engine/adjacency.test.ts"
+    },
+    {
+      "id": "fp-floor-negative",
+      "title": "負の中間値に対する floor 除算(ceil を -floor(-n/d) で作る経路)",
+      "refs": [
+        "src/engine/fp.ts 補題 L2",
+        "src/engine/rules/research.ts ticksUntilResearchComplete"
+      ],
+      "observedBy": ["digest", "unit-test"],
+      "note": "端数のある研究コスト/レートを持つベクタが必ずこの経路を踏む"
+    },
+    {
+      "id": "fp-decimal-exact",
+      "title": "人間可読値 → 1e6 raw の 10 進厳密変換(小数第 7 位以降は reject)",
+      "refs": ["ADR 共通規約 603行", "schema/engineContent.ts §2"],
+      "observedBy": ["loader-reject"],
+      "note": "浮動小数の乗算を経由しないことが本質。tests/schema/engineContent.test.ts が担保"
+    },
+    {
+      "id": "fp-imul-wrap",
+      "title": "Math.imul の uint32 ラップを含む hash 経路(長い / 多バイトの seed)",
+      "refs": ["ADR-006 許可リスト", "src/engine/rng/fnv1a32.ts foldByte"],
+      "observedBy": ["digest", "unit-test"],
+      "note": "公式ベクタ突合は tests/engine/rng/fnv1a32.test.ts。golden vector は実 run 経路での固定"
+    },
+    {
+      "id": "clock-clamp-72h",
+      "title": "オフライン差分の 72h(4320 tick)クランプ境界(直下 / ちょうど / 超過)",
+      "refs": ["GDD 11.1", "GDD 11.9", "ADR-026", "src/engine/scheduler.ts §4"],
+      "observedBy": ["digest", "counters"],
+      "note": "advanceByElapsedMs 経路で掛かる。runSchedule 自体には上限が無いことも併せて固定する"
+    },
+    {
+      "id": "clock-fallback-one-minute",
+      "title": "1 分 tick Fallback(coarseTickMinutes=1)で (C) ステップ数が 10 倍になる",
+      "refs": ["ADR-014(3)", "src/engine/stochastic.ts requireCoarseTickMinutes"],
+      "observedBy": ["counters", "digest"],
+      "note": "計測 #4(Fallback 再校正)の入力にもなる"
+    },
+    {
+      "id": "clock-elapsed-floor",
+      "title": "経過 ms → tick 差の floor 変換(小数 ms・負値・非有限)",
+      "refs": ["src/engine/advance.ts elapsedMsToTickDelta"],
+      "observedBy": ["unit-test"],
+      "note": "tests/engine/advance.test.ts が境界を固定済み。golden vector には現れない(engine の外から来る入力)"
+    },
+    {
+      "id": "load-effect-unknown",
+      "title": "未知の effect 語彙を content ローダーが reject する",
+      "refs": ["schema/engineContent.ts ENGINE_EFFECT_BY_CONTENT_EFFECT"],
+      "observedBy": ["loader-reject"],
+      "note": "tests/schema/engineContent.test.ts §3 が担保。レジストリに無い語彙は必ず reject"
+    },
+    {
+      "id": "load-effect-unrepresentable",
+      "title": "GDD 6.2 にあるが engine 未実装の effect を理由付きで reject する",
+      "refs": ["GDD 6.2", "schema/engineContent.ts UNREPRESENTABLE_CONTENT_EFFECTS"],
+      "observedBy": ["loader-reject"],
+      "note": "health / codifySpeed / defense。黙って無視すると効かない content が sim を通る"
+    },
+    {
+      "id": "load-target-unresolved",
+      "title": "any / タグ / facility 実在 ID のどれでもない target を reject する(曖昧も reject)",
+      "refs": ["schema/engineContent.ts toEngineTarget"],
+      "observedBy": ["loader-reject"],
+      "note": "tests/schema/engineContent.test.ts §4 が担保。タグ名と facility ID の衝突も曖昧として reject"
+    },
+    {
+      "id": "load-tag-registry-mismatch",
+      "title": "engine のタグレジストリに無いタグを reject する(schema/engine 二重定義の突合)",
+      "refs": [
+        "ADR-024",
+        "src/engine/adjacency.ts ADJACENCY_TAGS",
+        "schema/facility.ts FACILITY_TAGS"
+      ],
+      "observedBy": ["loader-reject"],
+      "note": "T5/T6 統合の残作業(2 つのタグレジストリの突き合わせ)に対する機械的な歯止め"
+    },
+    {
+      "id": "load-missing-reduction-field",
+      "title": "縮約 rules が要求するフィールド欠落(harshWork / output / durationTicks*)を reject する",
+      "refs": ["schema/facility.ts 冒頭 [T7]", "schema/balance.ts 冒頭 [T7]"],
+      "observedBy": ["loader-reject"],
+      "note": "既定値で黙って埋めない"
+    }
+  ]
+}

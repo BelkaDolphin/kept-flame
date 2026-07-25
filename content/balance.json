@@ -15,6 +15,8 @@
     "moraleBonusLow": 0.2,
     "dispatchW": 0.15,
     "masteryResistMax": 0.2,
-    "memoryKeeperResist": -0.15
+    "memoryKeeperResist": -0.15,
+    "durationTicksMin": 1440,
+    "durationTicksMax": 2880
   }
 }
