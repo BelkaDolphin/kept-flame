@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import globals from "globals";
 
 // ---------------------------------------------------------------------------
 // 継ぐ火 -Kept Flame- ESLint flat config
@@ -371,6 +372,16 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
+    },
+  },
+  // Node で直接実行する計測/ツールスクリプト(例: bench/tags-contrast.mjs)。
+  // console/process 等の Node グローバルを許可するだけで、決定論制約とは無関係。
+  {
+    files: ["**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: globals.node,
     },
   },
 

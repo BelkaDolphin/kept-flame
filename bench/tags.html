@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>タグ7種 判読性計測 bench (#9a / #9b) - 継ぐ火</title>
+    <!--
+  出典: docs/design/tags-spec.md (T13前半)。この bench は同仕様を「入力」として
+  忠実に再現するだけで、色・パス・線幅を独自に変更しない(仕様書 8.2 禁止事項)。
+  - light テーマ固定。prefers-color-scheme 分岐は書かない(CLAUDE.md 絶対ルール)。
+  - 外部フォント・外部CSS・外部SVG・CDN は一切参照しない。単一HTMLで自己完結。
+  - コントラスト比の自動計算・spec期待値との突合は bench/tags-contrast.mjs (Node) 側の役目。
+    このページは #9b(実機ピンチ縮小での判読可否・人手計測)が主目的。
+-->
+    <style>
+      :root {
+        /* --- 面 (tags-spec.md §2.2) --- */
+        --kf-surface-page: #ffffff;
+        --kf-surface-cell: #faf8f5;
+        --kf-surface-cell-selected: #fcefd0;
+        --kf-surface-preview-add: #edf3ea;
+        --kf-surface-preview-sub: #f7eceb;
+        --kf-surface-rubble: #f0ede7;
+
+        /* --- 中立色/構造色 (§2.3) --- */
+        --kf-ink-body: #24201c;
+        --kf-ink-muted: #5b534b;
+        --kf-line-grid: #8a857d;
+        --kf-line-rubble: #7e796f;
+
+        /* --- タグ ink / tint (§2.1) --- */
+        --kf-tag-heat-ink: #8c290b;
+        --kf-tag-heat-tint: #faedea;
+        --kf-tag-clean-ink: #076f5a;
+        --kf-tag-clean-tint: #d9f6f0;
+        --kf-tag-foul-ink: #35240f;
+        --kf-tag-foul-tint: #f8eee3;
+        --kf-tag-noise-ink: #671b75;
+        --kf-tag-noise-tint: #f8edfa;
+        --kf-tag-damp-ink: #1942e5;
+        --kf-tag-damp-tint: #edeffa;
+        --kf-tag-calm-ink: #2d333e;
+        --kf-tag-calm-tint: #eef0f4;
+        --kf-tag-lore-ink: #975d0c;
+        --kf-tag-lore-tint: #f8efe2;
+
+        /* --- タイポグラフィ (§6.3) --- */
+        --kf-font-stack:
+          system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo,
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--kf-surface-page);
+        color: var(--kf-ink-body);
+        font-family: var(--kf-font-stack);
+      }
+
+      body {
+        padding: 16px;
+        max-width: 980px;
+        margin: 0 auto;
+        line-height: 1.6;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 32px 0 8px;
+        border-bottom: 1px solid var(--kf-line-grid);
+        padding-bottom: 4px;
+      }
+      h3 {
+        font-size: 13px;
+        margin: 0 0 6px;
+        color: var(--kf-ink-muted);
+        font-weight: 500;
+      }
+      p.lede {
+        color: var(--kf-ink-muted);
+        font-size: 13px;
+        margin: 0 0 12px;
+      }
+      code {
+        background: var(--kf-surface-cell);
+        padding: 1px 4px;
+        border-radius: 3px;
+        font-size: 12px;
+      }
+
+      section {
+        margin-bottom: 24px;
+      }
+
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ============ 凡例 (44px チップ full/mini) ============ */
+      #legend-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .legend-card {
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 8px;
+        padding: 10px;
+        background: var(--kf-surface-cell);
+      }
+      .legend-card .chips {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .legend-card .chip-label {
+        font-size: 11px;
+        color: var(--kf-ink-muted);
+        text-align: center;
+        margin-top: 2px;
+      }
+      .legend-card .chip-col {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .legend-card .meta {
+        font-size: 12px;
+        color: var(--kf-ink-muted);
+      }
+      .legend-card .meta .name {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--kf-ink-body);
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      /* ============ ズームスライダ ============ */
+      #zoom-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+        background: var(--kf-surface-cell);
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 8px;
+        padding: 10px 14px;
+        position: sticky;
+        top: 8px;
+        z-index: 5;
+      }
+      #zoom-controls input[type="range"] {
+        width: 220px;
+      }
+      #zoom-readout {
+        font-size: 13px;
+      }
+      #zoom-readout b {
+        font-weight: 700;
+      }
+      #zoom-readout .lod-tier {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        border: 1px solid var(--kf-line-grid);
+        background: var(--kf-surface-page);
+        font-weight: 700;
+      }
+
+      /* ============ 6x8 格子デモ ============ */
+      #grid-demo {
+        display: grid;
+        grid-template-columns: repeat(6, var(--cell-px, 44px));
+        grid-auto-rows: var(--cell-px, 44px);
+        gap: 3px;
+        background: var(--kf-surface-page);
+        padding: 8px;
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 6px;
+        width: fit-content;
+      }
+      .kf-cell {
+        width: var(--cell-px, 44px);
+        height: var(--cell-px, 44px);
+        background: var(--kf-surface-cell);
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 3px;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: center;
+        justify-content: center;
+        gap: 2px; /* マーカー間ガター >=2px (spec §3.3) */
+        overflow: hidden;
+      }
+      .kf-marker {
+        display: block;
+        flex: none;
+      }
+      .kf-marker-numeral {
+        font-size: 8px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      /* ============ 判読テストモード ============ */
+      #judge-panel {
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 8px;
+        padding: 16px;
+        background: var(--kf-surface-cell);
+      }
+      #judge-stage {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 140px;
+        background: var(--kf-surface-page);
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 6px;
+        margin-bottom: 12px;
+      }
+      #judge-progress {
+        font-size: 13px;
+        color: var(--kf-ink-muted);
+        margin-bottom: 8px;
+      }
+      .judge-buttons {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .judge-buttons button {
+        font-family: var(--kf-font-stack);
+        font-size: 14px;
+        padding: 10px 16px;
+        border-radius: 6px;
+        border: 1.5px solid var(--kf-ink-body);
+        background: var(--kf-surface-page);
+        color: var(--kf-ink-body);
+        cursor: pointer;
+        min-height: 44px; /* 最小タップ領域 GDD §6.6 */
+      }
+      .judge-buttons button:hover {
+        background: var(--kf-surface-cell-selected);
+      }
+      .judge-buttons button.legible {
+        border-color: var(--kf-tag-clean-ink);
+        color: var(--kf-tag-clean-ink);
+      }
+      .judge-buttons button.illegible {
+        border-color: var(--kf-tag-foul-ink);
+        color: var(--kf-tag-foul-ink);
+      }
+      .judge-buttons button.reset {
+        margin-left: auto;
+        border-color: var(--kf-line-grid);
+        color: var(--kf-ink-muted);
+      }
+
+      #judge-summary-table {
+        border-collapse: collapse;
+        font-size: 12px;
+        margin-top: 12px;
+      }
+      #judge-summary-table th,
+      #judge-summary-table td {
+        border: 1px solid var(--kf-line-grid);
+        padding: 3px 8px;
+        text-align: right;
+      }
+      #judge-summary-table th {
+        background: var(--kf-surface-page);
+      }
+      #judge-summary-table td:first-child,
+      #judge-summary-table th:first-child {
+        text-align: left;
+      }
+
+      #result-json {
+        width: 100%;
+        height: 220px;
+        font-family: ui-monospace, Consolas, "SFMono-Regular", monospace;
+        font-size: 11px;
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 6px;
+        padding: 8px;
+        background: var(--kf-surface-page);
+        color: var(--kf-ink-body);
+        resize: vertical;
+      }
+      #copy-json-btn,
+      #reset-judge-btn {
+        font-family: var(--kf-font-stack);
+        font-size: 13px;
+        padding: 8px 14px;
+        margin-top: 8px;
+        border-radius: 6px;
+        border: 1.5px solid var(--kf-ink-body);
+        background: var(--kf-surface-page);
+        cursor: pointer;
+      }
+      #copy-status {
+        font-size: 12px;
+        color: var(--kf-ink-muted);
+        margin-left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============================================================
+     SVG スプライト定義 (tags-spec.md §5.1)。
+     文書ルートに1個の隠しSVGとしてパターン/記号を集約し、
+     <use href="#kf-tag-<id>-full"> 等で参照する。
+     ============================================================ -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <!-- ---- パターン定義 (§5.4)。線・点は ink 100% 不透明、opacity/alpha で薄めない。 ---- -->
+        <pattern id="kf-pat-foul" patternUnits="userSpaceOnUse" width="3.6" height="3.6">
+          <circle cx="0.9" cy="0.9" r="1.05" fill="var(--kf-tag-foul-ink)" />
+          <circle cx="2.7" cy="2.7" r="1.05" fill="var(--kf-tag-foul-ink)" />
+        </pattern>
+
+        <pattern id="kf-pat-damp" patternUnits="userSpaceOnUse" width="6" height="5.5">
+          <path
+            d="M0 2.75 q1.5 -1.9 3 0 t3 0"
+            fill="none"
+            stroke="var(--kf-tag-damp-ink)"
+            stroke-width="1.6"
+          />
+        </pattern>
+
+        <pattern id="kf-pat-calm" patternUnits="userSpaceOnUse" width="6.5" height="6.5">
+          <path d="M3.25 0 V6.5" fill="none" stroke="var(--kf-tag-calm-ink)" stroke-width="1.6" />
+        </pattern>
+
+        <pattern id="kf-pat-lore" patternUnits="userSpaceOnUse" width="8" height="8">
+          <path
+            d="M0 8 L8 0 M-1 1 L1 -1 M7 9 L9 7 M0 0 L8 8 M-1 7 L1 9 M7 -1 L9 1"
+            fill="none"
+            stroke="var(--kf-tag-lore-ink)"
+            stroke-width="1.3"
+          />
+        </pattern>
+
+        <!-- チップ用オーバーライド (§6.1): S=26px でパターン線を1.5pxへ乗せるため
+       lore(strokeU=1.3、生成物中で唯一の最小値)のみ 1.3u -> 1.4u に引き上げる。
+       damp/calm は strokeU=1.6 で元々 S=26px 時点で 1.73px あり閾値を満たすため対象外
+       (§5.2 の判読下限表: 1.3u系のみ S=27.7px を要求し S=26px のチップで割る)。 -->
+        <pattern id="kf-pat-lore-chip" patternUnits="userSpaceOnUse" width="8" height="8">
+          <path
+            d="M0 8 L8 0 M-1 1 L1 -1 M7 9 L9 7 M0 0 L8 8 M-1 7 L1 9 M7 -1 L9 1"
+            fill="none"
+            stroke="var(--kf-tag-lore-ink)"
+            stroke-width="1.4"
+          />
+        </pattern>
+
+        <!-- ---- 記号定義 (§5.3)。viewBox 0 0 24 24 共通ユーザ空間。 ---- -->
+
+        <!-- heat 熱源 — 上向き三角、ベタ塗り100% -->
+        <symbol id="kf-tag-heat-full" viewBox="0 0 24 24">
+          <path d="M12 2.8 L21.2 20.4 L2.8 20.4 Z" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="kf-tag-heat-mini" viewBox="0 0 24 24">
+          <path d="M12 2.8 L21.2 20.4 L2.8 20.4 Z" fill="currentColor" stroke="none" />
+        </symbol>
+
+        <!-- clean 清浄 — 二重リング -->
+        <symbol id="kf-tag-clean-full" viewBox="0 0 24 24">
+          <path
+            d="M3.8 12a8.2 8.2 0 1 0 16.4 0a8.2 8.2 0 1 0 -16.4 0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+          <path
+            d="M8.8 12a3.2 3.2 0 1 0 6.4 0a3.2 3.2 0 1 0 -6.4 0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+        </symbol>
+        <symbol id="kf-tag-clean-mini" viewBox="0 0 24 24">
+          <path
+            d="M4.5 12a7.5 7.5 0 1 0 15 0a7.5 7.5 0 1 0 -15 0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="4"
+          />
+        </symbol>
+
+        <!-- foul 汚染 — 下向き三角 + 高密度ドット (背後に tint ベタ地を敷いてから重ねる) -->
+        <symbol id="kf-tag-foul-full" viewBox="0 0 24 24">
+          <path d="M3.6 4.4 L20.4 4.4 L12 20.4 Z" fill="var(--kf-tag-foul-tint)" stroke="none" />
+          <path
+            d="M3.6 4.4 L20.4 4.4 L12 20.4 Z"
+            fill="url(#kf-pat-foul)"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+        </symbol>
+        <symbol id="kf-tag-foul-mini" viewBox="0 0 24 24">
+          <path d="M2.8 4.4 L21.2 4.4 L12 21.2 Z" fill="currentColor" stroke="none" />
+        </symbol>
+
+        <!-- noise 騒音 — 同心弧3本 + 中心点(唯一の非閉曲線・左右非対称) -->
+        <symbol id="kf-tag-noise-full" viewBox="0 0 24 24">
+          <circle cx="5.5" cy="12" r="2" fill="currentColor" />
+          <path
+            d="M8.33 9.17 A4 4 0 0 1 8.33 14.83"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+          <path
+            d="M11.16 6.34 A8 8 0 0 1 11.16 17.66"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+          <path
+            d="M13.99 3.51 A12 12 0 0 1 13.99 20.49"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+        </symbol>
+        <symbol id="kf-tag-noise-mini" viewBox="0 0 24 24">
+          <circle cx="6" cy="12" r="2.8" fill="currentColor" />
+          <path
+            d="M12.36 5.64 A9 9 0 0 1 12.36 18.36"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="4"
+          />
+        </symbol>
+
+        <!-- damp 湿潤 — 水滴 + 横波 -->
+        <symbol id="kf-tag-damp-full" viewBox="0 0 24 24">
+          <path
+            d="M12 2.6 C15.4 7.8 19.4 11.2 19.4 13.6 A7.4 7.4 0 1 1 4.6 13.6 C4.6 11.2 8.6 7.8 12 2.6 Z"
+            fill="var(--kf-tag-damp-tint)"
+            stroke="none"
+          />
+          <path
+            d="M12 2.6 C15.4 7.8 19.4 11.2 19.4 13.6 A7.4 7.4 0 1 1 4.6 13.6 C4.6 11.2 8.6 7.8 12 2.6 Z"
+            fill="url(#kf-pat-damp)"
+            stroke="currentColor"
+            stroke-width="2.2"
+          />
+        </symbol>
+        <symbol id="kf-tag-damp-mini" viewBox="0 0 24 24">
+          <path
+            d="M12 2.6 C15.4 7.8 19.4 11.2 19.4 13.6 A7.4 7.4 0 1 1 4.6 13.6 C4.6 11.2 8.6 7.8 12 2.6 Z"
+            fill="currentColor"
+            stroke="none"
+          />
+        </symbol>
+
+        <!-- calm 静穏 — 横長スタジアム + 縦ストライプ -->
+        <symbol id="kf-tag-calm-full" viewBox="0 0 24 24">
+          <path
+            d="M7.8 7.6 H16.2 A4.4 4.4 0 0 1 16.2 16.4 H7.8 A4.4 4.4 0 0 1 7.8 7.6 Z"
+            fill="var(--kf-tag-calm-tint)"
+            stroke="none"
+          />
+          <path
+            d="M7.8 7.6 H16.2 A4.4 4.4 0 0 1 16.2 16.4 H7.8 A4.4 4.4 0 0 1 7.8 7.6 Z"
+            fill="url(#kf-pat-calm)"
+            stroke="currentColor"
+            stroke-width="2.4"
+          />
+        </symbol>
+        <symbol id="kf-tag-calm-mini" viewBox="0 0 24 24">
+          <path
+            d="M7.8 7.6 H16.2 A4.4 4.4 0 0 1 16.2 16.4 H7.8 A4.4 4.4 0 0 1 7.8 7.6 Z"
+            fill="currentColor"
+            stroke="none"
+          />
+        </symbol>
+
+        <!-- lore 学芸 — 菱形 + 45°クロスハッチ -->
+        <symbol id="kf-tag-lore-full" viewBox="0 0 24 24">
+          <path
+            d="M12 2.8 L21.2 12 L12 21.2 L2.8 12 Z"
+            fill="var(--kf-tag-lore-tint)"
+            stroke="none"
+          />
+          <path
+            d="M12 2.8 L21.2 12 L12 21.2 L2.8 12 Z"
+            fill="url(#kf-pat-lore)"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+        </symbol>
+        <!-- チップ専用(S=26px): kf-pat-lore-chip(1.4u)を使う -->
+        <symbol id="kf-tag-lore-full-chip" viewBox="0 0 24 24">
+          <path
+            d="M12 2.8 L21.2 12 L12 21.2 L2.8 12 Z"
+            fill="var(--kf-tag-lore-tint)"
+            stroke="none"
+          />
+          <path
+            d="M12 2.8 L21.2 12 L12 21.2 L2.8 12 Z"
+            fill="url(#kf-pat-lore-chip)"
+            stroke="currentColor"
+            stroke-width="2.5"
+          />
+        </symbol>
+        <symbol id="kf-tag-lore-mini" viewBox="0 0 24 24">
+          <path
+            d="M12 2.8 L21.2 12 L12 21.2 L2.8 12 Z M12 8.6 L15.4 12 L12 15.4 L8.6 12 Z"
+            fill="currentColor"
+            fill-rule="evenodd"
+            stroke="none"
+          />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header>
+      <h1>タグ7種 判読性計測 bench (#9a / #9b)</h1>
+      <p class="lede">
+        仕様:
+        <code>docs/design/tags-spec.md</code
+        >(唯一の正)。コントラスト比の自動計算・spec期待値との突合は
+        <code>bench/tags-contrast.mjs</code>(<code>npm run measure:contrast</code>)側で行う。
+        このページは実機でのピンチ縮小判読テスト(#9b、計測計画 §6.2 手順6〜7)を目的とする。 light
+        テーマ固定。
+      </p>
+    </header>
+
+    <!-- ============================================================
+     1. 凡例パネル: 7種 × full/mini チップ
+     ============================================================ -->
+    <section id="legend">
+      <h2>1. タグ7種 凡例(44px チップ, full / mini)</h2>
+      <div id="legend-grid"></div>
+    </section>
+
+    <!-- ============================================================
+     2. ズームスライダ + 6x8 格子デモ
+     ============================================================ -->
+    <section id="grid-section">
+      <h2>2. 6×8 格子デモ + ズームスライダ(最小判読スケール探索)</h2>
+      <p class="lede">
+        zoom 0.3〜1.0(§7.1 の
+        <code>markerPx = clamp(round(0.273 × 44 × zoom), 9, 26)</code> により、 この範囲は §7.3
+        が定める2つの目標値 — 種別同定下限12px・存在認識下限9px — の近傍を狙って絞ってある)。
+      </p>
+      <div id="zoom-controls">
+        <label for="zoom-slider">zoom</label>
+        <input type="range" id="zoom-slider" min="0.3" max="1.0" step="0.001" value="1.0" />
+        <div id="zoom-readout"></div>
+      </div>
+      <div id="grid-demo" style="margin-top: 12px"></div>
+    </section>
+
+    <!-- ============================================================
+     3. 判読テストモード
+     ============================================================ -->
+    <section id="judge-section">
+      <h2>3. 判読テストモード(#9b・決定論的順序)</h2>
+      <p class="lede">
+        §5.2 の基準サイズ S=44/28/20/14/12/10 (px) × タグ7種 = 42試行を固定順序(サイズ降順 → heat,
+        clean, foul, noise, damp, calm, lore の固定順)で提示する。<code>Math.random</code>
+        は使用しない。 各試行で記号が「どのタグか判読できたか」を回答する。
+      </p>
+      <div id="judge-panel">
+        <div id="judge-progress"></div>
+        <div id="judge-stage"></div>
+        <div class="judge-buttons">
+          <button type="button" id="btn-legible" class="legible">判読できた</button>
+          <button type="button" id="btn-illegible" class="illegible">判読できない</button>
+          <button type="button" id="reset-judge-btn" class="reset">最初からやり直す</button>
+        </div>
+        <table id="judge-summary-table"></table>
+
+        <h3 style="margin-top: 16px">結果 JSON</h3>
+        <textarea id="result-json" readonly></textarea>
+        <div>
+          <button type="button" id="copy-json-btn">結果をコピー</button>
+          <span id="copy-status"></span>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      "use strict";
+
+      /* ============================================================
+   0. データ定義 (tags-spec.md §1 / §5.3 / §7.2 の写し)
+   ============================================================ */
+
+      // 固定順序。判読テストの提示順・格子デモの割当てに使う唯一の順序。
+      var TAGS = [
+        { id: "heat", ja: "熱源", pattern: true },
+        { id: "clean", ja: "清浄", pattern: false },
+        { id: "foul", ja: "汚染", pattern: true },
+        { id: "noise", ja: "騒音", pattern: false },
+        { id: "damp", ja: "湿潤", pattern: true },
+        { id: "calm", ja: "静穏", pattern: true },
+        { id: "lore", ja: "学芸", pattern: true },
+      ];
+
+      // LOD 段階表 (tags-spec.md §7.2 / §8.3 lod.tiers)。
+      // L5 は §7.1 のクランプ式(下限9px)からは実際には到達しないが、
+      // 判読テストの基準サイズ S=10px 等が仕様上の境界外に出ないよう表としては保持する。
+      var LOD_TIERS = [
+        { id: "L1", min: 24, max: 26, symbol: "full", pattern: true, numeral: true, channels: 4 },
+        { id: "L2", min: 20, max: 23, symbol: "full", pattern: true, numeral: false, channels: 3 },
+        { id: "L3", min: 15, max: 19, symbol: "full", pattern: false, numeral: false, channels: 2 },
+        { id: "L4", min: 9, max: 14, symbol: "mini", pattern: false, numeral: false, channels: 2 },
+        { id: "L5", min: 0, max: 8, symbol: "none", pattern: false, numeral: false, channels: 1 },
+      ];
+
+      // 判読テストの基準サイズ (tags-spec.md §5.2 の列見出し S=44/28/20/14/12/10)。
+      var JUDGE_SIZES = [44, 28, 20, 14, 12, 10];
+
+      function lodTierForPx(px) {
+        if (px >= 24) return LOD_TIERS[0]; // S=44/28 のような表参照サイズは L1 扱いに丸める
+        for (var i = 0; i < LOD_TIERS.length; i++) {
+          var t = LOD_TIERS[i];
+          if (px >= t.min && px <= t.max) return t;
+        }
+        return LOD_TIERS[LOD_TIERS.length - 1];
+      }
+
+      function markerPxForZoom(zoom) {
+        var cellPx = 44 * zoom;
+        var raw = Math.round(0.273 * cellPx);
+        return Math.max(9, Math.min(26, raw));
+      }
+
+      /* ============================================================
+   1. 凡例パネル描画
+   ============================================================ */
+
+      function makeChipSvg(tagId, variant, symbolId, numeral) {
+        var ns = "http://www.w3.org/2000/svg";
+        var svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("viewBox", "0 0 44 44");
+        svg.setAttribute("width", "44");
+        svg.setAttribute("height", "44");
+        svg.style.color = "var(--kf-tag-" + tagId + "-ink)";
+
+        var rect = document.createElementNS(ns, "rect");
+        rect.setAttribute("x", "0.75");
+        rect.setAttribute("y", "0.75");
+        rect.setAttribute("width", "42.5");
+        rect.setAttribute("height", "42.5");
+        rect.setAttribute("rx", "6");
+        rect.setAttribute("fill", "var(--kf-tag-" + tagId + "-tint)");
+        rect.setAttribute("stroke", "var(--kf-tag-" + tagId + "-ink)");
+        rect.setAttribute("stroke-width", "1.5");
+        svg.appendChild(rect);
+
+        var use = document.createElementNS(ns, "use");
+        use.setAttribute("href", "#" + symbolId);
+        use.setAttribute("x", "4");
+        use.setAttribute("y", "3");
+        use.setAttribute("width", "26");
+        use.setAttribute("height", "26");
+        svg.appendChild(use);
+
+        var plate = document.createElementNS(ns, "rect");
+        plate.setAttribute("x", "19");
+        plate.setAttribute("y", "27");
+        plate.setAttribute("width", "23");
+        plate.setAttribute("height", "15");
+        plate.setAttribute("rx", "3");
+        plate.setAttribute("fill", "var(--kf-tag-" + tagId + "-tint)");
+        svg.appendChild(plate);
+
+        var text = document.createElementNS(ns, "text");
+        text.setAttribute("x", "41");
+        text.setAttribute("y", "39");
+        text.setAttribute("text-anchor", "end");
+        text.setAttribute("font-size", "13");
+        text.setAttribute("font-weight", "700");
+        text.setAttribute("fill", "var(--kf-tag-" + tagId + "-ink)");
+        text.setAttribute("class", "num");
+        text.textContent = numeral;
+        svg.appendChild(text);
+
+        return svg;
+      }
+
+      // 凡例チップに載せる係数値のサンプル(固定・決定論。実バランス値ではなく表示チャネルの実例)。
+      var LEGEND_NUMERALS = {
+        heat: "+20",
+        clean: "+10",
+        foul: "-10",
+        noise: "0",
+        damp: "+15",
+        calm: "-5",
+        lore: "+25",
+      };
+
+      function renderLegend() {
+        var host = document.getElementById("legend-grid");
+        TAGS.forEach(function (tag) {
+          var card = document.createElement("div");
+          card.className = "legend-card";
+
+          var chips = document.createElement("div");
+          chips.className = "chips";
+
+          var fullCol = document.createElement("div");
+          fullCol.className = "chip-col";
+          var fullSymbolId =
+            tag.id === "lore" ? "kf-tag-lore-full-chip" : "kf-tag-" + tag.id + "-full";
+          fullCol.appendChild(makeChipSvg(tag.id, "full", fullSymbolId, LEGEND_NUMERALS[tag.id]));
+          var fullLabel = document.createElement("div");
+          fullLabel.className = "chip-label";
+          fullLabel.textContent = "full";
+          fullCol.appendChild(fullLabel);
+
+          var miniCol = document.createElement("div");
+          miniCol.className = "chip-col";
+          miniCol.appendChild(
+            makeChipSvg(tag.id, "mini", "kf-tag-" + tag.id + "-mini", LEGEND_NUMERALS[tag.id]),
+          );
+          var miniLabel = document.createElement("div");
+          miniLabel.className = "chip-label";
+          miniLabel.textContent = "mini";
+          miniCol.appendChild(miniLabel);
+
+          chips.appendChild(fullCol);
+          chips.appendChild(miniCol);
+          card.appendChild(chips);
+
+          var meta = document.createElement("div");
+          meta.className = "meta";
+          meta.innerHTML =
+            '<span class="name">' +
+            tag.ja +
+            " (" +
+            tag.id +
+            ")</span>" +
+            "パターン: " +
+            (tag.pattern ? "あり" : "なし(輪郭のみ)");
+          card.appendChild(meta);
+
+          host.appendChild(card);
+        });
+      }
+
+      /* ============================================================
+   2. 6x8 格子デモ + ズームスライダ
+   ============================================================ */
+
+      var GRID_ROWS = 8;
+      var GRID_COLS = 6;
+
+      // 決定論的なセル→タグ割当て(Math.random不使用。セル index の純関数)。
+      // 1〜3個/セル(4個以上の +n バッジ運用は本benchのスコープ外)。
+      function tagsForCell(index) {
+        var n = 1 + ((index * 5 + 3) % 3); // 1..3
+        var out = [];
+        for (var k = 0; k < n; k++) {
+          out.push(TAGS[(index + k * 3 + Math.floor(index / GRID_COLS)) % TAGS.length]);
+        }
+        return out;
+      }
+
+      // 決定論的な係数値(表示チャネルのサンプル。-20..+20の範囲)。
+      function coeffForCell(tagIndexInTags, cellIndex) {
+        return ((cellIndex * 7 + tagIndexInTags * 13) % 41) - 20;
+      }
+
+      function buildGridCells() {
+        var host = document.getElementById("grid-demo");
+        host.innerHTML = "";
+        for (var i = 0; i < GRID_ROWS * GRID_COLS; i++) {
+          var cell = document.createElement("div");
+          cell.className = "kf-cell";
+          cell.dataset.cellIndex = String(i);
+          host.appendChild(cell);
+        }
+      }
+
+      function renderGridAtZoom(zoom) {
+        var cellPx = 44 * zoom;
+        var markerPx = markerPxForZoom(zoom);
+        var tier = lodTierForPx(markerPx);
+
+        document
+          .getElementById("grid-demo")
+          .style.setProperty("--cell-px", cellPx.toFixed(2) + "px");
+
+        var readout = document.getElementById("zoom-readout");
+        readout.innerHTML =
+          "zoom = <b class='num'>" +
+          zoom.toFixed(3) +
+          "</b> &nbsp;" +
+          "cellPx = <b class='num'>" +
+          cellPx.toFixed(1) +
+          "px</b> &nbsp;" +
+          "markerPx = <b class='num'>" +
+          markerPx +
+          "px</b> &nbsp;" +
+          "LOD = <span class='lod-tier'>" +
+          tier.id +
+          "</span> " +
+          "(symbol=" +
+          tier.symbol +
+          ", pattern=" +
+          tier.pattern +
+          ", numeral=" +
+          tier.numeral +
+          ", channels=" +
+          tier.channels +
+          ")";
+
+        var cells = document.querySelectorAll("#grid-demo .kf-cell");
+        cells.forEach(function (cell) {
+          var idx = Number(cell.dataset.cellIndex);
+          cell.innerHTML = "";
+          if (tier.symbol === "none") {
+            // L5: 個別マーカー撤去、集約ドット1個のみ(§7.2 L5根拠)。
+            var dot = document.createElement("div");
+            dot.style.width = "5px";
+            dot.style.height = "5px";
+            dot.style.borderRadius = "50%";
+            dot.style.background = "var(--kf-ink-body)";
+            cell.appendChild(dot);
+            return;
+          }
+          var cellTags = tagsForCell(idx);
+          cellTags.forEach(function (tag) {
+            var wrap = document.createElement("span");
+            wrap.style.display = "inline-flex";
+            wrap.style.flexDirection = "column";
+            wrap.style.alignItems = "center";
+
+            var symbolId = "kf-tag-" + tag.id + "-" + tier.symbol;
+            var ns = "http://www.w3.org/2000/svg";
+            var svg = document.createElementNS(ns, "svg");
+            svg.setAttribute("class", "kf-marker");
+            svg.setAttribute("viewBox", "0 0 24 24");
+            svg.setAttribute("width", String(markerPx));
+            svg.setAttribute("height", String(markerPx));
+            svg.style.color = "var(--kf-tag-" + tag.id + "-ink)";
+            var use = document.createElementNS(ns, "use");
+            use.setAttribute("href", "#" + symbolId);
+            svg.appendChild(use);
+            wrap.appendChild(svg);
+
+            if (tier.numeral) {
+              var tagIdx = TAGS.indexOf(tag);
+              var num = document.createElement("span");
+              num.className = "kf-marker-numeral num";
+              num.style.color = "var(--kf-tag-" + tag.id + "-ink)";
+              var coeff = coeffForCell(tagIdx, idx);
+              num.textContent = (coeff > 0 ? "+" : "") + coeff;
+              wrap.appendChild(num);
+            }
+
+            cell.appendChild(wrap);
+          });
+        });
+      }
+
+      /* ============================================================
+   3. 判読テストモード
+   ============================================================ */
+
+      // 決定論的な試行列: サイズ降順 × タグ固定順(§5.2 の列見出しをそのまま採用)。Math.random不使用。
+      var TRIALS = [];
+      JUDGE_SIZES.forEach(function (size) {
+        TAGS.forEach(function (tag) {
+          var tier = lodTierForPx(size);
+          TRIALS.push({
+            sizePx: size,
+            tagId: tag.id,
+            ja: tag.ja,
+            variant: tier.symbol === "mini" ? "mini" : "full",
+            legible: null, // null=未回答, true/false=回答済み
+          });
+        });
+      });
+
+      var judgeIndex = 0;
+
+      function currentSymbolId(trial) {
+        if (trial.variant === "full" && trial.tagId === "lore" && trial.sizePx === 26) {
+          return "kf-tag-lore-full-chip";
+        }
+        return "kf-tag-" + trial.tagId + "-" + trial.variant;
+      }
+
+      function renderJudgeStage() {
+        var stage = document.getElementById("judge-stage");
+        var progress = document.getElementById("judge-progress");
+        stage.innerHTML = "";
+
+        if (judgeIndex >= TRIALS.length) {
+          progress.textContent = "完了: " + TRIALS.length + " / " + TRIALS.length + " 試行";
+          var done = document.createElement("div");
+          done.textContent = "全試行が終了しました。下の結果 JSON をコピーしてください。";
+          done.style.fontSize = "13px";
+          done.style.color = "var(--kf-ink-muted)";
+          stage.appendChild(done);
+          setJudgeButtonsEnabled(false);
+          renderSummary();
+          return;
+        }
+
+        setJudgeButtonsEnabled(true);
+        var trial = TRIALS[judgeIndex];
+        progress.textContent =
+          "試行 " +
+          (judgeIndex + 1) +
+          " / " +
+          TRIALS.length +
+          "  (S=" +
+          trial.sizePx +
+          "px, variant=" +
+          trial.variant +
+          ")";
+
+        var ns = "http://www.w3.org/2000/svg";
+        var svg = document.createElementNS(ns, "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("width", String(trial.sizePx));
+        svg.setAttribute("height", String(trial.sizePx));
+        svg.style.color = "var(--kf-tag-" + trial.tagId + "-ink)";
+        var use = document.createElementNS(ns, "use");
+        use.setAttribute("href", "#" + currentSymbolId(trial));
+        svg.appendChild(use);
+        stage.appendChild(svg);
+
+        renderSummary();
+      }
+
+      function setJudgeButtonsEnabled(enabled) {
+        document.getElementById("btn-legible").disabled = !enabled;
+        document.getElementById("btn-illegible").disabled = !enabled;
+      }
+
+      function answerCurrent(legible) {
+        if (judgeIndex >= TRIALS.length) return;
+        TRIALS[judgeIndex].legible = legible;
+        judgeIndex++;
+        renderJudgeStage();
+        renderResultJson();
+      }
+
+      function renderSummary() {
+        var bySize = {};
+        JUDGE_SIZES.forEach(function (s) {
+          bySize[s] = { answered: 0, legible: 0, total: 0 };
+        });
+        TRIALS.forEach(function (t) {
+          bySize[t.sizePx].total++;
+          if (t.legible !== null) {
+            bySize[t.sizePx].answered++;
+            if (t.legible) bySize[t.sizePx].legible++;
+          }
+        });
+
+        var table = document.getElementById("judge-summary-table");
+        var html = "<tr><th>S (px)</th><th>回答済</th><th>判読できた</th><th>/ 全7種</th></tr>";
+        JUDGE_SIZES.forEach(function (s) {
+          var row = bySize[s];
+          html +=
+            "<tr><td class='num'>" +
+            s +
+            "</td><td class='num'>" +
+            row.answered +
+            "</td><td class='num'>" +
+            row.legible +
+            "</td><td class='num'>" +
+            row.total +
+            "</td></tr>";
+        });
+        table.innerHTML = html;
+      }
+
+      function computeMinLegibleSizePx() {
+        // 全7種が「判読できた」と回答されたサイズの中で最小のもの。未確定要素があれば null。
+        var candidates = JUDGE_SIZES.slice().sort(function (a, b) {
+          return a - b;
+        });
+        for (var i = 0; i < candidates.length; i++) {
+          var s = candidates[i];
+          var trialsAtSize = TRIALS.filter(function (t) {
+            return t.sizePx === s;
+          });
+          var allAnswered = trialsAtSize.every(function (t) {
+            return t.legible !== null;
+          });
+          var allLegible = trialsAtSize.every(function (t) {
+            return t.legible === true;
+          });
+          if (allAnswered && allLegible) return s;
+        }
+        return null;
+      }
+
+      function buildResultObject() {
+        var bySizePx = {};
+        JUDGE_SIZES.forEach(function (s) {
+          var trialsAtSize = TRIALS.filter(function (t) {
+            return t.sizePx === s;
+          });
+          var answered = trialsAtSize.filter(function (t) {
+            return t.legible !== null;
+          });
+          bySizePx[String(s)] = {
+            total: trialsAtSize.length,
+            answered: answered.length,
+            legibleCount: answered.filter(function (t) {
+              return t.legible === true;
+            }).length,
+          };
+        });
+
+        return {
+          $schema: "kept-flame/bench/tags-legibility/1",
+          specVersion: "2026-07-25",
+          generatedAt: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          devicePixelRatio: window.devicePixelRatio || null,
+          viewportCss: { widthPx: window.innerWidth, heightPx: window.innerHeight },
+          trials: TRIALS.map(function (t, i) {
+            return {
+              order: i,
+              tagId: t.tagId,
+              ja: t.ja,
+              sizePx: t.sizePx,
+              variant: t.variant,
+              legible: t.legible,
+            };
+          }),
+          bySizePx: bySizePx,
+          minLegibleSizePx: computeMinLegibleSizePx(),
+        };
+      }
+
+      function renderResultJson() {
+        var json = JSON.stringify(buildResultObject(), null, 2);
+        document.getElementById("result-json").value = json;
+      }
+
+      function copyResultJson() {
+        var text = document.getElementById("result-json").value;
+        var status = document.getElementById("copy-status");
+
+        function showStatus(msg) {
+          status.textContent = msg;
+          setTimeout(function () {
+            status.textContent = "";
+          }, 3000);
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () {
+              showStatus("コピーしました");
+            },
+            function () {
+              fallbackCopy(text, showStatus);
+            },
+          );
+        } else {
+          fallbackCopy(text, showStatus);
+        }
+      }
+
+      function fallbackCopy(text, showStatus) {
+        var ta = document.getElementById("result-json");
+        ta.focus();
+        ta.select();
+        try {
+          var ok = document.execCommand("copy");
+          showStatus(
+            ok
+              ? "コピーしました(フォールバック)"
+              : "コピー失敗: テキストエリアを手動で選択してください",
+          );
+        } catch (e) {
+          showStatus("コピー失敗: テキストエリアを手動で選択してください");
+        }
+      }
+
+      function resetJudge() {
+        TRIALS.forEach(function (t) {
+          t.legible = null;
+        });
+        judgeIndex = 0;
+        renderJudgeStage();
+        renderResultJson();
+      }
+
+      /* ============================================================
+   初期化
+   ============================================================ */
+
+      document.addEventListener("DOMContentLoaded", function () {
+        renderLegend();
+        buildGridCells();
+        renderGridAtZoom(1.0);
+
+        var slider = document.getElementById("zoom-slider");
+        slider.addEventListener("input", function () {
+          renderGridAtZoom(Number(slider.value));
+        });
+
+        document.getElementById("btn-legible").addEventListener("click", function () {
+          answerCurrent(true);
+        });
+        document.getElementById("btn-illegible").addEventListener("click", function () {
+          answerCurrent(false);
+        });
+        document.getElementById("reset-judge-btn").addEventListener("click", resetJudge);
+        document.getElementById("copy-json-btn").addEventListener("click", copyResultJson);
+
+        renderJudgeStage();
+        renderResultJson();
+      });
+    </script>
+  </body>
+</html>

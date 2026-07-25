@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "measure:contrast": "node bench/tags-contrast.mjs",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },
