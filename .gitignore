@@ -10,6 +10,7 @@ dist-ssr/
 .claude/
 .claude_sessions
 lancedb/
+models/
 
 # env / secrets
 .env
