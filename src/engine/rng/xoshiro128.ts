@@ -33,36 +33,16 @@ export interface Uint32Draw<State> {
 }
 
 // ---------------------------------------------------------------------------
-// ADR-006 の Math 許可リスト(abs/sign/floor/ceil/round/trunc/max/min)には
-// Math.imul が含まれておらず、engine 内での Math.imul 呼び出しは現行 lint
-// (no-restricted-syntax, SYNTAX_MATH)で禁止される。
-// しかし splitmix32 の mix 定数(0x85ebca6b 等)は uint32 の乗算結果が
-// Number の安全整数境界 2^53 を超えうるため、通常の `*` 演算子では丸めが
-// 発生し得る(xoshiro128** 本体の `*5` `*9` は被乗数が小さく 2^53 を超えない
-// ため通常の `*` で厳密に計算できる=下記で imul32 を使わない)。
-//
-// これは lint 回避のハックではなく、ECMA-262 が Math.imul を「ToInt32 変換後
-// の下位32bit を返す厳密演算」と規定している(丸め誤差を持たない点で ADR-006
-// が許可する他8関数と同じ "exact" カテゴリ)にもかかわらず ADR-006 の許可
-// リスト表(37〜47行)に imul が未掲載という ADR 側の抜け漏れへの暫定対応。
-// 恒久対応(表への追加・lint 側の許可)は人間判断が必要なため、
-// eslint.config.js は変更せず本件を実装者から報告する(T3 指示の
-// 「eslintルールの変更禁止・必要と思ったら変更せず報告」に従う)。
-//
-// 実装は Math.imul の標準的なポリフィル手法(上位/下位16bit分解)そのもので、
-// Math.imul(a,b) >>> 0 と bit-for-bit 一致する(乱数側テストベクタで
-// 間接的に検証される。導出時に 32bit 全域のランダム10万件 + 境界値で
-// Math.imul との突合を別途確認済み)。
-// ---------------------------------------------------------------------------
-function imul32(a: number, b: number): number {
-  const aLow = a & 0xffff;
-  const aHigh = a >>> 16;
-  return (((aHigh * b) << 16) + aLow * b) >>> 0;
-}
-
-// ---------------------------------------------------------------------------
 // splitmix32: worldSeed(uint32 1個)から xoshiro128** の128bit内部状態
 // (uint32 × 4)を展開する seed 拡散関数。
+//
+// mix 定数(0x85ebca6b 等)との乗算は結果が Number の安全整数境界 2^53 を
+// 超えうるため、通常の `*` 演算子では丸めが発生し得る。下記で Math.imul を
+// 使うのはそのため(xoshiro128** 本体の `*5` `*9` は被乗数が小さく 2^53 を
+// 超えないため通常の `*` で厳密に計算できる=Math.imul 不要、後述)。
+// Math.imul は ECMA-262 が「ToInt32 変換後の下位32bit を返す厳密演算」と
+// 規定する exact 演算であり、[2026-07-25改訂] で ADR-006 の Math 許可リスト
+// へ追加された(ユーザー承認済み。根拠: ADR-007 との矛盾解消)。
 // ---------------------------------------------------------------------------
 
 /** splitmix32 のアキュムレータ状態(uint32)。 */
@@ -80,8 +60,8 @@ const SPLITMIX32_MIX2 = 0xc2b2ae35;
 export function splitmix32Next(state: Splitmix32State): Uint32Draw<Splitmix32State> {
   const nextState = (state + SPLITMIX32_GOLDEN_GAMMA) >>> 0;
   let z = nextState;
-  z = imul32(z ^ (z >>> 16), SPLITMIX32_MIX1);
-  z = imul32(z ^ (z >>> 13), SPLITMIX32_MIX2);
+  z = Math.imul(z ^ (z >>> 16), SPLITMIX32_MIX1);
+  z = Math.imul(z ^ (z >>> 13), SPLITMIX32_MIX2);
   z = (z ^ (z >>> 16)) >>> 0;
   return { value: z, state: nextState };
 }
@@ -120,7 +100,7 @@ function rotl(x: number, k: number): number {
 /**
  * xoshiro128** を1ステップ進める。純関数(入力 state を書き換えず、出力値と
  * 新しい state の組を返す)。s0*5 / result*9 は被乗数が小さく積が 2^53 未満
- * に収まるため通常の `*` 演算子で厳密に計算できる(imul32 不要)。
+ * に収まるため通常の `*` 演算子で厳密に計算できる(Math.imul 不要)。
  */
 export function xoshiro128Next(state: Xoshiro128State): Uint32Draw<Xoshiro128State> {
   const [s0, s1, s2, s3] = state;
