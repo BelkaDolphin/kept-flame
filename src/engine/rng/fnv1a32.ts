@@ -28,20 +28,17 @@ import type { DomainTag } from "./domainTags";
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;
 const FNV_PRIME_32 = 0x01000193;
 
-// ADR-006 の Math 許可リストに Math.imul が含まれていない(lint 禁止)ため、
-// Math.imul と等価な下位32bit厳密乗算を上位/下位16bit分解で実装する。
-// hash(uint32) * FNV_PRIME_32 は積が Number の安全整数境界 2^53 を超えうるため
-// 通常の `*` では丸めが発生し得る。詳細な理由は xoshiro128.ts の同名ヘルパーの
-// コメントを参照(rng/ 配下は依存ゼロを保つためファイル間で共有せず重複させている)。
-function imul32(a: number, b: number): number {
-  const aLow = a & 0xffff;
-  const aHigh = a >>> 16;
-  return (((aHigh * b) << 16) + aLow * b) >>> 0;
-}
-
+// hash(uint32) * FNV_PRIME_32 の積は Number の安全整数境界 2^53 を超えうる
+// ため、通常の `*` 演算子では丸めが発生し得る。Math.imul は ECMA-262 が
+// 「ToInt32 変換後の下位32bit を返す厳密演算」と規定する exact 演算であり、
+// [2026-07-25改訂] で ADR-006 の Math 許可リストへ追加された
+// (ユーザー承認済み。根拠: ADR-007 との矛盾解消)。ただし Math.imul の返り値は
+// signed int32(ECMA-262 が ToInt32 の値域で規定)であり、旧 imul32 の
+// `>>> 0` 付き unsigned 出力と異なるため、末尾に `>>> 0` を明示して
+// uint32 契約(fnv1a32/fnv1a32Uint32 が hash を >>> 0 せず直接返す前提)を保つ。
 /** FNV-1a-32 の1バイト分の畳み込み(XOR してから FNV prime を掛ける)。 */
 function foldByte(hash: number, byte: number): number {
-  return imul32((hash ^ byte) >>> 0, FNV_PRIME_32);
+  return Math.imul((hash ^ byte) >>> 0, FNV_PRIME_32) >>> 0;
 }
 
 /**
