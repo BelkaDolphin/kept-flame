@@ -1,0 +1,32 @@
+[
+  {
+    "id": "techFireStarting",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": [],
+    "researchCost": 30,
+    "fieldRequirement": { "facility": "hearth", "recipe": "recipeKindling", "count": 3 },
+    "unlocks": ["techPottery", "techBasketWeaving"],
+    "leaf": false
+  },
+  {
+    "id": "techPottery",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 36,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeClayPot", "count": 2 },
+    "unlocks": [],
+    "leaf": false
+  },
+  {
+    "id": "techBasketWeaving",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 25,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeBasket", "count": 2 },
+    "unlocks": [],
+    "leaf": true
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "fpScale": 1000000,
+  "algoVersion": 1,
+  "coarseTickMinutes": 10,
+  "offlineClampTick": 4320,
+  "safetyFactor": 1.5,
+  "recallRiskParams": {
+    "base_p": 0.05,
+    "p_max": 0.35,
+    "loadWHarsh": 2.0,
+    "loadWNormal": 0.5,
+    "moraleThresholdMid": 30,
+    "moraleBonusMid": 0.1,
+    "moraleThresholdLow": 15,
+    "moraleBonusLow": 0.2,
+    "dispatchW": 0.15,
+    "masteryResistMax": 0.2,
+    "memoryKeeperResist": -0.15
+  }
+}

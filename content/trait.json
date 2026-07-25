@@ -1,0 +1,14 @@
+[
+  {
+    "id": "traitScholar",
+    "effects": [{ "stat": "researchSpeed", "op": "mul", "value": 1.3 }],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitFrail",
+    "effects": [{ "stat": "health", "op": "add", "value": -15 }],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  }
+]
