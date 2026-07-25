@@ -30,7 +30,7 @@
 - 構成側: major指摘22件が残存(運営LLM版レポート§4)。
 - 「継ぐ火」側: 先行プロトタイプ計測(ADR記載の12項目)が未実施。企画書R2残存fatal 3件・ADR R2残存fatal 4件は改訂で対応したが再攻撃は未実施。
 - ユーザー実地作業が未完: claude.ai Settings > Usage で extra usage(usage credits)がOFF/未入金であることの確認。
-- ユーザー判断待ち: 配信基盤をPagesのままにするか、最初からWorkers静的アセットにするか(ADR変更事項)。
+- ~~ユーザー判断待ち: 配信基盤をPagesのままにするか、最初からWorkers静的アセットにするか~~ **[2026-07-25解消]** Workers静的アセットに確定・ADR/ONBOARDING/計画書改訂済み(下記参照)。
 - 実機計測の制約: 現環境はWindows 11デスクトップ。iPhone SE2/Android中位機/8GB Surface実機での計測(#1,#2,#9,#10)は実機入手・接続方法が未定。
 
 - [2026-07-25] ユーザーがextra usage(usage credits)OFFを実地確認 → 課金の壁は完成。
@@ -41,6 +41,21 @@
 - [2026-07-25] **ユーザー決定4件**: ①先行計測計画を承認(細目は計画書推奨どおり) ②GitHubリポ=public「kept-flame」作成OK ③commitメール=GitHub noreply(81347031+BelkaDolphin@users.noreply.github.com、設定済み) ④**配信基盤=Workers静的アセットに確定**(Pagesから変更、ADR側の改訂が必要)。
 - [2026-07-25] PAT混入したuser.emailはnoreplyアドレスに修理済み。**解決済み**: ユーザー確認の結果、GitHub上のclassicトークンは2026-03-04期限切れの1個のみ=混入していたのは失効済みトークンで悪用不能。削除のみ推奨(急ぎ不要)。
 
+- [2026-07-25] **配信基盤改訂 + T0(リポジトリ初期化)完了**(Sonnet実行):
+  - ADR(ADR-025/ADR-021/ADR-031 + バージョニング節)・ONBOARDING.md §3・`docs/先行計測計画_ドラフト.md` §6.1(b)/§8-3 のCloudflare Pages言及を計6箇所、[2026-07-25改訂]注記付きでWorkers静的アセットへ改訂。stable/betaは`wrangler.toml`の`[env.stable]`/`[env.beta]`で別Workerとして表現する方針に統一。ADR-025の凍結アーカイブ方式は「退役版ごとに個別Worker(固定サブドメイン)」へ変更(Workersのバージョンプレビュー URLがPages同様に無期限保持される保証が未確認のため、確実な方式を採用)。
+  - `git init`(main・`.gitattributes` eol=lf・`.editorconfig`・`core.autocrlf false`)、`.gitignore`(node_modules/dist/.claude/lancedb等)、6設計文書を`docs/`へ移動しCLAUDE.md/MEMORY.md/ONBOARDING.mdのパス参照を更新。
+  - `npm view`実在確認: vite 8.1.5(ADR記載8.1と一致)・vitest 4.1.10・preact 10.29.7・@playwright/test 1.62.0・jsep 1.4.0・**typescript 7.0.2**(native/Go実装ベースのメジャーバージョン。ADR側はバージョン未指定のため矛盾はないが、strict系オプションの互換は今後の実装タスクで要確認)・prettier 3.9.6。
+  - `package.json`(devDependencies 7点のみ・追加依存なし)・`tsconfig.json`(strict全部)・`vite.config.ts`(vitest共有設定・JSXはtsconfig側のjsxImportSource=preactに委譲し`esbuild`型への追加依存を回避)・`.prettierrc`/`.prettierignore`。`npm install`成功・`npm run typecheck`/`npm run format`ともにパス。
+  - コミット2件(`docs:` → `chore:`)、author/committer=`81347031+BelkaDolphin@users.noreply.github.com`を確認、全履歴に実際のシークレット文字列なしを確認してから push。
+  - **リポジトリ**: https://github.com/BelkaDolphin/kept-flame (public, default branch main)。
+
+## 未解決・保留
+
+- ADR本文中、Cloudflare Pages言及のうち文意変更が必要な箇所(ADR-025の凍結アーカイブ方式)はWorkers静的アセット版へ改訂したが、「退役版ごとの個別Worker」運用は設計上の選択であり実装時に再検討の余地あり。
+- TypeScript 7.0.2(native/Go port)採用によるstrict tsconfigオプション群の完全互換は、実コード(T2以降)を書くまで未検証。
+- `.claude/`は現状空ディレクトリ、`.claude_sessions`は0バイトファイル(いずれも.gitignore対象・実害なし)。
+
 ## 次のステップ
-1. Sonnetで実行中: ADR/ONBOARDINGのWorkers静的アセット改訂 + T0(リポ初期化・文書をdocs/へ移動・初回コミット・public「kept-flame」作成&push)。
-2. T0完了後: T1(lint規約設計=Opus)→T2以降、計画書§4.2の割当てと依存関係(§4.3)に従って進行。Fable5は統率と最終確認のみ。
+1. T1(lint規約設計=Opus): ESLint 9 flat configでengine純粋性ルール(DOM/Date/Math.random等の禁止)を実装。計画書§3.2/§4.2参照。
+2. T1完了後: T2以降、計画書§4.2の割当てと依存関係(§4.3)に従って進行。Fable5は統率と最終確認のみ。
+3. ユーザーの期限切れPAT削除(急ぎ不要・§未解決参照)。
