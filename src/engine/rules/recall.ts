@@ -1,0 +1,251 @@
+// ---------------------------------------------------------------------------
+// 継ぐ火 -Kept Flame- (C)想起困難 = 確率イベント区間 — GDD 11.2 / 11.8(C) / ADR-009/018
+//
+// ===========================================================================
+// 1. (C) 区間の扱い(GDD 11.8(C) と段階1 の関係)
+// ===========================================================================
+//   GDD 11.8(C) は「確率イベント区間は閉形式解を持たない」ことを認め、毎 tick 逐次
+//   判定に戻すのでなく「次発生 tick を幾何分布の逆 CDF で一発サンプリングして
+//   その時刻へジャンプする」離散事象方式を将来形として示している。ただし
+//   ADR-009 / ADR-018(1) は **MVP = 段階1(粗粒度 per-step 全再評価)** と定め、
+//   逆 CDF(段階2 next-reaction + fpLog)は MVP 後の追加投資としている。
+//   本モジュールは段階1 = 粗粒度ステップごとの全ペア再評価だけを実装する。
+//   fpLog(非整数対数)は ADR-006 の Math 許可リストで禁止されており、段階2 は
+//   その導入とカスケードレジストリの人力保守を伴うため、段階1 実装を恒久の
+//   グラウンドトゥルースとして残す設計になっている。
+//
+//   (C) が (A)(B) と噛み合う点: **発生した想起困難は生産レートを変える**ので、
+//   発生 tick(= 粗粒度ステップ境界)と回復 tick(= 発生 + 持続)は両方とも
+//   積分区間の分割点になる。回復側は「(C) の結果として生まれた (B) 境界」であり、
+//   scheduler がこれを離散事象として持つことで (A) の閉形式が保たれる。
+//
+// ===========================================================================
+// 2. 発生式(GDD 11.2)
+// ===========================================================================
+//   p(1 ゲーム日 = 1440 tick あたり)
+//     = clamp(0, base_p × loadW(施設負荷) + moraleW + dispatchW
+//                 − masteryResist(u,t), p_max)
+//     loadW        : 過酷業務 ×2.0 / 通常業務 ×0.5 / 無配属は 0(就労していない)
+//     moraleW      : 士気 <30 で +0.10、<15 で +0.20(強い方を採る)
+//     dispatchW    : 探索派遣中 +0.15
+//     masteryResist: 実地稼働の定着度(0〜0.20)+ 記憶巧者 trait −0.15
+//   1 ステップあたり確率への変換は stochastic.ts の
+//   {@link perCoarseStepProbability}(線形按分・pow 禁止の理由もそこに記載)。
+//
+// ===========================================================================
+// 3. 縮約(state.ts §3 のスコープに合わせた 3 点)
+// ===========================================================================
+//   (a) **判定ペア** — GDD の `recallRisk(住民u, tech t)` は「u が記憶している
+//       未成文の tech」を走る。縮約 state は「誰がどの技術を記憶しているか」を
+//       持たない(住民系の記憶モデルは MVP 実装事項)ため、判定ペアは
+//       「全住民 × 全 research entity の techId」とする。ADR-014 の
+//       「20人×3tech×2,304step = 138,240 ベルヌーイ判定/run」と同じ判定数になる
+//       ので、先行計測 #3/#4(sec/run 校正)と #5(発生頻度)の入力として等価。
+//   (b) **停止の粒度** — GDD は「当該住民の当該 tech 関連生産のみ停止」だが、
+//       縮約 state の `recallImpairedUntilTick` は住民あたり 1 スカラなので、
+//       発生した住民の寄与を丸ごと 0 にする(rules/production.ts §2)。
+//   (c) **回復条件** — GDD の「通常業務就労かつ士気 ≥40 を持続、または療養所で
+//       休養1日」は縮約せず、持続 d(1〜2 日・seed 決定論)の満了のみで回復する。
+//       療養所・士気回復の実装は MVP 事項。
+//
+//   なお **既に想起困難中の住民には新規発生を積まない**(持続を延長しない)。
+//   これにより `recallImpairedUntilTick` の変化が「新規発生」と 1 対 1 対応し、
+//   計測 #5 の「週あたり発生回数/住民」が state の差分から数えられる。
+//   ただしベルヌーイ試行そのものは**発生中でも全ペアぶん引く**: 段階1 の
+//   「per-step 全再評価」を試行数の面でも崩さないため(= #3 の 138,240 判定/run が
+//   状態依存で目減りしない)であり、hash アドレス方式ゆえ引いても引かなくても
+//   他ペアの結果は変わらない。
+// ---------------------------------------------------------------------------
+
+import { FIX_ZERO, addFix, clampFix, maxFix, minFix, mulFix, subFix, type Fix } from "../fp";
+import { DOMAIN_TAGS } from "../rng/domainTags";
+import {
+  bernoulliHit,
+  coarseStepIndexOf,
+  drawFromStream,
+  hashedDrawUint32,
+  perCoarseStepProbability,
+  saltFromId,
+  uniformIntFromDraw,
+} from "../stochastic";
+import {
+  entitiesOfKind,
+  requireEntity,
+  type EntityId,
+  type GameState,
+  type ResidentState,
+} from "../state/state";
+import { setField, updateEntity } from "../state/update";
+import { RulesError, requireFacilityDef, type AdvanceContext, type EngineContent } from "./types";
+
+/** 判定対象の技術 ID(§3(a): research entity の techId・ID 昇順)。 */
+export function recallTechIds(state: GameState): readonly EntityId[] {
+  const result: EntityId[] = [];
+  for (const research of entitiesOfKind(state, "research")) {
+    result.push(research.techId);
+  }
+  return result;
+}
+
+/**
+ * 住民 1 人の 1 ゲーム日あたり想起困難発生確率(§2 / GDD 11.2)。
+ *
+ * 加算は式の左から右へ固定順で行う(浮動小数ではないので結合律は保たれるが、
+ * 途中の値域検査は順序依存・fp.ts sumFix の注記と同じ理由)。
+ *
+ * loadW は住民側の `assignedFacilityId`(配属先 facility **entity** の ID)から
+ * その facility 定義を引いて決める。生産側が `facility.workerIds` を見るのに対し
+ * こちらは住民→施設の逆向きの参照を使うので、両者が食い違う state は
+ * 「配属したのに workerIds に入っていない」等の整合違反になる(整合の担保は
+ * 配属 Command の実装事項であり T5 のスコープ外)。
+ *
+ * @throws {EntityLookupError} 配属先の facility entity が state に無い場合
+ * @throws {RulesError} 配属先 facility の定義が content に無い場合
+ */
+export function recallRiskPerDay(
+  state: GameState,
+  content: EngineContent,
+  resident: ResidentState,
+): Fix {
+  const p = content.recallRisk;
+
+  // loadW: 配属先の過酷業務フラグで決まる。無配属は就労していないので 0。
+  let loadW = FIX_ZERO;
+  if (resident.assignedFacilityId !== null) {
+    const facility = requireEntity(state, resident.assignedFacilityId, "facility");
+    loadW = requireFacilityDef(content, facility.defId).harshWork
+      ? p.loadWHarshFix
+      : p.loadWNormalFix;
+  }
+
+  // base_p × loadW。どちらも係数なので値域は小さいが、content 由来で上界を
+  // 証明できないため既定 API の mulFix(必要時 BigInt・fp.ts §4)を使う。
+  let risk = mulFix(p.basePFix, loadW);
+
+  // moraleW: 下位閾値のほうが強いので、そちらに掛かったら中位は使わない。
+  if (resident.morale < p.moraleThresholdLowFix) {
+    risk = addFix(risk, p.moraleBonusLowFix);
+  } else if (resident.morale < p.moraleThresholdMidFix) {
+    risk = addFix(risk, p.moraleBonusMidFix);
+  }
+
+  if (resident.dispatched) {
+    risk = addFix(risk, p.dispatchWFix);
+  }
+
+  // masteryResist = min(mastery, 上限) + 記憶巧者 trait 耐性(負値)。
+  let resist = maxFix(FIX_ZERO, minFix(resident.mastery, p.masteryResistMaxFix));
+  if (p.memoryKeeperTraitId !== null && resident.traitIds.includes(p.memoryKeeperTraitId)) {
+    // memoryKeeperResistFix は負値(-0.15)。resist は「引く量」なので符号を反転して足す。
+    resist = subFix(resist, p.memoryKeeperResistFix);
+  }
+  risk = subFix(risk, resist);
+
+  return clampFix(risk, FIX_ZERO, p.pMaxFix);
+}
+
+/** 想起困難が新たに発生した 1 件(scheduler が回復イベントを積むための情報)。 */
+export interface RecallOccurrence {
+  readonly residentId: EntityId;
+  /** 回復する tick(= 発生 tick + 持続)。 */
+  readonly untilTick: number;
+}
+
+/** {@link evaluateRecallCoarseStep} の結果。 */
+export interface RecallStepResult {
+  readonly state: GameState;
+  /** 引いたベルヌーイ試行の総数(計測 #3/#4 の判定数の実測に使う)。 */
+  readonly trialCount: number;
+  /** 新規発生(住民 ID 昇順)。 */
+  readonly occurrences: readonly RecallOccurrence[];
+}
+
+/**
+ * 粗粒度ステップ 1 回ぶんの (C) 全再評価(段階1・§1)。
+ *
+ * 走査順は住民 ID 昇順 × 技術 ID 昇順に固定(GDD 11.7 の逐次カスケード順序)。
+ * 発生の抽選は hash アドレス方式(順序非依存)、持続日数だけ逐次ストリーム
+ * (domainTag `recallDuration`)から引く(stochastic.ts §2)。
+ *
+ * @throws {RulesError} 持続の下限/上限が不正な場合
+ * @throws {StochasticError} 確率が [0,1] を外れた場合(= content のレンジ制約漏れ)
+ */
+export function evaluateRecallCoarseStep(
+  state: GameState,
+  ctx: AdvanceContext,
+  stepTick: number,
+): RecallStepResult {
+  const content = ctx.content;
+  const params = content.recallRisk;
+  if (
+    !Number.isSafeInteger(params.durationMinTicks) ||
+    !Number.isSafeInteger(params.durationMaxTicks) ||
+    params.durationMinTicks < 1 ||
+    params.durationMaxTicks < params.durationMinTicks
+  ) {
+    throw new RulesError(
+      `recallRisk の持続 tick(${String(params.durationMinTicks)}〜${String(params.durationMaxTicks)})が不正`,
+    );
+  }
+
+  const stepIndex = coarseStepIndexOf(stepTick, content.coarseTickMinutes);
+  const techIds = recallTechIds(state);
+  const residents = entitiesOfKind(state, "resident");
+
+  let next = state;
+  let trialCount = 0;
+  const occurrences: RecallOccurrence[] = [];
+
+  for (const resident of residents) {
+    // 士気・派遣・配属はステップ内で変わらないので p は住民あたり 1 回計算。
+    const pStep = perCoarseStepProbability(
+      recallRiskPerDay(state, content, resident),
+      content.coarseTickMinutes,
+    );
+    const residentSalt = saltFromId(resident.id);
+    let impaired = stepTick < resident.recallImpairedUntilTick;
+
+    for (const techId of techIds) {
+      const draw = hashedDrawUint32(ctx.worldSeedU32, DOMAIN_TAGS.recall, [
+        residentSalt,
+        saltFromId(techId),
+        stepIndex,
+      ]);
+      trialCount++;
+      if (!bernoulliHit(pStep, draw)) continue;
+      // 発生中は新規発生としない(§3 末尾)。試行は上で引き終えているので
+      // 以降のペアの乱数列には影響しない。
+      if (impaired) continue;
+
+      const durationDraw = drawFromStream(next, DOMAIN_TAGS.recallDuration);
+      next = durationDraw.state;
+      const untilTick =
+        stepTick +
+        uniformIntFromDraw(durationDraw.value, params.durationMinTicks, params.durationMaxTicks);
+      next = updateEntity(next, resident.id, "resident", (r) =>
+        setField(r, "recallImpairedUntilTick", untilTick),
+      );
+      occurrences.push({ residentId: resident.id, untilTick });
+      impaired = true;
+    }
+  }
+
+  return { state: next, trialCount, occurrences };
+}
+
+// ---------------------------------------------------------------------------
+// 回復について: **状態遷移を持たない**(scheduler の recallRecover イベントは
+// 区間境界としてのみ存在する)。
+//
+// 回復は `recallImpairedUntilTick` と現在 tick の比較だけで表現され
+// (`tick >= until` なら稼働・rules/production.ts の isWorkerActive)、回復 tick で
+// フラグを 0 に戻す処理は**入れない**。理由は分割不変性(advance.ts §3):
+// 半開区間の規約(scheduler.ts §2)により tick == toTick のイベントは処理されない
+// ため、ちょうど回復 tick で advance を区切ると「フラグを 0 に戻すイベント」が
+// どちらの advance でも発火せず、一括で進めた場合(発火する)と state が
+// 食い違ってしまう。比較だけで判定する設計にしておけば、区切り位置に関わらず
+// state が一致する = golden vector が分割位置に依存しない。
+//
+// 満了済みの until がフラグに残り続けるが、これは「最後に回復した tick」の記録で
+// あり、発生判定(`stepTick < until`)・稼働判定のどちらも正しく動く。
+// ---------------------------------------------------------------------------

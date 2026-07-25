@@ -39,10 +39,11 @@
 //   使うことは想定していない(engine 純粋性と決定論はドラフト側でも維持される)。
 //
 // ===========================================================================
-// 3. 正準順の維持(state.ts §2)
+// 3. 正準順の維持(state.ts §2 / §4)
 // ===========================================================================
 //   `entityStateById` の反復順は常に ID の UTF-16 コードユニット昇順である。
-//   維持責務はこのファイル(createGameState / putEntity)と serialize.ts
+//   `rngState` も同様に domainTag の昇順(state.ts §4)。維持責務はこのファイル
+//   (createGameState / putEntity / setRngState)と serialize.ts
 //   (fromSerializable)にある。
 //     - 既存 ID の差し替え: Map.set は挿入位置を変えないので順序は不変。
 //     - 新規 ID の追加    : 挿入順のままだと追加順序が反復順に漏れるため、
@@ -61,6 +62,8 @@
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "../canonicalize";
+import type { DomainTag } from "../rng/domainTags";
+import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   EntityLookupError,
   isEntityId,
@@ -210,12 +213,36 @@ function sortedById(entities: readonly EntityState[]): EntityState[] {
 }
 
 /**
+ * RNG ストリーム状態の Map を domainTag 昇順の正準順で作る(§3 / state.ts §4)。
+ * 入力の並び順には依存しない。
+ */
+function buildRngStateMap(
+  entries: readonly (readonly [DomainTag, Xoshiro128State])[],
+): ReadonlyMap<DomainTag, Xoshiro128State> {
+  const map = new Map<DomainTag, Xoshiro128State>();
+  for (const [tag, value] of [...entries].sort((a, b) => compareUtf16(a[0], b[0]))) {
+    if (map.has(tag)) {
+      throw new StateUpdateError(`domainTag "${tag}" の rngState が重複している`);
+    }
+    map.set(tag, value);
+  }
+  return map;
+}
+
+/**
  * GameState を作る唯一の入口。entity 列は渡された順に依らず ID 昇順の正準順で
  * Map 化される(§3)。新規セーブの生成と fromSerializable(serialize.ts)が使う。
  *
- * @throws {StateUpdateError} ID 規則違反または ID 重複がある場合
+ * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
+ * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
+ *
+ * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複がある場合
  */
-export function createGameState(meta: GameStateMeta, entities: readonly EntityState[]): GameState {
+export function createGameState(
+  meta: GameStateMeta,
+  entities: readonly EntityState[],
+  rngState: readonly (readonly [DomainTag, Xoshiro128State])[] = [],
+): GameState {
   for (const entity of entities) {
     requireValidId(entity);
   }
@@ -226,7 +253,33 @@ export function createGameState(meta: GameStateMeta, entities: readonly EntitySt
     worldSeed: meta.worldSeed,
     tick: meta.tick,
     entityStateById: buildEntityMap(sortedById(entities)),
+    rngState: buildRngStateMap(rngState),
   };
+}
+
+/**
+ * ドメインの RNG ストリーム状態を差し替える(新規ドメインなら追加する)。
+ * 逐次ストリームを引いた後の唯一の書き戻し口であり、`rngState` の反復順を
+ * domainTag 昇順に保つ責務を持つ(§3)。
+ *
+ * 既存ドメインの差し替えは Map.set が挿入位置を変えないので順序は不変。新規
+ * ドメインの追加時のみ Map を作り直す(ドメイン数は高々レジストリの件数)。
+ */
+export function setRngState(
+  state: GameState,
+  domainTag: DomainTag,
+  value: Xoshiro128State,
+): GameState {
+  const previous = state.rngState.get(domainTag);
+  if (previous !== undefined) {
+    if (Object.is(previous, value)) return state;
+    const next = new Map(state.rngState);
+    next.set(domainTag, value);
+    return setField(state, "rngState", next);
+  }
+  const merged: (readonly [DomainTag, Xoshiro128State])[] = [...state.rngState.entries()];
+  merged.push([domainTag, value]);
+  return setField(state, "rngState", buildRngStateMap(merged));
 }
 
 /**

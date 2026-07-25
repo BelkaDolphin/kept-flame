@@ -16,13 +16,33 @@
 /**
  * 登録済み domainTag の一覧(唯一のソース)。
  *
- * 現時点で ADR-007 本文が具体的に定めているのは 'exploration'
- * (探索の分岐 RNG。salt = (dispatchId, nodeIndex, branchId, choiceKey)、
- * 撤退枝/強行枝・慎重/大胆が各々独立の counter 起点を持つ)のみ。
- * production/raid/研究等の他ドメインは、各システムの RNG 設計時(T5 以降)に
- * 人間がこのファイルへ個別追加する。
+ * **並び順は UTF-16 コードユニット昇順に保つこと。** GameState.rngState
+ * (`ReadonlyMap<DomainTag, Xoshiro128State>`)の反復順は
+ * `entityStateById` と同じくタグ昇順を正準順とするため、レジストリ側も同じ
+ * 並びにしておくと「宣言順 = 正準順」で読めて対応が追いやすい(順序そのものの
+ * 維持責務は state/update.ts の setRngState 側にある)。
+ *
+ * --- 各タグの用途(1 タグ = 1 確率系。ADR-024(2)) ---
+ *   adjacency      : 隣接行列のタグペア係数に掛ける ±20% シード揺らぎ
+ *                    (GDD 6.4-2 単調解回避 / `adjacency.json` の seedOffsetRange)。
+ *                    salt = (fnv1a32(tagPairKey))。worldSeed から決まる周回固定値で、
+ *                    ストリーム状態を持たない(hash アドレス方式)。
+ *   exploration    : 探索の分岐 RNG。salt = (dispatchId, nodeIndex, branchId, choiceKey)、
+ *                    撤退枝/強行枝・慎重/大胆が各々独立の counter 起点を持つ(ADR-007)。
+ *   recall         : 想起困難の発生ベルヌーイ試行(GDD 11.2 / 段階1・ADR-009/018(1))。
+ *                    salt = (fnv1a32(residentId), fnv1a32(techId), coarseStepIndex)。
+ *                    per-step 全再評価が順序非依存であることを構造で保証するため
+ *                    ストリームを進めない hash アドレス方式を採る。
+ *   recallDuration : 想起困難の持続日数(1〜2日)の抽選。発生時にだけ引く低頻度の
+ *                    逐次ストリーム(rngState を前進させる)。発生ベルヌーイと
+ *                    同一ストリームを共有しないよう別タグに分けている(ADR-024(2))。
+ *
+ * production / research にタグが無いのは、T5 の縮約 rules における (A)生産 と
+ * (B)研究完了 が**決定論的で確率要素を持たない**ため(生産揺らぎ・研究イベントを
+ * 入れる段階でこのファイルへ追加する)。使われないタグを先に登録すると
+ * 「どの確率系がどのストリームを使うか」の対応が曇るので置かない。
  */
-const DOMAIN_TAG_LIST = ["exploration"] as const;
+const DOMAIN_TAG_LIST = ["adjacency", "exploration", "recall", "recallDuration"] as const;
 
 type DomainTagList = typeof DOMAIN_TAG_LIST;
 
@@ -64,3 +84,16 @@ function buildDomainTagRegistry<const T extends readonly string[]>(
 export const DOMAIN_TAGS: { readonly [K in DomainTag]: K } = Object.freeze(
   buildDomainTagRegistry(DOMAIN_TAG_LIST),
 );
+
+/**
+ * 未知の文字列がレジストリ登録済みの domainTag かを判定する(型ガード)。
+ * engine の**外**から来た文字列(セーブの rngState のキー等)をレジストリへ
+ * 突き合わせる唯一の口。engine 内部のコードは union 型で弾かれるのでこれを
+ * 使う必要はない。
+ */
+export function isDomainTag(value: string): value is DomainTag {
+  for (const tag of DOMAIN_TAG_LIST) {
+    if (tag === value) return true;
+  }
+  return false;
+}

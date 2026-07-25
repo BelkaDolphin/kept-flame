@@ -54,10 +54,25 @@
 //       受け付け、未知の entity 種別は reject する。
 //     - integrityChecksum(破損検出)は platform 層で JSON blob に対して行う。
 //   entity の未知フィールドは読み飛ばす(出力には現れないので往復は保たれる)。
+//
+// ===========================================================================
+// 3. rngState は「空なら書き出さない」(state.ts §4)
+// ===========================================================================
+//   `rngState` は逐次 RNG ストリームを 1 度でも引いたドメインだけを持つ Map で
+//   あり、**空の Map はキーごと省略する**。空 Map ⇔ キー不在 の 1 対 1 対応なので
+//   往復不変性は保たれ(空で復元 → 空で書き出し)、次の 2 つが同時に成り立つ:
+//     (a) ストリームを使っていないセーブのバイト列は rngState 導入前と同一
+//         (= 導入前に採った golden vector / integrityChecksum がそのまま生きる)
+//     (b) rngState を持たない旧セーブがマイグレーション無しでロードできる
+//         (ADR 3軸(b) additive-only)
+//   キーは domainTag、値は xoshiro128** の 4 語(uint32)配列。未登録の domainTag と
+//   長さ 4 以外・uint32 範囲外は reject する(レジストリ整合・ADR-024(2))。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson } from "../canonicalize";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
+import { isDomainTag, type DomainTag } from "../rng/domainTags";
+import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   entityIdFromString,
   isEntityId,
@@ -124,8 +139,10 @@ export type SerializedEntity =
   SerializedFacility | SerializedResearch | SerializedResident | SerializedResource;
 
 /**
- * GameState の直列化形。ADR「セーブフォーマット」(649行)のうち T4 が扱う
- * 範囲(state.ts §3 参照)。
+ * GameState の直列化形。ADR「セーブフォーマット」(649行)のうち現状扱う範囲
+ * (state.ts §3 / §4 参照)。
+ *
+ * `rngState` は空のとき省略される(§3)。
  */
 export type SerializedGameState = {
   readonly saveSchemaVersion: number;
@@ -134,6 +151,7 @@ export type SerializedGameState = {
   readonly worldSeed: string;
   readonly tick: number;
   readonly entityStateById: { readonly [id: string]: SerializedEntity };
+  readonly rngState?: { readonly [domainTag: string]: readonly number[] };
 };
 
 // --- 2. state → JSON -------------------------------------------------------
@@ -198,15 +216,35 @@ export function toSerializable(state: GameState): SerializedGameState {
   for (const entity of state.entityStateById.values()) {
     entries.push([entity.id, serializeEntity(entity)]);
   }
+  const entityStateById: { readonly [id: string]: SerializedEntity } = Object.fromEntries(entries);
 
-  const raw: SerializedGameState = {
-    saveSchemaVersion: state.saveSchemaVersion,
-    contentVersion: state.contentVersion,
-    algoVersion: state.algoVersion,
-    worldSeed: state.worldSeed,
-    tick: state.tick,
-    entityStateById: Object.fromEntries(entries),
-  };
+  const rngEntries: [string, readonly number[]][] = [];
+  for (const [domainTag, words] of state.rngState) {
+    rngEntries.push([domainTag, [...words]]);
+  }
+
+  // 空の rngState はキーごと省略する(§3)。オブジェクトの生スプレッドは
+  // ADR-028(1) で禁止(このファイルも免除対象外)なので、条件分岐で 2 つの
+  // リテラルを書き分けている。
+  const raw: SerializedGameState =
+    rngEntries.length === 0
+      ? {
+          saveSchemaVersion: state.saveSchemaVersion,
+          contentVersion: state.contentVersion,
+          algoVersion: state.algoVersion,
+          worldSeed: state.worldSeed,
+          tick: state.tick,
+          entityStateById,
+        }
+      : {
+          saveSchemaVersion: state.saveSchemaVersion,
+          contentVersion: state.contentVersion,
+          algoVersion: state.algoVersion,
+          worldSeed: state.worldSeed,
+          tick: state.tick,
+          entityStateById,
+          rngState: Object.fromEntries(rngEntries),
+        };
 
   // 正準化がバイト同一性の根拠(§1(a))。ここを外すと呼び出し側の
   // オブジェクトリテラル定義順が JSON に漏れる。
@@ -365,6 +403,48 @@ function deserializeEntity(id: EntityId, value: unknown, path: string): EntitySt
   }
 }
 
+/** uint32(0〜2^32-1 の整数)のみ許可。xoshiro128** の state 語の値域。 */
+function requireUint32(value: unknown, path: string): number {
+  const n = requireInt(value, path);
+  if (n < 0 || n > 0xffff_ffff) {
+    throw new SerializeError(`${path}: uint32(0〜4294967295)を期待したが ${String(n)} だった`);
+  }
+  return n;
+}
+
+/**
+ * rngState(§3)を読む。キーは登録済み domainTag、値は uint32 × 4。
+ * 未登録タグ・長さ違い・値域外はすべて reject する(黙って捨てない)。
+ */
+function deserializeRngState(value: unknown): readonly (readonly [DomainTag, Xoshiro128State])[] {
+  if (value === undefined) return [];
+  const o = requireObject(value, "$.rngState");
+  const result: (readonly [DomainTag, Xoshiro128State])[] = [];
+  for (const key of Object.keys(o)) {
+    const path = `$.rngState.${key}`;
+    if (!isDomainTag(key)) {
+      throw new SerializeError(
+        `${path}: "${key}" は rng/domainTags.ts のレジストリに無い domainTag(ADR-024(2))`,
+      );
+    }
+    const words = o[key];
+    if (!Array.isArray(words) || words.length !== 4) {
+      throw new SerializeError(`${path}: uint32 4 語の配列を期待した`);
+    }
+    const source = words as readonly unknown[];
+    result.push([
+      key,
+      [
+        requireUint32(source[0], `${path}[0]`),
+        requireUint32(source[1], `${path}[1]`),
+        requireUint32(source[2], `${path}[2]`),
+        requireUint32(source[3], `${path}[3]`),
+      ],
+    ]);
+  }
+  return result;
+}
+
 /**
  * 直列化形(JSON.parse の結果)から GameState を復元する。オブジェクト → Map。
  * 入力のキー順には依存しない(必要なキーを名指しで読み、Map は ID 昇順で
@@ -395,5 +475,5 @@ export function fromSerializable(input: unknown): GameState {
     entities.push(deserializeEntity(entityIdFromString(key), rawEntities[key], path));
   }
 
-  return createGameState(meta, entities);
+  return createGameState(meta, entities, deserializeRngState(root["rngState"]));
 }

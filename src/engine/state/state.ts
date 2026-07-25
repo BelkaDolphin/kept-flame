@@ -53,20 +53,42 @@
 //     item・在庫・装備 / memoirLog・bond / trait 定義本体(content 側) /
 //     成文化キュー / 6×8 格子の地形・瓦礫 / 難度シード。
 //   GameState の非 entity フィールドも同様に絞り、セーブフォーマット
-//   (ADR 649行)のうち以下は T4 では持たない:
-//     rngState        : domainTags レジストリが現状 'exploration' 1 件のみで、
-//                       production/研究ドメインの追加は T5 の RNG 設計時。
-//                       Map<DomainTag, Xoshiro128State> の往復は T5 で足す。
-//     eventQueueSnapshot / inProgressOrders : 離散事象ヒープ(T5)と対で設計する。
+//   (ADR 649行)のうち以下は持たない:
+//     eventQueueSnapshot / inProgressOrders : 下記 §4 参照(T5 で不要と判断)。
 //     commandLog / renderedLogs / dispatchSnapshots / integrityChecksum /
 //     runCount / cumulativeInheritPoints / monotonicTimestamp : 上記の
 //       「含めない」機能か、platform 層(永続化・時刻)の担当。
 //
-//   3 本の rules が読む値だけを持たせてあるので、T5 でフィールドを足すときは
+//   3 本の rules が読む値だけを持たせてあるので、フィールドを足すときは
 //   「その rule が実際に読むか」を基準に additive で足すこと。
+//
+// ===========================================================================
+// 4. rngState と eventQueueSnapshot(T5 で確定)
+// ===========================================================================
+//   **rngState**(セーブフォーマット 658行 `{ "domainTag": "xoshiro 4×uint32語" }`)を
+//   `ReadonlyMap<DomainTag, Xoshiro128State>` として保持する。T4 では
+//   domainTags レジストリが 'exploration' 1 件しか無かったため T5 送りにしていた。
+//   T5 でレジストリに adjacency / recall / recallDuration が入り、うち
+//   **逐次ストリームとして状態を進めるのは recallDuration のみ**である
+//   (他は worldSeed + salt から毎回導出する hash アドレス方式なので状態を持たない。
+//   どちらの方式かは rng/domainTags.ts のタグ別コメントに書いてある)。
+//   反復順は domainTag の UTF-16 コードユニット昇順を正準順とし、維持責務は
+//   state/update.ts(createGameState / setRngState)と state/serialize.ts
+//   (fromSerializable)にある = entityStateById と全く同じ扱い(§2)。
+//
+//   **eventQueueSnapshot は持たない。** T5 の離散事象ヒープに載るイベントは
+//   すべて state から決定論的に再構成できる(想起困難の回復 tick は
+//   `recallImpairedUntilTick`、(C)粗粒度ステップは tick の絶対グリッド、
+//   研究完了は進行度とレートからの予測)。再構成できるものをセーブに二重で
+//   持つと「state とキューが食い違うセーブ」という壊れ方を作ってしまうため、
+//   scheduler.ts の buildEventQueue が単一の真実になる。再構成不能な外因
+//   イベント(襲撃の予定 tick 等)を入れる段階で、そのイベントだけを
+//   eventQueueSnapshot として足すこと。
 // ---------------------------------------------------------------------------
 
 import type { Fix } from "../fp";
+import type { DomainTag } from "../rng/domainTags";
+import type { Xoshiro128State } from "../rng/xoshiro128";
 
 // --- 1. ID -----------------------------------------------------------------
 
@@ -244,9 +266,19 @@ export interface GameStateMeta {
  *   (a) `entityStateById` の反復順は ID の UTF-16 コードユニット昇順(§2)
  *   (b) キーと値の `id` が一致する
  *   (c) 全 ID が {@link ENTITY_ID_PATTERN} に一致する(§1)
+ *   (d) `rngState` の反復順は domainTag の UTF-16 コードユニット昇順(§4)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
+  /**
+   * ドメイン別の逐次 RNG ストリーム状態(§4 / ADR-007)。
+   *
+   * 「まだ 1 度も引いていないドメイン」はキーを持たない(= 遅延初期化)。
+   * 初回の draw で `hash(worldSeed, domainTag, [])` から seed 展開される
+   * ため、キーの有無で結果が分岐することはない。hash アドレス方式のドメイン
+   * (adjacency / recall)は永久にここへ現れない。
+   */
+  readonly rngState: ReadonlyMap<DomainTag, Xoshiro128State>;
 }
 
 // --- 4. 参照 ---------------------------------------------------------------
@@ -303,4 +335,20 @@ export function entitiesOfKind<K extends EntityKind>(
     }
   }
   return result;
+}
+
+/**
+ * ドメインの逐次 RNG ストリーム状態(§4)。まだ 1 度も引いていなければ
+ * undefined。「引いたことがあるか」自体は結果に影響しない(遅延初期化)。
+ */
+export function getRngState(state: GameState, domainTag: DomainTag): Xoshiro128State | undefined {
+  return state.rngState.get(domainTag);
+}
+
+/**
+ * ストリーム状態を保持している domainTag を正準順(昇順・§4)で返す。
+ * `entityIds` と同じく Map の反復順をそのまま使う(防御的な再ソートはしない)。
+ */
+export function rngStateDomains(state: GameState): readonly DomainTag[] {
+  return [...state.rngState.keys()];
 }

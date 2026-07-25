@@ -71,9 +71,21 @@
 - [2026-07-25] `.gitignore`に`models/`追加(eba846c)。RAG ingest時にlocal-ragが埋め込みモデル(Xenova)をプロジェクト直下にDLするため。
 - [2026-07-25] **セッション終了**。RAG記録: chat://2026-07-25/kept-flame-implementation-start(T4完了版に更新済み)。P0/P1のうちT0〜T4+T13完了、進捗は計画書§4.3のクリティカルパス上でT5直前まで。
 
+- [2026-07-25] **T5完了**(Opus): 最小tickエンジン。新規8ファイル(advance/scheduler/stochastic/adjacency/rules{types,production,research,recall})+ state層4ファイル改修(rngState組込み)。テスト182件追加(既存360件は無改変で全pass)。設計要点:
+  - **(A)(B)(C)は「区間は常に(A)、境界に(B)(C)がある」形で実装**。中心不変条件=「レートを変える全状態変化がheapのイベントとして境界化されている」。想起困難の回復は(C)が生んだ(B)境界。
+  - tie-break=(tick, パイプライン段, entityId)の**全順序**+同一キーpush禁止 → heap内部配置が処理順に影響しない。パイプライン段はGDD 11.7の9段を10刻みで予約し、想起困難の回復(22)/抽選(24)を「負傷反映→生産」の間に配置(**GDD 11.7に想起困難の記載が無いための解釈 = 要ユーザー判断**)。
+  - **eventQueueSnapshotはセーブに持たない**(全イベントがstateから再構成可能。scheduler.buildEventQueueが単一の真実)。
+  - **rngStateは空なら直列化形から省略** → 既存360件のserializeテスト(トップレベルキー一覧)を壊さず、旧セーブもマイグレーション不要でロード可。
+  - domainTagsは`adjacency`/`recall`/`recallDuration`を追加(production/researchは縮約rulesが決定論的でRNG不要のため**登録しない**)。recall=hashアドレス方式(順序非依存=段階1の全再評価が構造的に成立)、recallDuration=逐次ストリーム(rngStateの唯一の実利用者)。
+  - `p_step = p_day × coarse/1440` の**線形按分**(1-(1-p)^(Δ/1440)は非整数べき乗=ADR-006禁止のため)。誤差の妥当性は計測#5で判定。
+  - 分割不変性(advance(0→T2) == advance(0→T1)+advance(T1→T2))をテストで固定。この過程で**2件の分割不変性バグを発見・修正**: ①回復イベントでフラグを0に戻すと回復tickちょうどで区切ったとき不一致→回復は比較のみで表現(状態遷移を持たない境界イベント)②完了tickちょうどで区切ると「進行度がコスト到達済みだが未完了」stateになる→残り0以下なら現在tickで完了(ticksUntilResearchCompleteが0を返す)。
+  - mulFixProvenは1箇所のみ(adjacencyの係数×(1+offset))。根拠=構成時に|係数|<=2e6を強制(`ADJACENCY_PAIR_VALUE_ABS_MAX`)。他は全てmulFix(自動BigInt)。
+  - 実測(Ryzen 7 5700X・住民20/施設12/tech3): 72h catch-up(4320tick)=**28ms**・432ステップ・25,920判定。sim 1run(2304粗粒度ステップ)=**59ms**・**138,240判定**(ADR-014の見積り判定数と一致)。ADR-014の「2s/run仮置き」に対し大幅に余裕がある可能性(botロジック込みの本計測はT9)。
+  - 縮約の明示: 生産式は`出力(Lv) × 隣接乗数 × 稼働就労者数`(ステータス5種・trait倍率は縮約対象外)、研究は単一キュー(未完了のID昇順先頭)、(C)判定ペアは「全住民 × 全research entityのtechId」(=ADR-014の20人×3techと同じ判定数)、想起困難は住民単位で停止(tech別停止は縮約外)。
+
 ## 次のステップ
-1. **次セッション最初**: T5(最小tickエンジン=Opus、単一ボトルネック)を投入。advance/scheduler((A)(B)(C)区間分類・離散事象ヒープ・tie-break・72hクランプ)/stochastic段階1/rules縮約3本/adjacency。rngStateのGameState組込みとdomainTags追加(production/research/recall等)もT5の範囲。
-2. T5と並行可: T6(最小schema+ダミーcontent=Sonnet)。T5+T6完了後: T7(golden vector被覆設計=Opus)→T8(Playwright)、T9(sim校正)。
+1. T7(golden vector被覆設計=Opus)。T5の被覆すべき経路: (A)(B)(C)各境界/同一tick複数イベントのtie-break/分割不変/rngState往復/adjacencyのシード揺らぎ/72hクランプ境界/1分tick Fallback。
+2. T5+T6完了後: T7→T8(Playwright)、T9(sim校正)、T10/T11(bench・Worker)。
 3. ユーザー保留(非ブロッキング): damp色の彩度判断、期限切れPAT削除、GitHub Actions用workflow(T15)はT9後。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
