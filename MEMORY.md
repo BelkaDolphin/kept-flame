@@ -71,7 +71,7 @@
 - [2026-07-25] `.gitignore`に`models/`追加(eba846c)。RAG ingest時にlocal-ragが埋め込みモデル(Xenova)をプロジェクト直下にDLするため。
 - [2026-07-25] **セッション終了**。RAG記録: chat://2026-07-25/kept-flame-implementation-start(T4完了版に更新済み)。P0/P1のうちT0〜T4+T13完了、進捗は計画書§4.3のクリティカルパス上でT5直前まで。
 
-- [2026-07-25] **T5完了**(Opus): 最小tickエンジン。新規8ファイル(advance/scheduler/stochastic/adjacency/rules{types,production,research,recall})+ state層4ファイル改修(rngState組込み)。テスト182件追加(既存360件は無改変で全pass)。設計要点:
+- [2026-07-25] **T5完了**(Opus・コミット0b15b74、Fable5検分済み: 583件全pass・typecheck/lint/formatクリーン・実消費約400k=見積り200kの2倍、主因はADR/GDD全読+分割不変性デバッグ): 最小tickエンジン。新規8ファイル(advance/scheduler/stochastic/adjacency/rules{types,production,research,recall})+ state層4ファイル改修(rngState組込み)。テスト182件追加(既存360件は無改変で全pass)。設計要点:
   - **(A)(B)(C)は「区間は常に(A)、境界に(B)(C)がある」形で実装**。中心不変条件=「レートを変える全状態変化がheapのイベントとして境界化されている」。想起困難の回復は(C)が生んだ(B)境界。
   - tie-break=(tick, パイプライン段, entityId)の**全順序**+同一キーpush禁止 → heap内部配置が処理順に影響しない。パイプライン段はGDD 11.7の9段を10刻みで予約し、想起困難の回復(22)/抽選(24)を「負傷反映→生産」の間に配置(**GDD 11.7に想起困難の記載が無いための解釈 = 要ユーザー判断**)。
   - **eventQueueSnapshotはセーブに持たない**(全イベントがstateから再構成可能。scheduler.buildEventQueueが単一の真実)。
@@ -83,9 +83,13 @@
   - 実測(Ryzen 7 5700X・住民20/施設12/tech3): 72h catch-up(4320tick)=**28ms**・432ステップ・25,920判定。sim 1run(2304粗粒度ステップ)=**59ms**・**138,240判定**(ADR-014の見積り判定数と一致)。ADR-014の「2s/run仮置き」に対し大幅に余裕がある可能性(botロジック込みの本計測はT9)。
   - 縮約の明示: 生産式は`出力(Lv) × 隣接乗数 × 稼働就労者数`(ステータス5種・trait倍率は縮約対象外)、研究は単一キュー(未完了のID昇順先頭)、(C)判定ペアは「全住民 × 全research entityのtechId」(=ADR-014の20人×3techと同じ判定数)、想起困難は住民単位で停止(tech別停止は縮約外)。
 
+- [2026-07-25] **T6完了**(Sonnet実装・Fable5検分ののちコミットe95948f): `schema/`8ファイル(自前検証器・npm追加依存なし・throwでなくValidationIssue[]収集方式=計測#11のreject再試行コスト計測向け)+`content/`ダミーJSON5ファイル(GDD 11.1〜11.3準拠)+テスト41件。contentBundle.tsが正準化→検証→ID一意性→相互参照/循環検出の単一入口。規模は16ファイル/約1914行(目安12/400超過はエージェント自己申告あり、5カテゴリの実レンジ検証+循環検出のためでFable5妥当と判断)。実消費約228k。
+- [2026-07-25] **T5/T6の要ユーザー判断(未処理・文書追記が必要な差異)**: ①GDD11.7同一tick優先順位に想起困難の項なし(T5解釈: 回復22/抽選24を負傷反映→生産の間) ②p_step線形按分の式をGDD11.2/11.8(C)に明記すべき ③eventQueueSnapshot非セーブ方針(ADR-012と差異) ④rngState空なら直列化省略(ADR-012にない正準化) ⑤adjacency effect語彙: engineは`yieldMul`のみ、写せないeffectはcontentロードでreject方針(T7実装要。T6 schemaは自由文字列で広い) ⑥footprint 2×1/2×2未実装=全施設1×1扱い(MVPでstate拡張要) ⑦adjacencyクランプ±60%はengine定数(content化判断余地) ⑧contentはカテゴリごと1ファイル方式(ADR図はエンティティ個別とも読める) ⑨tech.prereqs長さ0許可(エラ起点用、ADRコメント「1-3」と差異)。
+- [2026-07-25] **T5/T6統合の残作業**: `schema/facility.ts`のFACILITY_TAGSとT5 adjacencyのタグレジストリが別物=突き合わせ要。T6 JSON→`src/engine/rules/types.ts`内部表現へのローダー未実装(**T7の前提**)。
+
 ## 次のステップ
-1. T7(golden vector被覆設計=Opus)。T5の被覆すべき経路: (A)(B)(C)各境界/同一tick複数イベントのtie-break/分割不変/rngState往復/adjacencyのシード揺らぎ/72hクランプ境界/1分tick Fallback。
-2. T5+T6完了後: T7→T8(Playwright)、T9(sim校正)、T10/T11(bench・Worker)。
-3. ユーザー保留(非ブロッキング): damp色の彩度判断、期限切れPAT削除、GitHub Actions用workflow(T15)はT9後。
+1. **T7(golden vectorハーネス: 被覆設計=Opus→生成器実装=Sonnet)**。被覆すべき経路(T5引き継ぎ): (A)(B)(C)各境界/同一tick複数イベント(研究完了が粗粒度グリッドに乗る・乗らない両方)/**分割不変性の回復tick・完了tickちょうど区切り(T5でバグが出た場所)**/rngState往復(空・非空)/adjacencyシード揺らぎ/72hクランプ境界/1分tick Fallback/過密のセルID辞書順先頭2件。`advanceWithReport`のカウンタ(ステップ数・ベルヌーイ試行数・(B)件数・発生件数)を状態ハッシュと併せてvectorに含める=「挙動同一だが区間分割が変わった」検出(ADR残余リスク#9対策)。前提: T6 JSON→rules/types.tsローダー実装をT7冒頭に含める。
+2. T7後: T8(Playwright 3エンジンconformance=Sonnet)。T5完了によりT9(sim校正=Sonnet)・T10(perf計測境界=Opus→Sonnet)も並行可。
+3. ユーザー保留(非ブロッキング): 上記⑨件の判断、damp色の彩度、期限切れPAT削除。T15(workflow)はT9後+§8-1承認。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
