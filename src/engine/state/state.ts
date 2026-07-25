@@ -1,0 +1,306 @@
+// ---------------------------------------------------------------------------
+// 継ぐ火 -Kept Flame- 正規化 GameState の型定義 — ADR-028(1) / ADR-002(1)
+//
+// GameState は「正規化(normalized)」で保持する: 全 entity を入れ子にせず、
+// グローバル一意 ID をキーとする単一の Map(`entityStateById`)に平坦に置き、
+// entity どうしの関係は ID 参照で表す。入れ子を作らないので、1 entity の更新で
+// 複製されるサブツリーが Map 1 段に限定され、構造共有(ADR-028(1))が
+// 「Map を 1 枚と entity を 1 個作り直すだけ」に収まる。
+//
+// ===========================================================================
+// 1. 単一 namespace であることの根拠(ADR「共通規約」602行 / ADR-024(1))
+// ===========================================================================
+//   ID は全カテゴリ横断でグローバル一意を schema 検証段階で強制するため、
+//   カテゴリごとに Map を分けなくても衝突(シャドーイング)が起きない。よって
+//   本モジュールはカテゴリ別 Map を持たず `entityStateById` 1 枚に統一する。
+//   これはセーブフォーマット(ADR「セーブフォーマット」649行)の
+//   `entityStateById` とそのまま 1 対 1 対応し、往復(serialize.ts)が
+//   「Map ↔ 1 段のプレーンオブジェクト」で済む。
+//
+// ===========================================================================
+// 2. Map の反復順は「ID の UTF-16 コードユニット昇順」で固定(正準順)
+// ===========================================================================
+//   `entityStateById` の反復順は常に ID 昇順であることを不変条件とする。
+//   維持するのは state/update.ts(createGameState / putEntity)と
+//   state/serialize.ts(fromSerializable)の 2 経路だけで、本モジュールは
+//   その前提に乗って `entityIds` を無加工で返す(ここで防御的に再ソートすると
+//   不変条件が壊れても検出できなくなる)。
+//
+//   ねらいは 2 つ:
+//     (a) 到達経路(どの順で entity を追加したか)に依らず、同じ ID 集合なら
+//         必ず同じ反復順になる = 反復順に依存するコードがあっても結果が
+//         分岐しない。
+//     (b) 直列化が Map の反復順をそのまま書き出せる = 往復のバイト同一性
+//         (serialize.ts)を Map 側の性質として保証できる。
+//   代償は新規 ID 追加時の Map 再構築(O(n log n))だが、entity 数は
+//   施設 48 + 住民 20 + 研究/資源で高々 100 オーダーであり、かつ新規追加は
+//   毎 tick の操作ではない(毎 tick 起きるのは既存 entity の値更新 = 挿入位置
+//   不変)。
+//
+// ===========================================================================
+// 3. このプロトタイプに含める entity と、含めないもの
+// ===========================================================================
+//   先行計測計画 §2.1 の P1 は「rules 縮約 3 本((A)生産 / (B)研究完了 /
+//   (C)想起困難)が動く範囲」をスコープとする。よって entity は 4 種のみ:
+//
+//     resident : (C)想起困難の発生式(GDD 11.2)が読む住民個人変数
+//     facility : (A)生産の主体。配置セルと従事者、Lv
+//     research : (B)研究完了の進行度
+//     resource : 生産/研究コストが読み書きする資源ストック
+//
+//   **含めない**(計測 12 項目のどれにも不要。GDD 全域のモデル化はしない):
+//     探索/派遣・分岐木・冒険記 / 襲撃 / 衛星拠点 / 大移動・継承点・周回 /
+//     item・在庫・装備 / memoirLog・bond / trait 定義本体(content 側) /
+//     成文化キュー / 6×8 格子の地形・瓦礫 / 難度シード。
+//   GameState の非 entity フィールドも同様に絞り、セーブフォーマット
+//   (ADR 649行)のうち以下は T4 では持たない:
+//     rngState        : domainTags レジストリが現状 'exploration' 1 件のみで、
+//                       production/研究ドメインの追加は T5 の RNG 設計時。
+//                       Map<DomainTag, Xoshiro128State> の往復は T5 で足す。
+//     eventQueueSnapshot / inProgressOrders : 離散事象ヒープ(T5)と対で設計する。
+//     commandLog / renderedLogs / dispatchSnapshots / integrityChecksum /
+//     runCount / cumulativeInheritPoints / monotonicTimestamp : 上記の
+//       「含めない」機能か、platform 層(永続化・時刻)の担当。
+//
+//   3 本の rules が読む値だけを持たせてあるので、T5 でフィールドを足すときは
+//   「その rule が実際に読むか」を基準に additive で足すこと。
+// ---------------------------------------------------------------------------
+
+import type { Fix } from "../fp";
+
+// --- 1. ID -----------------------------------------------------------------
+
+declare const ENTITY_ID_BRAND: unique symbol;
+
+/**
+ * entity の ID。実体は文字列だが、素の文字列と混ぜられないよう branded type に
+ * してある。生成口は {@link entityIdFromString} だけ(brand を `as` で偽造
+ * しないこと)。
+ *
+ * 不変条件: {@link ENTITY_ID_PATTERN} に一致する。
+ */
+export type EntityId = string & { readonly [ENTITY_ID_BRAND]: "EntityId" };
+
+/**
+ * ID の命名規則(ADR-011 / ADR「共通規約」602行)。先頭が英小文字なので
+ * **正準整数インデックスになり得ない**。これは往復不変性の根拠でもある:
+ *
+ *   JS のオブジェクトは「正準数値文字列」のキー(`"0"`, `"12"`)を数値キーとして
+ *   先頭に繰り上げて列挙するため、キーが整数風だと挿入順が保存されない。
+ *   ID が必ず英小文字始まりであることにより、`entityStateById` の
+ *   プレーンオブジェクト表現は列挙順 = 挿入順が保証され、JSON.stringify の
+ *   出力バイト列が Map の反復順(= ID 昇順)にそのまま従う(ADR-028(2))。
+ */
+export const ENTITY_ID_PATTERN = /^[a-z][a-zA-Z0-9_]*$/;
+
+/** ID 規則違反。content ロード・セーブ復元の境界で必ず停止させる。 */
+export class EntityIdError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EntityIdError";
+  }
+}
+
+/** 参照した entity が無い / 種別が食い違う。 */
+export class EntityLookupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EntityLookupError";
+  }
+}
+
+/** 文字列が ID 規則(ADR-011)に一致するか。 */
+export function isEntityId(value: string): boolean {
+  return ENTITY_ID_PATTERN.test(value);
+}
+
+/**
+ * 文字列から EntityId を作る唯一の口。engine 外(content・セーブ・テスト)から
+ * 来た文字列は必ずここを通す。
+ *
+ * @throws {EntityIdError} ADR-011 の命名規則に一致しない場合
+ */
+export function entityIdFromString(value: string): EntityId {
+  if (!isEntityId(value)) {
+    throw new EntityIdError(
+      `entityIdFromString: "${value}" は ID 規則 ${ENTITY_ID_PATTERN.source} に一致しない(ADR-011)`,
+    );
+  }
+  return value as EntityId;
+}
+
+// --- 2. entity ------------------------------------------------------------
+
+/** entity の種別タグ。`entityStateById` の値を判別するための discriminant。 */
+export type EntityKind = "facility" | "research" | "resident" | "resource";
+
+/**
+ * 住民。(C)想起困難の発生式(GDD 11.2)
+ * `p = clamp(0, base_p × loadW + moraleW + dispatchW − masteryResist, p_max)`
+ * が読む変数だけを持つ。
+ *
+ * loadW(過酷業務か通常業務か)は施設側 content の属性から引くので、住民側は
+ * 「どの施設に就いているか」(assignedFacilityId)だけを持つ。
+ */
+export interface ResidentState {
+  readonly kind: "resident";
+  readonly id: EntityId;
+  /** 士気。人間単位 0〜100 の Fix(GDD 11.2 は <30 / <15 / >=40 を閾値に使う)。 */
+  readonly morale: Fix;
+  /** 実地稼働で蓄積する定着度 masteryResist。人間単位 0〜0.20 の Fix。 */
+  readonly mastery: Fix;
+  /** 就労中の施設 entity の ID。無配属は null。 */
+  readonly assignedFacilityId: EntityId | null;
+  /** 探索派遣中か(dispatchW +0.15 の条件)。派遣先の詳細は T4 では持たない。 */
+  readonly dispatched: boolean;
+  /** 保持する trait の content ID(ID 昇順)。記憶巧者 trait の判定に使う。 */
+  readonly traitIds: readonly EntityId[];
+  /** 想起困難が解ける tick。0 は「発生していない」。 */
+  readonly recallImpairedUntilTick: number;
+}
+
+/**
+ * 施設。(A)生産の主体。
+ *
+ * tags / lvCurve / 過酷業務かどうかといった定義値は content 側(facility 定義)に
+ * あり、state は「どの定義の実体が、どのセルに、Lv いくつで、誰が就いているか」
+ * だけを持つ(正規化)。
+ */
+export interface FacilityState {
+  readonly kind: "facility";
+  readonly id: EntityId;
+  /** content の facility 定義 ID。同じ定義の実体が複数あるので id とは別に持つ。 */
+  readonly defId: EntityId;
+  /** Lv 1〜5(GDD)。上限の検証は schema 検証器(T6)の担当。 */
+  readonly level: number;
+  /** 6×8 格子の通し番号 0〜47(ADR-002(2) の近傍集計はこの番号で行う)。 */
+  readonly cellIndex: number;
+  /** 就労中の住民 ID(ID 昇順。順序は集合演算の決定論のため・GDD 11.7)。 */
+  readonly workerIds: readonly EntityId[];
+}
+
+/**
+ * 研究進行。(B)研究完了 = レート変化イベント(GDD 11.8(B))の対象。
+ *
+ * 研究コスト・prereq は content の tech 定義にあるので、state は進行度と
+ * 完了 tick だけを持つ。
+ */
+export interface ResearchState {
+  readonly kind: "research";
+  readonly id: EntityId;
+  /** content の tech 定義 ID。 */
+  readonly techId: EntityId;
+  /** 蓄積研究点。 */
+  readonly progress: Fix;
+  /** 完了した tick。未完了は null。 */
+  readonly completedTick: number | null;
+}
+
+/**
+ * 資源ストック。(A)生産の出力先であり (B)研究コストの引き落とし元。
+ */
+export interface ResourceState {
+  readonly kind: "resource";
+  readonly id: EntityId;
+  /** content の resource 定義 ID。 */
+  readonly resourceId: EntityId;
+  /** 現在庫。 */
+  readonly stock: Fix;
+}
+
+/** `entityStateById` に入る値の全体。`kind` で判別する。 */
+export type EntityState = FacilityState | ResearchState | ResidentState | ResourceState;
+
+/** 種別タグから entity 型を引く。`EntityOfKind<"resident">` = ResidentState。 */
+export type EntityOfKind<K extends EntityKind> = Extract<EntityState, { readonly kind: K }>;
+
+// --- 3. GameState ---------------------------------------------------------
+
+/**
+ * GameState のうち entity 以外のスカラ。createGameState の引数にも使う。
+ *
+ * 3 バージョン軸(ADR「バージョニング / マイグレーション(3軸)」)はセーブに
+ * そのまま載るので state 側に保持する。
+ */
+export interface GameStateMeta {
+  /** セーブ構造の版。差があればマイグレーション連鎖(ADR 3軸(a))。 */
+  readonly saveSchemaVersion: number;
+  /** content の版。差は additive-only で吸収(ADR 3軸(b))。 */
+  readonly contentVersion: number;
+  /** 決定論バンドルの版。golden vector 変化と 1 対 1(ADR-016 / 3軸(c))。 */
+  readonly algoVersion: number;
+  /** 世界シード。RNG への展開(hash → uint32)は T5 の rng 配線で行う。 */
+  readonly worldSeed: string;
+  /** ゲーム内時刻。1 tick = 1 分(ADR-026)。 */
+  readonly tick: number;
+}
+
+/**
+ * 正規化されたゲーム状態。**不変(immutable)**であり、更新は
+ * state/update.ts の単一経路(updateEntity / updateIn / putEntity /
+ * removeEntity / setField)だけを通す(ADR-028(1))。
+ *
+ * 不変条件:
+ *   (a) `entityStateById` の反復順は ID の UTF-16 コードユニット昇順(§2)
+ *   (b) キーと値の `id` が一致する
+ *   (c) 全 ID が {@link ENTITY_ID_PATTERN} に一致する(§1)
+ */
+export interface GameState extends GameStateMeta {
+  readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
+}
+
+// --- 4. 参照 ---------------------------------------------------------------
+
+/** entity を引く。無ければ undefined。 */
+export function getEntity(state: GameState, id: EntityId): EntityState | undefined {
+  return state.entityStateById.get(id);
+}
+
+/**
+ * entity を種別付きで引く。存在と種別を実行時に検査して narrowing する。
+ * 「あるはず」の参照(rules から の参照はほぼ全てこれ)に使い、
+ * 不在を黙って読み飛ばさない。
+ *
+ * @throws {EntityLookupError} 存在しない、または種別が食い違う場合
+ */
+export function requireEntity<K extends EntityKind>(
+  state: GameState,
+  id: EntityId,
+  kind: K,
+): EntityOfKind<K> {
+  const entity = state.entityStateById.get(id);
+  if (entity === undefined) {
+    throw new EntityLookupError(`requireEntity: entity "${id}" が存在しない(期待種別 ${kind})`);
+  }
+  if (entity.kind !== kind) {
+    throw new EntityLookupError(
+      `requireEntity: entity "${id}" の種別は ${entity.kind} で、期待した ${kind} と違う`,
+    );
+  }
+  return entity as EntityOfKind<K>;
+}
+
+/**
+ * 全 entity の ID を正準順(ID 昇順・§2)で返す。Map の反復順をそのまま
+ * 使うので、不変条件が守られている限り追加のソートは不要。
+ */
+export function entityIds(state: GameState): readonly EntityId[] {
+  return [...state.entityStateById.keys()];
+}
+
+/**
+ * 指定種別の entity を正準順(ID 昇順)で返す。集合演算(合計・按分)に渡す
+ * 配列は必ずこの順序にすること(GDD 11.7: 加算順序が結果に影響する)。
+ */
+export function entitiesOfKind<K extends EntityKind>(
+  state: GameState,
+  kind: K,
+): readonly EntityOfKind<K>[] {
+  const result: EntityOfKind<K>[] = [];
+  for (const entity of state.entityStateById.values()) {
+    if (entity.kind === kind) {
+      result.push(entity as EntityOfKind<K>);
+    }
+  }
+  return result;
+}
