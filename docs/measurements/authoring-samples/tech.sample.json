@@ -1,0 +1,10 @@
+{
+  "id": "techCordage",
+  "era": "e1",
+  "lossClass": "criticalRecoverable",
+  "prereqs": ["techBasketWeaving"],
+  "researchCost": 28,
+  "fieldRequirement": { "facility": "workbench", "recipe": "recipeCordage", "count": 2 },
+  "unlocks": [],
+  "leaf": true
+}

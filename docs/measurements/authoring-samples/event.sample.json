@@ -1,0 +1,84 @@
+{
+  "id": "eventNearRubbleField",
+  "destTags": ["near"],
+  "nodes": [
+    {
+      "difficulty": 40,
+      "R": 20,
+      "statWeights": { "vigor": 0.6, "fortitude": 0.4 },
+      "choices": [
+        { "label": "慎重に進む", "effect": { "successMod": 0.1, "rewardMod": -0.05 } },
+        { "label": "強行突破する", "effect": { "rewardMod": 0.1, "injuryRiskMul": 1.5 } }
+      ],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty",
+          "result": "success",
+          "logTemplate": "瓦礫原を踏破し、奥へ進んだ。"
+        },
+        {
+          "cond": "teamPower < difficulty",
+          "result": "failure",
+          "logTemplate": "瓦礫原で足止めを食らった。"
+        }
+      ]
+    },
+    {
+      "difficulty": 55,
+      "R": 25,
+      "statWeights": { "combatPower": 1.0 },
+      "choices": [
+        { "label": "撤退する", "effect": { "successMod": 0.15, "rewardMod": -0.3 } },
+        { "label": "強行する", "effect": { "rewardMod": 0.2, "injuryRiskMul": 1.5 } }
+      ],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty && injuryCount == 0",
+          "result": "success",
+          "logTemplate": "野犬の群れを無傷で追い払った。"
+        },
+        {
+          "cond": "teamPower < difficulty || injuryCount > 0",
+          "result": "failure",
+          "logTemplate": "野犬の群れに手を焼き、負傷者が出た。"
+        }
+      ]
+    },
+    {
+      "difficulty": 50,
+      "R": 20,
+      "statWeights": { "intellect": 1.0 },
+      "choices": [],
+      "branches": [
+        {
+          "cond": "hasTrait('traitScholar') == true",
+          "result": "success",
+          "logTemplate": "学者が古い銘板の文字を読み解いた。"
+        },
+        {
+          "cond": "hasTrait('traitScholar') == false",
+          "result": "partial",
+          "logTemplate": "銘板の一部しか読み解けなかった。"
+        }
+      ]
+    },
+    {
+      "difficulty": 35,
+      "R": 15,
+      "statWeights": { "dexterity": 1.0 },
+      "choices": [{ "label": "慎重に解除する", "effect": { "successMod": 0.1 } }],
+      "branches": [
+        {
+          "cond": "maxStatHolder('dexterity') >= difficulty",
+          "result": "success",
+          "logTemplate": "器用な者が罠を解除した。"
+        },
+        {
+          "cond": "maxStatHolder('dexterity') < difficulty",
+          "result": "failure",
+          "logTemplate": "罠を踏み抜き負傷者が出た。"
+        }
+      ]
+    }
+  ]
+}

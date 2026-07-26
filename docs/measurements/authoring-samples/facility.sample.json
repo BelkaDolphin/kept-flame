@@ -1,0 +1,10 @@
+{
+  "id": "garden",
+  "tags": ["damp"],
+  "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+  "lvCurve": [90, 103.5, 119.025, 136.87875, 157.410562],
+  "overflowCapPolicy": "convertToWaste",
+  "footprint": { "width": 1, "height": 1 },
+  "harshWork": false,
+  "output": { "kind": "resource", "resourceId": "grain" }
+}
