@@ -24,11 +24,18 @@ export type IntervalId = (typeof INTERVAL_IDS)[number];
 /** 予算判定の結果。`"pass"` でも #1 の合格ではない(設計文書 §0)。 */
 export type Verdict = "pass" | "fail";
 
-/** 結果 JSON のフォーマット版。境界定義を変えたら必ず上げる(設計文書 §9)。 */
-export const PERF_RESULT_SCHEMA = "kept-flame/bench/perf-boundaries/1";
+/**
+ * 結果 JSON のフォーマット版。境界定義を変えたら必ず上げる(設計文書 §9)。
+ *
+ * 版 **2 = T11**: B1 が Worker 経路(往復転送込みの `computeWallMs`)に、
+ * B2 が `src/platform/persistence.ts` 経路(integrityChecksum 検証を内側に含む)に
+ * 差し替わった。版 1(T10)の B1/B2 と**数値は比較できない**ため版を上げる。
+ * 境界の定義そのものは T10 が設計文書 §7 で先に決めたとおりで変えていない。
+ */
+export const PERF_RESULT_SCHEMA = "kept-flame/bench/perf-boundaries/2";
 
 /** 設計文書の版(この実装が従っている境界定義の日付)。 */
-export const BOUNDARY_SPEC_VERSION = "2026-07-26";
+export const BOUNDARY_SPEC_VERSION = "2026-07-26+t11";
 
 /** 計画 §5.1 の暫定 K。**根拠は無い**(実機校正で置換するまでの仮置き)。 */
 export const PROVISIONAL_DEVICE_K = 5;
@@ -273,6 +280,11 @@ export interface PerfWorkload {
   readonly saveBytes: number;
   readonly measuredTrials: number;
   readonly warmupTrials: number;
+  /**
+   * 代表盤面セーブの integrityChecksum(T11・ADR-012(2))。決定論の自己検査に
+   * 使う値であり、同じ盤面なら環境に依らず同じになる。
+   */
+  readonly integrityChecksum?: number;
 }
 
 /** engine の自己申告カウンタ(ワークロードが設計どおりかの検証)。 */
@@ -288,11 +300,30 @@ export interface PerfSupplementary {
   readonly contentLoadMs: number;
   readonly contentJsonParseMs: number;
   readonly boardBuildMs: number;
+  /**
+   * `indexedDB.open()`。T11 以降は**初回作成を含む cold open**
+   * (`onupgradeneeded` 込み)を入れる。設計文書 §11-(1) の判断材料。
+   */
   readonly idbOpenMs: number;
   readonly idbPutMs: number;
   readonly unmountMedianMs: number;
   /** `idbOpenMs + restore 中央値`(設計文書 §3 B2 の派生値)。 */
   readonly restoreWithOpenMs: number;
+  /**
+   * 既存 DB を開き直したときの `indexedDB.open()`(T11 で追加)。
+   * cold(初回作成)との差が「44.6ms が DB 作成コストなのか毎回のコストなのか」の
+   * 答えになる(設計文書 §11-(1))。
+   */
+  readonly idbOpenWarmMs?: number;
+  /**
+   * そのページで**最初に IndexedDB へ触った**呼び出しの所要時間(T11 で追加。
+   * ベンチでは前回 DB の `deleteDatabase`)。IndexedDB サブシステム自体の
+   * 起動コストがここに落ちるため、`idbOpenMs` から分離して読める。
+   * T10 が §11-(1) に登録した「idbOpen 44.6ms」の正体を切り分けるための値。
+   */
+  readonly idbFirstTouchMs?: number;
+  /** `encodeSaveRecord`(toSerializable + stringify + checksum)。書込側・予算外。 */
+  readonly saveEncodeMs?: number;
 }
 
 /** save サイズ感度(予算判定に使わない参考値・設計文書 §3 B2)。 */
@@ -302,6 +333,45 @@ export interface PerfSensitivity {
     readonly entityCount: number;
     readonly summary: IntervalSummary;
   } | null;
+  /**
+   * 同じ catch-up をメインスレッド同期 advance で回したときの参考値(T11)。
+   * ADR-026(3) は tick 差 ≤600 をメインスレッド経路と定めているので、これは
+   * 「旧実装の名残」ではなく**実アプリの別経路**である。B1(Worker 経路)との
+   * 差が Worker 越しの往復コスト(計測 #8)そのものになる。
+   */
+  readonly computeOnMainThread?: {
+    readonly summary: IntervalSummary;
+    readonly route: string;
+  };
+}
+
+/** Worker 経路の補助情報(T11・設計文書 §7)。 */
+export interface PerfWorkerReport {
+  /**
+   * `"preboot"` = アプリ起動時に Worker を作る(起動コストは予算外)。
+   * `"onDemand"` = 復帰時に作る(その場合 bootMs/contentTransferMs は B1 算入)。
+   * 設計文書 §7-4 が「どちらの実装かを結果 JSON に書くこと」と規定している。
+   */
+  readonly lifecycle: "onDemand" | "preboot";
+  readonly protocolVersion: number;
+  /** ADR-029(1) の二系統のうち実際に走った方。 */
+  readonly updateStrategy: string;
+  /** ADR-026(3) の tick 差しきい値で選ばれた経路。 */
+  readonly route: string;
+  /** `new Worker()` + モジュール評価(予算外)。 */
+  readonly bootMs: number;
+  /** content 1回転送の往復(予算外・ADR-029(1))。 */
+  readonly contentTransferMs: number;
+  /** Worker 内の計算時間(受領〜完了 post 直前)の中央値。B1 の内訳。 */
+  readonly computeWorkerMedianMs: number;
+  /** 完了スナップショット転送 + スケジューリングの残差の中央値。B1 の内訳。 */
+  readonly snapshotTransferMedianMs: number;
+  /** 入力 state の postMessage(構造化複製シリアライズ込み)の中央値。B1 の内訳。 */
+  readonly requestPostMedianMs: number;
+  /** `computeWallMs 中央値 + bootMs + contentTransferMs`(onDemand 実装での換算値)。 */
+  readonly computeWallWithBootMs: number;
+  /** 転送されたスナップショットの entity 数(転送が壊れていないことの確認)。 */
+  readonly snapshotEntityCount: number;
 }
 
 export interface PerfResultInput {
@@ -312,6 +382,7 @@ export interface PerfResultInput {
   readonly supplementary: PerfSupplementary;
   readonly sensitivity: PerfSensitivity;
   readonly observedDomNodeCount: number;
+  readonly worker?: PerfWorkerReport;
 }
 
 export interface PerfResult {
@@ -324,9 +395,21 @@ export interface PerfResult {
   readonly intervals: { readonly [K in IntervalId]: IntervalSummary } & {
     /** B3 の忠実度(設計文書 §5 末尾)。実 UI ストア導入まで placeholder。 */
     readonly hydrateFidelity: "placeholder" | "real-store";
+    /**
+     * B1 の忠実度(T11)。ADR-029(1) の可変ドラフトは engine 側 API 待ちで
+     * 未実装なので、現状は構造共有系での実測 = **上限側の見積り**である
+     * (`src/platform/catchUp.ts` §1)。
+     */
+    readonly computeFidelity: "worker-mutable-draft" | "worker-structural-sharing";
+    /**
+     * B2 の忠実度(T11)。`persistence` = 実 persistence.ts 経路
+     * (integrityChecksum 検証を内側に含む)。
+     */
+    readonly restoreFidelity: "bench-idb" | "persistence";
   };
   readonly supplementary: PerfSupplementary;
   readonly sensitivity: PerfSensitivity;
+  readonly worker: PerfWorkerReport | null;
   readonly observed: {
     readonly domNodeCount: number;
     readonly domNodeCountMatchesExpected: boolean;
@@ -344,7 +427,9 @@ const JUDGEMENT_NOTE =
   "デスクトップ実測は実機の下限見積りにしかならない(先行計測計画 §1 の区分②)。" +
   "K=5 は計画 §5.1 の暫定値で根拠は無く、bench/kernel.html 相当の校正カーネルで " +
   "K_device を実測して置き換えるまで #1 を合格と宣言してはならない。" +
-  "totalMs は試行ごとの 4 区間合計の中央値、sumOfMediansMs は区間別中央値の和(別物)。";
+  "totalMs は試行ごとの 4 区間合計の中央値、sumOfMediansMs は区間別中央値の和(別物)。" +
+  "T11 以降 B1(compute)は Worker 往復込みの computeWallMs、B2(restore)は " +
+  "integrityChecksum 検証込みであり、T10($schema .../1)の値とは比較できない。";
 
 /**
  * 結果 JSON を組み立てる(純関数)。
@@ -361,9 +446,18 @@ export function buildPerfResult(input: PerfResultInput): PerfResult {
     workload: input.workload,
     engineCounters: input.engineCounters,
     budgets: BUDGET_MS,
-    intervals: { ...summaries, hydrateFidelity: "placeholder" },
+    intervals: {
+      ...summaries,
+      hydrateFidelity: "placeholder",
+      computeFidelity:
+        input.worker?.updateStrategy === "mutable-draft"
+          ? "worker-mutable-draft"
+          : "worker-structural-sharing",
+      restoreFidelity: "persistence",
+    },
     supplementary: input.supplementary,
     sensitivity: input.sensitivity,
+    worker: input.worker ?? null,
     observed: {
       domNodeCount: input.observedDomNodeCount,
       domNodeCountMatchesExpected: input.observedDomNodeCount === input.workload.expectedDomNodes,

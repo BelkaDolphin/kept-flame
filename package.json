@@ -24,6 +24,7 @@
     "conformance:e2e": "playwright test",
     "bench:perf:build": "vite build --config bench/vite.perf.config.ts",
     "bench:perf:preview": "vite preview --config bench/vite.perf.config.ts",
+    "bench:perf:e2e": "playwright test --config bench/playwright.perf.config.ts",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },

@@ -30,6 +30,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: HERE,
+  // T11: `src/platform/workerClient.ts` が
+  // `new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })` で
+  // catch-up Worker を起動する。Vite の `worker.format` は既定 `"iife"` なので、
+  // module worker として出させるために明示的に `"es"` にする(既定のままだと
+  // ブラウザ側の `type: "module"` 指定と出力形式が食い違う)。
+  worker: { format: "es" },
   build: {
     // 本体アプリの `dist/` や T8 の `dist/harness` と衝突しない別名。
     // `.gitignore` の `dist/` に含まれるので追加の除外設定は不要。

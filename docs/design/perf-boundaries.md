@@ -158,6 +158,11 @@ R3 により、復帰経路上で 4 区間に属さない演算はここに全�
 | `idbPutMs` | セーブの書込 1 回 | 復帰シナリオのクリティカルパス外(§3 B2) | ADR-012(1) の書込側予算として別途 |
 | `unmountMs` | `render(null, container)` | 試行間の後始末 | 変更なし |
 | `layoutFlushMs` | — | B4 の内側(`layoutMs`)に含めたので独立項目は持たない | — |
+| `idbFirstTouchMs` **[T11]** | ページで**最初の IndexedDB 呼び出し**(ベンチでは前回 DB の `deleteDatabase`) | IndexedDB サブシステム自体の起動コスト。アプリ起動時に 1 回で、復帰のたびには払わない | §12-4。T16 の判定では「2秒予算の外で先に払われる固定費」として別枠で見る |
+| `idbOpenWarmMs` **[T11]** | 既存 DB を開き直す `open` | 同上(`idbOpenMs` は cold = 新規作成込み) | §12-4 |
+| `saveEncodeMs` **[T11]** | `toSerializable` + `JSON.stringify` + `integrityChecksum` | **書込側**。復帰経路に無い | ADR-012(1) の書込側予算として別途 |
+| `workerBootMs` **[T11]** | `new Worker()` + モジュール評価 | §7-4(`workerLifecycle: "preboot"`) | onDemand 実装にしたら B1 算入 |
+| `contentTransferMs` **[T11]** | content 1回転送の往復(ADR-029(1)) | §7-2。アプリ起動時であって復帰経路ではない | 変更なし |
 
 **結果 JSON では `budgets` / `intervals` と `supplementary` を別オブジェクトに分ける。** 補助メトリクスが 4 予算の合計に混ざらないようにするため。
 
@@ -298,7 +303,7 @@ T11 では**変わらない**。B3 が変わるのは実 UI ストアが入る�
 | `bench/perfMain.ts` | 試行ループ。**本文書 §3 の境界だけを実装する**。表示とコピー |
 | `bench/perfBoard.ts` | §6 の代表盤面 + 合成大容量セーブ。content の in-browser ロード |
 | `bench/perfGrid.tsx` | B3 の view model 構築(純関数) + B4 の Preact コンポーネント |
-| `bench/perfIdb.ts` | B2 の暫定 IndexedDB。**T11 で `src/platform/persistence.ts` に置き換わる場所**(§7) |
+| ~~`bench/perfIdb.ts`~~ | B2 の暫定 IndexedDB。**T11 で削除**し `src/platform/persistence.ts` に置き換えた(§12) |
 | `bench/perfStats.ts` | 中央値・要約・判定・結果 JSON 組立(純関数・vitest 対象) |
 | `bench/vite.perf.config.ts` | 隔離 vite 設定(`conformance/vite.harness.config.ts` と同じ流儀。ルートの `vite.config.ts` は触らない) |
 
@@ -306,9 +311,85 @@ T11 では**変わらない**。B3 が変わるのは実 UI ストアが入る�
 
 ## 11. 未確定点(要判断・非ブロッキング)
 
-1. **`indexedDB.open()` を 450ms 予算に入れるか**。ADR-012(4) の文言は 3 演算しか名指ししていないが、実 cold restore では必ず払う。T10 は両方の数値を出す。T11 が実測を見て決め、決めたら本文書 §3 B2 と ADR-012(4) の文言を同時に直す(ADR 改訂はユーザー承認事項)。
+1. **`indexedDB.open()` を 450ms 予算に入れるか**。ADR-012(4) の文言は 3 演算しか名指ししていないが、実 cold restore では必ず払う。T10 は両方の数値を出す。T11 が実測を見て決め、決めたら本文書 §3 B2 と ADR-012(4) の文言を同時に直す(ADR 改訂はユーザー承認事項)。→ **[T11] 前提が崩れたので §12-4 を参照**(44.6ms は open のコストではなく IndexedDB サブシステムの初回起動コストだった)。
 2. **B4 に paint を含められない**。同期的に測れないため。実機で「見えるまで」を測るなら `requestAnimationFrame` 2 回待ち等の別手法が要るが、それは R4(区間内での非同期禁止)に反するので**別メトリクス**として T14 で足すのが筋。
 3. **B3 の忠実度**。実 UI ストアが無い間、B3 は代替物である(§5 末尾)。UI 実装が入ったら #1 を取り直す必要がある。
 4. **save サイズ**。代表盤面の save は数 KB、ADR-012(2) の容量目標は ≤512KB。B2 の予算 450ms がどちらを想定した数字なのかは ADR に書かれていない。T10 は両方測る(§3 B2)。どちらを正とするかは T16 の判定時にユーザー判断。
 5. **タイマ分解能**。cross-origin isolated でない環境では `performance.now()` が丸められ、B3/B4 が測れない(Chromium で 0.1ms 刻み・実測確認済み。Firefox/WebKit は 1ms)。T12 が COOP/COEP を入れるまで #1 は Chromium 系のみで取り、B3/B4 は「予算より 3 桁小さい」以上の主張をしない。
 6. **B1 のウォームアップ差**。実測では compute の warmup が中央値の約 2.5 倍だった(16.2ms vs 6.55ms)。実機の実復帰は cold なので、実機計測では中央値だけでなくウォームアップ値も必ず併記すること。ADR-012(4) の 1100ms がどちらを想定した数字なのかは ADR に書かれていない(T16 の判定時にユーザー判断)。
+
+---
+
+## 12. T11 差し替えの実施記録(2026-07-26)
+
+§7 で先に決めた差し替えを実装した記録である。**境界の定義(§3 の開始点/終了点、§4 の予算外リスト、§2 の R1〜R8)は 1 つも変えていない。** 変わったのは「その境界の内側で何が走るか」であり、その結果として実測値が §1 の T10 値と比較不能になった(結果 JSON の `$schema` を `.../1` → `.../2` へ上げた理由)。
+
+### 12-1. 実装ファイル
+
+| ファイル | 役割 | 境界との関係 |
+|---|---|---|
+| `src/platform/persistence.ts` | IDB open/put/get・正準化 JSON 文字列・`integrityChecksum` | **B2 の本体**。`loadLatestSave()` が §3 B2 の 3 演算 + checksum を内包する |
+| `src/platform/catchUp.ts` | 二系統の切替点・経路選択・catch-up 本体・Worker メッセージ規約 | **B1 の中身**(Worker 非依存の純粋部。vitest 対象) |
+| `src/platform/worker.ts` | Worker エントリ(グローバルへの配線のみ) | B1 の実行場所 |
+| `src/platform/workerClient.ts` | メイン側ハンドル(`new Worker` / 往復 / 内訳の組立) | **B1 の計測点**(`computeWallMs`) |
+| `bench/perfMain.ts` | 上記 2 経路を差し込み。旧 `bench/perfIdb.ts` は削除 | §10 の表を更新済み |
+| `bench/perfSmoke.spec.ts` + `bench/playwright.perf.config.ts` | 実 Chromium 1 エンジンのスモーク | 計測値の判定はしない(§0) |
+
+### 12-2. B2(restore)で決めたこと
+
+- **`integrityChecksum` は B2 の内側**(§7 のとおり)。下位区間 `checksum` として出す。実装は engine の FNV-1a-32(`src/engine/rng/fnv1a32.ts`)の再利用で、独自ハッシュを増やしていない。ADR-012(2) が求めているのは破損検出であって改竄耐性ではないため 32bit で足りる(SubtleCrypto は非同期で §2 R4 に反するので不採用)。
+- **ADR-012 のセーブフォーマットとの差(要ユーザー判断)**: ADR は `integrityChecksum` を `entityStateById` と同階層のキーとして列挙しているが、**チェックサムは自分自身を含む文書を覆えない**。実装では 1 段のエンベロープ `{ saveFormatVersion, integrityChecksum, payload }` に分離し、`payload` が ADR のセーブフォーマットそのもの(正準化 JSON 文字列)である。検証は payload 文字列を 1 回舐めるだけで済み、復帰経路に `JSON.stringify` を増やさない。
+- **`payload` は文字列**のまま IDB に入れる(§3 B2 の「構造化複製可能なオブジェクトとして入れない」を維持)。エンベロープは薄いヘッダ 2 フィールドのみで、`JSON.parse` のコストは B2 に残る。
+- **下位区間が親を過不足なく分割する規則(§2 R7)を守るための追加**: `loadLatestSave` は自分の内側で取った**生の `performance.now()` 値**を返し、bench は関数呼び出し前後との残差を `restore.callOverhead` として明示計上する。これで `idbGet + checksum + parse + deserialize + callOverhead = restore` が恒等に成り立つ。
+- **未実装のまま(計画 §2.2)**: 2秒デバウンス / 15秒・25コマンド絶対フラッシュ / 書込前サイズ検査 / localStorage ミラー・巻戻し検知。差し込み位置は `persistence.ts` §5 にコメントで固定した。**`mirrorCheckMs` は機能が無いので結果 JSON に出さない**(常に null のフィールドを作らない)。
+
+### 12-3. B1(compute)で決めたこと
+
+- **判定式は §7-2 のとおり `computeWallMs ≤ 1100ms`**(メイン側で見た「postMessage 直前 → 完了メッセージ受信」)。Worker 内時間では判定しない。
+- **§7-1 の timeOrigin 規則を守る実装**: Worker が外へ出すのは**継続時間だけ**で、絶対時刻は 1 つも渡さない。メイン側で 1 点だけ引き算するのは同一コンテキストの `receivedAt − startedAt` である。
+- **B1 の下位区間(親を過不足なく分割する)**:
+  `requestPost`(メイン `postMessage` 呼び出し = 入力 state のシリアライズ込み)/ `workerContextBuild` / `workerAdvance` / `workerSnapshot` / `workerOther`(Worker 側ハンドラの残り)/ `transport`(**残差**として定義 = `computeWallMs − requestPost − workerHandlerMs`)。
+- **§7-2 に無かったコストの所属を追加(R8 に従いここで宣言する)**: **入力 state のメイン→ワーカ転送**。§7-2 は content 転送と完了スナップショット転送しか名指ししていなかったが、Worker 経路では復元済み state を必ずワーカへ渡す。これは復帰経路の内側なので **B1 に算入**し、`requestPost` と `transport` に現れる。
+- **完了スナップショットに `AdvanceContext` の一部を同梱する(同じく R8 の宣言)**: 隣接乗数 `multiplierByFacilityId` は UI の表示値でもあるため、Worker から返さないとメイン側が B3 で `createAdvanceContext` を呼び直すことになり、**§3 B3 の「含まないもの: engine の再計算」に反する**。よって完了メッセージに `{ worldSeedU32, multiplierByFacilityId }`(`TransferableAdvanceContext`)を同梱し、B3 は `restoreAdvanceContext()` で繋ぎ直すだけにした(施設 12 基 = Map 12 エントリ、`content` は積まない)。この転送コストは **B1 の内側**(`transport`)。
+- **`workerLifecycle: "preboot"`**(§7-4)。`workerBootMs` と `contentTransferMs` は予算外の補助メトリクスとして出し、onDemand 実装での換算値 `computeWallWithBootMs = computeWallMs + bootMs + contentTransferMs` を派生値として併記する。
+- **二系統の切替点(ADR-029(1))は `src/platform/catchUp.ts` の `CATCH_UP_UPDATE_MODES` ただ 1 箇所**。現状 `"mutable-draft"` は**未実装で必ず例外**になる(黙って構造共有へフォールバックしない)。理由は engine 側に「ドラフト表現 + in-place 更新 API」が要り、T11 は `src/engine/**` を変更しないタスクだから。したがって **B1 の実測値は構造共有系のもの = 上限側の見積り**であり、可変ドラフト導入後は下がる。この事実は結果 JSON の `intervals.computeFidelity`(`"worker-structural-sharing"`)に機械可読で載せた。
+- **経路選択のしきい値は ADR-026(3) の 600 tick**(`chooseCatchUpRoute`)。72h catch-up(4320 tick)は Worker 経路になる。
+- **メインスレッド同期 advance は消していない**。ADR-026(3) が「差分 ≤600 tick はメインスレッド」と定めている以上これは実アプリの別経路であり、`sensitivity.computeOnMainThread` として同条件で併走計測する。**両者の差が計測 #8(Worker 越し転送コスト)そのもの**になる。
+
+### 12-4. §11-(1)(`indexedDB.open()` を予算に入れるか)への回答
+
+T10 が §11-(1) に登録した **`idbOpenMs` = 44.6ms** は、**`open()` のコストではなく IndexedDB サブシステムのページ内初回起動コスト**だった。T11 は前回 DB の `deleteDatabase()` を計測前に置いた(毎回クリーンな状態から測るため)ので、初回接触コストがそちらへ移り、内訳が分離できた:
+
+| メトリクス | 実測(HeadlessChrome 151 / Ryzen 7 5700X) | 意味 |
+|---|---|---|
+| `idbFirstTouchMs` | **43.6 ms** | ページで最初の IndexedDB 呼び出し(ここでは `deleteDatabase`)。サブシステム起動 |
+| `idbOpenMs`(cold) | **1.8 ms** | 同一ページ内で DB を新規作成する `open`(`onupgradeneeded` 込み) |
+| `idbOpenWarmMs` | **0.2 ms** | 既存 DB を開き直す `open` |
+
+**結論(提案)**: `open()` を 450ms 予算へ入れる/入れないの議論は**入れても入れなくても結論が変わらない**(1.8ms は 450ms の 0.4%)。実際に効くのは「アプリ起動時に IndexedDB へ 1 回触るまでの ~44ms」であり、これは B2 の予算ではなく **アプリ起動シーケンス側の問題**である(復帰のたびに払うものではない)。よって:
+
+- **§3 B2 と ADR-012(4) の文言は変えない**(open は引き続き補助メトリクス)。
+- 代わりに **`idbFirstTouchMs` を必ず記録する**ことにした(§4 の補助メトリクスへ追加)。実機では桁が変わりうるので、T16 の判定時にはこの値を「2秒予算の外で先に払われる固定費」として別枠で見ること。
+- **これは T11 の提案であって決定ではない**。ADR 文言の改訂はユーザー承認事項なので、確定は T16 のユーザー判断に委ねる。
+
+### 12-5. デスクトップ実測(参考値・#1 の合否ではない)
+
+HeadlessChrome 151 / Ryzen 7 5700X / `crossOriginIsolated: false`(= **0.1ms 刻みへ丸め**)。ウォームアップ 1 + 計測 10 試行の中央値。
+
+| 区間 | T10(版1) | T11(版2) | warmup | 予算 | 内訳(T11 中央値) |
+|---|---|---|---|---|---|
+| B2 restore | 0.3 ms | **0.3 ms** | 1.1 ms | 450 | idbGet 0.2 / checksum 0.0 / parse 0.0 / deserialize 0.1 / callOverhead 0.0 |
+| B1 compute | 6.65 ms(メインスレッド) | **7.4 ms**(Worker 往復込み) | 16.8 ms | 1100 | workerAdvance 7.2 / workerContextBuild 0.1 / transport 0.1 / requestPost 0.0 / workerOther 0.0 |
+| B3 hydrate | 0 ms | **0 ms** | 0.2 ms | 250 | viewModel 0.0 / vnode 0.0 |
+| B4 mount | — | **1.8 ms** | 6.1 ms | 200 | render 0.7 / layout 1.2 |
+| 合計 | — | **9.7 ms** | — | 2000 | — |
+
+補助: `workerBootMs` **7.6 ms** / `contentTransferMs` **0.3 ms** / `idbFirstTouchMs` **43.6 ms** / `idbOpenMs`(cold)2.0 ms / `idbOpenWarmMs` 0.1 ms / `idbPutMs` 2.1 ms / `saveEncodeMs` 1.1 ms / `contentLoadMs` 2.0 ms。セーブ 6,160 B(entity 37・`integrityChecksum` 3493417291)。onDemand 実装での換算 `computeWallWithBootMs` = **15.3 ms**。
+
+**計測 #8(Worker 越し転送コスト)**: 同一実行内で測ったメインスレッド同期 advance = **6.5 ms** に対し、Worker 経路 = **7.4 ms**。**上乗せは約 0.9 ms(+14%)**。その内訳を見ると `requestPost + transport` = **0.1 ms 以下**であり、上乗せの大半は**構造化複製ではなく Worker 側の実行環境差**(`workerAdvance` 7.2 vs メインの `advance` 6.4)である。#8 の判断基準「転送込みで2秒予算内」に対してデスクトップでは 3 桁の余裕がある。**ただし §0 のとおりこれは実機の下限見積りであり、#8 も #1 も合格ではない**(structured clone のコストは実機のメモリ帯域/GC に強く依存する = 計画 §1 が #8 を区分②に置いた理由そのもの)。
+
+**save サイズ感度**(524,314 B の合成セーブ): restore 中央値 **3.75 ms**(idbGet 0.4 / checksum 0.5 / parse 0.95 / deserialize 1.25 / callOverhead 0.5)。**checksum は容量目標いっぱいでも 0.5 ms** であり、B2 へ入れたことによる予算圧迫は 0.2% 未満。
+
+**分解能の注意**: `requestPost` / `transport` / `checksum` / `parse` / B3 全体は 0.1ms 刻みの下に落ちており、「0」は「0.1ms 未満」以上のことを言っていない(§2「タイマ分解能」)。T12 が COOP/COEP を入れれば実数値が取れる。
+
+**B3 が 0 になった理由(T10 との差)**: T10 は B1 で作った `AdvanceContext` を B3 で使い回していた。T11 では B1 が Worker へ移ったため、Worker が計算済みの隣接乗数を完了メッセージで返し、B3 は `restoreAdvanceContext()` で繋ぎ直すだけにしてある(§12-3)。B3 に engine の再計算を入れないための措置であり、§3 B3 の定義どおり。
