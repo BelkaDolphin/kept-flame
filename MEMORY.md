@@ -126,10 +126,13 @@
 - [2026-07-27] **T12完了**(Sonnet・コミットed1c734、Fable5検分: gcTrace実行含め全pass): COOP/COEP追加でcrossOriginIsolated=true化(副産物: B3が初めて観測可能に=0.033ms)。**GCポーズ実測最大0.28〜0.83ms vs 予算50ms**。**ヒープ増分はheadless ChromiumがmeasureUserAgentSpecificMemoryを拒否(SecurityError・最小再現で確認)→unmeasuredとして正直に縮退・実機送り**。CDPトレースのUserBlocking/IsLoadingはbegin/end不対で偽308msポーズを生む→実証の上で除外。
 - [2026-07-27] **T14完了**(Sonnet・コミットff156d9、Fable5検分: 850件+device:smoke 3件+conformance:e2e 111件全pass): `dist/device/` 自己完結HTML化(perf 117KB/harness 122KB/tags 42KB)+`docs/measurements/device-testing-guide.md`。**核心=配信手段×計測項目マトリクス**: crossOriginIsolated には secure context+COOP/COEP 両方必要 → file:///LAN http では#2永久不可、可能経路は Android USBポートフォワード/Workers https/PC上vite previewの3つのみ。iOSはヒープ計測が全経路で不可。**発見: Chromiumはfile://起点のmodule Blob Workerを無言で失敗させる**(type:"module"除去で解決・最小再現で確認)。
 
+- [2026-07-27] **T16完了**(Opus分析・Fable5が文書化=`docs/measurements/summary.md`、実消費188k): 先行計測フェーズの唯一の合否表。**①6項目 = 合格4(#3 #4 #7 #9a)/予備合格1(#5)/部分達成1(#12=絶対時間未取得)。Fallback発動は全項目不要**。工数再計算: **15〜17週→16.5〜18週(+1.0〜1.6週)**、増加主因はGDD 13.1に行が無かった2作業(conformance被覆維持+0.5〜0.8週、設計文書改訂+0.3〜0.5週)。**最重要知見: 律速はカレンダー日数でなく週次利用上限**(記録7タスクの実消費が計画比3.58倍、1セッション5h枠≒2M実効)。**完了宣言: ①フェーズは可、フェーズ全体は不可**(②実機待ち+#2ヒープはデスクトップでも未取得+K校正カーネル未実装=D7判断待ち)。要ユーザー判断を**B1〜B9(実装ブロッカー)/D1〜D7(実機判定前)/N1〜N14(非ブロッキング)/W1〜W4(作業)**に総目録化。**B1(想起困難のtie-break位置=GDD 11.7)が最優先**(algoVersion直結、未裁定のまま住民系に進むとgolden 37本全再生成が発生)。
+
 ## 次のステップ
-1. ~~sc11裁定/T8/T9/T10/T15/#12/T11/T12/T14~~ **[2026-07-26〜27完了]** ①フェーズの実装タスクは全消化。
-2. **T16(計測総括=Opus)実行中**: 12項目現況表・合否判定・Fallback提案・工数再計算・要ユーザー判断総目録を `docs/measurements/summary.md` へ。
-3. T16後: ユーザーへ総括報告 → ②実機計測(device-testing-guide.md に従いユーザー実施: #1 #2 #8 #9b #7-iOS)→ 工数確定 → MVP実装ロードマップ化。
-4. ユーザー保留(T16が総目録化する): T5/T6の⑨件、T7の5件(spec§8)、GDD 6.3(c)恒久観測不能性(spec§8-9)、#12の2件(距離帯・ステータス名英字ID)、T10の4件、**T11エンベロープ=ADR-012文言改訂**、damp色の彩度、期限切れPAT削除。
-3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
-4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
+1. ~~先行計測①フェーズ(T0〜T16)~~ **[2026-07-27完了]** 総括は `docs/measurements/summary.md`(唯一の合否表)。
+2. **ユーザー裁定待ち: summary.md §6.1 の B1〜B9(実装ブロッカー9件)**。特に B1(想起困難 tie-break)が最優先。D1〜D7 は実機判定前まででよい。
+3. **②実機計測 = ユーザー実施**: `docs/measurements/device-testing-guide.md` + `dist/device/`(`npm run device:package` で再生成可)。実機入手後は #10(ITP 7日待ち)を最初に開始。
+4. #12 再測定(タイムスタンプ打刻+手順書だけ渡した別セッション)→ GDD 13.2 チェックポイントを数値で閉じる。
+5. B1〜B9 裁定後: MVP実装ロードマップ化(残り16.1〜17.5週の見積りをタスク分解、見積りは計画方式×3.5倍、予算単位はセッション≒2M)。
+6. 教訓の運用化: 各タスク完了時に実消費を必ずMEMORY.mdへ記録(今フェーズは16中7タスクしか記録なし=#11データが不完全になった)。
+- [2026-07-25] **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。
