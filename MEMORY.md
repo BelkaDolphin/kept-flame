@@ -108,9 +108,20 @@
 
 - [2026-07-26] **セッション最終区切り**: T7完全完了(前半8817426+後半431bef1)で先行計測のconformance土台が完成。次セッション冒頭の推奨: ①sc11-overcrowdのspec§4.4不整合をOpusかFable5で裁定(spec説明文の修正 or シナリオ配置の修正+ベクタ再生成。ベクタは`golden:write`で再生成可能なので軽い) ②T8(Playwright)とT9(sim校正)を並行投入。
 
+- [2026-07-26] **sc11裁定完了**(Fable5裁定・Opus反映・コミット532616a)。裁定過程で報告済み不整合(A)より深い問題を発見:
+  - **(A)** cell 0 は四隅かつ cell 7 の NW 近傍 → heat近傍は実際5件(spec§4.4の「4件・先頭2件=1,2・超過2」は誤り)。シナリオと既存36ベクタは不変、spec側を実態へ修正。
+  - **(B)重要**: adjacency.ts computeCellAdjacency で辞書順ソート結果`ordered[i]`は一度も読まれない。ボーナスは(selfTag,tag)ペアのみ依存 → **GDD 6.3(c)「辞書順先頭(threshold-1)件選抜」はタグ×タグ効果モデルでは恒久的に観測不能(挙動上無意味)**。engineはGDD忠実なので無変更。spec§8-9に要ユーザー判断として登録。パス改名 `adj-overcrowd-lexical-top2`→`adj-overcrowd-effective-limit`。
+  - **(C)** sc11では±60%クランプがマスクし本数制限のボーナス減も観測不能(0.8→0.6 vs 2.0→0.6で同一digest)。ペナclamp(−0.6)も最大−0.3で未発動。**(D)** patchのnoise|noiseは一度も発火せず。
+  - 対処: **sc16-overcrowd-fine追加**(heat|heat 0.1=clamp非発動域で本数制限可視化、penaltyPerExcess −0.15×超過6=−0.9→clamp −0.6実発動、smelter2基目でnoise|noise発火=multi-tag効果観測)。壊し方3通り全てでdigestが動くことを数値確認済み。ベクタ36→37本。既存36本のexpectedは1バイト不変を確認。
+- [2026-07-26] **T8完了**(Sonnet・コミット9f8ffc9、Fable5検分: conformance:e2e 111件を統率側でも実行し全pass確認): Playwright 3エンジンconformance。**計測#7 = 37ベクタ×Chromium/Firefox/WebKit 完全bit一致・合格**(実iOS Safari非代替の注記付き=計画書§7)。設計要点: digest計算は`tools/goldenVectorBuilder.ts`へ純粋部抽出(単一の真実、golden:check出力不変)、scenarios.tsはnode束縛(fileURLToPath)のため`tools/genHarnessData.ts`でbundle/初期stateを事前計算しgitignored manifest経由でブラウザへ(実load/deserialize経路を通す)、vite build+preview方式(dev server非依存)、ベクタ一覧はindex.jsonから動的列挙(sc16追加を無変更で自動追随した実績あり)。
+- [2026-07-26] **T9完了**(Sonnet・コミット79bacf8、Fable5検分: sim テスト20件pass確認): sim校正ハーネス。**計測結果(ローカルRyzen=Actions runnerより上振れ注意)**: **#3** measuredSecPerRun=0.0351s → 週次11000runsでshards=1・約6.4分(目標30分に大幅余裕)。**#4** 1分tick=0.3277s/run(ほぼ10倍) → shards=3・約20分でキャップ内。**#5** 想起困難1.875回/住民/週=**GDD目標1〜3回に適合**(パターン別0〜2.875、mastery0.20が過酷base_pを完全相殺するclamp挙動も検証)。決定論チェック(別プロセス2回でバイト同一)、粒度別評価×フルスケジューラ突合8seed全一致。bot2本のみ(計画§2.2遵守)。エージェント判断3点承認済み: shards除数=30分目標、RUN_TOTAL_TICKS固定で10倍化表現、#5はbot停止でパターン純度優先。
+- [2026-07-26] 3並行(裁定Opus+T8/T9 Sonnet)の実消費: 176k+356k+356k=約888k。package.json共有はEdit限定+直前再読の指示で衝突なし。全コミットpush済み(origin/main=9f8ffc9)。
+
 ## 次のステップ
-1. ~~**T7後半(生成器実装=Sonnet)**~~ **[2026-07-26完了]** 上記参照。**残宿題1件**: sc11-overcrowd の spec §4.4 説明文と実装の不整合裁定(上記参照・非ブロッキングだが T8 の3エンジン突合前に片付けるのが吉)。
-2. T8(Playwright 3エンジンconformance=Sonnet)。T5完了によりT9(sim校正=Sonnet)・T10(perf計測境界=Opus→Sonnet)も並行可。72h golden vector 生成時間の実測(sc01-steady-alpha 10ms・他は概ね1〜6ms、sc13-onemin-alphaのみ16ms=1分tick Fallbackで(C)判定数10倍のため)が計測#3のsec/run校正の一次データに使える。
-3. ユーザー保留(非ブロッキング): 上記⑨件の判断(うち⑤adjacency effect語彙はT7で実装済み)、damp色の彩度、期限切れPAT削除。T15(workflow)はT9後+§8-1承認。**T7で追加の要ユーザー判断5件**(詳細は `docs/design/golden-vector-spec.md` §8): ①schema省略可フィールド3種のADR注記 ②ローダー配置(`schema/engineContent.ts`)のADRリポ構成への追記 ③GDD 6.2 効果表の英字ID正本がGDDに無い ④GDD 6.2「学芸3連接」はタグペア行列で表現不能(成文化実装時にモデル見直し要) ⑤`adjacency.seedOffsetRange` に「揺らぎ無し」の表現が無い({0,0}を慣用表現とした)。
+1. ~~sc11裁定~~ / ~~T8~~ / ~~T9~~ **[2026-07-26完了]** 上記参照。①ローカル完結6項目のうち **#3/#4/#5(予備)/#7(3エンジン)が合格**。残りは #9a(ツール済み・計測実行のみ)と #12(エンティティ制作素工数)。
+2. **T10(bench/perf.html: 4サブ予算の計測境界設計=Opus→実装=Sonnet)** → T11(persistence+worker最小=Opus) → T12(GC/メモリ計測=Sonnet) → T14(実機パッケージング=Sonnet)のチェーン(計測#1/#2/#8)。
+3. **T15(calibrate.yml)**: T9完了+リポ作成済みで前提は揃った。ただし計画書§8-1系の承認とLLM非連携の最終確認をユーザーと(Actions実runnerでの#3/#4本計測)。
+4. **T16(計測実行+合否判定+工数再計算=Opus)**: T10〜T14後。#12(tech/facility/event各1本のオーサリング実測)はいつでも実施可。
+5. ユーザー保留(非ブロッキング): T5/T6の⑨件判断、T7の5件(spec§8)、**新規: GDD 6.3(c)辞書順選抜の恒久観測不能性(spec§8-9・(B)発見)**、damp色の彩度、期限切れPAT削除。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
