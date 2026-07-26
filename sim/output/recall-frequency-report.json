@@ -1,0 +1,89 @@
+{
+  "byPattern": [
+    {
+      "occurrenceCount": 7,
+      "occurrencesPerResidentPerWeek": 0.4375,
+      "patternId": "normal-morale-high",
+      "residentCount": 2,
+      "title": "通常業務/士気高(50)/非派遣"
+    },
+    {
+      "occurrenceCount": 25,
+      "occurrencesPerResidentPerWeek": 1.5625,
+      "patternId": "normal-morale-mid",
+      "residentCount": 2,
+      "title": "通常業務/士気中閾値未満(29)/非派遣"
+    },
+    {
+      "occurrenceCount": 43,
+      "occurrencesPerResidentPerWeek": 2.6875,
+      "patternId": "normal-morale-low",
+      "residentCount": 2,
+      "title": "通常業務/士気低閾値未満(14)/非派遣"
+    },
+    {
+      "occurrenceCount": 26,
+      "occurrencesPerResidentPerWeek": 1.625,
+      "patternId": "harsh-morale-high",
+      "residentCount": 2,
+      "title": "過酷業務/士気高(50)/非派遣"
+    },
+    {
+      "occurrenceCount": 34,
+      "occurrencesPerResidentPerWeek": 2.125,
+      "patternId": "harsh-morale-mid",
+      "residentCount": 2,
+      "title": "過酷業務/士気中閾値未満(29)/非派遣"
+    },
+    {
+      "occurrenceCount": 46,
+      "occurrencesPerResidentPerWeek": 2.875,
+      "patternId": "harsh-morale-low",
+      "residentCount": 2,
+      "title": "過酷業務/士気低閾値未満(14)/非派遣"
+    },
+    {
+      "occurrenceCount": 34,
+      "occurrencesPerResidentPerWeek": 2.125,
+      "patternId": "normal-dispatched",
+      "residentCount": 2,
+      "title": "通常業務/士気高(50)/派遣中"
+    },
+    {
+      "occurrenceCount": 40,
+      "occurrencesPerResidentPerWeek": 2.5,
+      "patternId": "harsh-dispatched",
+      "residentCount": 2,
+      "title": "過酷業務/士気高(50)/派遣中"
+    },
+    {
+      "occurrenceCount": 0,
+      "occurrencesPerResidentPerWeek": 0,
+      "patternId": "harsh-high-mastery",
+      "residentCount": 2,
+      "title": "過酷業務/士気高(50)/定着度上限(0.20)/非派遣"
+    },
+    {
+      "occurrenceCount": 45,
+      "occurrencesPerResidentPerWeek": 2.8125,
+      "patternId": "worst-case",
+      "residentCount": 2,
+      "title": "過酷業務/士気低閾値未満(14)/派遣中(最悪ケース)"
+    }
+  ],
+  "overallOccurrencesPerResidentPerWeek": 1.875,
+  "seeds": [
+    "recall-freq-0",
+    "recall-freq-1",
+    "recall-freq-2",
+    "recall-freq-3",
+    "recall-freq-4",
+    "recall-freq-5",
+    "recall-freq-6",
+    "recall-freq-7"
+  ],
+  "totalOccurrences": 300,
+  "totalResidentWeeks": 160,
+  "weekTicks": 10080,
+  "withinExpectedRange": true
+}
