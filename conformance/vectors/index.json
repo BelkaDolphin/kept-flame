@@ -62,6 +62,7 @@
     { "file": "sc13-onemin-alpha.json", "vectorId": "sc13-onemin-alpha" },
     { "file": "sc14-offset-zero-alpha.json", "vectorId": "sc14-offset-zero-alpha" },
     { "file": "sc15-tie-alpha.json", "vectorId": "sc15-tie-alpha" },
-    { "file": "sc15-tie-split-alpha.json", "vectorId": "sc15-tie-split-alpha" }
+    { "file": "sc15-tie-split-alpha.json", "vectorId": "sc15-tie-split-alpha" },
+    { "file": "sc16-overcrowd-fine-alpha.json", "vectorId": "sc16-overcrowd-fine-alpha" }
   ]
 }

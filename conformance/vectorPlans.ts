@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // golden vector 用ベクタ計画(T7 後半) — `docs/design/golden-vector-spec.md` §5/§6
 //
-// 36 本の計画(vectorId / scenarioId / worldSeed / plan / 申告する paths)を
+// 37 本の計画(vectorId / scenarioId / worldSeed / plan / 申告する paths)を
 // spec §6 の表そのまま列挙する。`splitTicks` の解決(数値配列への展開)は
 // `tools/genGoldenVectors.ts` が spec §7.2 の規則に従って行う
 // (`"first-recall-recovery"` / `"every-coarse-step"` の 2 つの記号値はここでは
@@ -160,11 +160,12 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
   plan("sc10-morale-edge-alpha", "sc10-morale-edge", SEEDS.alpha, 4320, ["c-morale-thresholds"]),
 
   // --- sc11-overcrowd ------------------------------------------------------------------
+  // 過密の「本数制限そのもの」「ペナ側クランプの発動」「複数タグ施設の同時参加」は
+  // sc11 では観測できない(spec §4.4 の [2026-07-26 裁定])ので sc16 へ移した。
+  // sc11 に残るのは超過ペナ(3 × -0.10)・ボーナス側 ±60% クランプ・盤端・target 解決。
   plan("sc11-overcrowd-alpha", "sc11-overcrowd", SEEDS.alpha, 1440, [
-    "adj-overcrowd-lexical-top2",
-    "adj-overcrowd-multi-tag",
+    "adj-overcrowd-effective-limit",
     "adj-bonus-clamp",
-    "adj-penalty-clamp",
     "adj-neighbor-edge",
     "adj-target-resolution",
   ]),
@@ -198,4 +199,11 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     ["split-at-recovery-tick", "split-at-completion-tick"],
     { splitTicks: [1000] },
   ),
+
+  // --- sc16-overcrowd-fine ---------------------------------------------------------------
+  plan("sc16-overcrowd-fine-alpha", "sc16-overcrowd-fine", SEEDS.alpha, 1440, [
+    "adj-overcrowd-effective-limit",
+    "adj-overcrowd-multi-tag",
+    "adj-penalty-clamp",
+  ]),
 ];

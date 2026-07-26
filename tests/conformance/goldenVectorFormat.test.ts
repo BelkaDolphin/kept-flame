@@ -334,7 +334,8 @@ describe("conformance/coverage.json の形式", () => {
       "rng-worldseed-variation",
       "clock-clamp-72h",
       "clock-fallback-one-minute",
-      "adj-overcrowd-lexical-top2",
+      // 2026-07-26 裁定で adj-overcrowd-lexical-top2 から改名(spec §4.4 / §8-9)。
+      "adj-overcrowd-effective-limit",
       "fp-mulfix-bigint-fallback",
     ];
     const ids = new Set(registry.paths.map((entry) => entry.id));

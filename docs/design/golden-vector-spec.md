@@ -2,6 +2,8 @@
 
 作成日: 2026-07-25 / 担当: Opus / 状態: **後半(生成器実装・Sonnet)への指示書を含む**
 
+改訂: 2026-07-26(Fable5 裁定) — sc11 の過密判定に関する §4.3 / §4.4 の記述が実態と食い違っていたため全面改訂し(近傍 4 件 → 5 件・超過 2 件 → 3 件)、「辞書順選抜が観測できる配置」という主張を撤回した。併せて観測が成立していなかった 2 経路を新シナリオ sc16(§4.5)へ移し、経路 ID `adj-overcrowd-lexical-top2` を `adj-overcrowd-effective-limit` へ改名した。詳細は §4.4 / §4.5 / §8-9。**既存 36 ベクタの `expected` は不変**(§6 改訂履歴)。
+
 根拠文書: `docs/技術設計書_継ぐ火_ADR.md`(ADR-016 / ADR-017 / ADR-006 / ADR-007 / ADR-008 / ADR-012 / ADR-014 / ADR-018 / ADR-023 / ADR-024 / ADR-026 / ADR-029 / 残余リスク #9) / `docs/企画書_継ぐ火_GDD.md` §6.2〜6.4 / §11.1〜11.9 / `docs/先行計測計画_ドラフト.md` §3.3 / §4.2 T7 / 計測項目 #7 / `MEMORY.md`(T5 引き継ぎ経路一覧)
 
 実装物の対応:
@@ -77,7 +79,7 @@ ADR-016(1) は `algoVersion` bump の必要十分条件を「**golden vector が
 | `tie-` | 2 | 同一 tick 複数イベントの全順序(段の順 / 同段の entityId 順) |
 | `split-` | 5 | 分割不変性(回復 tick・完了 tick・ステップ境界・グリッド外・1 ステップ刻み) |
 | `rng-` | 7 | worldSeed の変化・空文字列・非 ASCII・サロゲート・rngState 空/非空の往復・順序非依存 |
-| `adj-` | 8 | シード揺らぎ・恒等・過密の辞書順先頭 2 件・複数タグ・両クランプ・target 3 形・盤端 |
+| `adj-` | 8 | シード揺らぎ・恒等・過密の有効件数制限 + 超過ペナ・複数タグ・両クランプ・target 3 形・盤端 |
 | `fp-` | 5 | mulFix の BigInt フォールバック・mulFixProven 上界・負の floor・10 進厳密変換・Math.imul ラップ |
 | `clock-` | 3 | 72h クランプ境界・1 分 tick Fallback・経過 ms の floor |
 | `load-` | 5 | ローダーの reject(未知 effect / 未実装 effect / 未解決 target / タグ不整合 / 縮約必須フィールド欠落) |
@@ -217,7 +219,7 @@ patch 機構が**必須**な理由(設計上の逃げではない):
 - 施設定義 ID / tech ID は content 由来(`hearth` / `forge` / `workbench` / `techFireStarting` / `techPottery` / `techBasketWeaving`)。
 - 資源 entity の `resourceId` は content の `facility.output.resourceId`(`firewood` / `iron`)と一致させる。一致しないと `applyProduction` が例外を投げる(産出を静かに捨てない設計)。
 
-### 4.3 シナリオ一覧(15 件)
+### 4.3 シナリオ一覧(16 件)
 
 | id | content patch | 初期 state(要点) | 主に踏む経路 |
 | --- | --- | --- | --- |
@@ -231,17 +233,88 @@ patch 機構が**必須**な理由(設計上の逃げではない):
 | `sc08-mastery` | なし | sc06 の盤面 + `residentAda.mastery = 0.5`(上限 0.2 で打ち止め。打ち止めが無ければ p が 0 になる差で観測可能) | `c-mastery-cap` |
 | `sc09-memkeeper` | `trait` 配列へ `traitMemoryKeeper` を追加 + `balance.recallRiskParams.memoryKeeperTraitId = "traitMemoryKeeper"` | sc06 の盤面 + `residentAda.traitIds = ["traitMemoryKeeper"]`(p 0.15 vs 他 0.30) | `c-memory-keeper` |
 | `sc10-morale-edge` | なし | forge 就労の住民 4 名を morale = **15 / 14.999999 / 30 / 29.999999** に置く(閾値ちょうどは加算されない側) | `c-morale-thresholds` |
-| `sc11-overcrowd` | `adjacency.tagMatrix["heat|heat"] = { effect:"forgeYield", target:"any", valueFP:0.4 }`、`adjacency.tagMatrix["noise|noise"] = { effect:"efficiency", target:"any", valueFP:0.1 }`、`facility` に `smelter`(tags `["heat","noise"]`, harshWork true, output resource `iron`)と `cistern`(tags `["damp"]`, harshWork false, output resource `firewood`)を追加 | 中心 cell 7 に `facilitySmelterA`(smelter, Lv1, 就労 1 名)、その 8 近傍のうち cell **1 / 2 / 6 / 8** に hearth を 4 基(= 同一タグ 4 件で threshold 3 超過 → 辞書順先頭 2 件のみ有効・2 件超過ぶんペナ)、cell 13 に `facilityCisternA`(cistern)、さらに四隅 cell **0 / 5 / 42 / 47** に hearth を配置(盤端の回り込み検査)。資源 2 件・住民は各施設に 1 名 | `adj-overcrowd-lexical-top2` `adj-overcrowd-multi-tag` `adj-bonus-clamp` `adj-penalty-clamp` `adj-neighbor-edge` `adj-target-resolution` |
+| `sc11-overcrowd` | `adjacency.tagMatrix["heat|heat"] = { effect:"forgeYield", target:"any", valueFP:0.4 }`、`adjacency.tagMatrix["noise|noise"] = { effect:"efficiency", target:"any", valueFP:0.1 }`、`facility` に `smelter`(tags `["heat","noise"]`, harshWork true, output resource `iron`)と `cistern`(tags `["damp"]`, harshWork false, output resource `firewood`)を追加 | 中心 cell 7 に `facilitySmelterA`(smelter, Lv1, 就労 1 名)、その 8 近傍のうち cell **1 / 2 / 6 / 8** に hearth を 4 基、cell 13 に `facilityCisternA`(cistern)、さらに四隅 cell **0 / 5 / 42 / 47** に hearth を配置(盤端の回り込み検査)。**cell 0 は四隅であると同時に cell 7 の NW 近傍**なので、中心から見た heat 近傍は 5 件(0/1/2/6/8)= 有効 2 件 + 超過 3 件になる(§4.4)。資源 2 件・住民は各施設に 1 名 | `adj-overcrowd-effective-limit`(超過ペナ側のみ) `adj-bonus-clamp` `adj-neighbor-edge` `adj-target-resolution` |
 | `sc12-bigstock` | `facility.hearth.lvCurve = [6000000, 6900000, 7935000, 9125250, 10494037.5]` | 施設 `facilityHearthA`(hearth, cell 0, Lv1, 就労 1 名)、資源 `resourceFirewood`(stock 0)、住民 1 名 | `fp-mulfix-bigint-fallback` |
 | `sc13-onemin` | `balance.coarseTickMinutes = 1` | sc06 と同じ盤面 | `clock-fallback-one-minute` `c-step-grid` `c-trial-count` |
 | `sc14-offset-zero` | `adjacency.seedOffsetRange = { min: 0, max: 0 }` | sc01 と同じ盤面 | `adj-seed-offset-identity` |
 | `sc15-tie` | `tech.techFireStarting.researchCost = 80000` | 施設 `facilityDeskA`(workbench, cell 20, Lv1, 就労 `residentCal`)、research `researchFire`(techFireStarting, progress 0)/ `researchPottery`、住民 `residentAda` `residentBea`(ともに `recallImpairedUntilTick = 1000`・無配属)+ `residentCal`。**tick 1000 に「回復 2 件 + 粗粒度ステップ + 研究完了」が同時に来る**(80000/80 = 1000、1000 % 10 == 0) | `tie-multi-event-same-tick` `tie-same-stage-entity-order` `split-at-recovery-tick` `split-at-completion-tick` |
+| `sc16-overcrowd-fine`<br>**[2026-07-26 追加]** | sc11 と同じ facility 追加(`smelter` / `cistern`)+ `adjacency.tagMatrix["heat|heat"] = { effect:"forgeYield", target:"any", valueFP:0.1 }`、`adjacency.tagMatrix["noise|noise"] = { effect:"efficiency", target:"any", valueFP:0.1 }`、`adjacency.overcrowd.penaltyPerExcessFP = -0.15` | 中心 cell 7 に `facilitySmelterA`(smelter, Lv1, 就労 1 名)。その 8 近傍 **0 / 1 / 2 / 6 / 8 / 12 / 13 / 14 を全て埋める**。うち cell 8 は 2 基目の smelter(`facilitySmelterB`・heat+noise)、残り 7 セルは hearth。資源 2 件(iron / firewood)・住民は各施設に 1 名。research entity なし | `adj-overcrowd-effective-limit`(本数制限側) `adj-overcrowd-multi-tag` `adj-penalty-clamp` |
 
 **sc15 は本設計で最も価値の高いシナリオ**である。T5 で実際にバグが出た 2 つの区切り位置(回復 tick / 完了 tick)が同一 tick に重なり、かつ同段 2 件の entityId 順が同時に効く。ここを 1 本のベクタで固定すると、分割不変性の退行はほぼ必ずここで落ちる。
 
-### 4.4 sc11 の過密判定の詳細(実装が迷わないように)
+### 4.4 sc11 の過密判定の詳細 **[2026-07-26 裁定により全面改訂]**
 
-`cellIdOf` は `c00`〜`c47` の 2 桁ゼロ埋めなので**辞書順 = セル番号昇順**。中心 cell 7 の 8 近傍は方向順 N, NE, E, SE, S, SW, W, NW で `[1, 2, 8, 14, 13, 12, 6, 0]`。`heat` を持つ近傍を cell 1 / 2 / 6 / 8 に置くと、方向順の列挙は `[1, 2, 8, 6]` → セル ID 辞書順へ再ソートして `[1, 2, 6, 8]` → 先頭 `threshold - 1 = 2` 件(cell 1, 2)のみボーナス有効、cell 6 / 8 は無効化 + 超過 2 件ぶんのペナルティ。**この「方向順で列挙してから辞書順へ再ソートする」二段が観測できる配置になっている**(方向順のまま先頭 2 件を採ると cell 1, 2 と一致してしまうため、意図的に方向順と辞書順が食い違う cell 6 / 8 を含めてある)。
+**改訂前の記述は誤りだった。** 旧版は「heat 近傍 4 件 → 先頭 2 件(cell 1, 2)有効・超過 2 件」と書き、さらに「方向順で列挙してから辞書順へ再ソートする二段が観測できる配置になっている」と主張していた。前者は近傍の数え落とし、後者は原理的に成立しない主張である。以下が実態(engine 実挙動と突合済み)。
+
+#### (1) 近傍は 4 件ではなく 5 件(発見 A)
+
+`cellIdOf` は `c00`〜`c47` の 2 桁ゼロ埋めなので**辞書順 = セル番号昇順**。中心 cell 7 の 8 近傍は方向順 N, NE, E, SE, S, SW, W, NW で `[1, 2, 8, 14, 13, 12, 6, 0]` であり、**この列挙自体に cell 0 が含まれている**。sc11 は「盤端の回り込み検査」として四隅 0 / 5 / 42 / 47 にも hearth を置くので、cell 0 は四隅であると同時に中心 cell 7 の NW 近傍でもある。したがって:
+
+- heat バケツ = 方向順 `[1, 2, 8, 6, 0]` → セル ID 辞書順へ再ソート `[0, 1, 2, 6, 8]` の **5 件**
+- 有効件数 = `threshold - 1` = **2 件**、超過 = **3 件**(旧版の「超過 2 件」は誤り)
+- 過密ペナルティ = 3 × −0.10 = **−0.30**
+
+`seedAlpha` での実測(§4.3 の patch 適用後・シード揺らぎ焼き込み後の係数は `heat|heat` = +0.461694, `damp|heat` = −0.080968, `noise|noise` = +0.080558):
+
+| 施設 | cell | bonus(クランプ後) | ペナルティ | 乗数 | 超過数 |
+| --- | --- | --- | --- | --- | --- |
+| `facilitySmelterA` | 7 | +0.600000(生値 2×0.461694 − 0.080968 = **0.842420** → ±60% クランプ) | −0.300000 | 1.300000 | 3 |
+| `facilityHeat1` | 1 | +0.600000 | −0.300000 | 1.300000 | 3 |
+| `facilityHeat2` / `facilityHeat6` / `facilityHeat8` / `facilityCorner0` | 2 / 6 / 8 / 0 | +0.600000 | −0.100000 | 1.500000 | 1 |
+| `facilityCisternA` | 13 | 0 | −0.100000 | 0.900000 | 1 |
+| `facilityCorner5` / `facilityCorner42` / `facilityCorner47` | 5 / 42 / 47 | 0 | 0 | 1.000000 | 0 |
+
+#### (2) 「辞書順で選ばれた個体」は観測不能(発見 B・主張の撤回)
+
+`src/engine/adjacency.ts` の `computeCellAdjacency`(§3 の 2 重ループ)は、辞書順へ再ソートした結果 `ordered` の**要素そのものを一度も読まない**。ボーナス項は `matrix.pairEffects.get(tagPairKey(selfTag, tag))` だけで決まり、`i` は「何件ぶん加算するか」のカウンタとしてしか使われない:
+
+```ts
+for (let i = 0; i < effectiveCount; i++) {
+  for (const selfTag of subject.tags) {
+    const effect = matrix.pairEffects.get(tagPairKey(selfTag, tag));   // ordered[i] は使わない
+```
+
+これは engine のバグではなく **GDD 6.2 の効果モデル(タグ × タグの対称行列・施設ペア非依存)に忠実な実装**である。効果が近傍の個体に依存しない以上、「先頭 (threshold-1) 件として**どの個体が**選ばれたか」は乗数に影響しようがなく、**いかなる配置・いかなる golden vector でも観測できない**。旧版が主張した「方向順と辞書順が食い違う cell 6 / 8 を含めてあるので二段ソートが観測できる」は成立しない(方向順のまま先頭 2 件を採っても、辞書順で採っても、加算される値は同じ 2 項なので digest は一致する)。よって:
+
+- この主張は**撤回**する。engine は変更しない(GDD 忠実実装であり正しい)。
+- 経路 ID `adj-overcrowd-lexical-top2` は `adj-overcrowd-effective-limit` へ改名し、title を「有効ボーナスが (threshold-1) 件分に制限され、超過数 × ペナが積まれる」= **実際に観測できる 2 つ**へ書き直した(`conformance/coverage.json`)。
+- 「効果が施設ペア依存に拡張されない限り、GDD 6.3(c) の辞書順選抜規則は permanently vacuous(挙動上無意味)」という判断は §8-9 に要ユーザー判断事項として記録した。
+
+#### (3) sc11 では本数制限もペナ側クランプも観測できない(発見 C / D)
+
+上表のとおり sc11 の中心 smelter は、有効 2 件でも生値 0.842420、仮に本数制限が壊れて 5 件全部が効いても 5×0.461694 − 0.080968 = 2.227502 で、**どちらも ±60% クランプに吸われて bonus = +0.600000 になる**。つまり sc11 の digest は「有効件数」を区別できない。sc11 が実際に固定しているのは:
+
+- **超過数 × ペナルティ**(3 × −0.10 = −0.30。数え落とせば digest が動く)
+- **ボーナス側の ±60% クランプ**(`adj-bonus-clamp`。生値 0.842420 > 0.6 なので発動している)
+- 盤端の回り込み無し(`adj-neighbor-edge`)と target 3 形の解決(`adj-target-resolution`)
+
+一方で以下は sc11 では観測できないので、経路の申告から外して sc16 へ移した:
+
+- `adj-penalty-clamp` — ペナルティは最大 −0.30 で `clampFP` = 0.6 に届かない。**クランプが壊れていても sc11 は pass する**(発見 C)。
+- `adj-overcrowd-multi-tag` — `noise` タグを持つ施設は中心 smelter だけであり、「noise を持つ**近傍**」がどの施設にも存在しない。よって `noise|noise` は一度も発火せず、複数タグ施設はバケツへ参加するだけで効果も超過数も動かさない(発見 D)。
+
+### 4.5 sc16 の過密判定の詳細 **[2026-07-26 追加]**
+
+sc16 は §4.4(3) で観測不能と判明した 3 経路を**実際に観測できる**ようにするためのシナリオである。中心 cell 7 の 8 近傍 `[0, 1, 2, 6, 8, 12, 13, 14]` を全て埋め、cell 8 だけを 2 基目の smelter(heat + noise)にする。
+
+`seedAlpha` での実測(patch 後・シード揺らぎ焼き込み後の係数は `heat|heat` = +0.115423, `noise|noise` = +0.080558, `damp|heat` = −0.080968(sc16 の盤面に damp 施設は無いので不発)):
+
+| 施設 | cell | bonus | ペナルティ | 乗数 | 超過数 |
+| --- | --- | --- | --- | --- | --- |
+| `facilitySmelterA`(中心) | 7 | **+0.311404** | **−0.600000**(生値 6 × −0.15 = −0.900000 → clampFP で切られる) | **0.711404** | 6 |
+| `facilitySmelterB` | 8 | +0.311404 | −0.450000 | 0.861404 | 3 |
+| `facilityHearth1` / `6` / `13` | 1 / 6 / 13 | +0.230846 | −0.450000 | 0.780846 | 3 |
+| `facilityHearth0` / `2` / `12` / `14` | 0 / 2 / 12 / 14 | +0.230846 | −0.150000 | 1.080846 | 1 |
+
+中心 smelter の bonus の内訳: heat バケツ **8 件中 有効 2 件** × 0.115423 = 0.230846、noise バケツ **1 件**(cell 8 の smelter)× 0.080558 = 0.080558、計 **0.311404**。
+
+この配置で 3 つが digest として立つ:
+
+1. **本数制限(`adj-overcrowd-effective-limit`)** — 有効 2 件なら bonus 0.311404(クランプ**未発動**)。本数制限が壊れて 8 件全部が効くと 8 × 0.115423 + 0.080558 = 1.003942 → ±60% クランプで 0.600000 となり、乗数は 0.711404 ではなく 1.000000 になる。**係数を 0.4 ではなく 0.1 にしたのはこのため**(sc11 は両側ともクランプに吸われて区別できなかった)。
+2. **ペナ側クランプ(`adj-penalty-clamp`)** — 超過 6 件 × −0.15 = −0.900000 が `clampFP` = 0.6 で −0.600000 へ切られる。クランプが無ければ乗数は 0.411404 になるので、**クランプの発動そのものが digest に出る**。
+3. **複数タグの同時参加(`adj-overcrowd-multi-tag`)** — cell 8 の smelter は中心から見て heat バケツ(過密カウント 8 件目)と noise バケツ(`noise|noise` +0.080558)の**両方**に参加する。タグごとの独立集計が壊れて 1 タグにしか数えないと bonus が 0.230846 へ落ちる。
+
+ベクタは `sc16-overcrowd-fine-alpha`(seed alpha・0→1440・分割なし)1 本。research entity を置いていないのでベルヌーイ試行は 0 件、`rngState` も空のままであり、**観測される差分は隣接乗数だけ**になる(実測 `probe.resourceStockSumRaw` = 1,186,377,120,000 = 各施設 100/tick × 乗数 × 1440 tick の総和、`stateDigest` = `20b9530e8db78e6a46ba749c27077b9e`)。
 
 ---
 
@@ -258,11 +331,11 @@ worldSeed は文字列で、`fnv1a32(worldSeed)` で uint32 になる(`worldSeed
 | `kanji` | `種火` | 非 ASCII BMP。`fnv1a32` は `charCodeAt`(UTF-16 コードユニット)単位であり UTF-8 バイト単位の標準 FNV とは値が異なる(fnv1a32.ts 冒頭)。**ブラウザ 3 エンジンで文字列走査が一致することの検出器**(ADR-017 / 計測 #7) |
 | `emoji` | `🔥火` | サロゲートペア(コードユニット 2 個)+ BMP。canonicalize.ts §2 が明示したサロゲート扱いを実 run 経路でも固定する |
 
-seed とシナリオの全直積は張らない(15 × 6 = 90 は保守が重い)。`rng-` 系の経路は「worldSeed を実際に消費するシナリオ」= `sc01-steady`(adjacency 揺らぎ)と `sc06-recall`((C) 抽選)に限って seed を振る。
+seed とシナリオの全直積は張らない(16 × 6 = 96 は保守が重い)。`rng-` 系の経路は「worldSeed を実際に消費するシナリオ」= `sc01-steady`(adjacency 揺らぎ)と `sc06-recall`((C) 抽選)に限って seed を振る。
 
 ---
 
-## 6. ベクタ一覧(36 本)
+## 6. ベクタ一覧(37 本)
 
 `plan` 列: `toTick` / `elapsedMonotonicMs` / `splitTicks` の指定。`splitTicks` の `<推定>` は生成器が §7.2 の規則で求めて JSON へ焼く。
 
@@ -297,15 +370,18 @@ seed とシナリオの全直積は張らない(15 × 6 = 90 は保守が重い)
 | 27 | `sc08-mastery-alpha` | sc08 | alpha | 0→4320 | `c-mastery-cap` |
 | 28 | `sc09-memkeeper-alpha` | sc09 | alpha | 0→4320 | `c-memory-keeper` |
 | 29 | `sc10-morale-edge-alpha` | sc10 | alpha | 0→4320 | `c-morale-thresholds` |
-| 30 | `sc11-overcrowd-alpha` | sc11 | alpha | 0→1440 | `adj-overcrowd-lexical-top2` `adj-overcrowd-multi-tag` `adj-bonus-clamp` `adj-penalty-clamp` `adj-neighbor-edge` `adj-target-resolution` |
+| 30 | `sc11-overcrowd-alpha` | sc11 | alpha | 0→1440 | `adj-overcrowd-effective-limit` `adj-bonus-clamp` `adj-neighbor-edge` `adj-target-resolution` |
 | 31 | `sc11-overcrowd-beta` | sc11 | beta | 0→1440 | `rng-worldseed-variation` |
 | 32 | `sc12-bigstock-alpha` | sc12 | alpha | 0→100 | `fp-mulfix-bigint-fallback` |
 | 33 | `sc13-onemin-alpha` | sc13 | alpha | 0→4320 | `clock-fallback-one-minute` `c-step-grid` `c-trial-count` |
 | 34 | `sc14-offset-zero-alpha` | sc14 | alpha | 0→4320 | `adj-seed-offset-identity` |
 | 35 | `sc15-tie-alpha` | sc15 | alpha | 0→2000 | `tie-multi-event-same-tick` `tie-same-stage-entity-order` |
 | 36 | `sc15-tie-split-alpha` | sc15 | alpha | 0→2000, splits [1000] | `split-at-recovery-tick` `split-at-completion-tick` |
+| 37 | `sc16-overcrowd-fine-alpha`<br>**[2026-07-26 追加]** | sc16 | alpha | 0→1440 | `adj-overcrowd-effective-limit` `adj-overcrowd-multi-tag` `adj-penalty-clamp` |
 
-base content ベクタ(`index.json` の `baseContentVectorIds`)= sc01 / sc02 / sc05 / sc06 / sc07 / sc08 / sc10 由来の全ベクタ。patch 付き(sc03 / sc04 / sc09 / sc11 / sc12 / sc13 / sc14 / sc15)は engine 境界被覆用。
+base content ベクタ(`index.json` の `baseContentVectorIds`)= sc01 / sc02 / sc05 / sc06 / sc07 / sc08 / sc10 由来の全ベクタ。patch 付き(sc03 / sc04 / sc09 / sc11 / sc12 / sc13 / sc14 / sc15 / sc16)は engine 境界被覆用。
+
+**改訂履歴**: 2026-07-25 に 36 本で確定。2026-07-26 の裁定(§4.4)で #30 の申告 paths から `adj-overcrowd-multi-tag` / `adj-penalty-clamp` を外し(sc11 では観測不能だったため)、`adj-overcrowd-lexical-top2` を `adj-overcrowd-effective-limit` へ改名、#37 を追加して 37 本にした。**#1〜#36 の `expected`(digest / counters / probe)は 1 バイトも変わっていない**(変わるのは #30 の `paths` 配列と `index.json` / `coverage-matrix.json` だけ)。
 
 ---
 
@@ -315,8 +391,8 @@ base content ベクタ(`index.json` の `baseContentVectorIds`)= sc01 / sc02 / s
 
 | ファイル | 内容 |
 | --- | --- |
-| `conformance/scenarios.ts` | §4.3 の 15 シナリオ。`SCENARIOS: readonly Scenario[]` を export。`Scenario = { id, contentPatch: ((raw: RawContentBundle) => RawContentBundle) \| null, buildState: (worldSeed: string) => GameState }`。content は `validateContentBundle` → `loadEngineContent`(`schema/engineContent.ts`)の正規経路で読む。**patch は raw JSON 段で当てる**(検証を迂回しない) |
-| `conformance/vectorPlans.ts` | §6 の 36 プラン。`VECTOR_PLANS: readonly VectorPlan[]`。`VectorPlan = { vectorId, scenarioId, worldSeed, fromTick, toTick \| null, elapsedMonotonicMs \| null, splitTicks \| "first-recall-recovery" \| "every-coarse-step", paths }` |
+| `conformance/scenarios.ts` | §4.3 の 16 シナリオ。`SCENARIOS: readonly Scenario[]` を export。`Scenario = { id, contentPatch: ((raw: RawContentBundle) => RawContentBundle) \| null, buildState: (worldSeed: string) => GameState }`。content は `validateContentBundle` → `loadEngineContent`(`schema/engineContent.ts`)の正規経路で読む。**patch は raw JSON 段で当てる**(検証を迂回しない) |
+| `conformance/vectorPlans.ts` | §6 の 37 プラン。`VECTOR_PLANS: readonly VectorPlan[]`。`VectorPlan = { vectorId, scenarioId, worldSeed, fromTick, toTick \| null, elapsedMonotonicMs \| null, splitTicks \| "first-recall-recovery" \| "every-coarse-step", paths }` |
 | `tools/genGoldenVectors.ts` | 生成器 + 検証器。`--check`(既存ベクタと突合・差分を stderr へ)と `--write`(再生成)の 2 モード。`conformance/vectors/*.json` / `index.json` / `coverage-matrix.json` を出力 |
 | `tests/conformance/goldenVectors.test.ts` | 全ベクタを再実行して `compareObservations` が空配列であること / 分割不変性 / `checkCoverage` が空配列であること |
 | `package.json` | `"golden:check": "node --experimental-strip-types tools/genGoldenVectors.ts --check"` と `"golden:write": "... --write"` を追加(実行方法は着手時に Node 24 で確認すること。`tsx` 等の**新規依存は入れない**) |
@@ -342,7 +418,7 @@ base content ベクタ(`index.json` の `baseContentVectorIds`)= sc01 / sc02 / s
 - ベクタ JSON に「現在時刻」「実行環境」「絶対パス」を書かない。
 - `paths` の申告は**実際に踏む経路だけ**にする。踏んでいない経路を申告すると `checkCoverage` が通ってしまい被覆の穴が隠れる(= 残余リスク #9 が復活する)。迷ったら申告せず、代わりにレジストリの `note` へ「未被覆」と書いて報告する。
 - 経路 ID を増やしたくなったら `conformance/coverage.json` へ追記する(勝手に別の場所へ経路の概念を作らない)。
-- ベクタ数を増やすのは自由だが、**§6 の 36 本は減らさない**。減らす提案は理由付きで報告する。
+- ベクタ数を増やすのは自由だが、**§6 の 37 本は減らさない**。減らす提案は理由付きで報告する。
 - `content/*.json` を書き換えない(patch はコード側で当てる)。
 
 ### 7.4 完了条件
@@ -366,4 +442,8 @@ T5/T6 から持ち越したものを含む。**いずれも本 spec の実装を
 5. **GDD 6.2 の表は tag×tag と tag×facility が混在している**(「汚染 × 寝床・療養所」「湿潤 × 菜園」)。実装は `tagMatrix` のキーを tag|tag に限り、施設指定を `target` 側で表現している。GDD へこの表現規約を明記すべき。
 6. **`adjacency.seedOffsetRange` に「揺らぎ無し」の表現が無い**(schema が必須フィールド)。engine は `seedOffset: null` で恒等になるが content からは到達不能なので、`{min:0, max:0}` を恒等の慣用表現とした。schema 側で null 許容にするかは判断待ち。
 7. **【本タスクで検出・修正済み】ダミー content に 1e6 で厳密表現できない値があった。** `content/facility.json` の `forge.lvCurve[4] = 262.3509375`(= 150 × 1.15⁴ を倍精度で展開したままの値)は小数第 7 位を持ち、1e6 固定小数点では表現できない。ローダーの 10 進厳密変換がこれを reject したため `262.350937`(GDD 11.7 の floor 方向に統一)へ修正した。**オーサリングツール(`tools/`・ADR リポ構成581行)は `1.15^(Lv-1)` 展開値を必ず 6 桁で floor して書き出す必要がある**。ツール実装時にこの規則を組み込むこと(現状は人手で書いたダミーなので同種の値が再混入しうる)。
-8. T5/T6 の既報 9 件(GDD 11.7 の想起困難 2 段の位置 / p_step 線形按分の GDD 明記 / eventQueueSnapshot 非セーブ / rngState 空省略 / adjacency effect 語彙 / footprint 2×1・2×2 未実装 / adjacency クランプ ±60% の engine 定数化 / content のカテゴリ 1 ファイル方式 / `tech.prereqs` 長さ 0 許可)は未処理のまま。うち **adjacency effect 語彙は本タスクで実装済み**(上記 3)。
+9. **【2026-07-26 裁定・要ユーザー判断】GDD 6.3(c) の「セル ID 辞書順で先頭 (threshold-1) 件のみ有効」規則は、現行の効果モデルの下では permanently vacuous(挙動上無意味)である。** 隣接効果は GDD 6.2 が定めるとおり**タグ × タグの対称行列**で表現され、ボーナス項は (自施設のタグ, 近傍のタグ) のペアのみで決まって近傍の**個体**には依存しない(`computeCellAdjacency` の再ソート結果 `ordered[i]` は一度も読まれない)。したがって「有効な (threshold-1) 件として**どの近傍が**選ばれるか」は乗数に一切影響せず、golden vector でも単体テストでも(挙動として)観測できない。観測できるのは「有効件数 = threshold-1」と「超過数 × ペナルティ」の 2 つだけである。判断が必要なのは次の 2 点:
+   - **engine 側**: 現状維持を推奨する。実装は GDD 6.3(c) に忠実であり、将来効果が施設ペア依存(例: 「同じ施設定義が隣接すると減衰」)へ拡張された瞬間に辞書順選抜が意味を持ち始める。ここで「無意味だから」とソートを削ると、その拡張時に**順序非決定**(`Map` 反復順・方向順依存)が静かに混入する。ソートは決定論の保険として残す価値がある。
+   - **GDD 側**: 6.3(c) の文言を「先頭 (threshold-1) 件**のみ**有効」から「有効件数は (threshold-1) 件。どの個体が有効になるかは現行の効果モデルでは結果に影響しないが、決定論のため常にセル ID 辞書順で選ぶ」へ改めるか、あるいは効果モデル自体を施設ペア依存へ拡張するか。**ユーザー判断**。
+   - 被覆側は本裁定で正直化済み: 経路 ID を `adj-overcrowd-effective-limit` へ改名し、`conformance/coverage.json` の note に観測不能性を明記した。旧 ID `adj-overcrowd-lexical-top2` の `observedBy: ["digest","probe"]` は「辞書順選抜を観測している」という**虚偽の申告**だった。
+10. T5/T6 の既報 9 件(GDD 11.7 の想起困難 2 段の位置 / p_step 線形按分の GDD 明記 / eventQueueSnapshot 非セーブ / rngState 空省略 / adjacency effect 語彙 / footprint 2×1・2×2 未実装 / adjacency クランプ ±60% の engine 定数化 / content のカテゴリ 1 ファイル方式 / `tech.prereqs` 長さ 0 許可)は未処理のまま。うち **adjacency effect 語彙は本タスクで実装済み**(上記 3)。

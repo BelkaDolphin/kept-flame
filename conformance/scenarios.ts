@@ -171,11 +171,24 @@ function patchAddMemoryKeeperTrait(): (raw: RawContentBundle) => RawContentBundl
   };
 }
 
+/** {@link patchOvercrowdFixtures} の可変部(sc11 と sc16 で値だけが違う)。 */
+interface OvercrowdPatchOptions {
+  /** `heat|heat`(target=any)の係数。 */
+  readonly heatHeatValueFP: number;
+  /** `noise|noise`(target=any)の係数。 */
+  readonly noiseNoiseValueFP: number;
+  /** 指定時のみ `adjacency.overcrowd.penaltyPerExcessFP` を差し替える。 */
+  readonly penaltyPerExcessFP?: number;
+}
+
 /**
- * sc11: 過密判定用の facility 定義(smelter/cistern)を追加し、
+ * sc11 / sc16: 過密判定用の facility 定義(smelter/cistern)を追加し、
  * heat|heat を target=any へ差し替え、noise|noise を新規に足す(spec §4.3)。
+ * sc16 は加えて過密ペナルティを強め、ペナ側クランプが実際に発動する値にする。
  */
-function patchOvercrowdFixtures(): (raw: RawContentBundle) => RawContentBundle {
+function patchOvercrowdFixtures(
+  options: OvercrowdPatchOptions,
+): (raw: RawContentBundle) => RawContentBundle {
   return (raw) => {
     const smelter = {
       id: "smelter",
@@ -202,10 +215,17 @@ function patchOvercrowdFixtures(): (raw: RawContentBundle) => RawContentBundle {
     const adjacency = clone(raw.adjacency) as Record<string, unknown>;
     const tagMatrix: Record<string, AdjacencyRule> = {
       ...(adjacency["tagMatrix"] as Record<string, AdjacencyRule>),
-      "heat|heat": { effect: "forgeYield", target: "any", valueFP: 0.4 },
-      "noise|noise": { effect: "efficiency", target: "any", valueFP: 0.1 },
+      "heat|heat": { effect: "forgeYield", target: "any", valueFP: options.heatHeatValueFP },
+      "noise|noise": { effect: "efficiency", target: "any", valueFP: options.noiseNoiseValueFP },
     };
-    return { ...raw, facility, adjacency: { ...adjacency, tagMatrix } };
+    const patched: Record<string, unknown> = { ...adjacency, tagMatrix };
+    if (options.penaltyPerExcessFP !== undefined) {
+      patched["overcrowd"] = {
+        ...(adjacency["overcrowd"] as Record<string, unknown>),
+        penaltyPerExcessFP: options.penaltyPerExcessFP,
+      };
+    }
+    return { ...raw, facility, adjacency: patched };
   };
 }
 
@@ -414,10 +434,16 @@ function sc10BuildState(worldSeed: string): GameState {
  * 中心 cell 7 の smelter に対する heat タグ近傍(spec §4.4)。cell 1/2/6/8 の 4 基。
  * 四隅(0/5/42/47)は盤端の回り込み検査用だが、**cell 0 は cell 7 の NW 近傍
  * でもある**(§4.4 の近傍列挙 `[1, 2, 8, 14, 13, 12, 6, 0]` に cell 0 が含まれる)。
- * そのため実際の heat 近傍は 5 件(0,1,2,6,8)になり、§4.4 の「先頭 2 件 = cell1,2 /
- * 超過 2 件」という例示の数値とは一致しない。これは spec 自身の記述内の不整合
- * であり、生成器はシナリオを勝手に変更せず spec §4.3 の表(cell 1/2/6/8 と
- * 四隅 0/5/42/47)をそのまま実装する(要 Opus/ユーザー判断として報告)。
+ * そのため実際の heat 近傍は **5 件**(0,1,2,6,8)= 有効 2 件 + 超過 3 件になる。
+ *
+ * **[2026-07-26 Fable5 裁定]** シナリオはこのまま維持し、誤っていた spec §4.3/§4.4
+ * の記述(「同一タグ 4 件 / 超過 2 件」)を実態へ修正した。加えて、この盤面で
+ * 「辞書順で選抜された個体」は原理的に観測できない(ボーナスは (selfTag, tag)
+ * ペアのみで決まり近傍の個体に非依存 = `computeCellAdjacency` の `ordered[i]` は
+ * 読まれない)ことも裁定済みで、詳細は `conformance/coverage.json` の
+ * `adj-overcrowd-effective-limit` の note と spec §4.4 / §8-9 にある。
+ * sc11 で実際に digest へ出るのは超過ペナ(3 × -0.10 = -0.30)とボーナス側の
+ * ±60% クランプであり、**本数制限そのものとペナ側クランプは sc16 が観測する**。
  */
 const SC11_HEAT_NEIGHBOR_CELLS = [1, 2, 6, 8] as const;
 const SC11_CORNER_CELLS = [0, 5, 42, 47] as const;
@@ -469,6 +495,41 @@ function sc15BuildState(worldSeed: string): GameState {
   ]);
 }
 
+// --- sc16-overcrowd-fine ----------------------------------------------------------
+
+/**
+ * 中心 cell 7 の 8 近傍を**全て**埋める(spec §4.5)。方向順 N,NE,E,SE,S,SW,W,NW =
+ * `[1, 2, 8, 14, 13, 12, 6, 0]` の昇順表記。cell 8 だけ 2 基目の smelter
+ * (heat+noise)にし、残り 7 セルは hearth(heat)。
+ *
+ * これで中心 smelter から見て
+ *   - heat バケツ 8 件 → 有効 2 件 + 超過 6 件(6 × -0.15 = -0.90 → clamp -0.60)
+ *   - noise バケツ 1 件(cell 8 の smelter)→ noise|noise が**効果レベルで発火**
+ * となり、sc11 では観測できなかった「本数制限そのもの」「ペナ側クランプの発動」
+ * 「複数タグ施設の同時参加」の 3 つが digest に出る(spec §4.5)。
+ */
+const SC16_NEIGHBOR_CELLS = [0, 1, 2, 6, 8, 12, 13, 14] as const;
+const SC16_SECOND_SMELTER_CELL = 8;
+
+function sc16BuildState(worldSeed: string): GameState {
+  const entities: EntityState[] = [
+    mkFacility("facilitySmelterA", "smelter", 7, ["residentSmelterA"], 1),
+    mkResident("residentSmelterA", { assignedFacilityId: "facilitySmelterA" }),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceFirewood", "firewood", 0),
+  ];
+  for (const cell of SC16_NEIGHBOR_CELLS) {
+    const isSecondSmelter = cell === SC16_SECOND_SMELTER_CELL;
+    const facilityName = isSecondSmelter ? "facilitySmelterB" : `facilityHearth${String(cell)}`;
+    const residentName = isSecondSmelter ? "residentSmelterB" : `residentHearth${String(cell)}`;
+    entities.push(
+      mkFacility(facilityName, isSecondSmelter ? "smelter" : "hearth", cell, [residentName], 1),
+    );
+    entities.push(mkResident(residentName, { assignedFacilityId: facilityName }));
+  }
+  return createGameState(baseMeta(worldSeed), entities);
+}
+
 // ===========================================================================
 // 6. SCENARIOS(spec §4.3 の表)
 // ===========================================================================
@@ -502,7 +563,11 @@ export const SCENARIOS: readonly Scenario[] = [
     buildState: sc06Board({ traitIds: ["traitMemoryKeeper"] }),
   },
   { id: "sc10-morale-edge", contentPatch: null, buildState: sc10BuildState },
-  { id: "sc11-overcrowd", contentPatch: patchOvercrowdFixtures(), buildState: sc11BuildState },
+  {
+    id: "sc11-overcrowd",
+    contentPatch: patchOvercrowdFixtures({ heatHeatValueFP: 0.4, noiseNoiseValueFP: 0.1 }),
+    buildState: sc11BuildState,
+  },
   { id: "sc12-bigstock", contentPatch: patchHearthBigLvCurve(), buildState: sc12BuildState },
   { id: "sc13-onemin", contentPatch: patchOneMinuteCoarseTick(), buildState: sc06BoardDefault },
   { id: "sc14-offset-zero", contentPatch: patchZeroSeedOffset(), buildState: sc01BuildState },
@@ -510,6 +575,15 @@ export const SCENARIOS: readonly Scenario[] = [
     id: "sc15-tie",
     contentPatch: patchTechResearchCost("techFireStarting", 80_000),
     buildState: sc15BuildState,
+  },
+  {
+    id: "sc16-overcrowd-fine",
+    contentPatch: patchOvercrowdFixtures({
+      heatHeatValueFP: 0.1,
+      noiseNoiseValueFP: 0.1,
+      penaltyPerExcessFP: -0.15,
+    }),
+    buildState: sc16BuildState,
   },
 ];
 
