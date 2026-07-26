@@ -1,0 +1,314 @@
+# オフライン復帰2秒予算 — 4サブ予算の計測境界設計 (T10)
+
+対象: `bench/perf.html` / 計測項目 **#1**(先行計測計画 §5.2)
+後続: **#2**(GC/メモリ・T12)、**#8**(Worker 越し転送・T11)の土台
+根拠文書: ADR-012(4)(2s 予算の ms 配分)・ADR-019/ADR-029(Worker catch-up・可変ドラフト)・ADR-026(tick は経過時刻の純関数)・ADR-027(非アクティブ画面アンマウント)・先行計測計画 §2.1 P2 / §5.1 / §5.2 #1
+
+この文書は**境界の定義**が本体である。「どこで `performance.now()` を取るか」「どの処理がどの区間に属するか」「後続タスクで何が差し替わるか」を先に確定し、実装(`bench/perfMain.ts` ほか)はこの定義に従うだけにする。実装を先に書いて後から辻褄を合わせると、T11/T12 で境界が静かにずれて #1 の数値が比較不能になるため。
+
+---
+
+## 0. 位置づけと限界(先に書く)
+
+- 計測 #1 は先行計測計画 §1 の仕分けで **区分②(デスクトップ予備 + 実機本計測)**である。本ページをデスクトップ(Windows / Ryzen 7 5700X 等)で走らせて得られる数値は、**ターゲット実機(iPhone SE2 / Android 中位機 / 8GB Surface)の下限見積りにしかならない**。
+- したがって本ページのデスクトップ実行結果をもって **#1 を「合格」と宣言してはならない**(計画 §5.1 の明文規定)。合否は `K_device = t_device / t_desktop` を `bench/kernel.html` 相当の校正カーネルで実測してから「デスクトップ実測 × K ≤ ADR 基準」で判定する。K の暫定値 **5 には根拠が無い**(計画 §5.1 が明記)。
+- 本ページはデスクトップでも「**どの区間が支配的か**」「**save サイズ・DOM 数に対してどう伸びるか**」という**形**を先に取るためのものであり、絶対値の合否判定器ではない。
+
+---
+
+## 1. 4サブ予算(ADR-012(4))
+
+| ID | 区間名 | ADR の呼称 | 予算 |
+|---|---|---|---|
+| **B1** | `compute` | compute(tick catch-up) | ≤1100ms |
+| **B2** | `restore` | IDB 読出 + JSON.parse + deserialize | ≤450ms |
+| **B3** | `hydrate` | Preact ハイドレーション | ≤250ms |
+| **B4** | `mount` | 約240 DOM 初回マウント | ≤200ms |
+| — | `total` | 合計 | ≤2000ms |
+
+ADR の列挙順は**予算表の順**であって実行順ではない。実際の復帰経路の実行順は **B2 → B1 → B3 → B4**(セーブを読む → 不在ぶんを進める → UI 状態を作る → DOM を出す)であり、本ページはこの順で計測する。順序は区間の排他性(§2 R2)に影響しない。
+
+---
+
+## 2. 共通規約
+
+### R1 単一タイムライン
+4 区間はすべて**同一ドキュメントのメインスレッド**の `performance.now()` 上で取る。`Date.now()` は使わない(単調でない)。T11 で B1 が Worker へ移る際の例外は §7 に規定する。
+
+### R2 逐次・排他(オーバーラップ禁止)
+1 試行の中で 4 区間は上記の固定順に**逐次**実行し、区間は互いに素な半開区間 `[start, end)` とする。ある区間の `end` を採ってから次の区間の `start` を採る。並行実行・入れ子・再入は禁止。
+
+### R3 1 演算 1 所有者
+復帰経路上のすべての演算は「ちょうど 1 つの区間に属する」か「**予算外**として §4 に名前付きで明示列挙される」かのいずれかでなければならない。どちらでもない演算を実装に置いてはならない。境界が曖昧な演算(§4 の各項)は、この文書を先に改訂してから実装を変える。
+
+### R4 隠れ非同期の禁止
+区間の内側で `await` してよいのは、**その区間が計測対象としている I/O そのもの**だけである(B2 の IDB `get` のみが該当)。それ以外の `await`(マイクロタスク待ち・`setTimeout(0)`・`requestAnimationFrame`)を区間内に置いてはならない。イベントループへ制御を返すと無関係な作業が挟まりうるため。
+
+### R5 計測器自身を区間に入れない
+タイムスタンプは素の `performance.now()` で先に変数へ取る。`performance.mark()` / `performance.measure()`(T12 の CDP トレース切り出し用)は、**取得済みのタイムスタンプを `{ startTime }` 指定で後から**発行する。mark 呼び出しのコストが計測窓の内側に入らないようにするため。User Timing L3 の `startTime` 指定に未対応のエンジンでは mark をまるごと諦める(try/catch で握り潰す。計測値そのものには影響しない)。
+
+### R6 段取りは外
+content ロード・代表盤面の構築・セーブの**書込**・IndexedDB の `open`・前試行の DOM アンマウント・試行間のイベントループ譲渡は、すべて 4 区間の**外**で行う(§4 に補助メトリクスとして記録)。
+
+### R7 下位区間は親を厳密分割
+各区間の内訳(例 B2 の `idbGet` / `parse` / `deserialize`)は、親区間を**過不足なく分割**する。下位区間の合計が親を超えたり、親の外へはみ出したりしてはならない。下位区間は情報であって予算ではない。
+
+### R8 新しいコストは文書を先に直す
+T11/T12 以降で新しいコスト(Worker 転送・integrityChecksum 検証・実ストアの水和など)が現れたら、**まず本文書の §3/§4 に所属を書いてから**実装する。ベンチ側の都合で黙って区間に足し引きしない。
+
+### タイマ分解能(重要な落とし穴・実測で確認済み)
+`performance.now()` の分解能はエンジンとクロスオリジン隔離状態に依存する。cross-origin isolated でない場合、Firefox と WebKit は 1ms 前後へ丸める。
+
+**Chromium も丸める。** T10 の実測(HeadlessChrome 151・`crossOriginIsolated: false`)では**全区間の値が 0.1ms(100µs)刻み**になり、B3 `hydrate` の中央値は **0ms**(= 分解能の下)になった。つまり `crossOriginIsolated: false` の環境では **B3/B4 のような 1ms 未満の区間は事実上測れない**。
+
+したがって:
+
+- **#1 の計測は Chromium 系で行う**ことを既定とする(Firefox/WebKit の 1ms 丸めよりは 10 倍細かいため)。
+- 1ms 未満に落ちた区間は「予算に対して 3 桁以上小さい」以上のことを言っていない。**pass の根拠として使ってよいが、実機で伸びる余地の見積りには使えない。**
+- T12 が COOP/COEP(cross-origin isolation)を `bench/vite.perf.config.ts` の `preview.headers` に入れると、副作用として高分解能タイマ(5µs)が有効になる。**T12 以降は B3/B4 の実数値が初めて取れる**。
+- 結果 JSON の `meta.crossOriginIsolated` に状態を必ず載せる(後から読む人が丸めの有無を判断できるように)。
+
+### 試行回数と中央値
+- 計測 **10 試行**の**中央値**を代表値とする(計画 §5.2 #1)。中央値の定義は「昇順ソート後、奇数個なら中央、偶数個なら中央 2 値の平均」。生値も全部出す。
+- 10 試行の**前に 1 回のウォームアップ試行**を走らせ、その値は中央値に入れず `warmupMs` として別に出す。理由: 実機の実復帰は **JIT が温まっていない状態**で起きるので、ウォームアップ値の方が cold start に近い。中央値(温まり済み)は下限、ウォームアップ値は上限寄りの参考値として**両方**報告する。
+- 試行間には `await`(`setTimeout(0)`)を挟んでイベントループへ返す。GC・描画をここで起こさせ、区間内へ落とし込まないため(R6)。
+
+---
+
+## 3. 区間定義
+
+### B1 `compute` — tick catch-up(≤1100ms)
+
+| | |
+|---|---|
+| **開始点** | `createAdvanceContext(state, content)` の呼び出し**直前** |
+| **終了点** | `advanceWithReport(state, ctx, targetTick)` が返り、その `state` をローカルへ束縛した**直後** |
+| **下位区間** | `contextBuildMs`(隣接行列のシード揺らぎ焼込 + 施設別産出乗数の precompute) / `advanceMs`(離散事象ループ本体) |
+
+**ワークロード**: `startTick = 0` → `targetTick = 4320`(= 72h・ADR-026 の 72h クランプ値そのもの)。`content/balance.json` の `coarseTickMinutes = 10` により (C) 粗粒度ステップは **432 回**、ベルヌーイ判定は 20 住民 × 3 tech × 432 = **25,920 回**。この 3 つの数は `ScheduleReport` のカウンタで**実測して結果 JSON に載せる**(ワークロードが設計どおりであることを毎回自己検証する)。
+
+**`createAdvanceContext` を内側に入れる理由**: 隣接乗数は施設配置に依存するのでセーブごとに作り直す必要があり、catch-up の前に必ず 1 回走る。復帰経路の一部なので B1 に属する(R3)。
+
+**含まないもの**: content のロード(§4)・セーブの読出(B2)・Worker への転送(§7)・スナップショットの構造化複製(§7)。
+
+**メインスレッド版でよい根拠**: ADR-026(3) は「差分が小さい通常操作はメインスレッド同期 advance、長期不在復帰は Worker へ委譲」と定めており、**engine 側は同じ純関数**である(`src/engine/advance.ts` §1 のコメント)。したがって T10 のメインスレッド計測は「engine の計算量そのもの」を測っており、T11 で Worker へ移した際に増えるのは**転送コストとスレッド起動コストだけ**である。§7 でその差分の所属を先に決めてある。
+
+---
+
+### B2 `restore` — IDB 読出 + JSON.parse + deserialize(≤450ms)
+
+| | |
+|---|---|
+| **開始点** | セーブ読出の入口関数(T10: `getSaveText` / T11: `persistence.loadLatestSave`)を**呼ぶ直前**。読出トランザクションの生成と `objectStore.get(key)` はどちらもこの内側 |
+| **終了点** | `fromSerializable(parsed)` が `GameState` を返した**直後** |
+| **下位区間** | `idbGetMs`(リクエスト発行 → `onsuccess` で値を得るまで) / `parseMs`(`JSON.parse`) / `deserializeMs`(`fromSerializable`) |
+
+**セーブは JSON 文字列として保存する**(構造化複製可能なオブジェクトとして入れない)。ADR-012(4) が予算項目に `JSON.parse` を明記しており、ADR-012(2) の `integrityChecksum` も JSON blob に対して掛ける設計であるため。この選択は T11 の `persistence.ts` がそのまま引き継ぐ。
+
+**書込は計測外**(R6)。#1 は「オフライン復帰」シナリオであり、予算の対象は**読出側**だけである。書込コスト(2秒デバウンス・15秒/25コマンド絶対フラッシュ・ADR-012(1))は別問題で、復帰時のクリティカルパスに乗らない。ベンチでは `idbPutMs` を補助メトリクスとして 1 回だけ記録する。
+
+**`indexedDB.open()` は区間外**(補助メトリクス `idbOpenMs`)。ADR-012(4) の予算項目が「読出 + parse + deserialize」の 3 演算を名指ししているのに合わせる。ただし**実際の cold restore では open も必ず払う**ので、結果 JSON では `restoreWithOpenMs = idbOpenMs + restoreMs` を派生値として併記し、T11 が「open を予算内へ入れるか」を数値を見て決められるようにする(§11-(1))。
+
+**save サイズ依存性**: B2 のコストは save のバイト数にほぼ比例する。縮約代表盤面(entity 37 個)の save は数 KB に過ぎず、ADR-012(2) の**容量目標 ≤512KB とは 2 桁違う**。デスクトップで 450ms を余裕で満たしても、それは「小さいセーブなら速い」以上のことを言っていない。よって本ページは **B2 だけを容量目標付近(既定 ≈512KB)の合成セーブでも計測**し、`sensitivity.restoreAtTargetSaveBytes` として報告する(予算判定には使わない参考値)。合成セーブは住民 entity を ID を変えて複製して膨らませたもので、engine の正規経路(`toSerializable` / `fromSerializable`)をそのまま通す。
+
+---
+
+### B3 `hydrate` — Preact ハイドレーション(≤250ms)
+
+**この区間の解釈は本タスクの設計判断そのものなので §5 に独立して書く。** 定義だけ先に:
+
+| | |
+|---|---|
+| **開始点** | B1 が返した `GameState` を入力に、UI 側の派生値(view model)の構築を**始める直前** |
+| **終了点** | ルート vnode(`<PerfGrid …/>`)を組み終えた**直後**。`render()` は**呼ばない** |
+| **下位区間** | `viewModelMs`(GameState + EngineContent + AdvanceContext → 48 セル分の表示用データ) / `vnodeMs`(ルート vnode の生成) |
+
+**含まないもの**: DOM の生成(B4)・レイアウト(B4)・engine の再計算(B1 で終わっている)。
+
+**Preact 固有の注意(境界の位置が言語仕様で決まる箇所)**: Preact ではコンポーネント関数の本体は `render()` 中の diff で初めて実行される。したがって `h(PerfGrid, { cells })`(= JSX `<PerfGrid cells={…}/>`)は**ルート vnode を 1 個作るだけ**であり、48 セル分の vnode 生成は**構造的に B4 側に入る**。これは実装の都合ではなく Preact の評価順そのものなので、B3 に vnode ツリー構築を含めることはできない。結果として B3 に入るのは「engine state → 派生値」だけであり、下位区間 `vnodeMs` はほぼ 0 になる。この非対称性は結果 JSON を読む側が知っている必要がある。
+
+---
+
+### B4 `mount` — 約240 DOM 初回マウント(≤200ms)
+
+| | |
+|---|---|
+| **開始点** | `render(rootVnode, container)` の呼び出し**直前** |
+| **終了点** | 生成済みサブツリーに対して**同期レイアウトを強制**(`container.getBoundingClientRect()` を読む)した**直後** |
+| **下位区間** | `renderMs`(`render()` が返るまで = vdom diff + DOM 生成 + 挿入) / `layoutMs`(強制同期レイアウト) |
+
+**レイアウトを区間に入れる理由**: `render()` の同期部分だけでは「DOM ノードが作られた」までしか測れず、利用者から見た「格子が出た」に届かない。Fallback が「DOM 仮想化で render 削減」(ADR 692行)である以上、削減対象はスタイル計算・レイアウトを含む描画コストであり、これを予算外に置くと数値が実態より小さく出る。**paint / composite は同期的に測れないので含まない**(この分だけ B4 は依然として過小評価である旨を明記する)。
+
+**DOM 規模**: 6×8 = 48 セル × 5 要素 = **240 要素**。1 セルの内訳は 4重符号化(`docs/design/tags-spec.md`)に対応させ、コンテナ 1 + 記号 1 + タグ名 1 + 数値 1 + バッジ 1 の計 5 要素とする。実際にマウントされた要素数は `container.querySelectorAll("*").length` で**実測して結果 JSON に載せる**(240 からズレたらワークロードが壊れている)。
+
+**試行間のアンマウント**は区間外(R6)。`render(null, container)` で毎試行きれいに落としてから次へ進む(ADR-027 の「非アクティブ画面は物理アンマウント」に対応)。
+
+---
+
+## 4. 予算外だが必ず記録する補助メトリクス
+
+R3 により、復帰経路上で 4 区間に属さない演算はここに全部並べる。
+
+| メトリクス | 何を測るか | なぜ予算外か | 将来の扱い |
+|---|---|---|---|
+| `contentLoadMs` | `validateContentBundle` → `loadEngineContentOrThrow` | ADR-012(4) の 4 項目に content ロードは無い。content はアプリ起動時に 1 回で、セーブ復帰ごとには走らない | T11 で Worker へ 1 回転送する対象になる(ADR-029(1))。転送側は §7 |
+| `contentJsonParseMs` | **計測しない**(0 として明示) | Vite が `content/*.json` をビルド時に JS リテラルへ畳むため、ブラウザでは JSON.parse が発生しない。実アプリも同じバンドル方式(ADR-025 静的アセット)なので実態と一致 | 実配信で content を fetch する方式に変えたら測る |
+| `boardBuildMs` | 代表盤面の構築 + `toSerializable` + `JSON.stringify` | 計測の**段取り**。実アプリに対応物が無い | 変更なし |
+| `idbOpenMs` | `indexedDB.open()` の完了まで | ADR の予算項目が 3 演算を名指ししているため(§3 B2) | T11 で「予算内へ入れるか」を判断(§11-(1)) |
+| `idbPutMs` | セーブの書込 1 回 | 復帰シナリオのクリティカルパス外(§3 B2) | ADR-012(1) の書込側予算として別途 |
+| `unmountMs` | `render(null, container)` | 試行間の後始末 | 変更なし |
+| `layoutFlushMs` | — | B4 の内側(`layoutMs`)に含めたので独立項目は持たない | — |
+
+**結果 JSON では `budgets` / `intervals` と `supplementary` を別オブジェクトに分ける。** 補助メトリクスが 4 予算の合計に混ざらないようにするため。
+
+---
+
+## 5. 設計判断: SSR が無い構成で「Preact ハイドレーション」をどう解釈するか
+
+### 事実確認
+
+- ADR-025/ADR-031: 配信は **Cloudflare Workers 静的アセット(SPA モード)**。サーバ側レンダリングは存在しない。
+- ADR-027: ルーティングは `location.hash` + `popstate` の**自前極小ルータ**。プリレンダも無い。
+- ADR-001: 依存最小(`preact` のみ。`preact-render-to-string` も `preact-iso` も無い)。実際 `package.json` の devDependencies に SSR/prerender 系は 1 つも無い。
+
+したがって **Preact の `hydrate()` API を呼ぶ対象(サーバが吐いた既存 DOM)がそもそも存在しない**。ADR-012(4) の「Preact ハイドレーション」を文字どおり `hydrate()` と読むと、この構成では計測対象が空になる。
+
+### 判断
+
+**「ハイドレーション」= 復元済み `GameState`(engine の内部表現)から、UI が描画できる状態(ストア + 派生値 + ルート vnode)を組み立てるまで**、と解釈する。DOM は 1 つも作らない。
+
+根拠:
+
+1. **ADR の 4 分割は復帰経路を重複なく覆う意図**である(合計が 2000ms = 2秒予算そのもの)。`hydrate()` と読むと B3 と B4 が同じ DOM 生成を二重に数えることになり、合計が予算の意味を失う。
+2. ADR-027 が「非アクティブ画面は**物理アンマウント**し、その画面の **computed 購読を解除**」と書いている。つまり ADR の世界観では「engine state から computed(派生値)を作る層」が UI 側に独立して存在し、そこが性能予算の懸念対象として名指しされている。B3 をこの層に割り当てるのが ADR の記述と最も整合する。
+3. ADR-012(4) の**列挙順**が `IDB+parse+deserialize` → `ハイドレーション` → `DOM 初回マウント` であり、「状態を得る → 状態を UI 用に整える → DOM を出す」の順に読める。
+
+### この解釈が外れたときの復帰手順(明記)
+
+将来プリレンダ(ビルド時に格子の静的 HTML を吐く等)を導入した場合、**B3 は本物の `hydrate()` に置き換わり、B4 は「新規 DOM 生成」ではなく「既存 DOM への付着」になる**。そのときは本文書 §3 の B3/B4 を書き換え、それ以前の #1 実測値は比較不能として破棄する(algoVersion の bump と同じ扱い)。ADR-012(4) の項目名は変えなくてよい(名前は同じで中身が変わる)。
+
+### T10 実装での B3 の中身(暫定であることの明示)
+
+現時点で UI ストアは存在しない(P1/P2 スコープ外・計画 §2.2「12画面UI は作らない」)。よって B3 は**代替物**として次を測る:
+
+- 48 セル分の view model 構築: セルごとに「建っている施設 / タグ列 / Lv / 就労者数 / 隣接乗数(`AdvanceContext.multiplierByFacilityId` 由来) / 表示用の数値」を引く
+- 上部サマリの集計: 住民数・想起困難中の人数・資源ストック・研究進捗
+
+**4 区間の中で、実装が本番と最も乖離しているのが B3 である。** 実 UI ストア(signals / computed)が入ると B3 は確実に重くなるので、T10 の B3 実測値は「下限のさらに下限」として扱う。この点は結果 JSON の `intervals.hydrate.fidelity` フィールドに `"placeholder"` と機械可読で書き出す。
+
+---
+
+## 6. 代表盤面とワークロード
+
+### `sim/board.ts`(T9)を再利用するか — 判断: **しない**(2 つの独立した理由)
+
+**理由1(技術的・決定的)**: `sim/board.ts` は先頭で `conformance/scenarios.ts` の `loadBaseRawContentBundle` を import している。`conformance/scenarios.ts` はモジュール評価時に `fileURLToPath(new URL("../content/", import.meta.url))` を**即時実行**する。T8 がこれをブラウザへ持ち込んで実測した結果、Chromium/Firefox/WebKit いずれも `fileURLToPath is not a function` でページ全体がクラッシュした(`tools/genHarnessData.ts` 冒頭に実測記録あり)。`sim/board.ts` を bench から import すると同じ経路を踏む。
+
+**理由2(設計的・こちらが本質)**: T9 の代表盤面は **施設インスタンスを意図的に 2 個へ潰してある**(`sim/board.ts` の `buildPatternBoard` コメント: 「recallRiskPerDay は assignedFacilityId 先の harshWork だけを見るため、インスタンス数を増やしても判定は変わらない」)。計測 #5(想起困難の頻度)にはそれが正しい。しかし #1 は
+
+- **隣接/過密の実コスト**(ADR-002(2) の O(8) 近傍集計・ADR-029(2))
+- **48 セル格子 → 240 DOM** の対応(B3/B4 のワークロードそのもの)
+
+を含む必要があり、施設 2 個の盤面ではどちらも測れない。よって #1 は**別の代表盤面**を持つのが正しい。T9 の盤面を無理に流用すると、B1 の隣接コストと B3/B4 の格子が実態から外れる。
+
+**採る方針**: `bench/perfBoard.ts` に **#1 専用の代表盤面**を新設する。ただし住民側の軸(過酷/通常 × 士気 50/29/14 × 定着度 0/0.20 × 派遣有無 の代表10パターン × 2 人 = 20 人)は **T9 と同じ軸を踏襲**し、施設だけ 12 基へ展開する。両者の関係は `bench/perfBoard.ts` の冒頭に明記する。
+
+### 盤面の内容
+
+| | 値 | 根拠 |
+|---|---|---|
+| 住民 | 20 人(代表10パターン × 2) | ADR-014 の「20人」・T9 と同じ軸 |
+| 施設 | 12 基(hearth×4 / forge×4 / workbench×4) | T5 の実測条件「住民20/施設12/tech3」と一致させる |
+| 配置 | cell 0〜3(hearth) / 6〜9(forge) / 12〜15(workbench) | heat タグが密集し過密閾値(3)を超える近傍が生じる = 隣接/過密の計算が実際に走る |
+| 研究 | 3 本(content の tech 3 本に 1:1) | content/tech.json |
+| 資源 | firewood / iron の 2 種 | content/facility.json の output |
+| entity 合計 | 37 | |
+| catch-up | tick 0 → 4320(72h) | ADR-026 の 72h クランプ |
+| 粗粒度 | 10 分(432 step) | content/balance.json `coarseTickMinutes` |
+
+---
+
+## 7. T11(実 persistence / worker)で差し替わる境界
+
+### B2 → `src/platform/persistence.ts`
+
+| 変更 | 扱い |
+|---|---|
+| `bench/perfIdb.ts` の暫定実装が `persistence.ts` に置き換わる | **区間の定義は不変**(get → parse → deserialize の 3 演算)。計測点だけが `persistence.loadLatestSave()` の内側へ移る |
+| `integrityChecksum` 検証(ADR-012(2))が追加される | **B2 の内側**。同じ blob を舐める処理であり、復帰のクリティカルパスに乗るため。T11 はこれを B2 の 4 つ目の下位区間 `checksumMs` として出すこと |
+| localStorage ミラー読出 / 巻戻し検知(ADR-012 / GDD 11.9) | **B2 の外**(補助メトリクス `mirrorCheckMs`)。IDB が生きている happy path では分岐しないため |
+| 容量検査・QuotaExceeded 前のサイズ検査 | **書込側**。復帰経路に無いので B2 と無関係 |
+| `indexedDB.open()` | 引き続き補助(`idbOpenMs`)。T11 が「予算内に入れる」と決めたら本文書 §3 B2 を改訂すること(§11-(1)) |
+
+### B1 → `src/platform/worker.ts`(ADR-019 / ADR-029)
+
+ここが**最も大きく差し替わる**。先に規則を固定しておく:
+
+1. **タイムオリジンが変わる**。Worker の `performance.now()` は**そのワーカ固有の `timeOrigin`** を基準にする。したがって
+   - ワーカ内で取った時刻とメインで取った時刻を**引き算してはならない**。
+   - 比較してよいのは**継続時間**だけ。絶対時刻を突き合わせたい場合は `performance.timeOrigin + performance.now()` に揃える。
+   - T11 は `computeWorkerMs`(ワーカ内 B1)と `computeWallMs`(メイン側で見た `postMessage` → 完了メッセージ受信までの往復)の**両方**を出すこと。
+2. **新しいコスト `transferMs` の所属**:
+   - `content` の 1 回転送(ADR-029(1))は**アプリ起動時**であり復帰経路ではない → **予算外**(補助メトリクス `contentTransferMs`)。
+   - catch-up 完了時のスナップショット 1 回転送(構造化複製)は**復帰経路の内側** → **B1 の予算に算入**する。理由: ADR-019 が Worker オフロードを長期不在復帰の**正規経路**と定めており、計測 #8 の判断基準も「転送込みで2秒予算内」だから。
+   - よって T11 での判定式は **`computeWallMs ≤ 1100ms`**(= ワーカ計算 + 往復転送 + スレッド起動)。`computeWorkerMs` と `snapshotTransferMs` は内訳として出す。
+3. **可変ドラフト(ADR-029(1))の所属**: ドラフトの初期化(不変 state → 可変ドラフト)と完了時のスナップショット化(可変ドラフト → 不変 state)は**どちらも B1 の内側**。ADR-029 が数える「ドラフト1個 + 完了時1スナップショット」のアロケーションはここで発生する。
+4. **Worker の起動コスト**(`new Worker(...)` とモジュール評価)は、実アプリではアプリ起動時に済ませられる → **予算外**(補助 `workerBootMs`)。ただし「復帰時に初めて Worker を作る」実装にした場合は B1 に算入すること。T11 はどちらの実装かを結果 JSON に `workerLifecycle: "preboot" | "onDemand"` として書くこと。
+5. `createAdvanceContext` は引き続き **B1 の内側**(ワーカ側で実行)。
+
+### B3 / B4
+
+T11 では**変わらない**。B3 が変わるのは実 UI ストアが入るとき(§5 末尾)、B4 が変わるのはプリレンダを導入するとき(§5)。
+
+---
+
+## 8. T12(GC/メモリ)で差し替わる境界
+
+**結論: 4 区間の内側の境界は 1 つも変わらない。** T12 は区間の**外側**にサンプリング点を足すだけである。
+
+1. `performance.measureUserAgentSpecificMemory()` は **async であり、それ自身が GC を誘発しうる**。したがって 4 区間のどれかの内側や、区間と区間の間に置いてはならない(R2/R4 違反)。置いてよいのは**試行の境界**だけ:
+   - 試行開始前(`before`)
+   - B4 終了 + アンマウント後(`after`)
+   これで ADR-029(1) の「catch-up 中の JS ヒープ増分ピーク ≤48MB」は「試行前後の差分」として得られる。**「ピーク」を取りたい場合は区間内でサンプルできないため、CDP 側のトレース(下記 3)から取ること**。この制約は T12 が回避できない性質のものなので先に書いておく。
+2. `measureUserAgentSpecificMemory()` は **cross-origin isolated(COOP/COEP)を要求する**。`bench/vite.perf.config.ts` に `preview.headers` で `Cross-Origin-Opener-Policy: same-origin` / `Cross-Origin-Embedder-Policy: require-corp` を足すのは **T12 の担当**(T10 では入れない。入れると §2 のタイマ分解能の条件が T10/T12 で変わり、過去実測との比較が壊れるため)。T10 は `meta.crossOriginIsolated` を報告するだけにする。
+3. **CDP 経由の GC ポーズ抽出**(計画 §5.2 #2)はページ内の境界を変えない。ただしトレースから「どの区間で起きた GC か」を切り出すために、T10 の時点で各区間に **User Timing の mark/measure を発行しておく**(R5 の方式で、計測窓の外から)。名前は固定:
+   - mark: `kf:<interval>:start` / `kf:<interval>:end`(`interval` ∈ `compute` `restore` `hydrate` `mount`)
+   - measure: `kf:<interval>`(trial 番号は `detail` に入れる)
+   T12 はこの名前でトレースを切る。**名前を変えてはならない。**
+
+---
+
+## 9. 結果 JSON と非決定値の隔離
+
+- ルート直下に `meta` オブジェクトを置き、**非決定値(実行時刻・userAgent・ハードウェア情報・タイマ分解能状態)は全部そこへ隔離**する。`workload` / `budgets` / `intervals` / `supplementary` / `judgement` には非決定値を入れない。
+- 由来: `bench/tags.html`(T13)の結果 JSON も同じ方針で `generatedAt` / `userAgent` を持つ。ただし tags 側はフラットなので、こちらは `meta` に括る方を採る(#1 の結果は T16 で機械突合するため、決定論的な部分だけを差分できると都合がよい)。
+- `$schema` は `kept-flame/bench/perf-boundaries/1`。本文書の境界定義を変えたら**必ずこの版を上げる**(過去の実測 JSON と混ざらないように)。
+- 判定は 2 種類を併記する:
+  - `judgement.desktopRaw`: デスクトップ実測中央値 vs ADR 予算。**参考値**。
+  - `judgement.withProvisionalK`: 中央値 × K(既定 5)vs ADR 予算。計画 §5.1 の暫定運用。**K=5 に根拠は無い**旨を `judgement.note` に必ず載せる。
+  - どちらも `"pass"` と出ても **#1 は合格ではない**(§0)。`judgement.isOfficialVerdict: false` を固定で入れる。
+
+---
+
+## 10. 実装ファイルと責務
+
+| ファイル | 責務 |
+|---|---|
+| `bench/perf.html` | エントリ HTML。light 固定(`color-scheme: light`・`prefers-color-scheme` 分岐を書かない) |
+| `bench/perfMain.ts` | 試行ループ。**本文書 §3 の境界だけを実装する**。表示とコピー |
+| `bench/perfBoard.ts` | §6 の代表盤面 + 合成大容量セーブ。content の in-browser ロード |
+| `bench/perfGrid.tsx` | B3 の view model 構築(純関数) + B4 の Preact コンポーネント |
+| `bench/perfIdb.ts` | B2 の暫定 IndexedDB。**T11 で `src/platform/persistence.ts` に置き換わる場所**(§7) |
+| `bench/perfStats.ts` | 中央値・要約・判定・結果 JSON 組立(純関数・vitest 対象) |
+| `bench/vite.perf.config.ts` | 隔離 vite 設定(`conformance/vite.harness.config.ts` と同じ流儀。ルートの `vite.config.ts` は触らない) |
+
+---
+
+## 11. 未確定点(要判断・非ブロッキング)
+
+1. **`indexedDB.open()` を 450ms 予算に入れるか**。ADR-012(4) の文言は 3 演算しか名指ししていないが、実 cold restore では必ず払う。T10 は両方の数値を出す。T11 が実測を見て決め、決めたら本文書 §3 B2 と ADR-012(4) の文言を同時に直す(ADR 改訂はユーザー承認事項)。
+2. **B4 に paint を含められない**。同期的に測れないため。実機で「見えるまで」を測るなら `requestAnimationFrame` 2 回待ち等の別手法が要るが、それは R4(区間内での非同期禁止)に反するので**別メトリクス**として T14 で足すのが筋。
+3. **B3 の忠実度**。実 UI ストアが無い間、B3 は代替物である(§5 末尾)。UI 実装が入ったら #1 を取り直す必要がある。
+4. **save サイズ**。代表盤面の save は数 KB、ADR-012(2) の容量目標は ≤512KB。B2 の予算 450ms がどちらを想定した数字なのかは ADR に書かれていない。T10 は両方測る(§3 B2)。どちらを正とするかは T16 の判定時にユーザー判断。
+5. **タイマ分解能**。cross-origin isolated でない環境では `performance.now()` が丸められ、B3/B4 が測れない(Chromium で 0.1ms 刻み・実測確認済み。Firefox/WebKit は 1ms)。T12 が COOP/COEP を入れるまで #1 は Chromium 系のみで取り、B3/B4 は「予算より 3 桁小さい」以上の主張をしない。
+6. **B1 のウォームアップ差**。実測では compute の warmup が中央値の約 2.5 倍だった(16.2ms vs 6.55ms)。実機の実復帰は cold なので、実機計測では中央値だけでなくウォームアップ値も必ず併記すること。ADR-012(4) の 1100ms がどちらを想定した数字なのかは ADR に書かれていない(T16 の判定時にユーザー判断)。

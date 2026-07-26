@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>オフライン復帰2秒予算 4区間ベンチ (#1) - 継ぐ火</title>
+    <!--
+      T10 / 計測 #1。境界定義の正は docs/design/perf-boundaries.md。
+      - light テーマ固定。prefers-color-scheme 分岐は書かない(CLAUDE.md 絶対ルール)。
+      - 外部フォント/CSS/CDN は参照しない。
+      - #grid-root は B4(約240 DOM 初回マウント)の計測対象コンテナであり、
+        直下に 48 セル × 5 要素 = 240 要素ちょうどが載る。ここに他の要素を
+        書き足してはならない(実測ノード数が 240 からずれる)。
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+        --kf-ink-body: #24201c;
+        --kf-ink-muted: #5b534b;
+        --kf-line-grid: #8a857d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        background: #ffffff;
+        color: var(--kf-ink-body);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          "Hiragino Kaku Gothic ProN",
+          "Yu Gothic UI",
+          Meiryo,
+          sans-serif;
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 1.15rem;
+        margin: 0 0 0.5rem;
+      }
+      h2 {
+        font-size: 0.95rem;
+        margin: 1.5rem 0 0.5rem;
+      }
+      p,
+      li {
+        margin: 0.25rem 0;
+        font-size: 0.85rem;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 1rem 0;
+      }
+      button {
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.4rem 1rem;
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 4px;
+        background: #f4f2ee;
+        color: var(--kf-ink-body);
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #status,
+      #copy-status {
+        font-size: 0.8rem;
+        color: var(--kf-ink-muted);
+      }
+      table {
+        border-collapse: collapse;
+        font-size: 0.8rem;
+        margin-bottom: 0.75rem;
+      }
+      th,
+      td {
+        border: 1px solid #cccccc;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+        white-space: nowrap;
+      }
+      th {
+        background: #f0f0f0;
+      }
+      textarea {
+        width: 100%;
+        height: 14rem;
+        font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        font-size: 0.72rem;
+        border: 1px solid #dddddd;
+        padding: 0.5rem;
+      }
+      /* --- B4 の計測対象: 6 列 × 8 行の格子 --- */
+      #grid-root {
+        display: grid;
+        grid-template-columns: repeat(6, 5.5rem);
+        gap: 2px;
+        width: max-content;
+        margin: 0.5rem 0 1rem;
+      }
+      .kf-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 5.5rem;
+        height: 3.4rem;
+        border: 1px solid var(--kf-line-grid);
+        border-radius: 3px;
+        font-size: 0.62rem;
+        overflow: hidden;
+      }
+      .kf-cell__mark {
+        font-size: 0.95rem;
+        line-height: 1;
+      }
+      .kf-cell__tag {
+        color: var(--kf-ink-body);
+      }
+      .kf-cell__value {
+        font-variant-numeric: tabular-nums;
+      }
+      .kf-cell__badge {
+        color: var(--kf-ink-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>オフライン復帰2秒予算 — 4区間ベンチ (計測 #1)</h1>
+    <p>
+      境界定義の正は <code>docs/design/perf-boundaries.md</code>。実行順は
+      <strong>B2 restore → B1 compute → B3 hydrate → B4 mount</strong>(復帰経路の順)。
+      ウォームアップ 1 回 + 計測 10 回の中央値で判定する。
+    </p>
+    <p>
+      <strong>注意:</strong>
+      デスクトップでの実測は実機の<strong>下限見積り</strong>にしかならない(先行計測計画 §1
+      の区分②)。このページの判定が pass でも #1 は合格ではない。また cross-origin isolated でない
+      Firefox / WebKit は <code>performance.now()</code> を 1ms へ丸めるため、#1 は Chromium
+      系で計測する。
+    </p>
+
+    <div class="controls">
+      <button type="button" id="run-btn">計測を開始する</button>
+      <span id="status"></span>
+    </div>
+
+    <h2>結果</h2>
+    <div id="results-root"></div>
+
+    <h2>格子(6×8 = 48 セル × 5 要素 = 240 DOM)</h2>
+    <div id="grid-root"></div>
+
+    <h2>結果 JSON</h2>
+    <div class="controls">
+      <button type="button" id="copy-json-btn">結果をコピー</button>
+      <span id="copy-status"></span>
+    </div>
+    <textarea id="result-json" readonly spellcheck="false"></textarea>
+
+    <script type="module" src="./perfMain.ts"></script>
+  </body>
+</html>

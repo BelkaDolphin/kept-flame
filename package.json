@@ -22,6 +22,8 @@
     "conformance:build": "npm run conformance:gen-harness-data && vite build --config conformance/vite.harness.config.ts",
     "conformance:preview": "vite preview --config conformance/vite.harness.config.ts",
     "conformance:e2e": "playwright test",
+    "bench:perf:build": "vite build --config bench/vite.perf.config.ts",
+    "bench:perf:preview": "vite preview --config bench/vite.perf.config.ts",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },
