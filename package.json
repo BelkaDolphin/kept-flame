@@ -25,6 +25,8 @@
     "bench:perf:build": "vite build --config bench/vite.perf.config.ts",
     "bench:perf:preview": "vite preview --config bench/vite.perf.config.ts",
     "bench:perf:e2e": "playwright test --config bench/playwright.perf.config.ts",
+    "device:package": "npm run bench:perf:build && npm run conformance:build && node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/packageDevice.ts",
+    "device:smoke": "playwright test --config bench/playwright.device.config.ts",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },

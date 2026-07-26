@@ -53,6 +53,35 @@
         overflow: auto;
         font-size: 0.75rem;
       }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 0.75rem 0;
+      }
+      button {
+        font: inherit;
+        font-size: 0.85rem;
+        padding: 0.4rem 1rem;
+        min-height: 44px;
+        border: 1px solid #cccccc;
+        border-radius: 4px;
+        background: #f4f2ee;
+        color: #111111;
+        cursor: pointer;
+      }
+      #copy-status {
+        font-size: 0.8rem;
+        color: #555555;
+      }
+      textarea {
+        width: 100%;
+        height: 14rem;
+        font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        font-size: 0.72rem;
+        border: 1px solid #dddddd;
+        padding: 0.5rem;
+      }
     </style>
   </head>
   <body>
@@ -62,7 +91,22 @@
       <code>window.__CONFORMANCE_RESULTS__</code> for Playwright to compare against
       <code>conformance/vectors/*.json</code>.
     </p>
+    <!--
+      T14: 実 iOS Safari 補完(先行計測計画 §7)向けに、結果 JSON を画面表示+
+      コピー+ダウンロードできるようにする(実機は Web Inspector 接続が使えない
+      前提のため、この 3 手段だけで結果を回収できる必要がある)。
+      digest 計算・突合ロジック(runOnePlan/runAll)は harnessMain.ts 側で不変。
+    -->
     <div id="results-root"></div>
+
+    <h2>結果 JSON</h2>
+    <div class="controls">
+      <button type="button" id="copy-json-btn">結果をコピー</button>
+      <button type="button" id="download-json-btn">結果をダウンロード</button>
+      <span id="copy-status"></span>
+    </div>
+    <textarea id="result-json" readonly spellcheck="false"></textarea>
+
     <script type="module" src="./harnessMain.ts"></script>
   </body>
 </html>

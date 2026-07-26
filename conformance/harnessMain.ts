@@ -126,11 +126,63 @@ function renderTable(results: { readonly [vectorId: string]: VectorRunResult }):
   }
   table.appendChild(tbody);
   root.appendChild(table);
+}
 
-  const pre = document.createElement("pre");
-  pre.id = "json-output";
-  pre.textContent = JSON.stringify(results, null, 2);
-  root.appendChild(pre);
+// ---------------------------------------------------------------------------
+// T14: 結果 JSON の画面表示/コピー/ダウンロード(先行計測計画 §7 の実 iOS Safari
+// 補完向け)。digest 計算・突合ロジック(runOnePlan/runAll、上)には一切触れない。
+// perf.html(bench/perfMain.ts)/tags.html と同じ「コピー + ダウンロード」の
+// 2 手段を用意する。
+// ---------------------------------------------------------------------------
+
+function requireElement<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (el === null) throw new Error(`要素 #${id} が見つからない`);
+  return el as T;
+}
+
+function flashStatus(statusEl: HTMLElement, text: string): void {
+  statusEl.textContent = text;
+  setTimeout(() => {
+    statusEl.textContent = "";
+  }, 3000);
+}
+
+function copyResultJson(textarea: HTMLTextAreaElement, statusEl: HTMLElement): void {
+  const text = textarea.value;
+  if (navigator.clipboard as unknown) {
+    navigator.clipboard.writeText(text).then(
+      () => {
+        flashStatus(statusEl, "コピーしました");
+      },
+      () => {
+        textarea.focus();
+        textarea.select();
+        flashStatus(statusEl, "コピー失敗: テキストエリアを手動で選択してください");
+      },
+    );
+    return;
+  }
+  textarea.focus();
+  textarea.select();
+  flashStatus(statusEl, "コピー失敗: テキストエリアを手動で選択してください");
+}
+
+function downloadResultJson(textarea: HTMLTextAreaElement, statusEl: HTMLElement): void {
+  const text = textarea.value;
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `kept-flame-harness-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 3000);
+  flashStatus(statusEl, "ダウンロードしました");
 }
 
 function main(): void {
@@ -138,6 +190,17 @@ function main(): void {
   // window へ公開(Playwright の e2e/conformance.spec.ts がここを読む)。
   (window as unknown as { __CONFORMANCE_RESULTS__: unknown }).__CONFORMANCE_RESULTS__ = results;
   renderTable(results);
+
+  const jsonArea = requireElement<HTMLTextAreaElement>("result-json");
+  const copyStatus = requireElement("copy-status");
+  jsonArea.value = JSON.stringify(results, null, 2);
+  requireElement<HTMLButtonElement>("copy-json-btn").addEventListener("click", () => {
+    copyResultJson(jsonArea, copyStatus);
+  });
+  requireElement<HTMLButtonElement>("download-json-btn").addEventListener("click", () => {
+    downloadResultJson(jsonArea, copyStatus);
+  });
+
   (window as unknown as { __CONFORMANCE_DONE__: boolean }).__CONFORMANCE_DONE__ = true;
 }
 

@@ -712,30 +712,58 @@ function showStatus(el: HTMLElement, text: string): void {
   el.textContent = text;
 }
 
+/** コピー/ダウンロードの結果を数秒だけ表示する(T14・両ボタン共通)。 */
+function flashStatus(statusEl: HTMLElement, msg: string): void {
+  statusEl.textContent = msg;
+  setTimeout(() => {
+    statusEl.textContent = "";
+  }, 3000);
+}
+
 function copyResultJson(textarea: HTMLTextAreaElement, statusEl: HTMLElement): void {
-  const done = (msg: string): void => {
-    statusEl.textContent = msg;
-    setTimeout(() => {
-      statusEl.textContent = "";
-    }, 3000);
-  };
   const text = textarea.value;
   if (navigator.clipboard as unknown) {
     navigator.clipboard.writeText(text).then(
       () => {
-        done("コピーしました");
+        flashStatus(statusEl, "コピーしました");
       },
       () => {
         textarea.focus();
         textarea.select();
-        done("コピー失敗: テキストエリアを手動で選択してください");
+        flashStatus(statusEl, "コピー失敗: テキストエリアを手動で選択してください");
       },
     );
     return;
   }
   textarea.focus();
   textarea.select();
-  done("コピー失敗: テキストエリアを手動で選択してください");
+  flashStatus(statusEl, "コピー失敗: テキストエリアを手動で選択してください");
+}
+
+/**
+ * 結果 JSON をファイルとしてダウンロードする(T14: 実機での結果回収手段。
+ * `docs/measurements/device-testing-guide.md` の「PC へ送る手段」の1つ)。
+ * クリップボード API が無い/権限が無い実機でもファイル共有アプリ経由で送れる。
+ */
+function downloadResultJson(textarea: HTMLTextAreaElement, statusEl: HTMLElement): void {
+  const text = textarea.value;
+  if (text.length === 0) {
+    flashStatus(statusEl, "先に計測を実行してください");
+    return;
+  }
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `kept-flame-perf-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 3000);
+  flashStatus(statusEl, "ダウンロードしました");
 }
 
 function requireElement<T extends HTMLElement>(id: string): T {
@@ -751,10 +779,14 @@ function main(): void {
   const gridRoot = requireElement("grid-root");
   const jsonArea = requireElement<HTMLTextAreaElement>("result-json");
   const copyButton = requireElement<HTMLButtonElement>("copy-json-btn");
+  const downloadButton = requireElement<HTMLButtonElement>("download-json-btn");
   const copyStatus = requireElement("copy-status");
 
   copyButton.addEventListener("click", () => {
     copyResultJson(jsonArea, copyStatus);
+  });
+  downloadButton.addEventListener("click", () => {
+    downloadResultJson(jsonArea, copyStatus);
   });
 
   runButton.addEventListener("click", () => {

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>実機計測パッケージ - 継ぐ火</title>
+    <!--
+      T14。dist/device/index.html。3ページ(perf.html / tags.html / harness.html)への
+      入口だけを持つ静的ページ。外部フォント/CSS/CDN は参照しない。
+      light テーマ固定(CLAUDE.md 絶対ルール。prefers-color-scheme 分岐を書かない)。
+      詳しい実施手順は docs/measurements/device-testing-guide.md を参照。
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        max-width: 640px;
+        background: #ffffff;
+        color: #24201c;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          "Hiragino Kaku Gothic ProN",
+          "Yu Gothic UI",
+          Meiryo,
+          sans-serif;
+        line-height: 1.7;
+      }
+      h1 {
+        font-size: 1.2rem;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        font-size: 0.9rem;
+        color: #5b534b;
+        margin: 0.25rem 0 1rem;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      li {
+        margin-bottom: 0.75rem;
+      }
+      a.card {
+        display: block;
+        padding: 0.9rem 1rem;
+        min-height: 44px;
+        border: 1px solid #8a857d;
+        border-radius: 8px;
+        background: #f4f2ee;
+        color: #24201c;
+        text-decoration: none;
+        font-size: 1rem;
+      }
+      a.card:active {
+        background: #ece8e1;
+      }
+      a.card .desc {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: 0.8rem;
+        color: #5b534b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>実機計測パッケージ — 継ぐ火</h1>
+    <p>
+      各ページはこのファイルと同じ場所にある単一 HTML です。手順は
+      <code>docs/measurements/device-testing-guide.md</code> を参照してください。
+    </p>
+    <ul>
+      <li>
+        <a class="card" href="./perf.html"
+          >計測 #1/#2/#8: オフライン復帰2秒予算 + メモリ + Worker転送
+          <span class="desc"
+            >「計測を開始する」を押すだけ。結果 JSON をコピー/ダウンロードできる。</span
+          ></a
+        >
+      </li>
+      <li>
+        <a class="card" href="./tags.html"
+          >計測 #9b: タグ記号の判読テスト(ピンチ縮小)
+          <span class="desc"
+            >画面をピンチ操作しながら記号が判読できる最小サイズを回答する。</span
+          ></a
+        >
+      </li>
+      <li>
+        <a class="card" href="./harness.html"
+          >計測 #7 補完: golden vector 実機 Safari 確認
+          <span class="desc"
+            >ページを開くだけで自動計算される。結果 JSON をコピー/ダウンロードできる。</span
+          ></a
+        >
+      </li>
+    </ul>
+  </body>
+</html>

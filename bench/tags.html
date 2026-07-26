@@ -301,10 +301,12 @@
         resize: vertical;
       }
       #copy-json-btn,
+      #download-json-btn,
       #reset-judge-btn {
         font-family: var(--kf-font-stack);
         font-size: 13px;
         padding: 8px 14px;
+        min-height: 44px; /* 最小タップ領域 GDD §6.6(T14 追加分もここに揃える) */
         margin-top: 8px;
         border-radius: 6px;
         border: 1.5px solid var(--kf-ink-body);
@@ -592,6 +594,7 @@
         <textarea id="result-json" readonly></textarea>
         <div>
           <button type="button" id="copy-json-btn">結果をコピー</button>
+          <button type="button" id="download-json-btn">結果をダウンロード</button>
           <span id="copy-status"></span>
         </div>
       </div>
@@ -1081,6 +1084,36 @@
         }
       }
 
+      // T14: 実機での結果回収手段としてファイルダウンロードも用意する
+      // (クリップボード API が使えない/権限が無い実機でもファイル共有アプリ経由で送れる)。
+      function downloadResultJson() {
+        var text = document.getElementById("result-json").value;
+        var status = document.getElementById("copy-status");
+        function showStatus(msg) {
+          status.textContent = msg;
+          setTimeout(function () {
+            status.textContent = "";
+          }, 3000);
+        }
+        if (!text) {
+          showStatus("先に判読テストを1件以上回答してください");
+          return;
+        }
+        var blob = new Blob([text], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "kept-flame-tags-" + stamp + ".json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () {
+          URL.revokeObjectURL(url);
+        }, 3000);
+        showStatus("ダウンロードしました");
+      }
+
       function fallbackCopy(text, showStatus) {
         var ta = document.getElementById("result-json");
         ta.focus();
@@ -1128,6 +1161,7 @@
         });
         document.getElementById("reset-judge-btn").addEventListener("click", resetJudge);
         document.getElementById("copy-json-btn").addEventListener("click", copyResultJson);
+        document.getElementById("download-json-btn").addEventListener("click", downloadResultJson);
 
         renderJudgeStage();
         renderResultJson();

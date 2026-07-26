@@ -477,3 +477,69 @@ HeadlessChrome 151 / Ryzen 7 5700X / `crossOriginIsolated: true`(§13-1 の副�
 2. **`$schema` を上げない判断(§13-1)は「既存テスト無改変」の制約を優先した結果**であり、境界文書の一般原則(§9「境界定義を変えたら必ず版を上げる」)とは矛盾しない(境界定義自体は不変)ものの、「観測条件が変わって過去値と比較不能になった」という意味では T11 の schema bump 理由と同種の事象である。`meta.crossOriginIsolated` を見ずに `$schema` だけで比較可能性を判断するコードを将来書くと誤る恐れがあるため、ここに明記した。
 3. **GC ポーズ判定の対象範囲**: 判定は B1(compute)の 11 試行全体に重なる GC 候補イベントを見ており、実際の「1 回の catch-up あたりのポーズ」ではなく「11 回のどれか 1 回ぶんの最大値」である。これは§8-1 が明記する構造的制約(区間内でサンプリングできない)の帰結であり、より厳密にしたい場合は 1 試行だけをトレースする専用モードが要るが、本タスクの判断基準(≤50ms/回)に対して 2 桁の余裕がある現状ではその追加実装の必要性は低いと判断した。
 4. **ヒープ増分ピークの「ピーク」の定義**: §8-1 の設計どおり「試行境界(前後)の差分」であって、真の意味でのヒープ使用量ピーク(試行中の最大瞬間値)ではない。真のピークは Chrome DevTools のヒーププロファイラ等、別ツールでの補完が必要(本タスクのスコープ外)。
+
+---
+
+## 14. T14(実機計測ページのパッケージング)実施記録(2026-07-27)
+
+対象: 計測 #1/#2/#8(`bench/perf.html`)・#9b(`bench/tags.html`)・#7 実 iOS Safari 補完(`conformance/harness.html`)を実機で開ける形にする。ユーザー向け実施手順は `docs/measurements/device-testing-guide.md`。**本節は §1〜§13 の境界定義を 1 つも変えていない**(4 区間の開始点/終了点・R1〜R8 は不変)。変わったのは配布形態(複数ファイルのビルド出力 → 単一 HTML)と、結果 JSON の画面表示/回収手段(コピーに加えダウンロードを追加)だけである。
+
+### 14-1. 単一ファイル化の方式(新規 npm 依存なし)
+
+`npm run bench:perf:build` / `npm run conformance:build` の出力(`dist/perf/` / `dist/harness/`)は、HTML + 別チャンクの JS という複数ファイル構成であり、`bench/perf.html` はさらに catch-up Worker 用の別チャンク(`assets/worker-*.js`)を持つ。これを `tools/packageDevice.ts`(post-build スクリプト・純関数を切り出して `tests/tools/packageDevice.test.ts` で固定)がテキスト操作でインライン化し、`dist/device/` に4ファイル(`perf.html`/`tags.html`/`harness.html`/`index.html`)を書き出す。新規 npm パッケージは追加していない(`vite-plugin-singlefile` 相当を自前実装)。
+
+- `<link rel="stylesheet">` → `<style>` へインライン化、`<link rel="modulepreload">` は削除、`<script src="...">` → インライン `<script>` へ本文を埋め込む(`</script` は `<\/script` へエスケープし HTML パーサの誤認を防ぐ)。
+- `bench/tags.html` は T13 時点で既に外部依存ゼロの単一 HTML だったため、ビルドを経由せずソースをそのまま検査つきでコピーするだけで足りた。
+- `conformance/harness.html` は `harnessData.json` を `import harnessDataJson from "./harnessData.json"` で静的 import しているため、Vite が JSON をバンドル本体へ JS オブジェクトとしてインライン化済みであり、**別ファイルの同梱は不要**だった(T14 依頼が想定していた「harnessData.json は埋め込みか同梱の2ファイル構成」のうち、埋め込み側がビルドの標準動作として既に実現していた)。
+- 生成物には `dist/device/index.html`(`tools/deviceIndex.template.html` をそのままコピー)を追加した。3ページへの入口リンクのみを持つ静的ページで、light 固定・外部参照ゼロ。
+- 自己完結の自己検査として `assertSelfContained()` を実装し、`<script src=...>` の残存・外部 `<link rel="stylesheet"|"modulepreload">` の残存・`http(s)://` を指す `src=`/`href=` 属性の残存の3点を検査してから書き出す(検査対象はビルド出力全体。JS 文字列内の `.src=` のようなプロパティ代入は「属性の直前は必ず空白」という HTML 構文上の性質を使って誤検出を避けている)。
+
+生成物サイズ(実測): `perf.html` 約117KB / `harness.html` 約122KB / `tags.html` 約42KB / `index.html` 約3KB。
+
+### 14-2. catch-up Worker の埋め込みで実測した file:// 特有の制約(重要)
+
+`src/platform/workerClient.ts`(変更禁止)は `new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "kept-flame-catchup" })` で Worker を起動する。Vite ビルド後、この `new URL(...)` は `/assets/worker-<hash>.js` という絶対パスを指すが、`file://` で開いた場合はこの絶対パスを解決できない。
+
+対処として、ビルド後の worker チャンク(実測: import/export を一切含まない完全に自己完結した平坦スクリプトであることを確認済み)をテキストとして読み込み、`new Blob([code], { type: "text/javascript" })` + `URL.createObjectURL` で作った Blob URL に差し替えた(`tools/packageDevice.ts` の `inlineWorkerReferences`)。
+
+**この過程で実機配布に直結する挙動を1つ発見した**: Chromium で `new Worker(blobUrl, { type: "module" })` を `file://` 起点のページから呼ぶと、`onerror` がメッセージ無しで無言に失敗する(`new Worker(blobUrl)`(type 省略 = classic)は同じ `file://` 起点で成功する)最小再現で確認した。埋め込み対象の worker チャンクは import/export を含まないため、`type: "module"` を落としても意味的に同一に動く。よって `tools/packageDevice.ts` は `new Worker(...)` の呼び出しから Blob URL への置換と同時に、オプション引数中の `type: "module"` だけを取り除く(`name` 等の他オプションは残す)。`worker.ts`/`workerClient.ts` のソース自体は無改変。
+
+この発見が無ければ `dist/device/perf.html` は `file://` で開いた瞬間に Worker が無言で失敗し、#1/#2/#8 のいずれも実機で測れなくなっていた。
+
+### 14-3. 結果 JSON の表示/コピー/ダウンロード(additive)
+
+T14 依頼の「3ページとも表示+コピー+ダウンロード」を確認した結果:
+
+| ページ | 対応状況(T14着手前) | 追加した内容 |
+|---|---|---|
+| `bench/perf.html` | 表示・コピーは T10 で実装済み | 「結果をダウンロード」ボタンを追加(`bench/perfMain.ts` の `downloadResultJson`)。計測境界・digest計算には触れていない |
+| `bench/tags.html` | 表示・コピーは T13 で実装済み | 「結果をダウンロード」ボタンを追加。判読テストのロジック(`TRIALS`/`renderJudgeStage`)は無改変 |
+| `conformance/harness.html` | `<pre>` での JSON 表示のみ(コピー/ダウンロード無し) | `<textarea id="result-json">` + 「結果をコピー」「結果をダウンロード」ボタンを追加(`conformance/harnessMain.ts`)。`runOnePlan`/`runAll`(digest 計算・突合ロジック)は無改変。`e2e/conformance.spec.ts` は `window.__CONFORMANCE_RESULTS__` のみを読むため無影響(全111件 pass 確認済み) |
+
+3ページとも `button { min-height: 44px }` をボタンへ適用(GDD §6.6 の最小タップ領域。`bench/tags.html` の判読ボタンは T13 時点で既に対応済みだったが、コピー/リセットボタンは対応漏れがあったため同時に揃えた)。3ページとも light 固定を維持(新規CSSでも `prefers-color-scheme` 分岐は書いていない)。
+
+### 14-4. 配信手段 × 計測項目の可否マトリクス(結論)
+
+詳細と実施手順は `docs/measurements/device-testing-guide.md` §1/§2 参照。要点のみ:
+
+- `measureUserAgentSpecificMemory()` と高分解能タイマは `crossOriginIsolated` を要求し、これは「secure context」+「COOP/COEPヘッダ」の両方が要る。`file://` はヘッダという概念自体が無いため常に `false`、LAN の `http://192.168.x.x` は secure context ですらないため常に `false`。
+- **isolation を得られる経路は3つ**: (a) Android の USB ポートフォワード経由 `http://localhost:PORT`(`bench/vite.perf.config.ts` が既に COOP/COEP を設定済み。iOS には Windows から使える同等手段が無い)、(b) Cloudflare Workers 静的アセットへの https 配信(`_headers` ファイルでヘッダ設定。全デバイス対応だがデプロイ作業が要る)、(c) 計測対象PC自身で `vite preview` を開く(Surfaceが計測用PCそのものの場合のみ)。
+- iOS Safari は経路によらず `measureUserAgentSpecificMemory` が存在しないため #2 は常に計測不可(先行計測計画 §6.3 の既定方針どおり)。
+- #9b(`tags.html`)と #7 補完(`harness.html`)は IndexedDB も isolation も使わないため、`file://` 直接オープンで要件を満たす。#1/#8(`perf.html`)は `file://` でも動作するが、1ms未満の区間はタイマ分解能の粗さで正確に測れない(実機は desktop よりずっと遅いため、実際に1ms未満に収まる区間は少ないと想定される)。
+
+### 14-5. スモークテスト
+
+新規 `bench/deviceSmoke.spec.ts` + `bench/playwright.device.config.ts`(Chromium・`page.goto("file://...")`、webServer を起動しない。既存の `playwright.config.ts`(#7・3エンジン)/`bench/playwright.perf.config.ts`(#1/#2・webServer経由)には一切触れていない)。`npm run device:smoke` で実行し、3件とも pass:
+
+1. `tags.html`: 凡例7件・格子48セル描画、判読テスト1件回答で結果JSON更新、外部ネットワークアクセスなし。
+2. `harness.html`: 37本の golden vector が全て `ok`、外部ネットワークアクセスなし。
+3. `perf.html`: `?autorun=1` で完走し `meta.crossOriginIsolated=false` / `memory.supported=false`(`unsupportedReason: "not-cross-origin-isolated"`) / `judgement.isOfficialVerdict=false` という想定どおりの縮退を確認、`worker.route="worker-draft-snapshot"` で Blob URL 化した Worker 経路も機能、外部ネットワークアクセスなし。
+
+既存の `npm run bench:perf:e2e`(2件)・`npm run conformance:e2e`(111件)は本タスクの変更後も全件 pass を確認済み。`npm test`(vitest、`tests/tools/packageDevice.test.ts` の新規14件を含む)は850件全pass。`npm run typecheck`/`npm run lint`/`npm run format` も全クリーン。
+
+### 14-6. 迷った点・未検証のまま持ち越した点
+
+1. **Android の USB ポートフォワード経由での `crossOriginIsolated` 有効化は未検証**(理論上は localhost の secure context 特例 + ヘッダ透過で成立するはずだが、実機での確認は行っていない)。
+2. **iOS Safari の `file://` での IndexedDB / Web Worker 挙動は未検証**。デスクトップ Chromium(headless/headed とも)では正常動作を確認済みだが、iOS 実機の挙動は本タスクのスコープ外(実機入手後に確認)。
+3. **GCポーズ(#2後半)は実機で自動収集する手段が無い**(CDP は Chromium かつ Playwright/DevTools 経由が前提)。実機計測ガイドはデスクトップ実測値(§13-4: 最大0.429ms、予算50msに対し2桁の余裕)を代替値として扱う方針を提案するに留めた(ADR側の判断基準変更を伴うため確定はユーザー承認事項・T16判断)。
+4. **Cloudflare Workers への一時デプロイは実行していない**(アカウント作業のためユーザー側。`docs/measurements/device-testing-guide.md` §10 にコマンド例のみ記載。`_headers` ファイル構文と `wrangler.toml` の `[assets]` 構成は Cloudflare 公式ドキュメント(`developers.cloudflare.com/workers/static-assets/headers/` 等)で確認済み)。
