@@ -117,11 +117,15 @@
 - [2026-07-26] **T9完了**(Sonnet・コミット79bacf8、Fable5検分: sim テスト20件pass確認): sim校正ハーネス。**計測結果(ローカルRyzen=Actions runnerより上振れ注意)**: **#3** measuredSecPerRun=0.0351s → 週次11000runsでshards=1・約6.4分(目標30分に大幅余裕)。**#4** 1分tick=0.3277s/run(ほぼ10倍) → shards=3・約20分でキャップ内。**#5** 想起困難1.875回/住民/週=**GDD目標1〜3回に適合**(パターン別0〜2.875、mastery0.20が過酷base_pを完全相殺するclamp挙動も検証)。決定論チェック(別プロセス2回でバイト同一)、粒度別評価×フルスケジューラ突合8seed全一致。bot2本のみ(計画§2.2遵守)。エージェント判断3点承認済み: shards除数=30分目標、RUN_TOTAL_TICKS固定で10倍化表現、#5はbot停止でパターン純度優先。
 - [2026-07-26] 3並行(裁定Opus+T8/T9 Sonnet)の実消費: 176k+356k+356k=約888k。package.json共有はEdit限定+直前再読の指示で衝突なし。全コミットpush済み(origin/main=9f8ffc9)。
 
+- [2026-07-26] **T15完了+#3/#4実runner合格**(Sonnet作成・Fable5検分・コミット4b74092、計測記録1e34871): `.github/workflows/calibrate.yml`(workflow_dispatch限定・contents:read・LLM要素ゼロ)。**実ubuntu-latest計測: #3=0.0487s/run→週次11000runsでshards=1・約8.9分、#4(1分tick)=0.4083s/run→shards=3・約25.0分。両方とも目標<30分・360分キャップ内で正式合格**。結果JSONは`docs/measurements/actions-*-2026-07-26.json`。
+  - **npm教訓(3コミット消費)**: Windows生成のpackage-lock.jsonはLinux側optional依存(@emnapi系=rolldownのwasm32-wasiフォールバック経由)を取りこぼし、npm ci が runner で失敗する。ゼロから再生成しても npm 11 arborist が@emnapi/runtimeを落とす再現性バグ。**根治=@emnapi 3点(core/runtime/wasi-threads)をdevDependenciesに直接ピン留め**(ce0e5e1)。`npm ci --dry-run`はWindows上では壊れたロックでも通ることがあり検出器として不完全。
+- [2026-07-26] **計測#12完了**(Sonnet・コミット80d20d5): オーサリング素工数。**reject 0回**(3カテゴリとも一発pass、手順書の6桁floor規則がlvCurve精度バグの再発を未然防止=手順書の有効性実証)。相対工数: event(28決定/84行)>>tech・facility(各8決定/10行)=GDD 13.2の上方修正方向と整合。**wall-clock未取得**(エージェントが打刻せず・報告書§0に開示、次回は打刻必須)→56〜150hの数値判定はT16へ。schema/event.ts=engine非接続スタンドアロン検証器(jsep ASTホワイトリストでGDD 12.2演算子を強制)。**新規GDD穴2件**: 距離帯(近郊/遠隔/深部)とステータス名の英字ID正本欠如(要ユーザー判断リストへ)。
+- [2026-07-26] **T10完了**(Opus・コミットdd32ab5、Fable5検分: 789件全pass): `docs/design/perf-boundaries.md`(4区間B1〜B4の境界定義・重複禁止R1〜R8・T11/T12差し替え点)+bench/perf.html一式。**B3=hydrate()やなくstate→ストア/派生値+ルートvnodeと定義**(SSR/prerender不在のため。hydrateFidelity:"placeholder"を機械可読で出力)。デスクトップ参考値: B2 0.3ms/B1 6.65ms/B3 ~0/B4 1.9ms(計9.55ms vs 2000ms、isOfficialVerdict:false=#1の合格ではない)。**T16持ち越し4件**: ①idbOpen 44.6msがADR-012(4)文言外 ②saveサイズ想定の曖昧(6KB vs 512KB目標、512KBでもrestore 2.6ms) ③compute warmupが中央値2.5倍(coldとwarmの併記必須) ④タイマ分解能0.1ms(COOP/COEPはT12担当)。sim/board.ts非再利用の判断(node束縛+施設2基では隣接コスト測れず)は妥当。
+
 ## 次のステップ
-1. ~~sc11裁定~~ / ~~T8~~ / ~~T9~~ **[2026-07-26完了]** 上記参照。①ローカル完結6項目のうち **#3/#4/#5(予備)/#7(3エンジン)が合格**。残りは #9a(ツール済み・計測実行のみ)と #12(エンティティ制作素工数)。
-2. **T10(bench/perf.html: 4サブ予算の計測境界設計=Opus→実装=Sonnet)** → T11(persistence+worker最小=Opus) → T12(GC/メモリ計測=Sonnet) → T14(実機パッケージング=Sonnet)のチェーン(計測#1/#2/#8)。
-3. **T15(calibrate.yml)**: T9完了+リポ作成済みで前提は揃った。ただし計画書§8-1系の承認とLLM非連携の最終確認をユーザーと(Actions実runnerでの#3/#4本計測)。
-4. **T16(計測実行+合否判定+工数再計算=Opus)**: T10〜T14後。#12(tech/facility/event各1本のオーサリング実測)はいつでも実施可。
-5. ユーザー保留(非ブロッキング): T5/T6の⑨件判断、T7の5件(spec§8)、**新規: GDD 6.3(c)辞書順選抜の恒久観測不能性(spec§8-9・(B)発見)**、damp色の彩度、期限切れPAT削除。
+1. ~~sc11裁定~~/~~T8~~/~~T9~~/~~T10~~/~~T15~~/~~#12~~ **[2026-07-26完了]**。①ローカル完結6項目の現況: **#3/#4=実runner正式合格、#5(予備)/#7(3エンジン)=合格、#12=相対データ取得(絶対時間はT16で再測)、#9a=ツール済み・計測実行のみ残**。
+2. **T11(persistence+worker最小=Opus)実行中** → T12(GC/メモリ計測=Sonnet) → T14(実機パッケージング=Sonnet)(計測#1/#2/#8の実機準備)。
+3. **T16(計測実行+判断基準突合+合否判定+Fallback提案+工数再計算=Opus)**: T12/T14後。持ち越し: T10の4件(idbOpen/saveサイズ/cold-warm/タイマ分解能)、#12絶対時間、#9aコントラスト計測実行。
+4. ユーザー保留(非ブロッキング): T5/T6の⑨件判断、T7の5件(spec§8)、GDD 6.3(c)恒久観測不能性(spec§8-9)、**#12新規2件(距離帯・ステータス名の英字ID正本欠如)**、damp色の彩度、期限切れPAT削除。実機計測(#1/#2/#8/#9b/#7 iOS補完)は実機入手・接続手段の確定待ち。
 3. **ADR-006改訂+imul置換 完全完了**(コミットbee9045/4c741d1/68a70c6): Math.imul許可リスト追加、xoshiro128.ts+fnv1a32.tsの両imul32をMath.imul直接使用に置換。**教訓として記録**: 単純置換は不可だった — 自前imul32は`>>>0`でunsigned返しだったがMath.imulはsigned int32を返す(ECMA-262)。fnv1a32のfoldByteはunsigned前提だったため公式ベクタ8件が失敗→`>>>0`追加で修正(xoshiro側は既存の`>>>0`があり無事)。**参照実装ベクタのテストが仕様差を即検出した実例** — 決定論プロジェクトで既知ベクタ突合を先に整備する方針の正しさの証拠。全248件pass。
 4. ユーザー判断待ち(非ブロッキング): ②damp色の彩度 ③期限切れPAT削除。
