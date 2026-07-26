@@ -1,0 +1,80 @@
+# 継ぐ火 -Kept Flame- 先行計測 #3/#4 校正ハーネス — 実 Actions runner 専用実行
+#
+# ADR-014 / 先行計測計画_ドラフト.md §5.2 #3・#4(measuredSecPerRun -> shards
+# 導出 -> 目標<30分 / 360分キャップ)をローカルRyzen実測ではなく実際の Actions
+# runner の wall-clock で計測する(計画書 §2.1 P3 行)。npm スクリプトを実行
+# するだけの純粋な計測ジョブであり、LLM/AIサービス連携は一切含まない
+# (CLAUDE.md 絶対ルール)。トリガーは workflow_dispatch のみ(Actionsを心臓に
+# しない方針・ONBOARDING.md §3)。
+
+name: Calibrate
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  calibrate:
+    name: "sim calibration (#3 baseline-10min / #4 fallback-1min)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: "Run calibration (#3 baseline-10min / #4 fallback-1min)"
+        run: npm run sim:calibrate
+      - name: Run recall-frequency preliminary check (#5)
+        run: npm run sim:recall-freq
+      - name: Write calibration summary
+        if: always()
+        run: |
+          node <<'EOF'
+          (function () {
+            const fs = require("node:fs");
+            const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+            const reportPath = "sim/output/calibrate-report.json";
+            if (!fs.existsSync(reportPath)) {
+              fs.appendFileSync(
+                summaryPath,
+                "# Calibration summary\n\ncalibrate-report.json が見つからない" +
+                  "(sim:calibrate 失敗の可能性)。\n",
+              );
+              return;
+            }
+            const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+            const row = (key) => {
+              const r = report[key];
+              const w = r.weekly;
+              return `| ${r.label} | ${r.coarseTickMinutes} | ${r.measuredSecPerRun.toFixed(4)} | ` +
+                `${w.shards} | ${(w.predictedWallClockSec / 60).toFixed(1)} | ` +
+                `${w.meetsGoal ? "OK" : "NG"} | ${w.withinCap ? "OK" : "NG"} |`;
+            };
+            const lines = [
+              "# Calibration summary (先行計測計画 §5.2 #3/#4)",
+              "",
+              "| label | coarseTickMinutes | measuredSecPerRun(s) | weekly shards | " +
+                "weekly wall-clock(min) | <30min目標 | <360minキャップ |",
+              "|---|---|---|---|---|---|---|",
+              row("baseline"),
+              row("fallback"),
+            ];
+            fs.appendFileSync(summaryPath, lines.join("\n") + "\n");
+          })();
+          EOF
+      - name: Upload sim output artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-output
+          path: sim/output/*.json
+          if-no-files-found: error
+          retention-days: 30
