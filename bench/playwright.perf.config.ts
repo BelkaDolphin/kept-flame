@@ -15,6 +15,10 @@
 // 目的は**性能値の判定ではなくスモーク**である: Worker 経路と persistence 経路が
 // 実ブラウザで実際に走り、結果 JSON が出ることを確かめるだけ。数値の合否は
 // 計測 #1 の本計測(T16・実機)の担当。
+//
+// [T12] `gcTrace.spec.ts` を追加(計測 #2 後半・CDP トレース)。webServer は
+// perfSmoke と共有する(同じ preview サーバに対して 2 spec が順に走るだけ)。
+// こちらも Chromium 限定(CDPSession が使えるのは Chromium のみ)。
 // ---------------------------------------------------------------------------
 
 import { dirname, resolve } from "node:path";
@@ -28,7 +32,7 @@ const BASE_URL = `http://localhost:${String(PERF_PORT)}`;
 
 export default defineConfig({
   testDir: HERE,
-  testMatch: "perfSmoke.spec.ts",
+  testMatch: ["perfSmoke.spec.ts", "gcTrace.spec.ts"],
   fullyParallel: false,
   retries: 0,
   reporter: [["list"]],

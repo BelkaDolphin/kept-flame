@@ -31,11 +31,23 @@ export type Verdict = "pass" | "fail";
  * B2 が `src/platform/persistence.ts` 経路(integrityChecksum 検証を内側に含む)に
  * 差し替わった。版 1(T10)の B1/B2 と**数値は比較できない**ため版を上げる。
  * 境界の定義そのものは T10 が設計文書 §7 で先に決めたとおりで変えていない。
+ *
+ * **T12 は版を上げない**(据え置き = 2)。理由: 4 区間の境界定義は 1 つも
+ * 変えていない(設計文書 §8「区間の外側にサンプリング点を足すだけ」)うえ、
+ * T12 タスク指示が既存テスト(`bench/perfSmoke.spec.ts` の `$schema` 完全一致
+ * 断言)を無改変で通すことを要求している。`crossOriginIsolated` の副作用
+ * (T12 で `true` になり `performance.now()` の分解能が上がる)は、
+ * **既存の `meta.crossOriginIsolated` フィールドそのものが機械可読な区別手段**
+ * になる(値が T10/T11 の `false` から T12 の `true` へ変わるため、これを
+ * 読めば B3/B4 の 0ms 表記が分解能由来か実測かを判別できる)。設計文書 §13-1 に
+ * この判断を記録した。追加フィールドは `memory`(#2 前半・ヒープ増分)のみ
+ * (additive)。GC ポーズ(#2 後半)は CDP トレースでしか取れないため
+ * `bench/gcTrace.spec.ts` 側の別 JSON。
  */
 export const PERF_RESULT_SCHEMA = "kept-flame/bench/perf-boundaries/2";
 
 /** 設計文書の版(この実装が従っている境界定義の日付)。 */
-export const BOUNDARY_SPEC_VERSION = "2026-07-26+t11";
+export const BOUNDARY_SPEC_VERSION = "2026-07-27+t12";
 
 /** 計画 §5.1 の暫定 K。**根拠は無い**(実機校正で置換するまでの仮置き)。 */
 export const PROVISIONAL_DEVICE_K = 5;
@@ -374,6 +386,138 @@ export interface PerfWorkerReport {
   readonly snapshotEntityCount: number;
 }
 
+// --- 5. メモリ計測(計測 #2 前半・T12) --------------------------------------
+//
+// 境界定義の正は `docs/design/perf-boundaries.md` §8。
+// `performance.measureUserAgentSpecificMemory()` は async で GC を誘発しうる
+// ため、4 区間の内側や区間間には置けない。サンプリングできるのは**試行の境界**
+// (試行開始前 `before` / B4 終了+アンマウント後 `after`)だけであり、
+// したがってヒープ増分は「その試行の B2+B1+B3+B4+アンマウント全体」を跨いだ
+// 差分になる(B1 単独には絞れない — 設計文書 §8-1 が明記する構造的制約)。
+
+/** `MeasureMemory` API の 1 スコープぶんの内訳(同一 agent cluster を集計)。 */
+export interface PerfMemoryScopeBytes {
+  /** `attribution[0].scope === "Window"` の合計。 */
+  readonly windowBytes: number;
+  /** `attribution[0].scope === "Worker"` の合計(catch-up Worker 分)。 */
+  readonly workerBytes: number;
+  /** 上記 2 スコープ以外(cross-origin-aggregated 等)の合計。 */
+  readonly otherBytes: number;
+  /** API が返す `bytes`(全スコープ合計・上 3 値の和と一致するはず)。 */
+  readonly totalBytes: number;
+}
+
+/** 1 試行ぶんの前後測定。 */
+export interface PerfMemorySample {
+  readonly trial: number;
+  readonly warmup: boolean;
+  readonly before: PerfMemoryScopeBytes;
+  readonly after: PerfMemoryScopeBytes;
+  readonly deltaTotalBytes: number;
+}
+
+/**
+ * `measureUserAgentSpecificMemory` の可否 + 増分の要約。
+ *
+ * API 不在(Firefox/WebKit)または非 cross-origin-isolated な環境では
+ * `supported: false` とし、増分系のフィールドは全部 `null` にする
+ * (計画 §6.3「iOS のメモリ計測に関する正直な制限」と同じ扱い方)。
+ */
+export interface PerfMemoryReport {
+  readonly supported: boolean;
+  /**
+   * 不可の理由。機械可読(判定ロジックが分岐できる固定文字列)。
+   * - `"not-cross-origin-isolated"` / `"unsupported-api"`: 呼ぶ前の feature
+   *   detection で判定できたケース(計画 §6.3 の Firefox/WebKit 等)。
+   * - `"measurement-error"`: `typeof === "function"` は真だったが**呼び出しが
+   *   例外/reject で終わった**ケース。実測で確認済み: Playwright の headless
+   *   Chromium(151・new headless 含む)は `crossOriginIsolated: true` でも
+   *   `measureUserAgentSpecificMemory()` が `SecurityError`
+   *   (`"... is not available"`)を投げる(headed では成功する)。ヘッドレス
+   *   自動化に固有の既知の制約であり、実ブラウザ(手動操作・実機)では発生しない
+   *   想定 — が「発生しない」と決め打ちにせず、起きたら理由付きで報告する。
+   * - `"not-measured"`: API 判定すら行っていない入力(`buildPerfResult` の
+   *   `memory` 省略時のデフォルト値。テストフィクスチャ用)専用。
+   */
+  readonly unsupportedReason:
+    "not-cross-origin-isolated" | "unsupported-api" | "measurement-error" | "not-measured" | null;
+  /** `"measurement-error"` のときの生メッセージ(デバッグ用・機械可読ではない)。 */
+  readonly errorMessage: string | null;
+  readonly samples: readonly PerfMemorySample[];
+  /** 計測試行(ウォームアップ除く)の中での最大増分。「ピーク」(ADR-029(1))。 */
+  readonly peakDeltaBytes: number | null;
+  readonly peakDeltaMb: number | null;
+  readonly medianDeltaBytes: number | null;
+  readonly warmupDeltaBytes: number | null;
+}
+
+/**
+ * `PerfResultInput.memory` を省略したときのデフォルト(`worker` の `?? null` と
+ * 同じ「新規追加フィールドで既存呼び出し元を壊さない」方針・T11 の
+ * `idbOpenWarmMs`/`idbFirstTouchMs` 等の optional 化と同じ前例に倣う)。
+ */
+export const UNMEASURED_MEMORY_REPORT: PerfMemoryReport = {
+  supported: false,
+  unsupportedReason: "not-measured",
+  errorMessage: null,
+  samples: [],
+  peakDeltaBytes: null,
+  peakDeltaMb: null,
+  medianDeltaBytes: null,
+  warmupDeltaBytes: null,
+};
+
+/**
+ * メモリ計測結果を要約する(純関数・vitest 対象)。
+ *
+ * `samples` が空 or `supported: false` なら増分系は全部 `null`。
+ */
+export function buildMemoryReport(
+  samples: readonly PerfMemorySample[],
+  supported: boolean,
+  unsupportedReason: PerfMemoryReport["unsupportedReason"],
+  errorMessage: string | null = null,
+): PerfMemoryReport {
+  if (!supported || samples.length === 0) {
+    return {
+      supported: false,
+      unsupportedReason,
+      errorMessage,
+      samples,
+      peakDeltaBytes: null,
+      peakDeltaMb: null,
+      medianDeltaBytes: null,
+      warmupDeltaBytes: null,
+    };
+  }
+  const measured = samples.filter((s) => !s.warmup);
+  const warmup = samples.find((s) => s.warmup);
+  if (measured.length === 0) {
+    return {
+      supported: true,
+      unsupportedReason: null,
+      errorMessage: null,
+      samples,
+      peakDeltaBytes: null,
+      peakDeltaMb: null,
+      medianDeltaBytes: null,
+      warmupDeltaBytes: warmup === undefined ? null : warmup.deltaTotalBytes,
+    };
+  }
+  const deltas = measured.map((s) => s.deltaTotalBytes);
+  const peak = Math.max(...deltas);
+  return {
+    supported: true,
+    unsupportedReason: null,
+    errorMessage: null,
+    samples,
+    peakDeltaBytes: peak,
+    peakDeltaMb: roundMs(peak / (1024 * 1024)),
+    medianDeltaBytes: Math.round(median(deltas)),
+    warmupDeltaBytes: warmup === undefined ? null : warmup.deltaTotalBytes,
+  };
+}
+
 export interface PerfResultInput {
   readonly meta: PerfMeta;
   readonly workload: PerfWorkload;
@@ -383,6 +527,8 @@ export interface PerfResultInput {
   readonly sensitivity: PerfSensitivity;
   readonly observedDomNodeCount: number;
   readonly worker?: PerfWorkerReport;
+  /** 省略時は {@link UNMEASURED_MEMORY_REPORT}(既存呼び出し元を壊さないための既定値)。 */
+  readonly memory?: PerfMemoryReport;
 }
 
 export interface PerfResult {
@@ -410,6 +556,8 @@ export interface PerfResult {
   readonly supplementary: PerfSupplementary;
   readonly sensitivity: PerfSensitivity;
   readonly worker: PerfWorkerReport | null;
+  /** ヒープ増分(計測 #2 前半・T12)。GC ポーズは別 JSON(`bench/gcTrace.spec.ts`)。 */
+  readonly memory: PerfMemoryReport;
   readonly observed: {
     readonly domNodeCount: number;
     readonly domNodeCountMatchesExpected: boolean;
@@ -429,7 +577,13 @@ const JUDGEMENT_NOTE =
   "K_device を実測して置き換えるまで #1 を合格と宣言してはならない。" +
   "totalMs は試行ごとの 4 区間合計の中央値、sumOfMediansMs は区間別中央値の和(別物)。" +
   "T11 以降 B1(compute)は Worker 往復込みの computeWallMs、B2(restore)は " +
-  "integrityChecksum 検証込みであり、T10($schema .../1)の値とは比較できない。";
+  "integrityChecksum 検証込みであり、T10($schema .../1)の値とは比較できない。" +
+  "T12 で meta.crossOriginIsolated=true(COOP/COEP)になりタイマ分解能が0.1ms丸めから" +
+  "高分解能へ変わったため、crossOriginIsolated=false で取った過去実測の B3/B4(0ms) と" +
+  "この結果の B3/B4 は比較できない($schema は据え置きなので meta.crossOriginIsolated を" +
+  "見て判別すること)。ヒープ増分ピーク(#2)は『試行境界(前後)の差分』であって" +
+  "catch-up 単独のピークではない(区間内でサンプルできないための構造的制約・" +
+  "perf-boundaries.md §8)。";
 
 /**
  * 結果 JSON を組み立てる(純関数)。
@@ -458,6 +612,7 @@ export function buildPerfResult(input: PerfResultInput): PerfResult {
     supplementary: input.supplementary,
     sensitivity: input.sensitivity,
     worker: input.worker ?? null,
+    memory: input.memory ?? UNMEASURED_MEMORY_REPORT,
     observed: {
       domNodeCount: input.observedDomNodeCount,
       domNodeCountMatchesExpected: input.observedDomNodeCount === input.workload.expectedDomNodes,

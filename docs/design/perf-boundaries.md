@@ -393,3 +393,87 @@ HeadlessChrome 151 / Ryzen 7 5700X / `crossOriginIsolated: false`(= **0.1ms 刻�
 **分解能の注意**: `requestPost` / `transport` / `checksum` / `parse` / B3 全体は 0.1ms 刻みの下に落ちており、「0」は「0.1ms 未満」以上のことを言っていない(§2「タイマ分解能」)。T12 が COOP/COEP を入れれば実数値が取れる。
 
 **B3 が 0 になった理由(T10 との差)**: T10 は B1 で作った `AdvanceContext` を B3 で使い回していた。T11 では B1 が Worker へ移ったため、Worker が計算済みの隣接乗数を完了メッセージで返し、B3 は `restoreAdvanceContext()` で繋ぎ直すだけにしてある(§12-3)。B3 に engine の再計算を入れないための措置であり、§3 B3 の定義どおり。
+
+---
+
+## 13. T12(GC/メモリ)実施記録(2026-07-27)
+
+§8 で先に決めた「4 区間の内側は変えない・区間の外側にサンプリング点を足すだけ」をそのまま実装した記録である。**§3 の区間定義・§2 の R1〜R8 は 1 つも変えていない。**
+
+### 13-1. COOP/COEP とタイマ分解能(§8-2 の実施)
+
+`bench/vite.perf.config.ts` の `preview.headers` に `Cross-Origin-Opener-Policy: same-origin` / `Cross-Origin-Embedder-Policy: require-corp` を追加した(build には headers の概念が無いので preview のみ)。全リソースが同一オリジンから配信されるため、COEP が要求する `Cross-Origin-Resource-Policy` を個別リソースへ追加する必要は無かった(CORP は異なるオリジンからの `no-cors` 読込にのみ効く)。
+
+**副作用の実測**: `crossOriginIsolated: true` になり、§2「タイマ分解能」で予告したとおり `performance.now()` の分解能が 0.1ms 丸め(T10/T11)から高分解能(実測で 1µs 未満まで見える桁)へ上がった。B3 `hydrate` の中央値が T11 の `0ms`(=分解能未満)から **`0.033ms`** という実数値として初めて観測できた(§13-4)。これは T12 が本タスクとして狙っていた副産物そのものである。
+
+**`$schema` は版を上げない(`.../2` のまま)**。理由: (a) §8 のとおり 4 区間の境界定義そのものは変えていない(T11 のように「B1/B2 の中身が Worker/persistence 経路へ差し替わった」ような構造変更ではなく、単にタイマの精度が上がっただけ)。(b) 本タスクの指示が `bench/perfSmoke.spec.ts`(既存テスト)を無改変で通すことを要求しており、同テストは `$schema` の完全一致を断言している。版を上げるとこの既存断言が機械的に壊れる。(c) 判別に必要な情報は既存の `meta.crossOriginIsolated` フィールドがそのまま担える(T10/T11 の `false` → T12 以降の `true`)。よって「$schema 更新」と「`crossOriginIsolated` フィールドでの機械可読な区別」のうち**後者を採った**。`bench/perfStats.ts` の `PERF_RESULT_SCHEMA` 定義コメントと `JUDGEMENT_NOTE` にこの判断根拠を明記した。
+
+### 13-2. ヒープ増分計測(計測 #2 前半)の実装(§8-1 の実施)
+
+`bench/perfMain.ts` の試行ループへ、`runTrial()`(B2→B1→B3→B4→アンマウント)の**呼び出し前後**だけで `performance.measureUserAgentSpecificMemory()` を前後取得するコードを追加した。区間の内側・区間間には一切置いていない(R2/R4 遵守)。`breakdown` は `attribution[0].scope` で `windowBytes` / `workerBytes` / `otherBytes` に仕分けて全試行ぶんを結果 JSON の `memory.samples` に残す(§8 冒頭の指示どおり window/worker 別)。
+
+**実測で判明した想定外の分岐(重要)**: API の有無を `typeof === "function"` で判定するだけでは不十分だった。**Playwright の headless Chromium(151・new headless 含む)は `crossOriginIsolated: true` かつ関数が存在していても、実際に呼ぶと `SecurityError`(`"...is not available"`)を投げる**。同一ページを `headless: false` で開くと成功する(`bytes` 実測値が返る)ことを最小再現(COOP/COEP のみを立てた素の HTML)と実際の `bench/perf.html` の両方で確認した。これは Puppeteer 側でも既知の報告がある headless 自動化固有の制約であり(参照: puppeteer/puppeteer#8258)、実ブラウザの手動操作や実機では発生しない想定である。
+
+対処として `sampleMemoryScopeSafe()` で呼び出しを try/catch し、失敗してもベンチ全体を継続させたうえで `memory.supported=false` / `memory.unsupportedReason="measurement-error"` / `memory.errorMessage=<生メッセージ>` を機械可読に残す(計画 §6.3 の「null + 理由」方式を「呼び出し失敗」のケースにも拡張)。`unsupportedReason` は次の 4 値: `"not-cross-origin-isolated"` / `"unsupported-api"`(計画 §6.3 の Firefox/WebKit 等)/ `"measurement-error"`(今回実測で追加)/ `"not-measured"`(`PerfResultInput.memory` 省略時のテストフィクスチャ用デフォルト。`bench/perfMain.ts` は返さない)。
+
+### 13-3. CDP 経由の GC ポーズ抽出(計測 #2 後半)の実装(§8-3 の実施)
+
+新規 `bench/gcTrace.spec.ts`(Playwright chromium 限定・`bench/playwright.perf.config.ts` の `testMatch` に追加)。Playwright の `CDPSession`(`context.newCDPSession(page)`)経由で生の CDP `Tracing` ドメインを直接叩く(新規 npm 依存なし・`chrome-devtools-protocol` パッケージは追加していない)。カテゴリ `disabled-by-default-v8.gc` / `disabled-by-default-v8.gc_stats` / `disabled-by-default-devtools.timeline` / `blink.user_timing` を `Tracing.start` の `traceConfig.includedCategories` に指定し、`Tracing.dataCollected` イベントでチャンクを蓄積する。
+
+**mark/measure を使った区間切り出し(§8-3 の設計どおり)**: `bench/perfMain.ts` が T10 の時点から発行している `kf:compute` measure(名前は固定・変更禁止)が `blink.user_timing` カテゴリのトレースイベントとして記録されることを実測で確認した。`performance.mark(name, { startTime })` に渡した `startTime` がそのままトレースイベントの `ts` として使われる(呼び出し時刻ではなく指定した仮想時刻)ことも実測で確認済み。試行は逐次実行なので `kf:compute` の窓は互いに素であり、時系列に並べた先頭がウォームアップ試行になる(トレースの `args.detail` に実際は `{"trial":-1}` 等の trial 番号が載ることも確認したが、実装は時系列の事実だけに依拠していて `detail` の中身には依存しない)。
+
+**実測で発見した罠(GC 候補イベントの選別)**: 当初は「`disabled-by-default-v8.gc` / `gc_stats` カテゴリのイベントは名前を問わず全部 GC」という設計で実装したが、実トレースを検分した結果 **`UserBlocking` という名前のイベントが begin 3 件 / end 2 件と対応が壊れており**、単純な LIFO begin/end 対応付けにかけると実在しない 308ms 相当の偽ポーズを生むことを実測で発見した(`IsLoading` も同様に GC フェーズとは考えにくい名前で、対応関係の性質が他の正規 GC フェーズ名と異なる)。他の全名前(`Scavenge` / `Marking` / `IncrementalMarking` / `Incremental Mark-Compact` / `Sweeping` / `Atomic` / `ObservablePause` / `MarkCompactCollector::EvacuatePagesInParallel` / `Evacuator::EvacuatePage` / `FullEvacuator::RawEvacuatePage` / `LiveObjectVisitor::VisitMarkedObjects[NoFail]` / `RememberedSetUpdatingItem::Process` / `V8.GCMarkTransitiveClosureFixpoint` / `V8.GCReachTransitiveClosureWithEmbedder`)は begin/end(または complete)の対応が正しく取れており、名前も V8 の GC 内部用語と一致する。よって `UserBlocking` / `IsLoading` の 2 つだけを名指しで除外する方針にした(`bench/gcTrace.spec.ts` の `V8_GC_NON_PAUSE_NAMES`)。**推測で決め打ちにせず、実測(begin/end 件数の不一致)で確認してから除外した**(CLAUDE.md「幻覚防止」への対応)。`disabled-by-default-devtools.timeline` カテゴリの `MajorGC`/`MinorGC` は今回のワークロードでは 1 度も観測されなかった(Chromium 151 はこのワークロードでは v8.gc 側の低レベルフェーズ名だけを流す)。
+
+**ウォームアップと計測試行の分離**: GC ポーズも B1〜B4 の中央値方式(§2)に倣い、ウォームアップ試行(cold start・JIT 未暖機)の GC ポーズを判定から除外し、`gc.maxPauseWarmupMs` として参考値で別掲した。判定(`judgement.gcPauseVerdict`)は**計測試行(ウォームアップ除く)の最大値**で行う。
+
+**正直な限界(コード冒頭コメント §3 に明記)**:
+- トレース区間は B1 の 11 試行(ウォームアップ含む)全体であり、1 回の catch-up の「ピーク」ではなく全試行を通した最大値。
+- `Incremental Mark-Compact` のような「サイクル全体」を表す名前の duration は非停止(並行/インクリメンタル)区間を含みうるため、真の stop-the-world 時間より大きく出る可能性がある。ネストされた `Atomic`/`ObservablePause` の方が実態に近い可能性があるが、どちらが正しいかは判定せず両方とも `observedEventNames` 付きの参考値として残す。
+- 0 件観測は「合格の強い根拠」にはならない(ワークロードが軽すぎて GC 自体が誘発されていない可能性)。
+
+### 13-4. デスクトップ実測(参考値・#2 の合否ではない)
+
+HeadlessChrome 151 / Ryzen 7 5700X / `crossOriginIsolated: true`(§13-1 の副作用で高分解能タイマ)。`npm run bench:perf:e2e` で 3 回連続実行し値の桁が安定していることを確認した(以下は代表 1 回分)。
+
+**#2 前半・ヒープ増分**: `memory.supported=false`, `unsupportedReason="measurement-error"`(§13-2 のとおり headless Chromium 自動化の既知の制約)。**この環境では数値を取得できなかった**。切り分けのため素の COOP/COEP ページで `headless:false` を試したところ成功する(`bytes` 実測値が返る)ことを確認したが、`bench/perf.html` 自体を `headless:false` で実行しようとすると、本エージェント実行環境(対話的デスクトップセッションを持たないサンドボックス疑い)では警告なしに `page.waitForFunction` が 150 秒でタイムアウトし、ウォームアップ試行から一切進まなかった(20 秒刻みで `status` を追跡し `"ウォームアップ試行を実行中…"` のまま停止していることを確認済み。visibilityState は `"visible"` で document 非表示によるスロットリングではない)。原因は catch-up Worker からの応答が返っていないことまでは切り分けたが、それ以上の深掘り(ヘッドフル自動化特有の Worker スケジューリング問題の特定)は本タスクのスコープ外と判断し停止した(CLAUDE.md「同じアプローチを3回試して失敗したら停止」)。**コード自体は正しく動作を分岐させることを確認済み**(headless では `measurement-error` を検出してベンチ全体を継続、素のページでは `headless:false` で実際に `bytes` が返ることを最小再現で確認)。実機/実ブラウザでの手動実行(T14)では通常のユーザー操作なので、この制約自体は発生しない見込み。**ヒープ増分ピークの実数値取得は T14/実機での宿題として持ち越す。**
+
+**#2 後半・GC ポーズ**(`bench/gcTrace.spec.ts` 実測・B1 の 11 試行を通した CDP トレース):
+
+| 指標 | 値 |
+|---|---|
+| 観測された GC 候補イベント名 | `Atomic` / `Evacuator::EvacuatePage` / `FullEvacuator::RawEvacuatePage` / `Incremental Mark-Compact` / `IncrementalMarking` / `LiveObjectVisitor::VisitMarkedObjects[NoFail]` / `MarkCompactCollector::EvacuatePagesInParallel` / `Marking` / `ObservablePause` / `RememberedSetUpdatingItem::Process` / `Scavenge` / `Sweeping` / `V8.GCMarkTransitiveClosureFixpoint` / `V8.GCReachTransitiveClosureWithEmbedder` |
+| GC 候補イベント総数(全 11 試行) | 1,072 件(ウォームアップ 114 / 計測 10 試行 683) |
+| 最大ポーズ(ウォームアップ) | **0.333 ms**(参考値) |
+| **最大ポーズ(計測10試行・判定値)** | **0.429 ms** |
+| 中央値(計測10試行) | 0.057 ms |
+| 最大ポーズ(ページ全体・B1 外含む) | 43.389 ms(参考。初期ロード等 B1 外での 1 回) |
+| 判定 | `pass`(≤50ms/回に対し **2 桁の余裕**) |
+
+**計測 #1 の副産物(crossOriginIsolated=true 下での B1〜B4 再計測)**:
+
+| 区間 | T11(`crossOriginIsolated:false`) | T12(`crossOriginIsolated:true`) | 差の性質 |
+|---|---|---|---|
+| B2 restore | 0.3 ms | **0.28 ms** | 実質同じ(内訳が 0.1ms 未満まで見えるように: idbGet 0.162 / deserialize 0.065 / parse 0.02 / checksum 0.01 / callOverhead 0.01) |
+| B1 compute | 7.4 ms | **7.365 ms** | 実質同じ(内訳: workerAdvance 7.117 / workerContextBuild 0.072 / transport 0.1 / requestPost 0.027) |
+| B3 hydrate | **0 ms**(分解能未満) | **0.033 ms** | **T12 で初めて実数値が見えた**(§13-1 の狙いどおり。viewModel 0.03 / vnode 0) |
+| B4 mount | 1.8 ms | **1.747 ms** | 実質同じ(render 0.605 / layout 1.112) |
+| 合計(試行ごと4区間和の中央値) | 9.7 ms | **9.403 ms** | 誤差の範囲 |
+
+補助: `workerBootMs` 8.03 ms / `contentTransferMs` 0.245 ms / `idbFirstTouchMs` 2.59 ms / `idbOpenMs`(cold)0.745 ms / `idbOpenWarmMs` 0.125 ms / `idbPutMs` 8.68 ms / `saveEncodeMs` 0.925 ms / `contentLoadMs` 1.905 ms。セーブ 6,160 B(entity 37・`integrityChecksum` 3493417291・T11 と同一 = 決定論に影響なし)。
+
+**解釈**: B1/B2/B4 の中央値そのものは T11(0.1ms 丸め)とほぼ変わらない(丸めの前後で誤差の範囲)。**B3 だけが「0.1ms 未満」から「0.033ms」という実数値になった**のが COOP/COEP 導入の直接的な観測効果であり、§2 が予告していた「T12 以降は B3/B4 の実数値が初めて取れる」を実証した形になる。`idbFirstTouchMs` が T11(43.6ms)から今回(2.59ms)へ大きく下がっているのは crossOriginIsolated 化の影響ではなく、実行環境(初回 DB 作成コストは OS/ディスクキャッシュ状態に依存)の揺らぎであり、既知の非決定要因として §11-(1)/§12-4 の議論を変えるものではない。
+
+### 13-5. Firefox/WebKit での縮退挙動
+
+`bench/perf.html` は Chromium 系専用のベンチではなく素の Web ページなので、理論上は Firefox/WebKit でも開ける。ただし:
+
+- **`bench:perf:e2e` は Chromium 限定のまま**(`bench/playwright.perf.config.ts` の `projects` は変更していない)。理由は元から §2「タイマ分解能」/T11 コメントに書かれているとおり、Firefox/WebKit は非 cross-origin-isolated 環境で `performance.now()` を 1ms へ丸めるため #1 の対象外という既定方針を継続するだけであり、T12 が新たに変えた点ではない。
+- `performance.measureUserAgentSpecificMemory` は Chromium 系 API であり(計画 §6.3)、Firefox/WebKit では `typeof !== "function"` になる。この場合 `memoryUnsupportedReason()` は `globalThis.crossOriginIsolated` を見て `"not-cross-origin-isolated"` か `"unsupported-api"` を返す(COOP/COEP を Firefox/WebKit で有効にしても API 自体が無いので後者になる)。**未実行だが、コードパスとしては `bench/perfMain.ts` の `getMeasureMemoryFn()` が `null` を返すだけで、ベンチ全体は正常に完走する**(該当分岐は `tests` 側で直接は踏んでいないが、`measureMemoryFn === null` の分岐は headless Chromium 実行でも `unsupported-api`/`not-cross-origin-isolated` ではなく `measurement-error` 経路を通っているため、`null` 分岐自体は実行されていない。**この点は未検証のまま**であり、Firefox/WebKit 実機での確認は T14/T16 へ持ち越す)。
+- CDP の `Tracing`/`CDPSession` は Chromium 専用機能なので、`bench/gcTrace.spec.ts` は最初から Chromium 限定として設計している(§13-3)。Firefox/WebKit で GC ポーズを取る手段は本タスクの範囲外(計画書にも代替手段の記載はない)。
+
+### 13-6. 迷った点・未確定点
+
+1. **§13-4 の「headless では動くが headed で止まる」現象の根本原因は未特定**。Worker からの応答が返っていないところまでは切り分けたが、それ以上は本タスクのスコープ外と判断して打ち切った。T14(実機パッケージング)または実際のユーザー操作(常に headed)では発生しない可能性が高いが、断定はしない。
+2. **`$schema` を上げない判断(§13-1)は「既存テスト無改変」の制約を優先した結果**であり、境界文書の一般原則(§9「境界定義を変えたら必ず版を上げる」)とは矛盾しない(境界定義自体は不変)ものの、「観測条件が変わって過去値と比較不能になった」という意味では T11 の schema bump 理由と同種の事象である。`meta.crossOriginIsolated` を見ずに `$schema` だけで比較可能性を判断するコードを将来書くと誤る恐れがあるため、ここに明記した。
+3. **GC ポーズ判定の対象範囲**: 判定は B1(compute)の 11 試行全体に重なる GC 候補イベントを見ており、実際の「1 回の catch-up あたりのポーズ」ではなく「11 回のどれか 1 回ぶんの最大値」である。これは§8-1 が明記する構造的制約(区間内でサンプリングできない)の帰結であり、より厳密にしたい場合は 1 試行だけをトレースする専用モードが要るが、本タスクの判断基準(≤50ms/回)に対して 2 桁の余裕がある現状ではその追加実装の必要性は低いと判断した。
+4. **ヒープ増分ピークの「ピーク」の定義**: §8-1 の設計どおり「試行境界(前後)の差分」であって、真の意味でのヒープ使用量ピーク(試行中の最大瞬間値)ではない。真のピークは Chrome DevTools のヒーププロファイラ等、別ツールでの補完が必要(本タスクのスコープ外)。

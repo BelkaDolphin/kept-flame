@@ -15,6 +15,15 @@
 //   - メインスレッド同期 advance は消さず `sensitivity.computeOnMainThread` へ
 //     (ADR-026(3) の実アプリ別経路であり、差分が計測 #8 そのもの)。
 //
+// T12 で足したもの(設計文書 §8。4 区間の内側は 1 つも変えていない):
+//   - `performance.measureUserAgentSpecificMemory()` を**試行の境界**
+//     (試行開始前 / B4+アンマウント後)だけで前後取得し、ヒープ増分を出す
+//     (計測 #2 前半)。区間内や区間間には絶対に置かない(§8-1: async で GC を
+//     誘発しうるため R2/R4 違反になる)。API 不在(Firefox/WebKit)・非
+//     cross-origin-isolated では `memory.supported=false` + 理由を機械可読で残す。
+//   - GC ポーズ(#2 後半)は CDP トレースでしか取れないため、このファイルではなく
+//     `bench/gcTrace.spec.ts`(Playwright chromium 限定)が担当する。
+//
 // 計測窓の内側では素の `performance.now()` しか呼ばない。User Timing の
 // mark/measure(T12 の CDP トレース切り出し用・設計文書 §8-3)は、取得済みの
 // タイムスタンプを `{ startTime }` 指定で**後から**発行する(設計文書 §2 R5)。
@@ -34,10 +43,14 @@ import {
 } from "./perfBoard";
 import { DOM_NODES_PER_CELL, EXPECTED_DOM_NODES, PerfGrid, buildGridViewModel } from "./perfGrid";
 import {
+  buildMemoryReport,
   buildPerfResult,
   summarizeInterval,
   type IntervalId,
   type PerfEngineCounters,
+  type PerfMemoryReport,
+  type PerfMemoryScopeBytes,
+  type PerfMemorySample,
   type PerfMeta,
   type PerfResult,
   type PerfSupplementary,
@@ -99,6 +112,88 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+// --- メモリ計測(計測 #2 前半・T12・設計文書 §8) -----------------------------
+//
+// `performance.measureUserAgentSpecificMemory()` は WICG Measure Memory API の
+// 実験的シグネチャで lib.dom.d.ts に型定義が無いため、既存の `deviceMemory`
+// (`buildMeta`)と同じ流儀で `unknown` 経由の型アサーションを使う。
+
+interface RawMemoryAttribution {
+  readonly url?: string;
+  readonly scope?: string;
+}
+
+interface RawMemoryBreakdownEntry {
+  readonly bytes: number;
+  readonly attribution: readonly RawMemoryAttribution[];
+  readonly types: readonly string[];
+}
+
+interface RawMemoryMeasurement {
+  readonly bytes: number;
+  readonly breakdown: readonly RawMemoryBreakdownEntry[];
+}
+
+type MeasureMemoryFn = () => Promise<RawMemoryMeasurement>;
+
+function getMeasureMemoryFn(): MeasureMemoryFn | null {
+  const fn = (performance as unknown as { readonly measureUserAgentSpecificMemory?: unknown })
+    .measureUserAgentSpecificMemory;
+  return typeof fn === "function" ? (fn.bind(performance) as unknown as MeasureMemoryFn) : null;
+}
+
+/**
+ * API 不在の理由を機械可読な固定文字列で返す(計画 §6.3 と同じ「null + 理由」方式)。
+ * `null` = API が使える。
+ */
+function memoryUnsupportedReason(
+  measureMemoryFn: MeasureMemoryFn | null,
+): PerfMemoryReport["unsupportedReason"] {
+  if (measureMemoryFn !== null) return null;
+  // cross-origin isolated でも API 自体が無ければ Chromium 系以外(計画 §6.3)。
+  return globalThis.crossOriginIsolated === true ? "unsupported-api" : "not-cross-origin-isolated";
+}
+
+/**
+ * 1 スコープぶんの内訳へ集計する。`attribution` は同一 agent cluster
+ * (メインの Window + catch-up Worker)を跨ぐため、先頭要素の scope で仕分ける
+ * (設計文書 §8 冒頭の指示どおり breakdown を window/worker 別に残す)。
+ *
+ * @throws {Error} `measureUserAgentSpecificMemory` 自体が例外/reject で終わった場合
+ */
+async function sampleMemoryScope(measureMemoryFn: MeasureMemoryFn): Promise<PerfMemoryScopeBytes> {
+  const result = await measureMemoryFn();
+  let windowBytes = 0;
+  let workerBytes = 0;
+  let otherBytes = 0;
+  for (const entry of result.breakdown) {
+    const scope = entry.attribution[0]?.scope;
+    if (scope === "Window") windowBytes += entry.bytes;
+    else if (scope === "Worker") workerBytes += entry.bytes;
+    else otherBytes += entry.bytes;
+  }
+  return { windowBytes, workerBytes, otherBytes, totalBytes: result.bytes };
+}
+
+/**
+ * `typeof === "function"` は真でも呼び出しが失敗しうる(実測で確認済み:
+ * Playwright の headless Chromium 151 は `crossOriginIsolated: true` でも
+ * `measureUserAgentSpecificMemory()` が `SecurityError` を投げる。headed では
+ * 成功する — ヘッドレス自動化固有の既知の制約)。ベンチ全体を失敗させたくないので
+ * ここで握り潰し、最後のエラーメッセージだけ `state` に残す。
+ */
+async function sampleMemoryScopeSafe(
+  measureMemoryFn: MeasureMemoryFn,
+  state: { errorMessage: string | null },
+): Promise<PerfMemoryScopeBytes | null> {
+  try {
+    return await sampleMemoryScope(measureMemoryFn);
+  } catch (error) {
+    state.errorMessage = error instanceof Error ? error.message : String(error);
+    return null;
+  }
 }
 
 // --- 1 試行 ----------------------------------------------------------------
@@ -335,10 +430,16 @@ async function runBench(
   const deps: TrialDeps = { db: db2, content, container, worker };
   const samples: TrialSample[] = [];
   const unmountValues: number[] = [];
+  const memorySamples: PerfMemorySample[] = [];
   let counters: PerfEngineCounters | null = null;
   let domNodeCount = 0;
   let snapshotEntityCount = 0;
   let strategy = ACTIVE_CATCH_UP_STRATEGY as string;
+
+  // 計測 #2 前半(設計文書 §8): API の可否は実行の頭で 1 回だけ判定する
+  // (試行ごとに変わるものではないため、ループの中で毎回 typeof チェックしない)。
+  const measureMemoryFn = getMeasureMemoryFn();
+  const memoryProbeState: { errorMessage: string | null } = { errorMessage: null };
 
   try {
     for (let i = -WARMUP_TRIALS; i < MEASURED_TRIALS; i++) {
@@ -347,7 +448,26 @@ async function runBench(
           ? "ウォームアップ試行を実行中…"
           : `計測試行 ${String(i + 1)} / ${String(MEASURED_TRIALS)} …`,
       );
+      // --- メモリ計測「試行開始前」(設計文書 §8-1: 区間の外・4区間の直前) ---
+      const memBefore =
+        measureMemoryFn === null
+          ? null
+          : await sampleMemoryScopeSafe(measureMemoryFn, memoryProbeState);
       const outcome = await runTrial(i, i < 0, deps);
+      // --- メモリ計測「B4 終了 + アンマウント後」(runTrial が既にアンマウント済み) ---
+      const memAfter =
+        measureMemoryFn === null
+          ? null
+          : await sampleMemoryScopeSafe(measureMemoryFn, memoryProbeState);
+      if (memBefore !== null && memAfter !== null) {
+        memorySamples.push({
+          trial: i,
+          warmup: i < 0,
+          before: memBefore,
+          after: memAfter,
+          deltaTotalBytes: memAfter.totalBytes - memBefore.totalBytes,
+        });
+      }
       samples.push(outcome.sample);
       unmountValues.push(outcome.unmountMs);
       domNodeCount = outcome.domNodeCount;
@@ -366,6 +486,20 @@ async function runBench(
       await yieldToEventLoop();
     }
     if (counters === null) throw new Error("試行が 1 回も走っていない");
+    // fn が有って実際にサンプルが 1 つも取れなかったのは呼び出し失敗
+    // (headless Chromium の既知の制約・上記コメント参照)。
+    const memoryReason: PerfMemoryReport["unsupportedReason"] =
+      measureMemoryFn === null
+        ? memoryUnsupportedReason(measureMemoryFn)
+        : memorySamples.length === 0
+          ? "measurement-error"
+          : null;
+    const memory = buildMemoryReport(
+      memorySamples,
+      measureMemoryFn !== null,
+      memoryReason,
+      memoryProbeState.errorMessage,
+    );
 
     onStatus("save サイズ感度(≈512KB)を計測中…");
     const paddedBoard = buildPaddedPerfBoard(
@@ -458,6 +592,7 @@ async function runBench(
       },
       observedDomNodeCount: domNodeCount,
       worker: workerReport,
+      memory,
     });
 
     // 計測後に格子を残しておく(目視確認用・計測窓の外)。
@@ -560,6 +695,9 @@ function renderResultTable(root: HTMLElement, result: PerfResult): void {
       : `メインスレッド同期 advance(比較・ADR-026(3) 別経路): 中央値 ${String(result.sensitivity.computeOnMainThread.summary.medianMs)} ms`,
     `補助: contentLoad ${result.supplementary.contentLoadMs.toFixed(3)} ms / IDB 初回接触 ${(result.supplementary.idbFirstTouchMs ?? 0).toFixed(3)} ms / idbOpen(cold) ${result.supplementary.idbOpenMs.toFixed(3)} ms / idbOpen(warm) ${(result.supplementary.idbOpenWarmMs ?? 0).toFixed(3)} ms / idbPut ${result.supplementary.idbPutMs.toFixed(3)} ms / restore+open ${result.supplementary.restoreWithOpenMs.toFixed(3)} ms`,
     `crossOriginIsolated=${String(result.meta.crossOriginIsolated)}(false の Firefox/WebKit では performance.now が 1ms へ丸められる)`,
+    result.memory.supported
+      ? `ヒープ増分(計測 #2 前半・試行境界の前後差分): ピーク ${String(result.memory.peakDeltaMb)} MB / 中央値 ${String(result.memory.medianDeltaBytes)} B / warmup ${String(result.memory.warmupDeltaBytes)} B(判断基準 ≤48MB。GC ポーズは bench/gcTrace.spec.ts が別 JSON で出す)`
+      : `ヒープ増分: 計測不可(理由=${String(result.memory.unsupportedReason)}。計画 §6.3 の iOS Safari 等)`,
     "この結果はデスクトップの下限見積りであり #1 の合否ではない(設計文書 §0)。",
   ];
   for (const line of lines) {
