@@ -31,6 +31,7 @@ declare module "node:module" {
 declare module "node:path" {
   export function join(...parts: readonly string[]): string;
   export function dirname(path: string): string;
+  export function resolve(...parts: readonly string[]): string;
 }
 
 declare const process: {

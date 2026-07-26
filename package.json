@@ -16,6 +16,12 @@
     "measure:contrast": "node bench/tags-contrast.mjs",
     "golden:check": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/genGoldenVectors.ts --check",
     "golden:write": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/genGoldenVectors.ts --write",
+    "sim:calibrate": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs sim/calibrate.ts",
+    "sim:recall-freq": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs sim/recallFrequency.ts",
+    "conformance:gen-harness-data": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/genHarnessData.ts",
+    "conformance:build": "npm run conformance:gen-harness-data && vite build --config conformance/vite.harness.config.ts",
+    "conformance:preview": "vite preview --config conformance/vite.harness.config.ts",
+    "conformance:e2e": "playwright test",
     "format": "prettier --check .",
     "format:write": "prettier --write ."
   },

@@ -17,6 +17,14 @@
 // 検証(下記 §2)が失敗した場合は、シナリオ/プランの設計ミスを疑い、それでも
 // 食い違うなら engine 側の挙動が仕様と食い違っている可能性として例外を投げて
 // 停止する(自動修正しない)。
+//
+// [T8] 1 プラン→1 ベクタの計算本体(digest 計算・分割/往復不変性の検証)は
+// `tools/goldenVectorBuilder.ts` へ抽出済み(node:fs 非依存の純粋部)。
+// これは `conformance/harness.html`(ブラウザ実行の conformance ハーネス)が
+// 同じロジックを import できるようにするための分割であり、
+// ここでの生成ロジック・digest 計算そのものは一切変更していない
+// (`buildVector(plan)` の外部シグネチャ・挙動は完全に維持)。詳細は
+// goldenVectorBuilder.ts 冒頭のコメントを参照。
 // ---------------------------------------------------------------------------
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -28,36 +36,22 @@ import { format } from "prettier";
 import {
   GOLDEN_VECTOR_FORMAT_VERSION,
   buildCoverageMatrix,
-  canonicalJsonOfState,
   checkCoverage,
   compareCounters,
   compareObservations,
-  countersOfReport,
-  digestOfCanonicalJson,
-  observe,
-  sumCounters,
   vectorFileName,
   type CoverageRegistry,
-  type GoldenCounters,
   type GoldenVector,
   type GoldenVectorIndex,
 } from "../conformance/goldenVector";
 import { resolveScenarioContent, SCENARIOS, type Scenario } from "../conformance/scenarios";
 import { VECTOR_PLANS, type VectorPlan } from "../conformance/vectorPlans";
 
-import { advanceWithReport, computeTargetTick, createAdvanceContext } from "../src/engine/advance";
 import { canonicalizeJson, compareUtf16, type JsonValue } from "../src/engine/canonicalize";
-import type { SegmentRecord } from "../src/engine/scheduler";
-import { fromSerializable, toSerializable } from "../src/engine/state/serialize";
-import { worldSeedToUint32 } from "../src/engine/stochastic";
 
-/** 生成器の使い方の誤り、または engine の分割/往復不変性が壊れている場合。 */
-export class GeneratorError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "GeneratorError";
-  }
-}
+import { GeneratorError, buildVectorFromResolvedInputs } from "./goldenVectorBuilder";
+
+export { GeneratorError };
 
 // --- 0. パス ----------------------------------------------------------------
 
@@ -82,57 +76,15 @@ function scenarioById(id: string): Scenario {
 }
 
 // --- 2. 1 プラン → 1 ベクタ(spec §7.2) --------------------------------------
-
-function resolveToTick(plan: VectorPlan): number {
-  if (plan.elapsedMonotonicMs !== null) {
-    const computed = computeTargetTick(plan.fromTick, plan.elapsedMonotonicMs);
-    if (plan.toTick !== null && plan.toTick !== computed) {
-      throw new GeneratorError(
-        `vector "${plan.vectorId}": toTick(${String(plan.toTick)}) と computeTargetTick の結果` +
-          `(${String(computed)})が食い違う(spec §7.2 規則3)`,
-      );
-    }
-    return computed;
-  }
-  if (plan.toTick === null) {
-    throw new GeneratorError(`vector "${plan.vectorId}": toTick も elapsedMonotonicMs も無い`);
-  }
-  return plan.toTick;
-}
-
-/** `splitTicks` の記号値を具体的な tick 配列へ解決する(spec §7.2 規則2)。 */
-function resolveSplitTicks(
-  spec: VectorPlan["splitTicks"],
-  fromTick: number,
-  toTick: number,
-  coarseTickMinutes: number,
-  oneShotSegments: readonly SegmentRecord[],
-): readonly number[] {
-  if (Array.isArray(spec)) return spec;
-
-  if (spec === "every-coarse-step") {
-    const ticks: number[] = [];
-    for (let t = fromTick + coarseTickMinutes; t < toTick; t += coarseTickMinutes) {
-      ticks.push(t);
-    }
-    return ticks;
-  }
-
-  // "first-recall-recovery"
-  const segment = oneShotSegments.find((s) => s.endEventKinds.includes("recallRecover"));
-  if (segment === undefined) {
-    throw new GeneratorError(
-      'splitTicks "first-recall-recovery": recallRecover イベントが一括実行の区間記録に1件も無い' +
-        "(空の splitTicks へ黙って落とさない・spec §7.2 規則2)",
-    );
-  }
-  return [segment.toTick];
-}
+//
+// [T8] 実体は `tools/goldenVectorBuilder.ts` の `buildVectorFromResolvedInputs`。
+// ここでは content/state の調達(node:fs 経由・conformance/scenarios.ts)だけを
+// 行い、計算本体へ委譲する(§0 コメント参照)。
 
 /**
- * 1 プランから 1 golden vector を作る(生成器の本体)。一括実行で `expected` を、
- * 必要なら分割実行で `splitCounters` を作り、**状態ダイジェストのみ**一括 ==
- * 分割を要求する(spec §3.3・カウンタは一致を要求しない)。
+ * 1 プランから 1 golden vector を作る(生成器の本体)。content/state は
+ * `conformance/scenarios.ts` 経由(node:fs)で調達し、計算本体は
+ * `buildVectorFromResolvedInputs`(node:fs 非依存の純粋部)に委譲する。
  *
  * @throws {GeneratorError} 分割不変性・rngState 往復不変性が破れている場合
  *   (engine を改変せず報告する・spec §7.2 規則8)
@@ -141,73 +93,7 @@ export function buildVector(plan: VectorPlan): GoldenVector {
   const scenario = scenarioById(plan.scenarioId);
   const content = resolveScenarioContent(scenario);
   const initialState = scenario.buildState(plan.worldSeed);
-  // AdvanceContext は run ごとに作り直さない(一括・分割の全 leg で共有・spec §7.2 規則4)。
-  const ctx = createAdvanceContext(initialState, content);
-
-  const toTick = resolveToTick(plan);
-  const needSegments = plan.splitTicks === "first-recall-recovery";
-  const oneShotReport = advanceWithReport(initialState, ctx, toTick, {
-    collectSegments: needSegments,
-  });
-  const expected = observe(oneShotReport.state, oneShotReport);
-
-  const splitTicks = resolveSplitTicks(
-    plan.splitTicks,
-    plan.fromTick,
-    toTick,
-    content.coarseTickMinutes,
-    oneShotReport.segments,
-  );
-
-  let splitCounters: GoldenCounters | null = null;
-  if (splitTicks.length > 0) {
-    let cursorState = initialState;
-    const counterList: GoldenCounters[] = [];
-    for (const boundary of [...splitTicks, toTick]) {
-      const legReport = advanceWithReport(cursorState, ctx, boundary);
-      counterList.push(countersOfReport(legReport));
-      cursorState = legReport.state;
-    }
-    splitCounters = sumCounters(counterList);
-
-    const splitDigest = digestOfCanonicalJson(canonicalJsonOfState(cursorState));
-    if (splitDigest !== expected.stateDigest) {
-      throw new GeneratorError(
-        `vector "${plan.vectorId}": 分割実行の最終状態ダイジェスト(${splitDigest})が` +
-          `一括実行(${expected.stateDigest})と食い違う。engine の分割不変性が壊れている可能性が` +
-          "あり、生成器は engine を改変しないので報告すること(spec §7.2 規則8)。",
-      );
-    }
-  }
-
-  if (plan.paths.includes("rng-state-nonempty-roundtrip")) {
-    const roundTripped = fromSerializable(
-      JSON.parse(JSON.stringify(toSerializable(oneShotReport.state))),
-    );
-    const roundTripDigest = digestOfCanonicalJson(canonicalJsonOfState(roundTripped));
-    if (roundTripDigest !== expected.stateDigest) {
-      throw new GeneratorError(
-        `vector "${plan.vectorId}": rngState 往復後の digest(${roundTripDigest})が` +
-          `一括実行(${expected.stateDigest})と一致しない(spec §7.2 規則6)。`,
-      );
-    }
-  }
-
-  return {
-    formatVersion: GOLDEN_VECTOR_FORMAT_VERSION,
-    vectorId: plan.vectorId,
-    scenarioId: plan.scenarioId,
-    worldSeed: plan.worldSeed,
-    worldSeedU32: worldSeedToUint32(plan.worldSeed),
-    coarseTickMinutes: content.coarseTickMinutes,
-    fromTick: plan.fromTick,
-    toTick,
-    elapsedMonotonicMs: plan.elapsedMonotonicMs,
-    splitTicks,
-    paths: plan.paths,
-    expected,
-    splitCounters,
-  };
+  return buildVectorFromResolvedInputs(plan, content, initialState);
 }
 
 // --- 3. coverage.json / balance.json の読み込み ------------------------------

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      T8 golden vector conformance ハーネス。計測 #7(クロスブラウザ完全bit一致)。
+      ダークモード/ダークテーマは CLAUDE.md 絶対ルールで禁止のため light 固定
+      (`prefers-color-scheme` 分岐は書かない・先行計測計画 §0.3)。
+    -->
+    <title>kept-flame conformance harness</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        background: #ffffff;
+        color: #111111;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      h1 {
+        font-size: 1.1rem;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        margin: 0.25rem 0 0.75rem;
+      }
+      table {
+        border-collapse: collapse;
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+      }
+      th,
+      td {
+        border: 1px solid #cccccc;
+        padding: 0.25rem 0.5rem;
+        text-align: left;
+      }
+      th {
+        background: #f0f0f0;
+      }
+      pre {
+        background: #f7f7f7;
+        border: 1px solid #dddddd;
+        padding: 0.75rem;
+        max-height: 40vh;
+        overflow: auto;
+        font-size: 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>kept-flame conformance harness</h1>
+    <p>
+      Computes all golden vector plans in this browser engine and exposes the result on
+      <code>window.__CONFORMANCE_RESULTS__</code> for Playwright to compare against
+      <code>conformance/vectors/*.json</code>.
+    </p>
+    <div id="results-root"></div>
+    <script type="module" src="./harnessMain.ts"></script>
+  </body>
+</html>
