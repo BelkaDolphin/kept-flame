@@ -1,0 +1,108 @@
+{
+  "id": "eventNearOldCistern",
+  "destTags": ["near"],
+  "nodes": [
+    {
+      "difficulty": 12,
+      "R": 6,
+      "statWeights": { "vigor": 0.6, "resilience": 0.4 },
+      "choices": [
+        { "label": "慎重に進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+        { "label": "大胆に踏み込む", "effect": { "rewardMod": 0.2, "difficultyMod": 0.15 } }
+      ],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty",
+          "result": "success",
+          "logTemplate": "崩れた瓦礫の道を踏み越え、隊は古い貯水槽へ続く道を切り開いた。"
+        },
+        {
+          "cond": "teamPower < difficulty && injuryCount == 0",
+          "result": "partial",
+          "logTemplate": "足場が崩れかけたが、隊員は誰も傷つかず持ちこたえた。"
+        },
+        {
+          "cond": "teamPower < difficulty && injuryCount > 0",
+          "result": "failure",
+          "logTemplate": "足場が崩れ、隊員の一人が転倒して負傷した。"
+        }
+      ]
+    },
+    {
+      "difficulty": 15,
+      "R": 8,
+      "statWeights": { "power": 1 },
+      "choices": [
+        { "label": "様子を見る", "effect": { "successMod": 0.1, "rewardMod": -0.05 } },
+        { "label": "強行突破する", "effect": { "injuryRiskMul": 1.5 } }
+      ],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty",
+          "result": "success",
+          "logTemplate": "水底に潜む影は怯み、隊は貯水槽の縁を確保した。"
+        },
+        {
+          "cond": "maxStatHolder('power') >= difficulty && injuryCount == 0",
+          "result": "success_solo",
+          "logTemplate": "一人の傑出した戦力が影を退け、隊は難なく貯水槽の縁を確保した。"
+        },
+        {
+          "cond": "teamPower < difficulty && injuryCount == 0",
+          "result": "retreat",
+          "logTemplate": "影に押し返され、隊はやむなく後退した。"
+        },
+        {
+          "cond": "teamPower < difficulty && injuryCount > 0",
+          "result": "failure",
+          "logTemplate": "影との揉み合いで隊員が傷つき、隊は撤退を余儀なくされた。"
+        }
+      ]
+    },
+    {
+      "difficulty": 18,
+      "R": 10,
+      "statWeights": { "intellect": 1 },
+      "choices": [],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty || hasTrait('traitScholar') == true",
+          "result": "success",
+          "logTemplate": "古い水利の記録が読み解かれ、貯水槽の設計図が持ち帰られた。"
+        },
+        {
+          "cond": "teamPower < difficulty && hasTrait('traitScholar') == false",
+          "result": "failure",
+          "logTemplate": "石板の文字は風化し尽くしており、誰も読み解けなかった。"
+        }
+      ]
+    },
+    {
+      "difficulty": 14,
+      "R": 7,
+      "statWeights": { "dexterity": 1 },
+      "choices": [
+        { "label": "罠を慎重に解除する", "effect": { "successMod": 0.2, "rewardMod": -0.15 } },
+        { "label": "力ずくで押し通る", "effect": { "injuryRiskMul": 2 } },
+        { "label": "迂回路を探す", "effect": { "difficultyMod": -0.1, "rewardMod": -0.2 } }
+      ],
+      "branches": [
+        {
+          "cond": "teamPower >= difficulty && injuryCount == 0",
+          "result": "success",
+          "logTemplate": "崩落防止の罠は無傷で解除され、隊は貯水槽の内部へ進んだ。"
+        },
+        {
+          "cond": "teamPower >= difficulty && injuryCount > 0",
+          "result": "success_wounded",
+          "logTemplate": "罠は解除されたが、隊員は軽傷を負いながら先へ進んだ。"
+        },
+        {
+          "cond": "teamPower < difficulty",
+          "result": "failure",
+          "logTemplate": "罠が作動し、隊は足止めを食らって撤退した。"
+        }
+      ]
+    }
+  ]
+}

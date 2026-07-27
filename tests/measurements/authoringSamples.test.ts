@@ -15,6 +15,12 @@ import eventSample from "../../docs/measurements/authoring-samples/event.sample.
 import facilitySample from "../../docs/measurements/authoring-samples/facility.sample.json";
 import techSample from "../../docs/measurements/authoring-samples/tech.sample.json";
 
+// 先行計測 #12 再計測(2026-07-27・タイムスタンプ実測版)のサンプル。
+// 既存サンプル(上記3本)とは別ファイルとして追加(上書き禁止)。
+import eventSampleRetest from "../../docs/measurements/authoring-samples/event.sample.retest-2026-07-27.json";
+import facilitySampleRetest from "../../docs/measurements/authoring-samples/facility.sample.retest-2026-07-27.json";
+import techSampleRetest from "../../docs/measurements/authoring-samples/tech.sample.retest-2026-07-27.json";
+
 // ---------------------------------------------------------------------------
 // 先行計測 #12(エンティティ制作素工数の実測)の検証実測スクリプト兼テスト。
 //
@@ -106,6 +112,94 @@ describe("authoring-samples — event.sample.json", () => {
       facility: [...facilityJson.map((f) => f.id), facilitySample.id],
       trait: traitJson.map((t) => t.id),
       event: [eventSample.id],
+    });
+    expect(issues).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 先行計測 #12 再計測(2026-07-27)分。手順書 §9 のタイムスタンプ打刻を伴う
+// 別セッションでの実施(docs/measurements/authoring-times-retest-2026-07-27.md
+// 参照)。既存サンプルとは独立に検証する(本物 content との2本立てマージ)。
+// ---------------------------------------------------------------------------
+
+function mergedRawBundleRetest(): RawContentBundle {
+  return {
+    tech: [...techJson, techSampleRetest],
+    facility: [...facilityJson, facilitySampleRetest],
+    trait: traitJson,
+    adjacency: adjacencyJson,
+    balance: balanceJson,
+  };
+}
+
+describe("authoring-samples — tech.sample.retest-2026-07-27.json", () => {
+  it("既存 content とマージして validateContentBundle を通る", () => {
+    const result = validateContentBundle(mergedRawBundleRetest());
+    if (!result.ok) {
+      expect(result.issues).toEqual([]);
+    }
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.tech.some((t) => t.id === "techSimpleBedding")).toBe(true);
+    }
+  });
+
+  it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
+    const bundleResult = validateContentBundle(mergedRawBundleRetest());
+    expect(bundleResult.ok).toBe(true);
+    if (!bundleResult.ok) return;
+    const engineResult = loadEngineContent(bundleResult.value);
+    if (!engineResult.ok) {
+      expect(engineResult.issues).toEqual([]);
+    }
+    expect(engineResult.ok).toBe(true);
+    if (engineResult.ok) {
+      expect(engineResult.value.techDefs.has("techSimpleBedding" as never)).toBe(true);
+    }
+  });
+});
+
+describe("authoring-samples — facility.sample.retest-2026-07-27.json", () => {
+  it("既存 content とマージして validateContentBundle を通る", () => {
+    const result = validateContentBundle(mergedRawBundleRetest());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.facility.some((f) => f.id === "reservoir")).toBe(true);
+    }
+  });
+
+  it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
+    const bundleResult = validateContentBundle(mergedRawBundleRetest());
+    expect(bundleResult.ok).toBe(true);
+    if (!bundleResult.ok) return;
+    const engineResult = loadEngineContent(bundleResult.value);
+    expect(engineResult.ok).toBe(true);
+    if (engineResult.ok) {
+      expect(engineResult.value.facilityDefs.has("reservoir" as never)).toBe(true);
+    }
+  });
+});
+
+describe("authoring-samples — event.sample.retest-2026-07-27.json", () => {
+  it("validateEvent(スタンドアロン検証)を通る", () => {
+    const result = validateEvent(eventSampleRetest);
+    if (!result.ok) {
+      expect(result.issues).toEqual([]);
+    }
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.id).toBe("eventNearOldCistern");
+      expect(result.value.nodes).toHaveLength(4);
+    }
+  });
+
+  it("ID がグローバル一意性チェックにも通る(event は ContentBundle 非組込みのため手動確認)", () => {
+    const issues = checkGlobalIdUniqueness({
+      tech: [...techJson.map((t) => t.id), techSample.id, techSampleRetest.id],
+      facility: [...facilityJson.map((f) => f.id), facilitySample.id, facilitySampleRetest.id],
+      trait: traitJson.map((t) => t.id),
+      event: [eventSample.id, eventSampleRetest.id],
     });
     expect(issues).toEqual([]);
   });

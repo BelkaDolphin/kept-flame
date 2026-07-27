@@ -1,0 +1,10 @@
+{
+  "id": "reservoir",
+  "tags": ["damp"],
+  "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+  "lvCurve": [45, 51.75, 59.5125, 68.439375, 78.705281],
+  "overflowCapPolicy": "discardExcess",
+  "footprint": { "width": 1, "height": 1 },
+  "harshWork": false,
+  "output": { "kind": "resource", "resourceId": "water" }
+}

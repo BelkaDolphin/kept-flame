@@ -1,0 +1,10 @@
+{
+  "id": "techSimpleBedding",
+  "era": "e1",
+  "lossClass": "criticalRecoverable",
+  "prereqs": ["techFireStarting"],
+  "researchCost": 28,
+  "fieldRequirement": { "facility": "workbench", "recipe": "recipeSimpleBedding", "count": 2 },
+  "unlocks": [],
+  "leaf": true
+}
