@@ -29,6 +29,10 @@ ADR-006 は全数値を 1e6 スケールの固定小数点で扱うと定める�
 - **確認**: 迷ったら値をそのまま JSON に書いて `schema/engineContent.ts` の `loadEngineContent`(または後述 §6 のスクリプト)に通す。7桁目以降に有効桁が残っていれば `rawFromHumanNumber` が reject して教えてくれる(このために存在するガードなので、迷ったら通して確認するのが最速)。
 - 同じ注意が `researchCost` の逓増式(`base_era × 1.2^n`、目安レンジのみ・§12.3)や `balance` の各種係数にも当てはまるが、tech/facility の schema は entity 個別値を直接書くので影響が大きいのは主に `facility.lvCurve` である。
 
+**[2026-07-28追記] 第2の実例(同型バグの独立再現)**: 先行計測#12の初回実施で `docs/measurements/authoring-samples/facility.sample.json` の `garden.lvCurve` を作成した際も同型のバグを実際に踏んだ。`Lv5 = 136.87875 × 1.15 = 157.4105625` は小数第7位に非ゼロ桁(`5`)を持ち1e6で厳密表現できない。本手順書の6桁floor規則を適用し `157.410562` へ切り捨てて記入したところ reject 0回で通過した(`docs/measurements/authoring-times.md` §2.3・`docs/measurements/summary.md` §2.5)。`forge.lvCurve[4]`(262.3509375→262.350937)と`garden.lvCurve[4]`(157.4105625→157.410562)の2例はいずれも「`1.15^(Lv-1)` の倍精度展開値の小数第7位に偶然非ゼロ桁が残る」という同一パターンであり、`1.15^n` の展開値では頻発しうることを示している。
+
+**[2026-07-28追記] 本節と `golden-vector-spec.md` §8-7 の関係**: `golden-vector-spec.md` §8「要ユーザー判断・未確定事項」の項目7は「オーサリングツール(`tools/`)実装時に6桁floor規則を組み込むこと」を将来タスクへの申し送りとして記録したものである。**そのオーサリングツール本体はMVP対象外と裁定済み**(`docs/measurements/summary.md` §6.2-6〜7)であるため、現時点で本規則を実際に強制しているのは (a) 本節の手順書(人間/LLM運営が手で計算する際に従う)と (b) `schema/engineContent.ts` の `rawFromHumanNumber` によるロード時reject(手順書を無視しても最終的に機械的に弾かれる安全網)の2層のみである。将来ツールを実装する場合も、この2層を代替するのではなく、(a)の計算をツールに移し(b)のrejectで最終検証する構図を維持すること。
+
 ## 3. tech の作成手順
 
 参照: GDD §5.1(コスト設計)/ §5.2(時代骨格)/ §7.4(技術喪失の二層)/ §12.1/ §12.4。スキーマ正本: `schema/tech.ts`。
