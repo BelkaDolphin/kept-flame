@@ -323,6 +323,14 @@ PAT heartbeat のシークレット管理(ADR-021・ADR-030 の bot PAT と共�
 
 各サブ予算をターゲット実機で個別計測(超過時の対処は ADR-019/029)。
 
+**[2026-07-27裁定] (5) セーブのエンベロープ化(裁定B2/B3/B4)** — IDB に入る値を `{saveFormatVersion, integrityChecksum, payload}` の2層構造とする。理由は**チェックサムが自分自身を含む文書を覆えない**ため(旧記述は `integrityChecksum` を `entityStateById` と同階層に列挙しており成立していなかった)。あわせて (i) `eventQueueSnapshot` はセーブに持たない(state から全再構成可能・`scheduler.buildEventQueue` が単一の真実)、(ii) `rngState` が空なら直列化形からキーごと省略する、を正準形として確定する。詳細は下記「セーブフォーマット(ADR-012)」節。
+
+**[2026-07-27裁定] (6) 上表 ms 配分の前提(裁定D1/D2/D3)**
+
+- **`IDB 読出 + JSON.parse + deserialize ≤450ms` が想定するセーブサイズ = 上記(2)の容量目標 512KB(上限側)**とする(裁定D1)。代表盤面(数KB)ではなく容量目標側を前提に置くことで、実機の合否解釈が盤面規模で揺れないようにする。参考: デスクトップでは 512KB でも restore 3.75ms。
+- **`compute(tick catch-up) ≤1100ms` は cold(ウォームアップ)側に適用する**(裁定D2)。実機の実復帰は必ず cold であり、JIT が温まった中央値で判定すると本番より甘くなる(デスクトップ実測でウォームアップは中央値の約2.5倍: 16.8ms vs 7.4ms)。**実機計測では cold / warm の両方を必ず併記すること**。
+- **`indexedDB.open()` は 450ms 予算に含めない**(裁定D3)。ADR-012(4) の文言は変更せず、「ページで最初に IndexedDB へ触るまでのサブシステム起動固定費」を `idbFirstTouchMs` という**補助メトリクス**として別枠で計上・報告する。実測ではこの固定費が 43.6ms → 2.59ms と 16 倍変動する(OS/ディスクキャッシュ依存の非決定要因)一方、実 cold open 自体は 2.0ms であり結論を左右しない。
+
 **選択肢**
 (a) ライフサイクルイベント依存のみ(旧):未発火終了で全損経路が数値的に開いたまま、却下。(b) 絶対フラッシュ + 容量数値 + ノード上界 + ms 配分:**採用**。
 
@@ -349,6 +357,8 @@ PAT heartbeat のシークレット管理(ADR-021・ADR-030 の bot PAT と共�
 
 **トレードオフ**
 catch-up(可変ドラフト)と live play(構造共有)で更新方式が二系統になる複雑さ(ドラフトは Worker-local に隔離し engine 純粋性・決定論は維持)。ヒープ/ポーズ数値は実機計測で再調整前提。
+
+**[2026-07-27裁定] 可変ドラフトの MVP 除外判断は保留(裁定N13)。** 先行計測の B1(compute)実測 7.4ms は**構造共有系(=上限側)の値**であり、これだけを見れば「可変ドラフトを MVP から外しても予算 1100ms に対し十分」と読める(実機の K が 100 倍でも 740ms)。しかし**可変ドラフトの本来の目的は速度ではなくヒープ圧の削減**であり、その根拠となる計測 #2 のヒープ増分は**デスクトップでも実機でも未取得**(headless Chromium が `measureUserAgentSpecificMemory()` を `SecurityError` で拒否)。よって**除外判断は #2 の実機ヒープ実測後まで保留**とし、現状の実装状態(`catchUp.ts` は構造共有系のみ実装・可変ドラフト経路は呼ぶと例外を投げて黙って落ちない・`computeFidelity: "worker-structural-sharing"` として機械可読に宣言)を維持する。
 
 ---
 
@@ -565,10 +575,18 @@ kept-flame/
 │  ├─ replay/                  # commandLog+seedから状態再構築 ADR-002
 ├─ content/                    # 運営LLMのadditive追加領域(正準化+意味論diffで隔離) ADR-015/023
 │  ├─ tech/ recipe/ facility/ item/ trait/ event/ raid/ outpost/ era/
+│  │                           # [2026-07-27裁定・N3] 正本はカテゴリごと1ファイル
+│  │                           #   (tech.json / facility.json / event.json …)。
+│  │                           #   エンティティ個別ファイル方式は採らない
 │  ├─ adjacency.json townParams.json balance.json  # balanceは人間専用(CODEOWNERS)
 │  └─ CHANGELOG.md
 ├─ schema/                     # JSON Schema+cond DSL(jsep AST)+ID命名正規表現
-│                              #   +グローバルID一意性検証器 ADR-011/024(人間専用)
+│  │                           #   +グローバルID一意性検証器 ADR-011/024(人間専用)
+│  └─ engineContent.ts         # [2026-07-27裁定・N6] contentローダー(JSON→engine内部表現)。
+│                              #   engine内に置けない: Object.keysはcanonicalize.tsのみ免除、
+│                              #   engine→schemaの非型importは全面禁止(lint強制)。加えて
+│                              #   schema/はCODEOWNERS人間専用ゆえ「engineが受け付ける
+│                              #   content語彙」を運営LLMが勝手に広げられない ADR-024/030
 ├─ sim/                        # engine共有検証ハーネス ADR-013(人間専用)
 │  ├─ bots/strategy/           # 5戦略bot(assist共有+閾値差替え) §11.5
 │  ├─ bots/adversary/          # 6敵対bot(a〜f) §11.6(跨ぎ依存を強制トリガー ADR-018)
@@ -607,14 +625,17 @@ kept-flame/
 ```jsonc
 // tech
 { "id", "era", "lossClass": "criticalRecoverable" | "rareIrreversible",
-  "prereqs": ["techId"],   // 1-3
+  "prereqs": ["techId"],   // 0-3 [2026-07-27裁定・N4] 旧「1-3」を改訂。
+                           //   長さ0 = era の起点テック(前提なし)を表現するため許可する。
   "researchCost": "int", "fieldRequirement": { "facility", "recipe", "count" },
   "unlocks": ["id"], "leaf": "bool" }
 // leaf=true(週次追加)は n リセット式の n に算入しない (§5.1)
 
 // facility
 { "id", "tags": ["7種"], "slots": { "lv1..lv5" },
-  "lvCurve": ["base × 1.15^(Lv-1) 個別FP"], "overflowCapPolicy", "footprint" }
+  "lvCurve": ["base × 1.15^(Lv-1) 個別FP"], "overflowCapPolicy", "footprint",
+  "harshWork": "bool",     // [2026-07-27裁定・N5] schemaでは省略可・ローダーでは必須
+  "output": { /* 資源ID→量 */ } }  // 同上。最終形は recipe entity 側へ移す想定
 // UI表示はタグ7種各々に固有記号を色と常時併記(色覚対応・ADR-003)
 
 // adjacency
@@ -641,21 +662,45 @@ kept-flame/
 ```jsonc
 { "fpScale": 1000000, "offlineClampTick": 4320, "safetyFactor": 1.5,
   "assistEfficiencyCap": 0.85,
-  "recallRiskParams": { "base_p": 0.05, "p_max": 0.35, "moraleW": "住民個人変数" },
+  "recallRiskParams": { "base_p": 0.05, "p_max": 0.35, "moraleW": "住民個人変数",
+    // [2026-07-27裁定・N5] 以下3つは schemaでは省略可・ローダーでは必須
+    "memoryKeeperTraitId": "traitId", "durationTicksMin": "int", "durationTicksMax": "int" },
   "lifespan", "populationFloor", "eraTable", "caravanRatio": 0.35, "roiRange",
   "algoVersion": 1,          // =決定論バンドル全体版・xoshiro128** でアンカー
   "coarseTickMinutes": 10 }  // MVP 粗粒度
 ```
 
+**[2026-07-27裁定] 省略可フィールド3種の二段構え(裁定N5)。** `facility.harshWork` / `facility.output` / `balance.recallRiskParams.{memoryKeeperTraitId,durationTicksMin,durationTicksMax}` は **schema 検証では省略可・content ローダー(`schema/engineContent.ts`)では必須**という二段構えを正式化する。既存 content と既存テストを壊さずに additive 拡張するための措置であり、ローダーは欠落を既定値で埋めず **reject** する(縮約必須フィールドの黙示補完は決定論の穴になるため)。`output` は最終形では recipe entity 側へ移す想定。
+
+**[2026-07-27裁定] content はカテゴリごと1ファイル方式(裁定N3)。** 上記リポ構成図の `content/tech/ recipe/ facility/ ...` はエンティティ個別ファイルとも読めるが、**正本はカテゴリごとに1 JSON ファイル**(`content/tech.json` / `content/facility.json` / `content/event.json` …)とする。正準化 diff・ID グローバル一意性検証・content-diff-gate はいずれもカテゴリ単位のロードを前提としており、個別ファイル方式にすると差分ゲートの粒度がファイル追加/削除の検出に依存して脆くなる。
+
 ### セーブフォーマット(ADR-012)
 
+**[2026-07-27裁定] エンベロープ化を採用(裁定B2)。** 旧記述は `integrityChecksum` を `entityStateById` と同階層のフィールドとして列挙していたが、**チェックサムは自分自身を含む文書を覆えない**(checksum を書き込んだ時点で対象バイト列が変わる)ため成立しない。IDB に入る値を「薄いエンベロープ + payload 文字列」の2層とし、checksum は payload 文字列のみを対象とする。
+
 ```jsonc
+// (1) IDB に入る値 = エンベロープ [2026-07-27裁定・B2]
+{
+  "saveFormatVersion": "int",       // エンベロープ自身の版。payload内の3軸(下記)とは別物
+  "integrityChecksum": "uint32",    // payload文字列のFNV-1a-32・破損検出専用/改竄耐性なし
+  "payload": "string"               // 下記(2)を canonicalize 済み JSON 文字列にしたもの
+}
+// payload は**文字列**のまま保持する(構造化複製可能なオブジェクトとして入れない)。
+//   → checksum は payload 文字列を舐めるだけでよく、読出側で再直列化しなくてよい。
+```
+
+```jsonc
+// (2) payload の中身 = 従来「セーブフォーマット」と呼んでいたもの
 {
   "saveSchemaVersion": "int",
   "contentVersion": "int",
   "algoVersion": "int",            // =golden vectorアンカー版(ADR-016)
   "worldSeed": "string",
   "rngState": { "domainTag": "xoshiro 4×uint32語" },
+  // [2026-07-27裁定・B4] rngState が空(=RNGを一度も消費していない)なら
+  //   直列化形から**キーごと省略**する正準化を行う。往復でバイト同一を保つため
+  //   「空オブジェクトを書く」ではなく「書かない」を正準形とする。
+  //   旧セーブもマイグレーション不要でロード可(欠落=空として解釈)。
   "tick": "int",
   "monotonicTimestamp": "int",
   "runCount": "int",
@@ -665,18 +710,21 @@ kept-flame/
     { "orderId", "entityId",
       "snapshottedParams": { /* 着手時点複製(tombstone救済) */ } }
   ],
-  "eventQueueSnapshot": [ { "tick", "type", "payload" } ],
+  // [2026-07-27裁定・B3] "eventQueueSnapshot" は**セーブに持たない**(旧記述を撤回)。
+  //   全イベントは state から再構成可能であり、`scheduler.buildEventQueue` が
+  //   イベントキューの単一の真実(single source of truth)。スナップショットを併記すると
+  //   state と queue が二重の真実になり、不整合セーブが原理的に作れてしまう。
   "dispatchSnapshots": [
     { "dispatchId", "seed",
       "resolvedTree": { /* 分岐木・総ノード≤16/派遣・同時≤2で≤32ノードに有界(ADR-012) */ } }
   ],
   "renderedLogs": [ /* 完成文字列・上限50 */ ],
-  "commandLog": [ { "tick", "cmdHash", "cmd" } ],  // リングバッファ2000件・replay入力
-  "integrityChecksum": "破損検出用・改竄耐性なし"
+  "commandLog": [ { "tick", "cmdHash", "cmd" } ]  // リングバッファ2000件・replay入力
+  // integrityChecksum は(1)のエンベロープ側へ移動 [2026-07-27裁定・B2]
 }
 ```
 
-容量:典型 **≤512KB 目標 / 1.5MB 警告 / 4MB 書込中止**。
+容量:典型 **≤512KB 目標 / 1.5MB 警告 / 4MB 書込中止**(測る対象は payload 文字列)。
 
 ### バージョニング / マイグレーション(3軸)
 
@@ -704,6 +752,23 @@ kept-flame/
 | 10 | ITP 7日免除の一次挙動(設計は非依存化済み・ADR-004) | standalone/非 standalone での IDB/localStorage 削除挙動を実機再検証 | 設計はバナーを最終起動 monotonicTimestamp のみでトリガーする防御実装ゆえ ITP 挙動仮定に依存しないが、免除条件を確認し促進強度を調整 |
 | 11 | 週次インタラクティブセッションの消費量(ADR-021) | bisection 最大約5フルゲート + schema reject 再試行を含むトークン/時間概算を実セッションで計測 | Pro/Max 週次上限に余裕。超過傾向なら content 投入単位を分割 |
 | 12 | 1エンティティ制作素工数 | event(choices 分岐で 1.5→2〜4h)含む実測で 56〜150h レンジのどこに収まるか計測 | 15〜17週を再計算。段階1(粗粒度・fpLog なし・xoshiro)完成をデータ層 + tick エンジン 13.1 目標に再設定した妥当性を確認 |
+
+#### [2026-07-27裁定] 計測項目への注記(裁定D1〜D6)
+
+**#1 オフライン復帰2秒予算**
+
+- 450ms(IDB+parse+deserialize)が想定するセーブサイズは **ADR-012(2) の容量目標 512KB**(上限側)とする(**D1**)。
+- 1100ms(compute)は **cold(ウォームアップ)側に適用**する(**D2**)。実機の実復帰は cold であるため。**実機計測では cold / warm を必ず両方併記**すること。
+- `indexedDB.open()` は 450ms 予算に**入れない**。「ページで最初に IDB へ触るまでの固定費」は `idbFirstTouchMs` という**補助メトリクス**として別枠で報告する(**D3**・ADR-012(4) の文言は不変)。
+
+**#2 GC/メモリ予算**
+
+- **GC ポーズは実機で自動収集する手段が無い**(CDP は Chromium + Playwright/DevTools 前提であり、実機ブラウザ上のページからは取得できない)。したがって**デスクトップ実測値を代替値として判定に用いる**(**D4**)。採用値は保守側の **最大 0.83ms**(3回連続実行のレンジ上端。代表1回分は 0.429ms)であり、予算 50ms に対し 2 桁の余裕がある。実機では GC ポーズを未計測のまま閉じる。
+- **ヒープ増分は iOS Safari では原理的に計測不可**(`performance.measureUserAgentSpecificMemory()` は Chromium 系 API であり、配信方法を変えても iOS では解決しない)。よって #2 のヒープ判定は **Android 実機の実測値 + iOS は間接指標(catch-up 実行時のクラッシュ/タブ強制リロードの有無)**の組合せで行う(**D5**)。iOS で数値が出ないことを不合格とは扱わない。
+
+**#7 クロスブラウザ golden vector 一致**
+
+- 判断基準欄の「実 iOS Safari(BrowserStack 相当)で定期補完」について: **Playwright の WebKit は Apple が出荷する Safari / WKWebView とはビルドが異なる独自ビルドであり、実 iOS Safari の代替にはならない**(**D6**)。3エンジン一致は「Chromium/Firefox/WebKit(Playwright ビルド)の範囲での合格」であって iOS Safari の一致を含意しない。定期補完は実機で `dist/device/harness.html` を開いて結果 JSON を回収する経路で行う(`docs/measurements/device-testing-guide.md` §5.3)。結果 JSON 側にも `webkitCaveat` フィールドで同旨を機械可読に持たせてある。
 
 ---
 
