@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "preflight": "node scripts/preflight.mjs",
+    "check:llm-paths": "node scripts/check-llm-paths.mjs",
     "measure:contrast": "node bench/tags-contrast.mjs",
     "golden:check": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/genGoldenVectors.ts --check",
     "golden:write": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs tools/genGoldenVectors.ts --write",

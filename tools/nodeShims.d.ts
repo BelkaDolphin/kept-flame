@@ -17,6 +17,12 @@ declare module "node:fs" {
   export function writeFileSync(path: string, data: string, encoding: "utf8"): void;
   export function mkdirSync(path: string, options?: { readonly recursive?: boolean }): void;
   export function existsSync(path: string): boolean;
+  // M44: tests/scripts/check-llm-paths.test.ts のフィクスチャ生成に使用。
+  export function mkdtempSync(prefix: string): string;
+  export function rmSync(
+    path: string,
+    options?: { readonly recursive?: boolean; readonly force?: boolean },
+  ): void;
 }
 
 declare module "node:url" {
@@ -34,7 +40,31 @@ declare module "node:path" {
   export function resolve(...parts: readonly string[]): string;
 }
 
+// M44: tests/scripts/ が preflight.mjs / check-llm-paths.mjs を子プロセスで
+// 起動して終了コードを検証するために使用(node:test 相当を持たないため).
+declare module "node:os" {
+  export function tmpdir(): string;
+}
+
+declare module "node:child_process" {
+  export interface SpawnSyncReturns {
+    readonly status: number | null;
+    readonly stdout: string;
+    readonly stderr: string;
+  }
+  export function spawnSync(
+    command: string,
+    args: readonly string[],
+    options?: {
+      readonly env?: Readonly<Record<string, string | undefined>>;
+      readonly encoding?: "utf8";
+    },
+  ): SpawnSyncReturns;
+}
+
 declare const process: {
   readonly argv: readonly string[];
+  readonly execPath: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
   exitCode: number | undefined;
 };
