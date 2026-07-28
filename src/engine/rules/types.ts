@@ -33,6 +33,7 @@
 import type { AdjacencyMatrix, Tag } from "../adjacency";
 import type { Fix } from "../fp";
 import type { EntityId } from "../state/state";
+import type { StatWeights, TraitDef } from "./stats";
 
 /** rules の入力の誤り(content 定義の欠落・Lv 範囲外・産出先不在など)。 */
 export class RulesError extends Error {
@@ -68,6 +69,36 @@ export interface FacilityDef {
    */
   readonly outputPerTickByLevel: readonly Fix[];
   readonly output: FacilityOutput;
+  /**
+   * [M5] GDD 11.1「Σ担当者**関連**ステータス寄与」の「関連」の実体
+   * (rules/stats.ts §2)。**省略時は {@link UNIFORM_STAT_WEIGHTS}(5 種等分)**
+   * であり、その既定では中立ステータスの就労者 1 人の寄与が厳密に 1.0 になる
+   * = T5 縮約形と 1 bit も違わない。
+   */
+  readonly statWeights?: StatWeights;
+  /**
+   * [M5] 保管庫としての容量寄与(GDD 6.7 / 12.1「施設側は上限値管理のみに
+   * 役割限定」)。**省略時はこの施設が容量を提供しない**。
+   */
+  readonly storage?: FacilityStorageDef;
+}
+
+/**
+ * [M5] 施設が提供する保管容量(GDD 6.7)。
+ *
+ * 資源ごとの上限は「balance の基礎容量 + 建っている保管施設の寄与」の総和であり、
+ * **どちらも無い資源は上限なし**(= オーバーフローが起きない)として扱う。
+ * この「無指定 = 無限」の既定が、上限を一切設定していない既存 conformance
+ * シナリオで新機構が完全に不活性になる根拠である。
+ */
+export interface FacilityStorageDef {
+  /** Lv 別の容量(index 0 = Lv1)。`outputPerTickByLevel` と同じ個別 FP 展開。 */
+  readonly capacityByLevel: readonly Fix[];
+  /**
+   * 容量を提供する対象の resource 定義 ID(ID 昇順)。
+   * null は「全資源」(汎用倉庫)。
+   */
+  readonly resourceIds: readonly EntityId[] | null;
 }
 
 // --- 2. tech 定義 ----------------------------------------------------------
@@ -123,6 +154,41 @@ export interface RecallRiskParams {
   readonly durationMaxTicks: number;
 }
 
+// --- 3b. 保管庫パラメータ(GDD 6.7)— M5 -----------------------------------
+
+/**
+ * 保管庫オーバーフロー・廃材スポンジ・廃材 3 出口のパラメータ(GDD 6.7)。
+ * すべて `balance.json` の `storage` ブロック由来(人間専用・CODEOWNERS)。
+ *
+ * **このブロックが content に無ければ {@link EngineContent.storage} は undefined**
+ * であり、上限判定も廃材生成も一切走らない(既存挙動と完全に同一)。
+ */
+export interface StorageParams {
+  /**
+   * 廃材(GDD 6.7)の resource 定義 ID。null なら廃材変換を行わない
+   * (超過分は全て破棄)。
+   */
+  readonly wasteResourceId: EntityId | null;
+  /**
+   * resource 定義 ID → 基礎容量。ここにも保管施設にも現れない資源は**上限なし**。
+   */
+  readonly baseCapacityByResourceId: ReadonlyMap<EntityId, Fix>;
+  /**
+   * resource 定義 ID → 超過分の廃材変換率(0〜1)。GDD 6.7「低次資源(薪・石等)は
+   * 超過分を一定比率で廃材へ自動変換(スポンジ機構)」。
+   * 未登録の資源は変換率 0 = 単純破棄(GDD 6.7「原則超過分破棄」)。
+   */
+  readonly wasteConversionRatioByResourceId: ReadonlyMap<EntityId, Fix>;
+  /**
+   * 廃材 → 研究点の変換率(GDD 6.7 の 3 出口(3)「廃材 N → RP 1」の 1/N)。
+   */
+  readonly wasteToResearchRatioFix: Fix;
+  /** 施設増築コストを廃材で代替できる上限比率(GDD 6.7「最大20%」)。 */
+  readonly buildCostWasteSubstitutionMaxFix: Fix;
+  /** 成文化の粘土を廃材で代替できる上限比率(GDD 6.7「低比率」)。 */
+  readonly codifyWasteSubstitutionMaxFix: Fix;
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -140,6 +206,25 @@ export interface EngineContent {
   readonly recallRisk: RecallRiskParams;
   /** 粗粒度ステップ幅(分 = tick)。MVP は 10(balance.coarseTickMinutes)。 */
   readonly coarseTickMinutes: number;
+  /**
+   * [M5] trait 定義(GDD 7.2)。**省略時は「生産へ効く trait が 1 つも無い」**
+   * = 全住民の trait 倍率 1.0(rules/stats.ts §1 の中立既定値)。
+   */
+  readonly traitDefs?: ReadonlyMap<EntityId, TraitDef>;
+  /**
+   * [M5] 保管庫パラメータ(GDD 6.7)。**省略時は上限なし**(オーバーフロー機構が
+   * 走らない)。
+   */
+  readonly storage?: StorageParams;
+  /**
+   * [M5] content の `trait.effects[].stat` のうち、engine が現時点で生産式へ
+   * 写せなかったキーの一覧(重複なし・UTF-16 昇順)。
+   *
+   * 隣接効果と違い trait 効果は **reject せず読み飛ばす**(理由は
+   * `schema/engineContent.ts` §1(e))。ただし「黙って捨てた」状態にはしないため、
+   * 何を捨てたかをここへ機械可読で残し、テストで固定する。
+   */
+  readonly unrepresentedTraitEffects?: readonly string[];
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------

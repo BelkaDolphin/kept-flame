@@ -23,6 +23,19 @@
 //   - schema 段: 形式のみ検証(既存 content・既存テストを壊さない)
 //   - loader 段: 欠落を reject(縮約 rules が読む値を黙って既定値で埋めない)
 // recipe カテゴリを追加する際に `output` の出所をそちらへ移すこと。
+//
+// ---------------------------------------------------------------------------
+// [M5] 追加フィールド `statWeights` / `storageCapacityCurve` / `storedResourceIds`
+// ---------------------------------------------------------------------------
+// いずれも **省略可**。同じく「schema 段は形式のみ・省略を許す」「loader 段が
+// engine への写し方を決める」の二段構えで、既存 content と既存テストを壊さない。
+//   statWeights          : GDD 11.1「Σ担当者**関連**ステータス寄与」の「関連」。
+//                          ステータス 5 種(裁定 B8)への重みで、**総和 1.0** を
+//                          要求する(中立性の根拠 = src/engine/rules/stats.ts §2)。
+//                          省略時は engine 側の等分既定(各 0.2)。
+//   storageCapacityCurve : GDD 6.7 / 12.1「施設側は上限値管理のみに役割限定」。
+//                          Lv 別の保管容量。省略時は容量を提供しない。
+//   storedResourceIds    : 容量の対象資源。省略/null は全資源(汎用倉庫)。
 // ---------------------------------------------------------------------------
 
 import {
@@ -79,6 +92,18 @@ export type FacilityOutputKind = (typeof FACILITY_OUTPUT_KINDS)[number];
 export type FacilityOutputContent =
   { readonly kind: "resource"; readonly resourceId: string } | { readonly kind: "research" };
 
+/** [M5] ステータス 5 種(裁定 B8)への重み。総和 1.0(検証はローダー側)。 */
+export const RESIDENT_STAT_KEYS = ["vigor", "dexterity", "intellect", "fortitude", "will"] as const;
+export type ResidentStatKey = (typeof RESIDENT_STAT_KEYS)[number];
+
+/** [M5] 重みは 0〜1(総和 1.0 の突き合わせは engineContent.ts が行う)。 */
+const STAT_WEIGHT_RANGE = { min: 0, max: 1 };
+
+/** [M5] 保管容量の Lv 別カーブ。lvCurve と同じ長さ・非負。 */
+const CAPACITY_VALUE_RANGE = { min: 0, max: 1_000_000_000 };
+
+export type FacilityStatWeights = { readonly [K in ResidentStatKey]: number };
+
 export interface FacilityContent {
   readonly id: string;
   readonly tags: readonly FacilityTag[];
@@ -86,6 +111,12 @@ export interface FacilityContent {
   readonly lvCurve: readonly number[];
   readonly overflowCapPolicy: string;
   readonly footprint: FacilityFootprint;
+  /** [M5] ステータス重み。JSON に無ければ null(engine 側が等分既定を使う)。 */
+  readonly statWeights: FacilityStatWeights | null;
+  /** [M5] Lv 別の保管容量。JSON に無ければ null(容量を提供しない)。 */
+  readonly storageCapacityCurve: readonly number[] | null;
+  /** [M5] 容量の対象資源 ID。JSON に無ければ null(= 全資源)。 */
+  readonly storedResourceIds: readonly string[] | null;
   /**
    * GDD 11.2 の過酷業務(製錬/鍛冶/高炉等)か。JSON に無ければ null
    * (= engine へ写す段で reject。ファイル冒頭 [T7] の節を参照)。
@@ -234,6 +265,71 @@ function validateOutput(
   return { kind: "resource", resourceId };
 }
 
+/** [M5] `statWeights`(省略可)の検証。5 種すべてを要求する(部分指定は曖昧)。 */
+function validateStatWeights(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): FacilityStatWeights | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const values: number[] = [];
+  for (const key of RESIDENT_STAT_KEYS) {
+    const n = expectNumber(obj[key], `${path}.${key}`, issues, STAT_WEIGHT_RANGE);
+    if (n === undefined) return undefined;
+    values.push(n);
+  }
+  const [vigor, dexterity, intellect, fortitude, will] = values;
+  return {
+    vigor: vigor ?? 0,
+    dexterity: dexterity ?? 0,
+    intellect: intellect ?? 0,
+    fortitude: fortitude ?? 0,
+    will: will ?? 0,
+  };
+}
+
+/** [M5] `storageCapacityCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負。 */
+function validateCapacityCurve(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (arr.length !== LV_CURVE_LENGTH) {
+    issues.add(
+      path,
+      `storageCapacityCurve は長さ ${String(LV_CURVE_LENGTH)}(Lv1〜Lv5)が必須(実際: ${String(arr.length)})`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const n = expectNumber(arr[i], `${path}[${String(i)}]`, issues, CAPACITY_VALUE_RANGE);
+    if (n === undefined) return undefined;
+    values.push(n);
+  }
+  return values;
+}
+
+/** [M5] `storedResourceIds`(省略可)の検証。ID 規則に一致する文字列の配列。 */
+function validateStoredResourceIds(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly string[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  const ids: string[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const value = validateId(arr[i], `${path}[${String(i)}]`, issues);
+    if (value === undefined) return undefined;
+    ids.push(value);
+  }
+  return ids;
+}
+
 export function validateFacility(raw: unknown): ValidationResult<FacilityContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -256,6 +352,24 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
   const output =
     rawOutput === undefined ? null : (validateOutput(rawOutput, "$.output", issues) ?? undefined);
 
+  // [M5] 追加の省略可フィールド。
+  const rawStatWeights = obj["statWeights"];
+  const statWeights =
+    rawStatWeights === undefined
+      ? null
+      : (validateStatWeights(rawStatWeights, "$.statWeights", issues) ?? undefined);
+  const rawCapacityCurve = obj["storageCapacityCurve"];
+  const storageCapacityCurve =
+    rawCapacityCurve === undefined
+      ? null
+      : (validateCapacityCurve(rawCapacityCurve, "$.storageCapacityCurve", issues) ?? undefined);
+  const rawStoredResourceIds = obj["storedResourceIds"];
+  const storedResourceIds =
+    rawStoredResourceIds === undefined
+      ? null
+      : (validateStoredResourceIds(rawStoredResourceIds, "$.storedResourceIds", issues) ??
+        undefined);
+
   if (
     id === undefined ||
     tags === undefined ||
@@ -264,10 +378,25 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     overflowCapPolicy === undefined ||
     footprint === undefined ||
     harshWork === undefined ||
-    output === undefined
+    output === undefined ||
+    statWeights === undefined ||
+    storageCapacityCurve === undefined ||
+    storedResourceIds === undefined
   ) {
     return fail(issues.list());
   }
 
-  return ok({ id, tags, slots, lvCurve, overflowCapPolicy, footprint, harshWork, output });
+  return ok({
+    id,
+    tags,
+    slots,
+    lvCurve,
+    overflowCapPolicy,
+    footprint,
+    harshWork,
+    output,
+    statWeights,
+    storageCapacityCurve,
+    storedResourceIds,
+  });
 }

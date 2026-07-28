@@ -18,5 +18,13 @@
     "memoryKeeperResist": -0.15,
     "durationTicksMin": 1440,
     "durationTicksMax": 2880
+  },
+  "storage": {
+    "wasteResourceId": "waste",
+    "baseCapacity": {},
+    "wasteConversionRatio": { "firewood": 0.5 },
+    "wasteToResearchRatio": 0.1,
+    "buildCostWasteSubstitutionMax": 0.2,
+    "codifyWasteSubstitutionMax": 0.05
   }
 }

@@ -89,6 +89,9 @@
 import type { Fix } from "../fp";
 import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
+// 型のみの参照(実行時依存は無い)。ステータス 5 種の正本 ID レジストリは
+// 生産式側(rules/stats.ts)が権威なので、state はその型を借りるだけにする。
+import type { ResidentStats } from "../rules/stats";
 
 // --- 1. ID -----------------------------------------------------------------
 
@@ -179,6 +182,18 @@ export interface ResidentState {
   readonly traitIds: readonly EntityId[];
   /** 想起困難が解ける tick。0 は「発生していない」。 */
   readonly recallImpairedUntilTick: number;
+  /**
+   * [M5] ステータス 5 種(裁定 B8 / GDD 7.1・人間単位 0〜100)。
+   *
+   * **省略可**。省略時は {@link NEUTRAL_RESIDENT_STATS}(全て基準 50)として
+   * 扱われ、生産寄与が厳密に 1.0 になる(rules/stats.ts §1)。住民生成側で
+   * 実際に振る本結線は M7 の担当であり、M5 は「生産式が受け取る形と中立既定値」
+   * までを実装する。
+   *
+   * **直列化形では省略された state のキーを出さない**(serialize.ts §4)。
+   * これにより既存セーブ・既存 golden vector のバイト列が 1 bit も動かない。
+   */
+  readonly stats?: ResidentStats;
 }
 
 /**
@@ -228,6 +243,23 @@ export interface ResourceState {
   readonly resourceId: EntityId;
   /** 現在庫。 */
   readonly stock: Fix;
+  /**
+   * [M5] 累計産出(オーバーフロー損失率 GDD 11.4-7 の分母)。
+   *
+   * **上限が有限な資源についてのみ記録する**({@link cumulativeOverflow} と
+   * 常に対で存在するか、対で存在しない)。上限無指定の資源では会計自体が
+   * 意味を持たない(損失は構造的に 0)ので持たず、直列化形にもキーを出さない
+   * = 既存セーブ・既存 golden vector のバイト列が動かない。
+   */
+  readonly cumulativeProduced?: Fix;
+  /**
+   * [M5] 累計オーバーフロー量(同分子)。廃材変換前の**超過そのもの**であり、
+   * 廃材へ変換された分も破棄された分も両方含む(GDD 6.7)。
+   *
+   * 廃材生成量を「この累計値の差分」から導くことで、区間を分割しても
+   * 生成量が一致する(rules/storage.ts §3 の telescoping)。
+   */
+  readonly cumulativeOverflow?: Fix;
 }
 
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */

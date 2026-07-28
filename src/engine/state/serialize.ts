@@ -67,10 +67,29 @@
 //         (ADR 3軸(b) additive-only)
 //   キーは domainTag、値は xoshiro128** の 4 語(uint32)配列。未登録の domainTag と
 //   長さ 4 以外・uint32 範囲外は reject する(レジストリ整合・ADR-024(2))。
+//
+// ===========================================================================
+// 4. entity の省略可フィールドも「無ければキーごと出さない」(M5)
+// ===========================================================================
+//   §3 と同じ規約を entity レベルへ広げる。M5 が足した
+//     resident.stats                                   (ステータス 5 種)
+//     resource.cumulativeProduced / cumulativeOverflow (オーバーフロー会計)
+//   はいずれも**未設定という状態が意味を持つ**(前者は「中立既定値」、後者は
+//   「上限が無いので会計しない」)。よって undefined を書き出すのではなく
+//   キーごと省略し、キー不在 ⇔ undefined の 1 対 1 対応で往復不変性を保つ。
+//
+//   ねらいは §3(a)(b) と同一 — M5 以前に採った golden vector 37 本と
+//   既存セーブのバイト列が 1 bit も動かないこと。オブジェクトの生スプレッドは
+//   ADR-028(1) で禁止(このファイルも免除対象外)なので、rngState と同じく
+//   条件分岐で複数のリテラルを書き分ける。
+//
+//   resource の 2 つの累計は**常に対で存在するか対で不在**である(会計は上限が
+//   有限な資源でのみ走る)。片方だけの直列化形は壊れた入力として reject する。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson } from "../canonicalize";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
+import type { ResidentStats } from "../rules/stats";
 import { isDomainTag, type DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
@@ -100,6 +119,15 @@ export class SerializeError extends Error {
 // インデックスシグネチャを持つ)必要があるため。Fix は raw 整数、EntityId は
 // 素の文字列として載る。
 
+/** [M5] ステータス 5 種の直列化形(raw 整数)。キー順は canonicalize が揃える。 */
+export type SerializedResidentStats = {
+  readonly vigor: number;
+  readonly dexterity: number;
+  readonly intellect: number;
+  readonly fortitude: number;
+  readonly will: number;
+};
+
 export type SerializedResident = {
   readonly kind: "resident";
   readonly id: string;
@@ -109,6 +137,8 @@ export type SerializedResident = {
   readonly dispatched: boolean;
   readonly traitIds: readonly string[];
   readonly recallImpairedUntilTick: number;
+  /** [M5] 未設定(中立既定値)なら**キーごと省略**する(§4)。 */
+  readonly stats?: SerializedResidentStats;
 };
 
 export type SerializedFacility = {
@@ -133,6 +163,10 @@ export type SerializedResource = {
   readonly id: string;
   readonly resourceId: string;
   readonly stock: number;
+  /** [M5] オーバーフロー会計。上限が無い資源では**対でキーごと省略**する(§4)。 */
+  readonly cumulativeProduced?: number;
+  /** [M5] 同上(必ず {@link cumulativeProduced} と対)。 */
+  readonly cumulativeOverflow?: number;
 };
 
 export type SerializedEntity =
@@ -156,19 +190,66 @@ export type SerializedGameState = {
 
 // --- 2. state → JSON -------------------------------------------------------
 
+/** [M5] 省略可の `stats` を持つ resident の直列化(§4 の 2 リテラル分岐)。 */
+function serializeResident(entity: ResidentState): SerializedResident {
+  const stats = entity.stats;
+  if (stats === undefined) {
+    return {
+      kind: "resident",
+      id: entity.id,
+      morale: toRaw(entity.morale),
+      mastery: toRaw(entity.mastery),
+      assignedFacilityId: entity.assignedFacilityId,
+      dispatched: entity.dispatched,
+      traitIds: [...entity.traitIds],
+      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+    };
+  }
+  return {
+    kind: "resident",
+    id: entity.id,
+    morale: toRaw(entity.morale),
+    mastery: toRaw(entity.mastery),
+    assignedFacilityId: entity.assignedFacilityId,
+    dispatched: entity.dispatched,
+    traitIds: [...entity.traitIds],
+    recallImpairedUntilTick: entity.recallImpairedUntilTick,
+    stats: {
+      vigor: toRaw(stats.vigor),
+      dexterity: toRaw(stats.dexterity),
+      intellect: toRaw(stats.intellect),
+      fortitude: toRaw(stats.fortitude),
+      will: toRaw(stats.will),
+    },
+  };
+}
+
+/** [M5] 省略可のオーバーフロー会計を持つ resource の直列化(§4)。 */
+function serializeResource(entity: ResourceState): SerializedResource {
+  const produced = entity.cumulativeProduced;
+  const overflow = entity.cumulativeOverflow;
+  if (produced === undefined || overflow === undefined) {
+    return {
+      kind: "resource",
+      id: entity.id,
+      resourceId: entity.resourceId,
+      stock: toRaw(entity.stock),
+    };
+  }
+  return {
+    kind: "resource",
+    id: entity.id,
+    resourceId: entity.resourceId,
+    stock: toRaw(entity.stock),
+    cumulativeProduced: toRaw(produced),
+    cumulativeOverflow: toRaw(overflow),
+  };
+}
+
 function serializeEntity(entity: EntityState): SerializedEntity {
   switch (entity.kind) {
     case "resident":
-      return {
-        kind: "resident",
-        id: entity.id,
-        morale: toRaw(entity.morale),
-        mastery: toRaw(entity.mastery),
-        assignedFacilityId: entity.assignedFacilityId,
-        dispatched: entity.dispatched,
-        traitIds: [...entity.traitIds],
-        recallImpairedUntilTick: entity.recallImpairedUntilTick,
-      };
+      return serializeResident(entity);
     case "facility":
       return {
         kind: "facility",
@@ -187,12 +268,7 @@ function serializeEntity(entity: EntityState): SerializedEntity {
         completedTick: entity.completedTick,
       };
     case "resource":
-      return {
-        kind: "resource",
-        id: entity.id,
-        resourceId: entity.resourceId,
-        stock: toRaw(entity.stock),
-      };
+      return serializeResource(entity);
     default: {
       // union を網羅していれば到達しない(型検査で担保)。EntityState を
       // 増やしたのに case を足し忘れた場合だけここへ落ちる。
@@ -332,19 +408,57 @@ function requireIntOrNull(value: unknown, path: string): number | null {
   return value === null ? null : requireInt(value, path);
 }
 
+/** [M5] `stats`(省略可・§4)を読む。キーが無ければ undefined を返す。 */
+function requireResidentStatsOrUndefined(value: unknown, path: string): ResidentStats | undefined {
+  if (value === undefined) return undefined;
+  const o = requireObject(value, path);
+  return {
+    vigor: requireFix(o["vigor"], `${path}.vigor`),
+    dexterity: requireFix(o["dexterity"], `${path}.dexterity`),
+    intellect: requireFix(o["intellect"], `${path}.intellect`),
+    fortitude: requireFix(o["fortitude"], `${path}.fortitude`),
+    will: requireFix(o["will"], `${path}.will`),
+  };
+}
+
 function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string): ResidentState {
+  const morale = requireFix(o["morale"], `${p}.morale`);
+  const mastery = requireFix(o["mastery"], `${p}.mastery`);
+  const assignedFacilityId = requireEntityIdOrNull(
+    o["assignedFacilityId"],
+    `${p}.assignedFacilityId`,
+  );
+  const dispatched = requireBoolean(o["dispatched"], `${p}.dispatched`);
+  const traitIds = requireEntityIdArray(o["traitIds"], `${p}.traitIds`);
+  const recallImpairedUntilTick = requireNonNegativeInt(
+    o["recallImpairedUntilTick"],
+    `${p}.recallImpairedUntilTick`,
+  );
+  const stats = requireResidentStatsOrUndefined(o["stats"], `${p}.stats`);
+  // exactOptionalPropertyTypes 下では `stats: undefined` を書けず、生スプレッドも
+  // 使えない(§4)ので 2 リテラルに書き分ける。
+  if (stats === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+    };
+  }
   return {
     kind: "resident",
     id,
-    morale: requireFix(o["morale"], `${p}.morale`),
-    mastery: requireFix(o["mastery"], `${p}.mastery`),
-    assignedFacilityId: requireEntityIdOrNull(o["assignedFacilityId"], `${p}.assignedFacilityId`),
-    dispatched: requireBoolean(o["dispatched"], `${p}.dispatched`),
-    traitIds: requireEntityIdArray(o["traitIds"], `${p}.traitIds`),
-    recallImpairedUntilTick: requireNonNegativeInt(
-      o["recallImpairedUntilTick"],
-      `${p}.recallImpairedUntilTick`,
-    ),
+    morale,
+    mastery,
+    assignedFacilityId,
+    dispatched,
+    traitIds,
+    recallImpairedUntilTick,
+    stats,
   };
 }
 
@@ -370,11 +484,26 @@ function deserializeResearch(id: EntityId, o: Record<string, unknown>, p: string
 }
 
 function deserializeResource(id: EntityId, o: Record<string, unknown>, p: string): ResourceState {
+  const resourceId = requireEntityId(o["resourceId"], `${p}.resourceId`);
+  const stock = requireFix(o["stock"], `${p}.stock`);
+  const rawProduced = o["cumulativeProduced"];
+  const rawOverflow = o["cumulativeOverflow"];
+  if ((rawProduced === undefined) !== (rawOverflow === undefined)) {
+    throw new SerializeError(
+      `${p}: cumulativeProduced / cumulativeOverflow は両方あるか両方無いかのいずれか` +
+        "(オーバーフロー会計は上限が有限な資源でのみ対で走る・§4)",
+    );
+  }
+  if (rawProduced === undefined || rawOverflow === undefined) {
+    return { kind: "resource", id, resourceId, stock };
+  }
   return {
     kind: "resource",
     id,
-    resourceId: requireEntityId(o["resourceId"], `${p}.resourceId`),
-    stock: requireFix(o["stock"], `${p}.stock`),
+    resourceId,
+    stock,
+    cumulativeProduced: requireFix(rawProduced, `${p}.cumulativeProduced`),
+    cumulativeOverflow: requireFix(rawOverflow, `${p}.cumulativeOverflow`),
   };
 }
 

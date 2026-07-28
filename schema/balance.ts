@@ -85,6 +85,30 @@ export interface RecallRiskParams {
   readonly durationTicksMax: number | null;
 }
 
+/**
+ * [M5] 保管庫オーバーフロー・廃材スポンジ・廃材3出口(GDD 6.7)のパラメータ。
+ *
+ * **ブロックごと省略可**(欠落は null)。省略時は engine 側で上限判定も廃材生成も
+ * 走らない = 既存挙動と完全に同一。資源ごとの上限/変換率は
+ * 「resource 定義 ID → 値」のオブジェクトで持つ(resource カテゴリが未実装のため
+ * ID の実在確認は行わない。GDD 12.1 の `item.overflow{policy,convertTo,ratio}` へ
+ * 移すのは item カテゴリを足す段の作業)。
+ */
+export interface StorageParamsContent {
+  /** 廃材の resource 定義 ID。null なら超過分は全て破棄。 */
+  readonly wasteResourceId: string | null;
+  /** resource 定義 ID → 基礎保管容量。ここに無い資源は**上限なし**。 */
+  readonly baseCapacity: { readonly [resourceId: string]: number };
+  /** resource 定義 ID → 超過分の廃材変換率(0〜1)。無指定は 0 = 単純破棄。 */
+  readonly wasteConversionRatio: { readonly [resourceId: string]: number };
+  /** GDD 6.7 3出口(3)「廃材 N → RP 1」の 1/N。 */
+  readonly wasteToResearchRatio: number;
+  /** GDD 6.7 3出口(1)「施設増築コストの一部代替(最大20%)」。 */
+  readonly buildCostWasteSubstitutionMax: number;
+  /** GDD 6.7 3出口(2)「成文化の粘土代替(低比率)」。 */
+  readonly codifyWasteSubstitutionMax: number;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -92,6 +116,108 @@ export interface BalanceContent {
   readonly offlineClampTick: number;
   readonly safetyFactor: number;
   readonly recallRiskParams: RecallRiskParams;
+  /** [M5] GDD 6.7 の保管庫パラメータ。JSON に無ければ null。 */
+  readonly storage: StorageParamsContent | null;
+}
+
+/** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
+const CAPACITY_RANGE: NumericRange = { min: 0, max: 1_000_000_000 };
+
+/** [M5] GDD 6.7「最大20%」を上限とする代替比率の保守境界。 */
+const SUBSTITUTION_RATIO_RANGE: NumericRange = { min: 0, max: 0.2 };
+
+function validateResourceNumberMap(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+  range: NumericRange,
+): { readonly [resourceId: string]: number } | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const result: Record<string, number> = {};
+  const issuesBefore = issues.list().length;
+  for (const key of Object.keys(obj)) {
+    const resourceId = validateId(key, `${path}.${key}`, issues);
+    const value = expectNumber(obj[key], `${path}.${key}`, issues, range);
+    if (resourceId === undefined || value === undefined) continue;
+    result[resourceId] = value;
+  }
+  return issues.list().length === issuesBefore ? result : undefined;
+}
+
+function validateStorage(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): StorageParamsContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const rawWasteResourceId = obj["wasteResourceId"];
+  const wasteResourceId =
+    rawWasteResourceId === undefined || rawWasteResourceId === null
+      ? null
+      : (validateId(rawWasteResourceId, `${path}.wasteResourceId`, issues) ?? undefined);
+  const baseCapacity = validateResourceNumberMap(
+    obj["baseCapacity"] ?? {},
+    `${path}.baseCapacity`,
+    issues,
+    CAPACITY_RANGE,
+  );
+  const wasteConversionRatio = validateResourceNumberMap(
+    obj["wasteConversionRatio"] ?? {},
+    `${path}.wasteConversionRatio`,
+    issues,
+    UNIT_RANGE,
+  );
+  const wasteToResearchRatio = expectNumber(
+    obj["wasteToResearchRatio"],
+    `${path}.wasteToResearchRatio`,
+    issues,
+    UNIT_RANGE,
+  );
+  const buildCostWasteSubstitutionMax = expectNumber(
+    obj["buildCostWasteSubstitutionMax"],
+    `${path}.buildCostWasteSubstitutionMax`,
+    issues,
+    SUBSTITUTION_RATIO_RANGE,
+  );
+  const codifyWasteSubstitutionMax = expectNumber(
+    obj["codifyWasteSubstitutionMax"],
+    `${path}.codifyWasteSubstitutionMax`,
+    issues,
+    SUBSTITUTION_RATIO_RANGE,
+  );
+
+  if (
+    wasteResourceId === undefined ||
+    baseCapacity === undefined ||
+    wasteConversionRatio === undefined ||
+    wasteToResearchRatio === undefined ||
+    buildCostWasteSubstitutionMax === undefined ||
+    codifyWasteSubstitutionMax === undefined
+  ) {
+    return undefined;
+  }
+
+  // 廃材変換率が指定されているのに変換先が無ければ、変換分は行き場を失う
+  // (黙って破棄せず reject する。GDD 6.7 のスポンジ機構が成立しない設定)。
+  if (wasteResourceId === null && Object.keys(wasteConversionRatio).length > 0) {
+    issues.add(
+      `${path}.wasteResourceId`,
+      "wasteConversionRatio が指定されているのに wasteResourceId が無い(廃材の行き先が決まらない)",
+    );
+    return undefined;
+  }
+
+  return {
+    wasteResourceId,
+    baseCapacity,
+    wasteConversionRatio,
+    wasteToResearchRatio,
+    buildCostWasteSubstitutionMax,
+    codifyWasteSubstitutionMax,
+  };
 }
 
 function validateRecallRiskParams(
@@ -289,6 +415,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     "$.recallRiskParams",
     issues,
   );
+  const rawStorage = obj["storage"];
+  const storage =
+    rawStorage === undefined
+      ? null
+      : (validateStorage(rawStorage, "$.storage", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -296,7 +427,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     coarseTickMinutes === undefined ||
     offlineClampTick === undefined ||
     safetyFactor === undefined ||
-    recallRiskParams === undefined
+    recallRiskParams === undefined ||
+    storage === undefined
   ) {
     return fail(issues.list());
   }
@@ -308,5 +440,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     offlineClampTick,
     safetyFactor,
     recallRiskParams,
+    storage,
   });
 }
