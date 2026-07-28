@@ -13,9 +13,12 @@
 //                  2秒デバウンス / 15秒・25コマンド絶対フラッシュ(ADR-012(1))は
 //                  **書込を包むスケジューラ**なので `saveScheduler.ts` に分けた
 //                  (この層は「1 回の書込」、あちらは「いつ書くか」)。
-//   まだ無い     : 容量検査 1.5MB 警告・4MB 中止(ADR-012(2)= M4)、
-//                  localStorage ミラーと巻戻し検知(GDD 11.9 = M4)。
-//                  入る場所だけを §5 にコメントで残す。
+//   M4 で足した  : 書込前サイズ検査 1.5MB 警告・4MB 中止(ADR-012(2)。
+//                  判定ロジック本体は `saveCapacity.ts`、ここは `saveGameState`
+//                  への最小結線のみ)。export/import(`exchange.ts`)・
+//                  localStorage ミラー(`localStorageMirror.ts`)・バックアップ
+//                  リマインド(`backupReminder.ts`)は同じ M4 だが**別ファイル**
+//                  (この層に「1 回の書込」以上の責務を足さないため)。
 //
 // ===========================================================================
 // 1. なぜ「エンベロープ + payload 文字列」なのか(ADR-012 の記述との差)
@@ -56,7 +59,8 @@
 //   内側: 読出トランザクションの生成 → `objectStore.get` → checksum 検証 →
 //         `JSON.parse` → `fromSerializable`
 //   外側: `indexedDB.open`(補助メトリクス idbOpenMs)、書込(idbPutMs)、
-//         localStorage ミラー読出 / 巻戻し検知(未実装・§5)。
+//         localStorage ミラー読出(§5(c)・実装済み) / 巻戻し検知
+//         (GDD 11.9 の一部・未実装・§5(c) に理由あり)。
 //
 //   {@link loadLatestSave} は自分の内訳を `marks`(生の performance.now 値)で
 //   返す。呼び出し側(bench/perfMain.ts)は関数呼び出しの**直前直後**でも
@@ -68,6 +72,7 @@ import { fnv1a32 } from "../engine/rng/fnv1a32";
 import { fromSerializable, toSerializable } from "../engine/state/serialize";
 import type { GameState } from "../engine/state/state";
 import { migrateSavePayload, migrateStoredSave, SAVE_FORMAT_VERSION } from "./migration";
+import { checkSaveCapacity, SAVE_SIZE_ABORT_BYTES, type SaveCapacityCheck } from "./saveCapacity";
 
 // --- 1. 定数とエラー -------------------------------------------------------
 
@@ -120,6 +125,22 @@ export class SaveBoundsError extends PersistenceError {
   ) {
     super(message);
     this.name = "SaveBoundsError";
+  }
+}
+
+/**
+ * 書込前サイズ検査(ADR-012(2))で 4MB 中止しきい値を超えた。
+ * 判定ロジック本体は `saveCapacity.ts`(純関数・I/O なし)、ここは書込を
+ * 実際に止める境界(`saveGameState`)でのみ投げる。
+ */
+export class SaveCapacityError extends PersistenceError {
+  constructor(
+    message: string,
+    /** 判定の全内訳(`level` は常に `"abort"`)。 */
+    readonly capacity: SaveCapacityCheck,
+  ) {
+    super(message);
+    this.name = "SaveCapacityError";
   }
 }
 
@@ -443,8 +464,10 @@ function awaitTransaction(tx: IDBTransaction, what: string): Promise<void> {
 /** {@link saveGameState} の結果(書込は復帰経路の外なので予算対象外)。 */
 export interface SavePutResult {
   readonly integrityChecksum: number;
-  /** payload の UTF-16 コードユニット長。バイト数は呼び出し側で測る。 */
+  /** payload の UTF-16 コードユニット長。バイト数は `capacity.byteLength` を見る。 */
   readonly payloadLength: number;
+  /** 書込前サイズ検査の結果(ADR-012(2)・M4)。`level` が `"warning"` でも書込は行う。 */
+  readonly capacity: SaveCapacityCheck;
   readonly encodeMs: number;
   readonly putMs: number;
 }
@@ -457,8 +480,13 @@ export interface SavePutResult {
  * この関数の仕事ではなく `saveScheduler.ts` が担う。ここへ書込ポリシーを入れると
  * 「1 回書く」を単体で叩けなくなる(= スケジューラのテストが IDB を要求する)。
  *
- * **書込前サイズ検査(1.5MB 警告 / 4MB 中止・ADR-012(2))は M4 の担当**で、
- * `encodeSaveRecord` の直後・`put` の直前に入る(§5(b))。
+ * **書込前サイズ検査(1.5MB 警告 / 4MB 中止・ADR-012(2)・M4)**: `encodeSaveRecord`
+ * の直後・`put` の直前で判定する。警告は `capacity` に載せて書込を続行し、
+ * 中止しきい値(4MB)は {@link SaveCapacityError} を投げて **`put` を呼ばない**
+ * (QuotaExceededError を待たず自前で止める・ADR-012(2)「書込中止」)。
+ *
+ * @throws {SaveBoundsError} 分岐木ノード上界超過(`encodeSaveRecord` 内)
+ * @throws {SaveCapacityError} payload が 4MB 中止しきい値以上
  */
 export async function saveGameState(
   db: IDBDatabase,
@@ -468,7 +496,14 @@ export async function saveGameState(
   const e0 = performance.now();
   const record = encodeSaveRecord(state);
   const e1 = performance.now();
-  // ここに「書込前サイズ検査」が入る(本実装スコープ・ADR-012(2))。
+  const capacity = checkSaveCapacity(record.payload);
+  if (capacity.level === "abort") {
+    throw new SaveCapacityError(
+      `セーブサイズが書込中止しきい値を超えた(${String(capacity.byteLength)} bytes ≥ ` +
+        `${String(SAVE_SIZE_ABORT_BYTES)} bytes・ADR-012(2))。エクスポートで退避してください。`,
+      capacity,
+    );
+  }
   const tx = db.transaction(SAVE_STORE_NAME, "readwrite");
   await requestToPromise(tx.objectStore(SAVE_STORE_NAME).put(record, key), `put("${key}")`);
   await awaitTransaction(tx, "書込トランザクション");
@@ -476,6 +511,7 @@ export async function saveGameState(
   return {
     integrityChecksum: record.integrityChecksum,
     payloadLength: record.payload.length,
+    capacity,
     encodeMs: e1 - e0,
     putMs: e2 - e1,
   };
@@ -577,12 +613,20 @@ export async function loadLatestSave(
 //        として platform 層に置いた。engine の tick とは独立(実時刻ベース)
 //        なので engine には入れない。
 //  (b) 書込前サイズ検査(1.5MB 警告 / 4MB 中止・ADR-012(2))
-//      → **[M4 の担当]** `saveGameState` の `encodeSaveRecord` 直後、`put` の直前。
-//        **復帰経路には無い**ので B2 とは無関係(perf-boundaries §7)。
-//  (c) localStorage ミラー読出 / 巻戻し検知(GDD 11.9)
-//      → **[M4 の担当]** `loadLatestSave` の **呼び出し側**。IDB が生きている
-//        happy path では分岐しないため B2 の外(補助メトリクス `mirrorCheckMs`)。
-//        まだ作っていないので `mirrorCheckMs` は結果 JSON に出さない。
+//      → **[M4 済]** `saveGameState` の `encodeSaveRecord` 直後、`put` の直前
+//        (判定本体は `saveCapacity.ts`)。**復帰経路には無い**ので B2 とは
+//        無関係(perf-boundaries §7)。
+//  (c) localStorage ミラー(IDB 冗長化)/ バックアップリマインド(GDD 11.9 の一部)
+//      → **[M4 済]** `localStorageMirror.ts`(ミラー書込/読出・容量超過時の
+//        縮退記録・`loadLatestSave` **呼び出し側**でのフォールバック合成)+
+//        `backupReminder.ts`(最終エクスポートからの経過実時間/コマンド数の
+//        閾値判定・データ側のみ)。IDB が生きている happy path では分岐しない
+//        ため B2 の外(補助メトリクス `mirrorCheckMs` は結果 JSON に出していない。
+//        フォールバックは失敗経路であり予算判定の対象外のため)。
+//        **GDD 11.9 の残り**(単調タイムスタンプの巻戻し検知 + 実時間ウィンドウ
+//        あたりの累積 tick レート制限)は catch-up の tick 進行(`clock.ts`・
+//        ADR-026(3)・未実装)と結合する話であり、`src/engine/**` 不可の M4
+//        スコープ外(積み残し・後続タスクへ)。
 //  (d) saveSchemaVersion 差のマイグレーション連鎖(ADR 3軸(a))
 //      → **[M3 済]** `verifySaveRecord` と `fromSerializable` の**間**。payload を
 //        parse したプレーン値に対して version 順に純関数を適用する
