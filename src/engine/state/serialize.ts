@@ -90,11 +90,13 @@
 import { canonicalizeJson } from "../canonicalize";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
 import type { ResidentStats } from "../rules/stats";
+import { RECORD_MEDIA, isRecordMedium, type RecordMedium } from "../rules/types";
 import { isDomainTag, type DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   entityIdFromString,
   isEntityId,
+  type CodifyState,
   type EntityId,
   type EntityState,
   type FacilityState,
@@ -169,8 +171,26 @@ export type SerializedResource = {
   readonly cumulativeOverflow?: number;
 };
 
+/**
+ * [M6] 成文化ジョブ / 記録(state.ts の {@link CodifyState})。
+ * 省略可フィールドは無い(未着手の記録という状態が無いため)。
+ */
+export type SerializedCodify = {
+  readonly kind: "codify";
+  readonly id: string;
+  readonly techId: string;
+  readonly medium: string;
+  readonly requiredWork: number;
+  readonly progress: number;
+  readonly completedTick: number | null;
+};
+
 export type SerializedEntity =
-  SerializedFacility | SerializedResearch | SerializedResident | SerializedResource;
+  | SerializedCodify
+  | SerializedFacility
+  | SerializedResearch
+  | SerializedResident
+  | SerializedResource;
 
 /**
  * GameState の直列化形。ADR「セーブフォーマット」(649行)のうち現状扱う範囲
@@ -248,6 +268,16 @@ function serializeResource(entity: ResourceState): SerializedResource {
 
 function serializeEntity(entity: EntityState): SerializedEntity {
   switch (entity.kind) {
+    case "codify":
+      return {
+        kind: "codify",
+        id: entity.id,
+        techId: entity.techId,
+        medium: entity.medium,
+        requiredWork: toRaw(entity.requiredWork),
+        progress: toRaw(entity.progress),
+        completedTick: entity.completedTick,
+      };
     case "resident":
       return serializeResident(entity);
     case "facility":
@@ -507,6 +537,29 @@ function deserializeResource(id: EntityId, o: Record<string, unknown>, p: string
   };
 }
 
+/** [M6] 記録媒体は engine 既知の 2 種のみ(未知は reject・rules/types.ts §3c)。 */
+function requireRecordMedium(value: unknown, path: string): RecordMedium {
+  const raw = requireString(value, path);
+  if (!isRecordMedium(raw)) {
+    throw new SerializeError(
+      `${path}: "${raw}" は記録媒体ではない(${RECORD_MEDIA.join(",")} のいずれか・GDD 11.1 追補)`,
+    );
+  }
+  return raw;
+}
+
+function deserializeCodify(id: EntityId, o: Record<string, unknown>, p: string): CodifyState {
+  return {
+    kind: "codify",
+    id,
+    techId: requireEntityId(o["techId"], `${p}.techId`),
+    medium: requireRecordMedium(o["medium"], `${p}.medium`),
+    requiredWork: requireFix(o["requiredWork"], `${p}.requiredWork`),
+    progress: requireFix(o["progress"], `${p}.progress`),
+    completedTick: requireIntOrNull(o["completedTick"], `${p}.completedTick`),
+  };
+}
+
 function deserializeEntity(id: EntityId, value: unknown, path: string): EntityState {
   const o = requireObject(value, path);
   const kind = requireString(o["kind"], `${path}.kind`);
@@ -519,6 +572,8 @@ function deserializeEntity(id: EntityId, value: unknown, path: string): EntitySt
   }
 
   switch (kind) {
+    case "codify":
+      return deserializeCodify(id, o, path);
     case "resident":
       return deserializeResident(id, o, path);
     case "facility":

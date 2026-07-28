@@ -16,6 +16,7 @@
 
 import {
   IssueCollector,
+  expectBoolean,
   expectExactNumber,
   expectInteger,
   expectNumber,
@@ -109,6 +110,54 @@ export interface StorageParamsContent {
   readonly codifyWasteSubstitutionMax: number;
 }
 
+/**
+ * [M6] エラ定義(GDD 5.1 のコスト表 / GDD 12.1 の `era` エンティティ)。
+ *
+ * GDD 12.1 は `era(id, order, gateTechId, baseEra, eraMultiplier)` を独立カテゴリ
+ * として挙げているが、T6 は era カテゴリをロード対象に含めていない。ブロックを
+ * 1 つ足すほうが「新カテゴリ + ファイル + 正準化 + ID レジストリ」より小さいので、
+ * **暫定的に balance へ置く**(era カテゴリを足す段でそちらへ移すこと)。
+ */
+export interface EraContent {
+  readonly id: string;
+  /** 時代順(1 始まり)。 */
+  readonly order: number;
+  /** GDD 5.1 の base_era(E1=30 / E2=60 / E3=120)。 */
+  readonly baseEra: number;
+  /** GDD 5.1 の era_multiplier(E1=1 / E2=2 / E3=4)。成文化の時代係数でもある。 */
+  readonly eraMultiplier: number;
+  /** そのエラの壁テック(GDD 5.2)。tech カテゴリの実在確認は contentBundle。 */
+  readonly gateTechId: string;
+  /** GDD 5.1「n の上限＝各エラのクリティカルパス本数で固定」。 */
+  readonly criticalPathMax: number;
+}
+
+/** [M6] 記録媒体 1 種のパラメータ(GDD 11.1 [2026-07-27追補] の表)。 */
+export interface RecordMediumContent {
+  readonly costMul: number;
+  readonly timeMul: number;
+  readonly caravanWeight: number;
+  readonly flammable: boolean;
+  /** コストを支払う資源(石板 = 粘土 / 紙 = 紙)。resource カテゴリ未実装ゆえ実在確認なし。 */
+  readonly costResourceId: string;
+}
+
+/**
+ * [M6] 成文化と記録媒体のパラメータ(GDD 11.1 追補 / 12.1 追補)。
+ *
+ * 媒体は engine 既知の 2 種固定なので、キーは `stoneTablet` / `paper` の
+ * **2 つちょうど**を要求する(欠落も余剰も reject)。
+ */
+export interface RecordMediaContent {
+  readonly baseCost: number;
+  readonly baseDurationTicks: number;
+  readonly printingTechId: string | null;
+  readonly printingCostMul: number;
+  readonly printingTimeMul: number;
+  readonly stoneTablet: RecordMediumContent;
+  readonly paper: RecordMediumContent;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -118,6 +167,10 @@ export interface BalanceContent {
   readonly recallRiskParams: RecallRiskParams;
   /** [M5] GDD 6.7 の保管庫パラメータ。JSON に無ければ null。 */
   readonly storage: StorageParamsContent | null;
+  /** [M6] GDD 5.1 のエラ表。JSON に無ければ null(= エラという概念が無い content)。 */
+  readonly eras: readonly EraContent[] | null;
+  /** [M6] GDD 11.1 追補の記録媒体パラメータ。JSON に無ければ null(成文化不可)。 */
+  readonly recordMedia: RecordMediaContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -217,6 +270,208 @@ function validateStorage(
     wasteToResearchRatio,
     buildCostWasteSubstitutionMax,
     codifyWasteSubstitutionMax,
+  };
+}
+
+// --- [M6] eras / recordMedia -----------------------------------------------
+
+/** GDD 5.1 のエラ表は E1〜E5 の 5 段(MVP は E1〜E3)。 */
+const ERA_ORDER_RANGE: NumericRange = { min: 1, max: 5 };
+/** base_era は 30〜480(GDD 5.1 の表)を含む保守境界。 */
+const BASE_ERA_RANGE: NumericRange = { min: 1, max: 100_000 };
+/** era_multiplier は 1〜16(GDD 5.1 の表)を含む保守境界。 */
+const ERA_MULTIPLIER_RANGE: NumericRange = { min: 1, max: 1_000 };
+/** クリティカルパス本数の上限(GDD 5.1 は E1=3 / E2=3 / E3=4 程度)。 */
+const CRITICAL_PATH_MAX_RANGE: NumericRange = { min: 1, max: 20 };
+/** 媒体倍率(コスト/時間)の保守境界。0 は「タダ/即完了」になるので除外する。 */
+const MEDIUM_MUL_RANGE: NumericRange = { min: 0.000_001, max: 100 };
+/** キャラバン重み(石版換算枠)。石板 1.0 / 紙 0.25(GDD 11.1 追補)。 */
+const CARAVAN_WEIGHT_RANGE: NumericRange = { min: 0, max: 100 };
+/** 印刷バフの倍率。バフなので 1 以下(GDD 5.2「-50% / ×2」= 0.5)。 */
+const PRINTING_MUL_RANGE: NumericRange = { min: 0.000_001, max: 1 };
+/** 記録 1 枚の基準コスト。 */
+const RECORD_BASE_COST_RANGE: NumericRange = { min: 0, max: 1_000_000 };
+/** 記録 1 枚の基準作業 tick(1 分 tick 換算)。上限は 30 日ぶん。 */
+const RECORD_BASE_DURATION_RANGE: NumericRange = { min: 1, max: 43_200 };
+
+function validateEra(raw: unknown, path: string, issues: IssueCollector): EraContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const id = validateId(obj["id"], `${path}.id`, issues);
+  const order = expectInteger(obj["order"], `${path}.order`, issues, ERA_ORDER_RANGE);
+  const baseEra = expectNumber(obj["baseEra"], `${path}.baseEra`, issues, BASE_ERA_RANGE);
+  const eraMultiplier = expectNumber(
+    obj["eraMultiplier"],
+    `${path}.eraMultiplier`,
+    issues,
+    ERA_MULTIPLIER_RANGE,
+  );
+  const gateTechId = validateId(obj["gateTechId"], `${path}.gateTechId`, issues);
+  const criticalPathMax = expectInteger(
+    obj["criticalPathMax"],
+    `${path}.criticalPathMax`,
+    issues,
+    CRITICAL_PATH_MAX_RANGE,
+  );
+
+  if (
+    id === undefined ||
+    order === undefined ||
+    baseEra === undefined ||
+    eraMultiplier === undefined ||
+    gateTechId === undefined ||
+    criticalPathMax === undefined
+  ) {
+    return undefined;
+  }
+  return { id, order, baseEra, eraMultiplier, gateTechId, criticalPathMax };
+}
+
+function validateEras(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly EraContent[] | undefined {
+  if (!Array.isArray(raw)) {
+    issues.add(path, "eras は配列(GDD 5.1 のエラ表)");
+    return undefined;
+  }
+  const source = raw as readonly unknown[];
+  const eras: EraContent[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const era = validateEra(source[i], `${path}[${String(i)}]`, issues);
+    if (era !== undefined) eras.push(era);
+  }
+  if (eras.length !== source.length) return undefined;
+
+  const seenIds = new Set<string>();
+  const seenOrders = new Set<number>();
+  for (const era of eras) {
+    if (seenIds.has(era.id)) {
+      issues.add(path, `エラ ID "${era.id}" が重複している`);
+      return undefined;
+    }
+    seenIds.add(era.id);
+    if (seenOrders.has(era.order)) {
+      issues.add(path, `エラ order ${String(era.order)} が重複している(時代順が一意に決まらない)`);
+      return undefined;
+    }
+    seenOrders.add(era.order);
+  }
+  return eras;
+}
+
+function validateRecordMedium(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): RecordMediumContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const costMul = expectNumber(obj["costMul"], `${path}.costMul`, issues, MEDIUM_MUL_RANGE);
+  const timeMul = expectNumber(obj["timeMul"], `${path}.timeMul`, issues, MEDIUM_MUL_RANGE);
+  const caravanWeight = expectNumber(
+    obj["caravanWeight"],
+    `${path}.caravanWeight`,
+    issues,
+    CARAVAN_WEIGHT_RANGE,
+  );
+  const flammable = expectBoolean(obj["flammable"], `${path}.flammable`, issues);
+  const costResourceId = validateId(obj["costResourceId"], `${path}.costResourceId`, issues);
+
+  if (
+    costMul === undefined ||
+    timeMul === undefined ||
+    caravanWeight === undefined ||
+    flammable === undefined ||
+    costResourceId === undefined
+  ) {
+    return undefined;
+  }
+  return { costMul, timeMul, caravanWeight, flammable, costResourceId };
+}
+
+function validateRecordMedia(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): RecordMediaContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const baseCost = expectNumber(
+    obj["baseCost"],
+    `${path}.baseCost`,
+    issues,
+    RECORD_BASE_COST_RANGE,
+  );
+  const baseDurationTicks = expectInteger(
+    obj["baseDurationTicks"],
+    `${path}.baseDurationTicks`,
+    issues,
+    RECORD_BASE_DURATION_RANGE,
+  );
+  const rawPrintingTechId = obj["printingTechId"];
+  const printingTechId =
+    rawPrintingTechId === undefined || rawPrintingTechId === null
+      ? null
+      : (validateId(rawPrintingTechId, `${path}.printingTechId`, issues) ?? undefined);
+  const printingCostMul = expectNumber(
+    obj["printingCostMul"],
+    `${path}.printingCostMul`,
+    issues,
+    PRINTING_MUL_RANGE,
+  );
+  const printingTimeMul = expectNumber(
+    obj["printingTimeMul"],
+    `${path}.printingTimeMul`,
+    issues,
+    PRINTING_MUL_RANGE,
+  );
+  const stoneTablet = validateRecordMedium(obj["stoneTablet"], `${path}.stoneTablet`, issues);
+  const paper = validateRecordMedium(obj["paper"], `${path}.paper`, issues);
+
+  if (
+    baseCost === undefined ||
+    baseDurationTicks === undefined ||
+    printingTechId === undefined ||
+    printingCostMul === undefined ||
+    printingTimeMul === undefined ||
+    stoneTablet === undefined ||
+    paper === undefined
+  ) {
+    return undefined;
+  }
+
+  // GDD 11.1 追補の表そのもの。ここを崩すと「紙＝安い/速い/軽い、石板＝高い/遅い/重い」
+  // という媒体選択のジレンマ(=このシステムの存在理由)が消えるので機械強制する。
+  if (paper.costMul > stoneTablet.costMul) {
+    issues.add(path, "紙は石板よりコストが安いこと(GDD 11.1 追補: 紙 = 安・速)");
+    return undefined;
+  }
+  if (paper.timeMul > stoneTablet.timeMul) {
+    issues.add(path, "紙は石板より学者作業時間が短いこと(GDD 11.1 追補)");
+    return undefined;
+  }
+  if (paper.caravanWeight >= stoneTablet.caravanWeight) {
+    issues.add(path, "紙は石板よりキャラバン重みが軽いこと(GDD 10.2 追補: 石板 1.0 / 紙 0.25)");
+    return undefined;
+  }
+  if (!paper.flammable || stoneTablet.flammable) {
+    issues.add(path, "可燃なのは紙のみ(GDD 11.1 追補: 石板 = 不燃)");
+    return undefined;
+  }
+
+  return {
+    baseCost,
+    baseDurationTicks,
+    printingTechId,
+    printingCostMul,
+    printingTimeMul,
+    stoneTablet,
+    paper,
   };
 }
 
@@ -420,6 +675,14 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawStorage === undefined
       ? null
       : (validateStorage(rawStorage, "$.storage", issues) ?? undefined);
+  const rawEras = obj["eras"];
+  const eras =
+    rawEras === undefined ? null : (validateEras(rawEras, "$.eras", issues) ?? undefined);
+  const rawRecordMedia = obj["recordMedia"];
+  const recordMedia =
+    rawRecordMedia === undefined
+      ? null
+      : (validateRecordMedia(rawRecordMedia, "$.recordMedia", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -428,7 +691,9 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     offlineClampTick === undefined ||
     safetyFactor === undefined ||
     recallRiskParams === undefined ||
-    storage === undefined
+    storage === undefined ||
+    eras === undefined ||
+    recordMedia === undefined
   ) {
     return fail(issues.list());
   }
@@ -441,5 +706,7 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     safetyFactor,
     recallRiskParams,
     storage,
+    eras,
+    recordMedia,
   });
 }

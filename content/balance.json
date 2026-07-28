@@ -26,5 +26,52 @@
     "wasteToResearchRatio": 0.1,
     "buildCostWasteSubstitutionMax": 0.2,
     "codifyWasteSubstitutionMax": 0.05
+  },
+  "eras": [
+    {
+      "id": "e1",
+      "order": 1,
+      "baseEra": 30,
+      "eraMultiplier": 1,
+      "gateTechId": "techStorage",
+      "criticalPathMax": 3
+    },
+    {
+      "id": "e2",
+      "order": 2,
+      "baseEra": 60,
+      "eraMultiplier": 2,
+      "gateTechId": "techSmelting",
+      "criticalPathMax": 3
+    },
+    {
+      "id": "e3",
+      "order": 3,
+      "baseEra": 120,
+      "eraMultiplier": 4,
+      "gateTechId": "techSteamEngine",
+      "criticalPathMax": 4
+    }
+  ],
+  "recordMedia": {
+    "baseCost": 20,
+    "baseDurationTicks": 720,
+    "printingTechId": "techPrinting",
+    "printingCostMul": 0.5,
+    "printingTimeMul": 0.5,
+    "stoneTablet": {
+      "costMul": 1,
+      "timeMul": 1,
+      "caravanWeight": 1,
+      "flammable": false,
+      "costResourceId": "clay"
+    },
+    "paper": {
+      "costMul": 0.6,
+      "timeMul": 0.5,
+      "caravanWeight": 0.25,
+      "flammable": true,
+      "costResourceId": "paper"
+    }
   }
 }

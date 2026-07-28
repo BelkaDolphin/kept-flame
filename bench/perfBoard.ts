@@ -234,18 +234,30 @@ export function perfResidentId(patternIndex: number, slot: 0 | 1): EntityId {
 }
 
 /**
+ * [M6] #1 の代表盤面が使う tech(ADR-014 の tech3)。
+ *
+ * M6 で content の tech が 24 本になったため「ちょうど 3 本」前提は成立しない。
+ * **本数に依存せず、M6 以前と同じ 3 本を同じ順序で明示指定**する
+ * (researchPerfA/B/C の割り当てが M6 前後で変わらない = #1 の測定条件が不変)。
+ */
+export const PERF_BOARD_TECH_IDS = [
+  "techBasketWeaving",
+  "techFireStarting",
+  "techPottery",
+] as const;
+
+/**
  * #1 の代表盤面を組み立てる(住民20 / 施設12 / tech3 / 資源2 = entity 37)。
  *
- * @throws {PerfBoardError} content の前提(hearth/forge/workbench が在り tech が
- *   ちょうど 3 本)が崩れている場合
+ * @throws {PerfBoardError} content の前提(hearth/forge/workbench が在り
+ *   {@link PERF_BOARD_TECH_IDS} が在る)が崩れている場合
  */
 export function buildPerfBoard(content: EngineContent, worldSeed = PERF_WORLD_SEED): GameState {
-  const techIds = [...content.techDefs.keys()];
-  if (techIds.length !== 3) {
-    throw new PerfBoardError(
-      `#1 の代表盤面は content.tech がちょうど 3 本(tech3・ADR-014)である前提` +
-        `(実際 ${String(techIds.length)} 本)`,
-    );
+  const techIds = PERF_BOARD_TECH_IDS.map((techId) => eid(techId));
+  for (const techId of techIds) {
+    if (!content.techDefs.has(techId)) {
+      throw new PerfBoardError(`#1 の代表盤面が前提にする tech "${techId}" が content に無い`);
+    }
   }
   const hearthDef = requireFacilityDef(content, HEARTH_DEF_ID);
   const forgeDef = requireFacilityDef(content, FORGE_DEF_ID);

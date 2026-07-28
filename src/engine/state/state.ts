@@ -47,11 +47,16 @@
 //     facility : (A)生産の主体。配置セルと従事者、Lv
 //     research : (B)研究完了の進行度
 //     resource : 生産/研究コストが読み書きする資源ストック
+//     codify   : [M6] 成文化ジョブ / 記録 1 枚(GDD 11.1 [2026-07-27追補])。
+//                縮約 3 本には要らないが、成文化は (B) レート変化イベントの
+//                もう一方の柱(GDD 11.8(B))なので research と同型で足した。
+//                既存 conformance シナリオは 1 件も持たないので、この追加で
+//                golden vector のバイト列は動かない。
 //
 //   **含めない**(計測 12 項目のどれにも不要。GDD 全域のモデル化はしない):
 //     探索/派遣・分岐木・冒険記 / 襲撃 / 衛星拠点 / 大移動・継承点・周回 /
 //     item・在庫・装備 / memoirLog・bond / trait 定義本体(content 側) /
-//     成文化キュー / 6×8 格子の地形・瓦礫 / 難度シード。
+//     6×8 格子の地形・瓦礫 / 難度シード。
 //   GameState の非 entity フィールドも同様に絞り、セーブフォーマット
 //   (ADR 649行)のうち以下は持たない:
 //     eventQueueSnapshot / inProgressOrders : 下記 §4 参照(T5 で不要と判断)。
@@ -92,6 +97,8 @@ import type { Xoshiro128State } from "../rng/xoshiro128";
 // 型のみの参照(実行時依存は無い)。ステータス 5 種の正本 ID レジストリは
 // 生産式側(rules/stats.ts)が権威なので、state はその型を借りるだけにする。
 import type { ResidentStats } from "../rules/stats";
+// 同上(型のみ)。記録媒体 enum の権威は rules/types.ts。
+import type { RecordMedium } from "../rules/types";
 
 // --- 1. ID -----------------------------------------------------------------
 
@@ -157,7 +164,7 @@ export function entityIdFromString(value: string): EntityId {
 // --- 2. entity ------------------------------------------------------------
 
 /** entity の種別タグ。`entityStateById` の値を判別するための discriminant。 */
-export type EntityKind = "facility" | "research" | "resident" | "resource";
+export type EntityKind = "codify" | "facility" | "research" | "resident" | "resource";
 
 /**
  * 住民。(C)想起困難の発生式(GDD 11.2)
@@ -262,8 +269,44 @@ export interface ResourceState {
   readonly cumulativeOverflow?: Fix;
 }
 
+/**
+ * [M6] 成文化ジョブ / 記録(GDD 6.2 / 11.1 [2026-07-27追補])。
+ *
+ * **1 entity = 記録 1 枚**であり、`completedTick` が
+ *   null      → 成文化キューに並んでいる(作業中)
+ *   非 null   → 記録として存在している
+ * を表す。研究 entity と同じ形(進行度 + 完了 tick)にしてあるのは、成文化完了が
+ * 研究完了と同じ (B) レート変化イベント(GDD 11.8(B))だからである。
+ *
+ * 同一 tech に**媒体別の記録を並存できる**(GDD 11.1 追補: 紙で速攻 → 後に石板へ
+ * 写す副本動線)。よって一意なのは (techId, medium) の組であり、techId 単独ではない。
+ * 「その tech が成文化済み」= 完了済み記録が 1 件以上存在すること。
+ */
+export interface CodifyState {
+  readonly kind: "codify";
+  readonly id: EntityId;
+  /** 成文化対象の tech 定義 ID。 */
+  readonly techId: EntityId;
+  /** 記録媒体(engine 既知の 2 種・GDD 11.1 追補)。 */
+  readonly medium: RecordMedium;
+  /**
+   * **着手時点で確定した所要作業量**(GDD 12.5-8「着手済みオーダーは着手時点
+   * パラメータをスナップショット確定」)。単位は「学者 1 人 × 1 tick = 1.0」。
+   *
+   * スナップショットにしているのは、作業中に E3 印刷が解禁されると所要時間が
+   * 変わってしまい、同じ区間を分割して進めた結果が食い違う(分割不変性・
+   * advance.ts §3)ため。
+   */
+  readonly requiredWork: Fix;
+  /** 蓄積した作業量。 */
+  readonly progress: Fix;
+  /** 記録が完成した tick。作業中は null。 */
+  readonly completedTick: number | null;
+}
+
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
-export type EntityState = FacilityState | ResearchState | ResidentState | ResourceState;
+export type EntityState =
+  CodifyState | FacilityState | ResearchState | ResidentState | ResourceState;
 
 /** 種別タグから entity 型を引く。`EntityOfKind<"resident">` = ResidentState。 */
 export type EntityOfKind<K extends EntityKind> = Extract<EntityState, { readonly kind: K }>;

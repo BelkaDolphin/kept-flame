@@ -206,9 +206,18 @@ describe("authoring-samples — event.sample.retest-2026-07-27.json", () => {
 });
 
 describe("authoring-samples — content/*.json 不変性の確認", () => {
-  it("本物の content/*.json は変更されていない(規模が T6/T7 時点のまま)", () => {
-    expect(techJson).toHaveLength(3);
+  // このテストの目的は「#12 の計測サンプルが本物の content へ紛れ込んでいないこと」
+  // であって content を凍結することではない。よって**正当な additive 追加が入ったら
+  // 期待値を更新する**(件数固定の強度は落とさない)。
+  //   T6/T7 時点: tech 3 / facility 3 / trait 2
+  //   M6:         tech 24(E1〜E3・GDD 5.2)。facility / trait は据え置き。
+  it("本物の content/*.json の規模が想定どおり(計測サンプルが混入していない)", () => {
+    expect(techJson).toHaveLength(24);
     expect(facilityJson).toHaveLength(3);
     expect(traitJson).toHaveLength(2);
+    // 計測サンプルの ID が本物側へ混入していないこと(このテストの本来の関心事)。
+    const techIds = new Set(techJson.map((t) => t.id));
+    expect(techIds.has(techSample.id)).toBe(false);
+    expect(techIds.has(techSampleRetest.id)).toBe(false);
   });
 });

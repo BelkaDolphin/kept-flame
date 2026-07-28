@@ -35,11 +35,13 @@ describe("validateContentBundle — ダミー content", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("tech 3件・facility 3件・trait 2件がロードされる(規模の確認)", () => {
+  // [M6] tech は E1〜E3 の 24 本(GDD 5.2)へ additive 追加した。facility 14 種と
+  // trait 8 種は未投入(それぞれ別タスク)なので T6 のダミー規模のまま。
+  it("tech 24件・facility 3件・trait 2件がロードされる(規模の確認)", () => {
     const result = validateContentBundle(dummyBundle());
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.tech).toHaveLength(3);
+      expect(result.value.tech).toHaveLength(24);
       expect(result.value.facility).toHaveLength(3);
       expect(result.value.trait).toHaveLength(2);
     }

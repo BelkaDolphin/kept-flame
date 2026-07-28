@@ -246,6 +246,18 @@ function baseMeta(worldSeed: string): GameStateMeta {
 }
 
 /**
+ * [M6] sim 代表盤面が使う tech(ADR-014 の tech3)。
+ *
+ * 以前は「content の tech がちょうど 3 本」を前提に `techDefs` の先頭 3 件を
+ * 使っていたが、M6 で E1〜E3 のテック 24 本を投入したのでその前提は成立しない。
+ * **本数に依存せず、当時と同じ 3 本を同じ順序で明示指定**する
+ * (= researchSimA/B/C の割り当てが M6 前後で 1 bit も変わらない)。
+ * recallRisk は tech の中身を読まない(判定数 = 住民 × research entity 数)ので、
+ * 3 本という**個数**だけが計測 #3/#4/#5 の前提であり、どの 3 本かは効かない。
+ */
+export const SIM_BOARD_TECH_IDS = ["techBasketWeaving", "techFireStarting", "techPottery"] as const;
+
+/**
  * 代表盤面を組み立てる(住民20・tech3・施設2種(過酷/通常)・代表10パターン)。
  *
  * facility は過酷(forge 相当)/通常(hearth 相当)の各 1 インスタンスに集約する
@@ -253,16 +265,18 @@ function baseMeta(worldSeed: string): GameStateMeta {
  * インスタンス数を増やしても判定は変わらない。隣接ボーナス/過密は
  * recallRisk に影響しないので配置(cellIndex)も任意でよい)。
  *
- * @throws {SimBoardError} content に forge/hearth 定義または tech がちょうど
- *   3 本無い場合(sim board の前提が content と食い違っている)
+ * @throws {SimBoardError} content に forge/hearth 定義または
+ *   {@link SIM_BOARD_TECH_IDS} が無い場合(sim board の前提が content と食い違っている)
  */
 export function buildPatternBoard(worldSeed: string, content: EngineContent): GameState {
-  const techIds = [...content.techDefs.keys()];
-  if (techIds.length !== 3) {
-    throw new SimBoardError(
-      `sim board は content.tech がちょうど3本(tech3・ADR-014)である前提` +
-        `(実際 ${String(techIds.length)} 本)。content/tech.json を確認するか sim/board.ts の代表盤面を見直すこと`,
-    );
+  const techIds = SIM_BOARD_TECH_IDS.map((techId) => eid(techId));
+  for (const techId of techIds) {
+    if (!content.techDefs.has(techId)) {
+      throw new SimBoardError(
+        `sim board が前提にする tech "${techId}" が content に無い` +
+          `(content/tech.json を確認するか sim/board.ts の SIM_BOARD_TECH_IDS を見直すこと)`,
+      );
+    }
   }
   const hearthDef = requireFacilityDef(content, NORMAL_FACILITY_DEF_ID);
   const forgeDef = requireFacilityDef(content, HARSH_FACILITY_DEF_ID);

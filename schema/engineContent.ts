@@ -109,17 +109,26 @@ import {
 } from "../src/engine/rules/stats";
 import type {
   EngineContent,
+  EraDef,
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
   RecallRiskParams,
+  RecordMediaParams,
+  RecordMediumParams,
   StorageParams,
   TechDef,
 } from "../src/engine/rules/types";
 import { entityIdFromString, type EntityId } from "../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../src/engine/stochastic";
 import type { AdjacencyContent, AdjacencyRule } from "./adjacency";
-import type { BalanceContent, StorageParamsContent } from "./balance";
+import type {
+  BalanceContent,
+  EraContent,
+  RecordMediaContent,
+  RecordMediumContent,
+  StorageParamsContent,
+} from "./balance";
 import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
 import type { FacilityContent, FacilityStatWeights } from "./facility";
@@ -167,7 +176,10 @@ export const UNREPRESENTABLE_CONTENT_EFFECTS: { readonly [contentEffect: string]
     health:
       "住民の健康(GDD 6.2「汚染 × 寝床・療養所 → 健康 -15%/tick」)は縮約 state に無い(state.ts §3)",
     codifySpeed:
-      "成文化(GDD 6.2「学芸 3連接 → 成文化 +30%」)は縮約 rules の対象外(rules/types.ts §2)。加えて「3 連接」はタグペア行列では表現できない",
+      "[M6 裁定 N7・対象外維持] 成文化そのものは M6 で実装済み(src/engine/rules/codify.ts)だが、" +
+      "GDD 6.2 の「学芸 3連接 → 成文化 +30%」は**3 者関係**であり、タグ×タグ対称行列" +
+      "(2 者関係)では原理的に表現できない。集合カウント型の効果モデルへ広げると" +
+      "隣接解決の観測挙動が変わり algoVersion bump(ADR-016)を伴うため、MVP では対象外を維持する",
     defense:
       "防衛係数(GDD 6.2「見張り台」)は襲撃システムに属し縮約 rules の対象外(rules/types.ts §2)",
   });
@@ -193,7 +205,10 @@ export const UNREPRESENTABLE_CONTENT_TRAIT_STATS: { readonly [stat: string]: str
     researchSpeed:
       "研究速度への直接倍率(GDD 7.2 学者)は未実装。研究点は施設の産出先 output.kind=research として生産式を通るため、trait 側の別倍率は生産式に写す先が無い",
     health: "住民の健康(GDD 7.2 病弱)は縮約 state に無い(src/engine/state/state.ts §3)",
-    codifySpeed: "成文化(GDD 7.2)は rules 未実装(M6 の担当)",
+    codifySpeed:
+      "[M6] 成文化の所要 tick は rules/codify.ts で実装済みだが、trait 倍率を掛ける先" +
+      "(= どの住民が何 tick その記録の作業に就いているか)が未実装。作業者割当は" +
+      "成文化を tick ループへ結線する段(M13 以降)の担当なので、それまで読み飛ばす",
     recallResist:
       "想起困難への耐性(GDD 11.2 記憶巧者)は balance.recallRiskParams.memoryKeeperResist 側で表現しており、trait effect 経由の一般化は未実装",
     morale: "士気への効果(GDD 7.3 楽観/悲観)は士気の更新規則そのものが未実装",
@@ -539,7 +554,114 @@ function toTechDef(content: TechContent, issues: IssueCollector): TechDef | unde
     "研究コスト",
   );
   if (researchCostFix === undefined) return undefined;
-  return { id: entityIdFromString(content.id), researchCostFix };
+  // [M6] era / lossClass / prereqs を engine へ渡す(GDD 5.1 / 7.4 / 11.4-1)。
+  // prereqs は ID 昇順へ正規化する(rules/techTree.ts の走査順の前提)。
+  return {
+    id: entityIdFromString(content.id),
+    researchCostFix,
+    eraId: content.era,
+    lossClass: content.lossClass,
+    prereqs: [...content.prereqs].sort(compareUtf16).map((id) => entityIdFromString(id)),
+  };
+}
+
+// --- 4b. era(GDD 5.1)— M6 -------------------------------------------------
+
+function toEraDefs(
+  eras: readonly EraContent[],
+  issues: IssueCollector,
+): ReadonlyMap<string, EraDef> | undefined {
+  const result = new Map<string, EraDef>();
+  for (const era of [...eras].sort((l, r) => compareUtf16(l.id, r.id))) {
+    const path = `balance.eras.${era.id}`;
+    const baseEraFix = toFix(era.baseEra, `${path}.baseEra`, issues, "base_era");
+    const multiplierFix = toFix(
+      era.eraMultiplier,
+      `${path}.eraMultiplier`,
+      issues,
+      "era_multiplier",
+    );
+    if (baseEraFix === undefined || multiplierFix === undefined) continue;
+    result.set(era.id, {
+      id: era.id,
+      order: era.order,
+      baseEraFix,
+      multiplierFix,
+      gateTechId: entityIdFromString(era.gateTechId),
+      criticalPathMax: era.criticalPathMax,
+    });
+  }
+  return result.size === eras.length ? result : undefined;
+}
+
+// --- 4c. recordMedia(GDD 11.1 [2026-07-27追補])— M6 -----------------------
+
+function toRecordMediumParams(
+  content: RecordMediumContent,
+  path: string,
+  issues: IssueCollector,
+): RecordMediumParams | undefined {
+  const costMulFix = toFix(content.costMul, `${path}.costMul`, issues, "媒体コスト倍率");
+  const timeMulFix = toFix(content.timeMul, `${path}.timeMul`, issues, "媒体時間倍率");
+  const caravanWeightFix = toFix(
+    content.caravanWeight,
+    `${path}.caravanWeight`,
+    issues,
+    "キャラバン重み",
+  );
+  if (costMulFix === undefined || timeMulFix === undefined || caravanWeightFix === undefined) {
+    return undefined;
+  }
+  return {
+    costMulFix,
+    timeMulFix,
+    caravanWeightFix,
+    flammable: content.flammable,
+    costResourceId: entityIdFromString(content.costResourceId),
+  };
+}
+
+function toRecordMediaParams(
+  content: RecordMediaContent,
+  issues: IssueCollector,
+): RecordMediaParams | undefined {
+  const path = "balance.recordMedia";
+  const baseCostFix = toFix(content.baseCost, `${path}.baseCost`, issues, "記録の基準コスト");
+  const printingCostMulFix = toFix(
+    content.printingCostMul,
+    `${path}.printingCostMul`,
+    issues,
+    "印刷のコスト倍率",
+  );
+  const printingTimeMulFix = toFix(
+    content.printingTimeMul,
+    `${path}.printingTimeMul`,
+    issues,
+    "印刷の時間倍率",
+  );
+  const stoneTablet = toRecordMediumParams(content.stoneTablet, `${path}.stoneTablet`, issues);
+  const paper = toRecordMediumParams(content.paper, `${path}.paper`, issues);
+
+  if (
+    baseCostFix === undefined ||
+    printingCostMulFix === undefined ||
+    printingTimeMulFix === undefined ||
+    stoneTablet === undefined ||
+    paper === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    baseCostFix,
+    baseDurationTicks: content.baseDurationTicks,
+    printingTechId:
+      content.printingTechId === null ? null : entityIdFromString(content.printingTechId),
+    printingCostMulFix,
+    printingTimeMulFix,
+    // キーは engine の RECORD_MEDIA(enum)と 1 対 1。content 側で欠落していれば
+    // schema/balance.ts が既に reject している。
+    byMedium: { paper, stoneTablet },
+  };
 }
 
 // --- 5. adjacency -----------------------------------------------------------
@@ -889,6 +1011,13 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     bundle.balance.storage === null
       ? null
       : (toStorageParams(bundle.balance.storage, issues) ?? undefined);
+  // [M6] どちらも省略可。キー不在 = engine 側の「エラ概念なし / 成文化不可」既定。
+  const eraDefs =
+    bundle.balance.eras === null ? null : (toEraDefs(bundle.balance.eras, issues) ?? undefined);
+  const recordMedia =
+    bundle.balance.recordMedia === null
+      ? null
+      : (toRecordMediaParams(bundle.balance.recordMedia, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -904,12 +1033,15 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     issues.hasIssues ||
     adjacency === undefined ||
     recallRisk === undefined ||
-    storage === undefined
+    storage === undefined ||
+    eraDefs === undefined ||
+    recordMedia === undefined
   ) {
     return fail(issues.list());
   }
-  // exactOptionalPropertyTypes ゆえ `storage: undefined` を書けないので分岐する
-  // (キー不在 = 上限なし、という engine 側の契約を型でも守る)。
+  // exactOptionalPropertyTypes ゆえ `storage: undefined` を書けないので、
+  // 省略可フィールドは「値があるときだけキーを足す」形で組み立てる
+  // (キー不在 = 各既定、という engine 側の契約を型でも守る)。
   const base = {
     facilityDefs,
     techDefs,
@@ -919,7 +1051,9 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     traitDefs,
     unrepresentedTraitEffects,
   };
-  return ok(storage === null ? base : { ...base, storage });
+  const withStorage = storage === null ? base : { ...base, storage };
+  const withEras = eraDefs === null ? withStorage : { ...withStorage, eraDefs };
+  return ok(recordMedia === null ? withEras : { ...withEras, recordMedia });
 }
 
 /**

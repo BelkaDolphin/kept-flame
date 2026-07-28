@@ -166,10 +166,32 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
 
     const content = result.value;
     expect([...content.facilityDefs.keys()]).toEqual(["forge", "hearth", "workbench"]);
+    // [M6] E1〜E3 のテック 24 本(GDD 5.2)。並びは ID の UTF-16 昇順(§4 の前提)。
     expect([...content.techDefs.keys()]).toEqual([
+      "techAgriculture",
+      "techBasicMedicine",
       "techBasketWeaving",
+      "techBedding",
+      "techBlacksmithing",
+      "techBlastFurnace",
+      "techBoneHideWorking",
+      "techCeramics",
+      "techCharcoalKiln",
       "techFireStarting",
+      "techGatheringHut",
+      "techGlass",
+      "techIrrigation",
+      "techLens",
+      "techMachineParts",
+      "techMetalCasting",
       "techPottery",
+      "techPrinting",
+      "techSmelting",
+      "techSteamEngine",
+      "techStoneTools",
+      "techStorage",
+      "techWaterDrawing",
+      "techWaterWheel",
     ]);
     expect(content.coarseTickMinutes).toBe(10);
   });

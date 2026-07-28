@@ -103,10 +103,79 @@ export interface FacilityStorageDef {
 
 // --- 2. tech 定義 ----------------------------------------------------------
 
-/** 技術定義(content)。縮約では研究コストだけを読む。 */
+/**
+ * [M6] 技術喪失の二層(GDD 7.4)。
+ *   (A) criticalRecoverable : クリティカルパス技術。失っても必ず再取得可能。
+ *   (B) rareIrreversible    : 一回性喪失を許容する希少側。
+ * 「取り返しのつかない喪失」は (B) のみに使う(GDD 7.4)。
+ */
+export const TECH_LOSS_CLASSES = ["criticalRecoverable", "rareIrreversible"] as const;
+
+/** {@link TECH_LOSS_CLASSES} のいずれか。 */
+export type TechLossClass = (typeof TECH_LOSS_CLASSES)[number];
+
+/**
+ * 省略時の lossClass。**安全側((A) = 再取得可能)** に倒す。
+ * (B) は「永久に失ってよい」という強い宣言なので、既定で選ばれてはならない。
+ */
+export const DEFAULT_TECH_LOSS_CLASS: TechLossClass = "criticalRecoverable";
+
+/**
+ * 技術定義(content)。
+ *
+ * T5 縮約は研究コストだけを読んでいた。M6 で `eraId` / `lossClass` / `prereqs` を
+ * 足したが、いずれも**省略可**である(既定値は下の各フィールドの doc 参照)。
+ * 省略可にしてあるのは M5 の `statWeights` / `storage` と同じ理由 —
+ * 「未設定なら M6 以前と 1 bit も違わない」を型で保証するため。
+ */
 export interface TechDef {
   readonly id: EntityId;
   readonly researchCostFix: Fix;
+  /**
+   * [M6] 所属エラの ID(GDD 5.2 の E1〜E3 = `e1`/`e2`/`e3`)。
+   * **省略時はエラ不明**として扱い、成文化の時代係数は 1.0、
+   * researchCost レンジ検証(GDD 12.3)は対象外になる。
+   */
+  readonly eraId?: string;
+  /** [M6] GDD 7.4 の二層。**省略時は {@link DEFAULT_TECH_LOSS_CLASS}**。 */
+  readonly lossClass?: TechLossClass;
+  /**
+   * [M6] 前提テック(ID 昇順)。**省略時は空**(エラ起点)。
+   * 実在確認と循環検出は content ロード側(`schema/contentBundle.ts`)の責務で、
+   * ここへ来る時点では解決済みの ID が並んでいる。
+   */
+  readonly prereqs?: readonly EntityId[];
+}
+
+/**
+ * [M6] エラ定義(GDD 5.1 のコスト表 / GDD 12.1 の `era` エンティティ)。
+ *
+ * era は独立した content カテゴリになっていない(T6 のロード対象外)ため、
+ * 暫定的に `balance.json` の `eras` ブロックから読む。era カテゴリを足す段で
+ * そちらへ移すこと。
+ */
+export interface EraDef {
+  readonly id: string;
+  /** 時代順(1 始まり)。エラ間の前後関係の唯一の根拠。 */
+  readonly order: number;
+  /**
+   * GDD 5.1 の `base_era`(E1=30 / E2=60 / E3=120)。**researchCost の
+   * レンジ検証(GDD 12.3)にだけ使う**。実行時のコストは tech 個別値が正。
+   */
+  readonly baseEraFix: Fix;
+  /**
+   * GDD 5.1 の `era_multiplier`(E1=1 / E2=2 / E3=4)。
+   * 成文化コスト/時間の「時代係数」(GDD 11.1)としても使う。
+   */
+  readonly multiplierFix: Fix;
+  /** そのエラの壁テック(GDD 12.1 `era.gateTechId`)。クリティカルパスの終点。 */
+  readonly gateTechId: EntityId;
+  /**
+   * GDD 5.1「n の上限＝各エラのクリティカルパス本数で固定」の上限値。
+   * 実際のクリティカルパス本数は prereq グラフから機械算出し、この値を
+   * 超えていないかを `rules/techTree.ts` が検査する。
+   */
+  readonly criticalPathMax: number;
 }
 
 // --- 3. recallRisk パラメータ(GDD 11.2) ----------------------------------
@@ -189,6 +258,66 @@ export interface StorageParams {
   readonly codifyWasteSubstitutionMaxFix: Fix;
 }
 
+// --- 3c. 記録媒体パラメータ(GDD 11.1 [2026-07-27追補])— M6 -----------------
+
+/**
+ * [M6] 記録媒体(GDD 11.1 追補)。**engine 既知の 2 種固定(enum)**であり、
+ * content カテゴリではない。並びは UTF-16 昇順 = 集合演算の安定順序(GDD 11.7)。
+ *
+ *   paper       : 安い/速い/軽い(キャラバン 0.25)/**可燃**
+ *   stoneTablet : 高い/遅い/重い(キャラバン 1.0)/不燃
+ */
+export const RECORD_MEDIA = ["paper", "stoneTablet"] as const;
+
+/** {@link RECORD_MEDIA} のいずれか。 */
+export type RecordMedium = (typeof RECORD_MEDIA)[number];
+
+/** 未知の文字列が記録媒体のいずれかか(型ガード)。 */
+export function isRecordMedium(value: string): value is RecordMedium {
+  for (const medium of RECORD_MEDIA) {
+    if (medium === value) return true;
+  }
+  return false;
+}
+
+/** 媒体 1 種ぶんのパラメータ(GDD 11.1 追補の表)。 */
+export interface RecordMediumParams {
+  /** 記録 1 枚のコスト倍率(石板 = 基準 ×1.0)。 */
+  readonly costMulFix: Fix;
+  /** 学者作業時間の倍率(石板 = 基準 ×1.0)。 */
+  readonly timeMulFix: Fix;
+  /** 大移動キャラバンの石版換算枠の消費量(石板 1.0 / 紙 0.25・GDD 10.2 追補)。 */
+  readonly caravanWeightFix: Fix;
+  /** 可燃か(紙 = true)。焼失は M22 の `destroyRecords` が扱う。 */
+  readonly flammable: boolean;
+  /** コストを支払う資源の定義 ID(石板 = 粘土 / 紙 = 紙・GDD 11.1)。 */
+  readonly costResourceId: EntityId;
+}
+
+/**
+ * [M6] 成文化と記録媒体のパラメータ(`balance.json` の `recordMedia` ブロック)。
+ *
+ * **このブロックが content に無ければ {@link EngineContent.recordMedia} は
+ * undefined** であり、成文化コマンドは一切実行できない(= M6 以前と同一挙動)。
+ */
+export interface RecordMediaParams {
+  /** 記録 1 枚の基準コスト(時代係数・媒体倍率を掛ける前)。 */
+  readonly baseCostFix: Fix;
+  /** 記録 1 枚の基準学者作業時間(tick)。媒体倍率を掛ける前。 */
+  readonly baseDurationTicks: number;
+  /**
+   * E3「簡易印刷」テックの content ID(GDD 5.2)。null なら印刷バフ無し。
+   * **バフは紙のみに適用**(GDD 11.1 追補)。
+   */
+  readonly printingTechId: EntityId | null;
+  /** 印刷解禁時の紙のコスト倍率(GDD 5.2「成文化コスト -50%」= 0.5)。 */
+  readonly printingCostMulFix: Fix;
+  /** 印刷解禁時の紙の時間倍率(GDD 5.2「速度 ×2」= 0.5)。 */
+  readonly printingTimeMulFix: Fix;
+  /** 媒体別パラメータ。2 種とも必須(enum 固定なので欠落は content ロードが reject)。 */
+  readonly byMedium: { readonly [K in RecordMedium]: RecordMediumParams };
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -225,6 +354,17 @@ export interface EngineContent {
    * 何を捨てたかをここへ機械可読で残し、テストで固定する。
    */
   readonly unrepresentedTraitEffects?: readonly string[];
+  /**
+   * [M6] エラ定義(GDD 5.1)。**省略時はエラという概念が無い content** として
+   * 扱い、成文化の時代係数は 1.0、tech ツリー検査(rules/techTree.ts)は
+   * 空の結果を返す。
+   */
+  readonly eraDefs?: ReadonlyMap<string, EraDef>;
+  /**
+   * [M6] 記録媒体パラメータ(GDD 11.1 追補)。**省略時は成文化が実行できない**
+   * (rules/codify.ts の全コマンドが RulesError)。
+   */
+  readonly recordMedia?: RecordMediaParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------
@@ -277,3 +417,30 @@ export function requireTechDef(content: EngineContent, techId: EntityId): TechDe
   }
   return def;
 }
+
+/**
+ * [M6] tech の所属エラ定義を引く。エラ不明(`eraId` 省略 / `eraDefs` 省略 /
+ * 該当 ID 無し)なら undefined。**呼び出し側は「エラ不明 = 時代係数 1.0」を
+ * 既定として扱う**(rules/codify.ts §2)。
+ */
+export function eraDefOfTech(content: EngineContent, techId: EntityId): EraDef | undefined {
+  const eraId = requireTechDef(content, techId).eraId;
+  if (eraId === undefined) return undefined;
+  return content.eraDefs?.get(eraId);
+}
+
+/**
+ * [M6] tech の lossClass(GDD 7.4)。**省略時は
+ * {@link DEFAULT_TECH_LOSS_CLASS}**。
+ */
+export function lossClassOfTech(content: EngineContent, techId: EntityId): TechLossClass {
+  return requireTechDef(content, techId).lossClass ?? DEFAULT_TECH_LOSS_CLASS;
+}
+
+/** [M6] tech の前提テック(ID 昇順)。**省略時は空**。 */
+export function prereqsOfTech(content: EngineContent, techId: EntityId): readonly EntityId[] {
+  return requireTechDef(content, techId).prereqs ?? EMPTY_PREREQS;
+}
+
+/** 共有の空配列(エラ起点テックでアロケーションしないため)。 */
+const EMPTY_PREREQS: readonly EntityId[] = [];

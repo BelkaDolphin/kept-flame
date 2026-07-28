@@ -113,6 +113,39 @@ function checkCrossReferences(
     }
   }
 
+  // [M6] balance.eras(GDD 5.1)を足したので、era 側 → tech 側と tech 側 → era 側の
+  // 両方向を突き合わせる。**eras ブロックが無い content では何も検査しない**
+  // (M6 以前の content・テスト用の最小バンドルをそのまま通すため)。
+  const eras = balance.eras;
+  if (eras !== null) {
+    const eraIds = new Set(eras.map((e) => e.id));
+    for (const era of eras) {
+      if (!techIds.has(era.gateTechId)) {
+        issues.push({
+          path: `balance.eras.${era.id}.gateTechId`,
+          message: `壁テック "${era.gateTechId}" が tech カテゴリに存在しない(GDD 5.2)`,
+        });
+      }
+    }
+    for (const t of tech) {
+      if (!eraIds.has(t.era)) {
+        issues.push({
+          path: `tech.${t.id}.era`,
+          message: `era "${t.era}" が balance.eras に存在しない(GDD 5.1 のエラ表)`,
+        });
+      }
+    }
+  }
+
+  // [M6] E3 印刷テック(GDD 5.2 / 11.1 追補)の実在確認。
+  const printingTechId = balance.recordMedia?.printingTechId ?? null;
+  if (printingTechId !== null && !techIds.has(printingTechId)) {
+    issues.push({
+      path: "balance.recordMedia.printingTechId",
+      message: `印刷テック "${printingTechId}" が tech カテゴリに存在しない(GDD 5.2)`,
+    });
+  }
+
   issues.push(...detectPrereqCycles(tech));
   return issues;
 }
