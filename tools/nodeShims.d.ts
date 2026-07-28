@@ -68,3 +68,30 @@ declare const process: {
   readonly env: Readonly<Record<string, string | undefined>>;
   exitCode: number | undefined;
 };
+
+// M45: tests/scripts/bot-token.test.ts が scripts/bot-token.mjs の JWT 組み立てを
+// 検証するために、テスト専用の使い捨て RSA 鍵ペアを生成・検証する用途のみ宣言する
+// (本番の署名処理自体は scripts/bot-token.mjs 側で node:crypto を直接 import する
+// だけで、型チェック対象外の .mjs のためここでの宣言は不要)。
+declare module "node:crypto" {
+  export function generateKeyPairSync(
+    type: "rsa",
+    options: {
+      readonly modulusLength: number;
+      readonly publicKeyEncoding: { readonly type: "spki"; readonly format: "pem" };
+      readonly privateKeyEncoding: { readonly type: "pkcs8"; readonly format: "pem" };
+    },
+  ): { readonly publicKey: string; readonly privateKey: string };
+
+  export interface Verify {
+    update(data: string): Verify;
+    verify(publicKey: string, signature: string, signatureEncoding: "base64url"): boolean;
+  }
+  export function createVerify(algorithm: string): Verify;
+}
+
+// M45: 上記テストが JWT の base64url セグメントを人間可読な JSON へデコードする
+// ためだけに使う最小宣言(@types/node 非依存方針を維持)。
+declare const Buffer: {
+  from(data: string, encoding: "base64url"): { toString(encoding: "utf8"): string };
+};
