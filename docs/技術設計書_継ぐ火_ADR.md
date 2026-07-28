@@ -154,10 +154,11 @@ sunset(直近3世代のみ新規生成可)は新規セーブ生成を止める�
 
 **決定**
 GitHub 仕様上 PR 作成者の自己承認は必須レビュー数に加算されず、1人 + AI 運営で PR 作成者 = Code Owner が同一人物だと必須レビューを永久に満たせずブロック、逆に admin bypass を許すと人間レビュー機能が実質無効化する欠陥を修正する。二役分離を導入:
-(1) 週次 content の PR は専用 bot アカウント(または GitHub App/PAT を持つ別 identity)が作成する。
-(2) 運営者本人(human)がその PR の CODEOWNERS レビュアーとして承認する — 作成者(bot)≠ 承認者(human)ゆえ必須レビュー1件が正当に成立し、admin bypass を使わずブランチ保護を維持。
-(3) 週次セッションの Claude Code はローカルで content を生成し bot identity で push/PR 化するスクリプト経路を用意(API キーは使わずローカル git + PAT のみ=課金の壁 ADR-021 を侵さない)。
-(4) 必須ステータスチェック(lint/tsc/Vitest/schema/canonicalize/content-diff-gate/id-registry/sim gate/conformance)+ force-push 禁止 + 直 push 禁止 + Include administrators 有効を維持。
+(1) **[2026-07-28改訂・ユーザー承認済み] bot identity は運営者本人アカウント配下の GitHub App(`kept-flame-bot`)とする**(専用 bot アカウント+PAT 方式から変更)。変更理由: ①fine-grained PAT は「リソースオーナー」方式のため、別アカウントの bot からは他人所有リポジトリ(`kept-flame`)に対して発行できない(GitHub 公式の既知ギャップ。classic PAT への格下げしか回避策がない) ②新規アカウント作成・メール・2FA・90日ローテーションの運用が丸ごと不要になる ③インストールトークンは寿命1時間の短命資格情報で、権限を Contents / Pull requests の Read-write 2種+`kept-flame` 単一リポジトリに絞れる=ADR-021 の最小権限方針とより整合する。
+(2) 週次 content の PR は GitHub App(`kept-flame-bot[bot]`)が作成し、運営者本人(human)がその PR の CODEOWNERS レビュアーとして承認する — 作成者(bot)≠ 承認者(human)ゆえ必須レビュー1件が正当に成立し、admin bypass を使わずブランチ保護を維持。
+(3) 週次セッションの Claude Code はローカルで content を生成し、**ローカル保管の App 秘密鍵(.pem・リポジトリ外・Actions secrets に置かない)から Node 組込み crypto で JWT を署名 → インストールトークンを取得 → push/PR 化**するスクリプト経路を用意(Anthropic API キーは一切使わない=課金の壁 ADR-021 を侵さない。GitHub API の呼出しはトークン発行と PR 作成のみで LLM 要素ゼロ)。
+(4) 必須ステータスチェック(lint/tsc/Vitest/schema/canonicalize/content-diff-gate/id-registry/sim gate/conformance)+ force-push 禁止 + 直 push 禁止 + Include administrators 有効を維持。ブランチ保護・rulesets は public リポジトリのため GitHub Free で全機能利用可。
+(5) **[2026-07-28追記・正直な開示] 本構成は技術的強制ではなく手続き的規律である。** personal アカウント所有リポジトリでは運営者本人が admin であり、保護設定自体を本人が無効化できる(バイパス不能な強制は Organization 所有でのみ成立)。二役分離の価値は「習慣的・偶発的な無審査マージを構造的に防ぐ」ことにあり、意図的な運用逸脱への防壁ではない(その防壁は決定論ゲート側=schema/sim/conformance が担う)。
 
 **選択肢**
 (a) CODEOWNERS 必須レビュー + 同一人物(旧):自己承認不可でデッドロック、撤回。(b) admin bypass 許可:レビュー無効化、却下。(c) bot 作成 PR + human 承認の二役分離:**採用**。
@@ -166,7 +167,7 @@ GitHub 仕様上 PR 作成者の自己承認は必須レビュー数に加算さ
 「ソロ運営で自己承認デッドロック、bypass すれば無審査マージ、回避策の言及が皆無」に、作成者と承認者を別 identity へ物理分離してレビュー機能を保ったまま成立させる具体構成で回答。
 
 **トレードオフ**
-bot identity(PAT/GitHub App)のシークレット管理が増える(ADR-021 最小権限・ローテーション対象に追加)。運営者本人がレビューを形骸化させ機械承認する運用逸脱は依然可能(残余リスク)。PAT push 設計は ADR-004 の 60 日 heartbeat と共有。
+bot identity(GitHub App 秘密鍵 .pem)のシークレット管理が増える(ADR-021 最小権限対象に追加。ただし PAT と違い定期ローテーション必須ではない)。トークン発行スクリプト(JWT 署名)の実装が PAT 直用より一段複雑。運営者本人がレビューを形骸化させ機械承認する運用逸脱は依然可能(残余リスク・上記(5))。ADR-004 の 60 日 heartbeat は運営者本人の資格情報による自己 push であり、bot の App 資格情報とは**共有しない**(2026-07-28 改訂で分離)。
 
 ---
 
@@ -301,7 +302,7 @@ rAF 毎の `targetTick` 再計算コスト(軽微)。低頻度更新のため UI
 「ITP 7日免除の一次ソースが ADR 内に無いまま挙動仮定の上に UI 仕様を先に確定」「月次コミットの自動化が不明で防ぎたいリスク(人間離脱)と対策の実行条件が同一に帰着」の2 major に回答。
 
 **トレードオフ**
-PAT heartbeat のシークレット管理(ADR-021・ADR-030 の bot PAT と共有)。ITP 実機挙動が仮定と乖離した場合の促進タイミング再調整(open question)。真の完全無活動時は失効しうる(受容)。
+PAT heartbeat のシークレット管理(ADR-021 の最小権限対象。ADR-030 の bot identity は 2026-07-28 改訂で GitHub App となり本 PAT とは共有しない)。ITP 実機挙動が仮定と乖離した場合の促進タイミング再調整(open question)。真の完全無活動時は失効しうる(受容)。
 
 ---
 
@@ -445,7 +446,7 @@ MVP に beta 環境 + promotion ゲート実装工数(監視自動化は後回�
 **決定**
 「API 自動化不採用」が全体前提だが CI/guardrail は git diff しか見ず PR 生成の課金経路(Pro 対話枠か API キー従量か)を判定・拒否できず運営者裁量のみに依存する欠陥に正直に回答する。強制可能な部分は固める:
 (1) 週次セッション起動前の preflight スクリプト(検討レポート Phase 0)で環境に `ANTHROPIC_API_KEY` が存在すれば起動中止=ローカルの物理的財布固定を機械化。
-(2) PR 作成はローカル git + bot PAT 経路のみ(ADR-030)で API 連携(headless/Actions claude 連携/Routines)を運用上不使用と明記、これらの workflow をリポジトリに置かないことを guardrail で確認。
+(2) PR 作成はローカル git + GitHub App インストールトークン経路のみ(ADR-030 [2026-07-28改訂])で API 連携(headless/Actions claude 連携/Routines)を運用上不使用と明記、これらの workflow をリポジトリに置かないことを guardrail で確認。
 (3) 週次インタラクティブ消費量の見積り — bisection 最大約5フルゲート再実行 + schema reject 再試行を含むセッションのトークン/時間概算を README に記載し、Pro/Max 週次上限に対する余裕を運用前に確認する手順を追加。
 ただし「どの課金経路で生成されたか」は git diff から原理的に判定不能で、上限超過時に運営者がとっさに API キー課金へ切替える人的逸脱は CI で防げない=残余リスクとして明示。MVP 期シークレットは CF Workers デプロイトークン([2026-07-25改訂] 旧 CF Pages デプロイトークンから変更。wrangler deploy 用 API トークン)+ bot PAT + heartbeat PAT に最小化、stable/beta 分離・GitHub 暗号化 secrets・`pull_request_target` への secrets 受渡し禁止を維持。
 
