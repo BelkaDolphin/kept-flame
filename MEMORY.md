@@ -155,6 +155,9 @@
   - **M6要裁定(未処理・M10へ持ち越し)**: ①`techBasketWeaving.researchCost=25`がGDD 12.3帯(38.88〜45)外=**既存contentの欠陥**。sc06の現在研究なので修正するとベクタ37本が動く→`KNOWN_RESEARCH_COST_BAND_VIOLATIONS`に固定して可視化済み。M10(conformance拡張)で「fixture修正はbumpか」の§9規律裁定とセットで処理 ②既存tech 3本の`unlocks`がstale(未使用フィールドのため実害なし)=同じくM10で一括 ③テスト更新は許可2箇所+同種1箇所(authoringSamples件数3→24、本来目的の「計測サンプルID混入なし」検査を代わりに追加)=Fable5事後承認、ユーザーへ報告済み。
   - 積み残し: 成文化のtickループ結線はM13以降(scheduler無変更の指示遵守・純関数は同型で用意済み)、destroyRecords/火災はM22、codifySpeed trait倍率は作業者割当実装まで読み飛ばし。
 - [2026-07-28] M4+M6結合ツリーで全ゲート(test 1133件/typecheck/lint/golden:check 37本)をFable5が再実行し合格。本日分(M3/M5/M4/M6+文書改訂)を一括push。
+- [2026-07-28] **M45前半完了・実演はブロッカーで保留**(Sonnet・コミット0cd524d push済み、実消費199k): `scripts/bot-token.mjs`(JWT RS256=Node組込みcryptoのみ・installation自動発見・トークンはstdoutのみ)+`scripts/bot-pr.mjs`(push+PR作成・トークンredact)+テスト18件+README節(ADR-030(5)但し書き転記・保護ON/OFF手順)。実APIでJWT署名疎通確認済み(`GET /app`成功)。テスト1133→1152。**ブロッカー: ユーザーのApp作成は完了しているがInstall App(リポジトリへのインストール)が未完了**=`GET /app/installations`が空→トークン取得不能→bot PR作成不能。実演用docs変更はローカルブランチ`bot/m45-app-install-status`(1ee9e3c・未push)に準備済み。
+  - **ブランチ保護の往復について(Fable5検分済み)**: エージェントは保護をON→gh読み出しで設定成立を確認(必須承認1+enforce_admins+force-push/deletion禁止・statuschecksはM46までnull)→bot経路が使えない状態でONのままだと全開発が止まるためOFFへ復帰。**現状=OFF(M45着手前と同一状態)**をFable5が実機確認(404)。.pemのgit履歴混入ゼロも確認。往復判断は指示⑤の意図(開発期は直push運用)と整合しており追認。
+  - **M45残作業**: ①ユーザーがInstall App実施(1分) ②`bot:token`→`bot:pr`で実演PR作成 ③保護を一時ON→ユーザーがPR承認+merge(admin bypass不使用)→保護OFF復帰 ④CODEOWNERSファイルが未作成(ADR-030(2)の完全な形にはrequire_code_owner_reviews+CODEOWNERSが必要。M46で`schema/`人間専用と併せて作成するのが自然)。
 
 ## 次のステップ
 
