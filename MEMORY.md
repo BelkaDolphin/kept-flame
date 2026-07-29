@@ -169,7 +169,7 @@
 - [2026-07-29] **M10/M11完了**(M10=Sonnet 443k(見積り315kの1.4倍・調査フェーズ超過を自己申告)/M11=Opus 250k(51%)。Fable5が結合ツリーで全ゲート=test 1396件/typecheck/lint/prettier/golden:check 40本/conformance:e2e 120件3エンジンbit一致を再実行し合格。balance.jsonのみ両タスク編集のためハンク分割コミット):
   - **M10**(コミット5c2053f): conformance拡張#1。ベクタ37→40本(sc17-prod-full/sc18-sto-overflow+split)・経路58→73件・singleCoverageWarnings実装。trait ID統一(`traitMemoryKeeper`)とresearchCost 25→40修正は**ベクタ変動0本を実測+0本の理由を数値で説明**(sc06Boardにworkbench無し=researchCost未評価/forgeのstatWeights.intellect=0=trait効果不寄与)。「base content欠陥修正はbumpでない」裁定をspec §9.4(2)に正本化(既存ベクタのgolden:write上書き可・反証義務2条件付き)。codex-4経路とstat-4経路はtickループ未結線(M6/M7設計どおり)のためunit-test限定=正直申告。
   - **M11**(コミット81306f2): 寿命モデル。**対数正規はオーサリング時64分位表展開**(実行時は表引き+整数演算のみ=ADR-018段階1、σ⇔表の整合をローダーが整数演算で機械検証、表の形はテストが数値積分で突合)。**人口下限の絶対保証=死亡ゲート**(下限割れなら死亡を次の加入tickへ延期。GDD 7.6の加入前倒しだけでは寝床上限に縛られ保証不能のため)。晴天漂着=絶対グリッド(分割不変)・段65。死者tombstone(M12前提)。rngドメインjoinAge/lifespan追加。縮約互換でgolden 40本不変。**分割不変性バグ1件を自力発見・修正**(同一advance内の加入→寿命死でイベント欠落)。
-  - **M11要ユーザー判断(★未処理)**: ①★死亡ゲートはGDDに無い機構→GDD 7.6追記可否 ②★段65(晴天漂着)がGDD 11.7一覧に無い(裁定B1と同種)→追記可否 ③★下限のceil化(floorだとGDD不等式より弱い) ④★GDDに無い定数: arrivalIntervalTicks=4320(3日)/joinAge 60〜240日/加入時士気50(1ランで死亡が起きる頻度を決める→M39〜M41で再評価前提) ⑤★分位表N=64をcontentに置く方式(σ変更=表再生成必須) ⑥★死者はtombstone方式(セーブ肥大は周回リセットで抑制)。
+  - ~~M11要ユーザー判断★6件~~ **[2026-07-29] 全件「推奨どおり」でユーザー承認・GDD反映完了**(Fable5編集): ①死亡ゲート+③ceil化+④暫定定数(M39〜M41再評価前提)をGDD 7.6に、⑤64分位表方式+⑥tombstoneをGDD 7.5に、②段65(晴天漂着)をGDD 11.7の表+裁定注記に、いずれも[2026-07-29裁定]で正本化。
   - 非ブロッキング記録: 寝床施設content未投入(施設14種の段で`bedCapacityCurve`投入までM11は本番content不活性)、safetyFactor/lifespanSigmaはEngineContent非写像(`UNMAPPED_TOWN_PARAM_FIELDS`に理由記録)、初期住民生成の呼び出しはbootstrap/M49、M11経路のベクタ化はM15。
 
 ## 次のステップ
