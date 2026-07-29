@@ -231,7 +231,7 @@ mount.dispose();                                  // 3. 購読を全部切る(AD
 
 ## 9. 要ユーザー判断 / 申し送り
 
-1. **`@preact/signals` を入れるか**。ADR-002/リポ構成は「Preact + signals」と書いているが、`preact` 本体しか devDependencies に無く、新規 npm 依存の追加は禁止指示のため **`src/ui/reactive.ts` に自前実装**した(ルータ自前・ADR-027(1) と同じ判断)。API を `.value` / `.peek()` に寄せてあるので差し替えは 1 ファイルで済む。**入れる/入れないの確定はユーザー判断**。
+1. ~~**`@preact/signals` を入れるか**~~ **[2026-07-29裁定] 自前実装を維持**(新規依存ゼロの原則優先)。不具合が出た場合のみ差し替えを再検討。API を `.value` / `.peek()` に寄せてあるので差し替えは `reactive.ts` 1 ファイルで済む。
 2. **`src/ui/**` の lint 追加**。ADR リポ構成は `src/ui/` に「生 signal 直読み禁止(lint)」と注記している。M8 では **型(`ReadonlySignal` しか渡さない)+ §6 の規律**で代替し、`eslint.config.js` は触っていない(並行タスクとの競合回避)。画面が実在する M29 以降にルール化するかを要判断。
-3. **`stateApplied` は暫定**(§7-2 で撤去)。engine コマンドの設計は未着手であり、ロードマップ上どのタスクが `src/engine/commands.ts` を作るかが明示されていない(M8 の発見事項)。
+3. ~~**`stateApplied` は暫定**(§7-2 で撤去)。engine コマンドの設計は未着手であり、ロードマップ上どのタスクが `src/engine/commands.ts` を作るかが明示されていない(M8 の発見事項)。~~ **[2026-07-29裁定] ロードマップに M49(engine コマンド層)を新設**。`stateApplied` の撤去は M49 の検収条件。
 4. **B3 の実測値は M35 で取り直す**。perf-boundaries.md §5 末尾が「実 UI ストアが入ったら #1 を取り直す」と明記しており、`hydrateFidelity: "placeholder"` の差し替えは M35 の担当。M8 の時点で B3 の中身(state → 根 signal 同期 + 派生値)は実物になった。

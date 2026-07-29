@@ -337,6 +337,15 @@
 
 **[2026-07-27裁定] 「戦力」は基礎ステータスではなく派生値(裁定B8)。** 7.1 の5種（`vigor`/`dexterity`/`intellect`/`fortitude`/`will`）と異なり、「戦力」はそれらと装備から算出される**派生値**であり、英字IDは `combatPower` とする。**算出式は engine 実装時に確定**する（本裁定はID正本の確定のみで、式は未確定）。`statWeights` に `combatPower` を書く場合、ローダーは基礎ステと別扱いで解決する。
 
+**[2026-07-29裁定] combatPower の算出式確定（M7 実装の正本化）。**
+
+`combatPower(住民) = clamp(0, (Σ_s w_s × 実効ステータス_s + Σ派生add) × clamp(Π派生mul, 0.7, 1.3), 100)`
+
+- **重み配分**: `vigor` 0.35 / `fortitude` 0.30 / `dexterity` 0.20 / `will` 0.15 / `intellect` 0.00（総和ちょうど 1.0 ＝ 基礎ステと同じ 0〜100 スケール。中立住民＝全ステ50 の戦力はちょうど 50）。知力を 0 とするのは、知力は研究・成文化系で活きる設計であり戦闘にまで効かせると万能ステータス化するため。
+- **重みは engine 定数**（`src/engine/rules/stats.ts` の `COMBAT_POWER_WEIGHTS`）。content/balance に**切り出さない**（裁定 N2＝隣接クランプ±60% と同じ判断）。変更はコード変更＝golden vector 差分＝algoVersion bump の正規の関門を必ず通る。バランス調整需要が生じたら「balance へ移設＋総和 1.0 のローダー強制追加＋bump 1回」で移行可能。
+- **装備は combatPower に含めない**。本節判定式が「関連チーム総合力 **+ 装備補正**」と装備を別項で加算するため、combatPower 側に混ぜると二重計上になる。分解は `装備込み最終戦力 = combatPower + 装備補正`（装備補正の実装は探索エンジン側）。
+- **trait は 2 段で効く**（基礎ステへの効果 → 重み付き和 → 派生値への直接効果 `stat: "combatPower"`。各経路 1 度だけで二重計上なし）。`yieldMul` は生産量専用の係数であり combatPower には**効かない**。
+
 **イベント列の確定タイミング：** 派遣確定時点でイベント列（判定結果・分岐・確定数値・報酬）を丸ごとセーブにスナップショット書込み。以後テーブルを一切再参照せず再生。週次でテーブルにadditive追加されても未帰還セーブの結果は不変。
 
 ### 8.3 判定前の質的分岐（一本道収束への回答）
@@ -616,6 +625,8 @@ E5『通信塔』完成＝他隷との交信成功＝**初回本編クリア**�
 全entityに安定文字列ID＋schemaVersion＋contentVersion。数値レンジ制約は trait係数・成文化速度/コスト・研究点係数・探索difficulty/R・item.stats・outpost hazard・recipe入出力比・recallRiskParams・recordMedia係数 の全カテゴリに min/max 定義。
 
 **[2026-07-27追補]** balance 系パラメータに `recordMedia{stoneTablet|paper: costMul, timeMul, caravanWeight, flammable}`（min/max 制約付き・§11.1 追補）を追加。event の `choices[].effect` / `branches[].result` 語彙に `destroyRecords{medium, scope}` を**予約**する（MVP では content 側から未使用のまま出荷。§11.1 追補）。
+
+**[2026-07-29追補] `tech.unlocks[]` の暫定解釈（M9・要素の型が本節で未定義だったことへの穴埋め）**: 要素は tech ID を基本とし、facility カテゴリの ID に解決できる要素は「その施設の建設解禁」と解釈する（静的グラフ解析 `src/engine/graph.ts` がこの解釈で施設ゲートを辿る）。現 content の `unlocks[]` は全て tech ID のため現時点の判定結果に影響なし。施設14種の content 化の段で正式確定する。
 
 ### 12.2 event cond DSL（確定）
 
