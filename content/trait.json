@@ -10,5 +10,59 @@
     "effects": [{ "stat": "health", "op": "add", "value": -15 }],
     "stackRule": "multiplicative",
     "maxPerResident": 3
+  },
+  {
+    "id": "traitArtisan",
+    "effects": [
+      { "stat": "dexterity", "op": "mul", "value": 1.2 },
+      { "stat": "yieldMul", "op": "mul", "value": 1.1 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitExplorer",
+    "effects": [
+      { "stat": "vigor", "op": "add", "value": 5 },
+      { "stat": "combatPower", "op": "mul", "value": 1.15 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitLivingLibrary",
+    "effects": [
+      { "stat": "recallResist", "op": "add", "value": -15 },
+      { "stat": "intellect", "op": "add", "value": 5 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitOptimist",
+    "effects": [
+      { "stat": "morale", "op": "add", "value": 10 },
+      { "stat": "will", "op": "add", "value": 5 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitPessimist",
+    "effects": [
+      { "stat": "morale", "op": "add", "value": -10 },
+      { "stat": "will", "op": "mul", "value": 0.9 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
+  },
+  {
+    "id": "traitStrongArm",
+    "effects": [
+      { "stat": "vigor", "op": "add", "value": 15 },
+      { "stat": "combatPower", "op": "mul", "value": 1.2 }
+    ],
+    "stackRule": "multiplicative",
+    "maxPerResident": 3
   }
 ]

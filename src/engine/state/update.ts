@@ -66,6 +66,7 @@ import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   EntityLookupError,
+  MAX_TRAITS_PER_RESIDENT,
   isEntityId,
   requireEntity,
   type EntityId,
@@ -208,6 +209,38 @@ function requireValidId(entity: EntityState): void {
   }
 }
 
+/**
+ * [M7] 住民の trait 保持上限(GDD 7.2 = {@link MAX_TRAITS_PER_RESIDENT})と
+ * 「ID 昇順・重複なし」の不変条件(state.ts の `traitIds` の doc)を強制する。
+ *
+ * ここで止めるのは、どちらの違反も**静かに間違った数値を出す**からである:
+ *   - 上限超過  : `rules/stats.ts` の値域証明(加算効果の上界 540)が破れ、
+ *                 mulFixProven が FixRangeError を投げる位置が入力依存になる。
+ *   - 重複      : 同じ trait の効果が 2 回合成され、倍率が静かに二乗になる。
+ *   - 順序崩れ  : 総乗が floor 丸めを挟むため、順序が変わると結果が 1 bit ずれる
+ *                 (= 同じセーブが環境によって違う値を出す)。
+ */
+function requireValidResidentTraits(entity: EntityState): void {
+  if (entity.kind !== "resident") return;
+  const traitIds = entity.traitIds;
+  if (traitIds.length > MAX_TRAITS_PER_RESIDENT) {
+    throw new StateUpdateError(
+      `住民 "${entity.id}" の trait が ${String(traitIds.length)} 個` +
+        `(上限 ${String(MAX_TRAITS_PER_RESIDENT)} 個・GDD 7.2)`,
+    );
+  }
+  for (let i = 1; i < traitIds.length; i++) {
+    const previous = traitIds[i - 1] ?? "";
+    const current = traitIds[i] ?? "";
+    if (compareUtf16(previous, current) >= 0) {
+      throw new StateUpdateError(
+        `住民 "${entity.id}" の traitIds が ID 昇順・重複なしでない` +
+          `("${previous}" → "${current}")。trait 合成は順序依存(rules/stats.ts §3)`,
+      );
+    }
+  }
+}
+
 function sortedById(entities: readonly EntityState[]): EntityState[] {
   return [...entities].sort((a, b) => compareUtf16(a.id, b.id));
 }
@@ -236,7 +269,8 @@ function buildRngStateMap(
  * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
  *
- * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複がある場合
+ * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
+ *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
@@ -245,6 +279,7 @@ export function createGameState(
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
+    requireValidResidentTraits(entity);
   }
   return {
     saveSchemaVersion: meta.saveSchemaVersion,

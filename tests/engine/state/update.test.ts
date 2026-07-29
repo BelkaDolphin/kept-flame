@@ -103,6 +103,38 @@ describe("createGameState", () => {
     const forged: ResidentState = { ...resident("aRui"), id: "Bad-Id" as unknown as EntityId };
     expect(() => createGameState(META, [forged])).toThrow(StateUpdateError);
   });
+
+  // [M7] 住民 trait の不変条件(GDD 7.2 の上限 3 個 / ID 昇順 / 重複なし)。
+  // 上限は rules/stats.ts の mulFixProven 値域証明の前提でもあるので、
+  // state を作る唯一の入口で機械強制する。
+  it("trait 上限 3 個ちょうどは受理する(GDD 7.2)", () => {
+    const holder = resident("aRui", 50, ["traitArtisan", "traitExplorer", "traitStrongArm"]);
+    expect(() => createGameState(META, [holder])).not.toThrow();
+  });
+
+  it("trait 4 個は reject する(GDD 7.2 の上限 3)", () => {
+    const over = resident("aRui", 50, [
+      "traitArtisan",
+      "traitExplorer",
+      "traitFrail",
+      "traitStrongArm",
+    ]);
+    expect(() => createGameState(META, [over])).toThrow(StateUpdateError);
+  });
+
+  it("trait の重複を reject する(効果が静かに二重合成されるため)", () => {
+    const dup = resident("aRui", 50, ["traitArtisan", "traitArtisan"]);
+    expect(() => createGameState(META, [dup])).toThrow(StateUpdateError);
+  });
+
+  it("trait が ID 昇順でなければ reject する(合成は順序依存)", () => {
+    const unsorted = resident("aRui", 50, ["traitStrongArm", "traitArtisan"]);
+    expect(() => createGameState(META, [unsorted])).toThrow(StateUpdateError);
+  });
+
+  it("住民以外の entity は trait 検査の対象外", () => {
+    expect(() => createGameState(META, [facility("dHall", ["a", "b", "c", "d"])])).not.toThrow();
+  });
 });
 
 describe("setField", () => {

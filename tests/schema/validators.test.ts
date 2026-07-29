@@ -127,6 +127,7 @@ describe("validateFacility", () => {
 });
 
 describe("validateTrait", () => {
+  const mul = (stat: string, value: number) => ({ stat, op: "mul", value });
   const validTrait = {
     id: "traitScholar",
     effects: [{ stat: "researchSpeed", op: "mul", value: 1.3 }],
@@ -158,6 +159,22 @@ describe("validateTrait", () => {
       effects: [{ stat: "researchSpeed", op: "divide", value: 1.3 }],
     });
     expect(result.ok).toBe(false);
+  });
+
+  // [M7] 裁定 B8 でステータス正本が確定したので、mul のレンジを種別別に分けた。
+  // ステータス名前空間(基礎 5 種 + 派生値 combatPower)は GDD 7.2 の
+  // 「ステータス倍率 ±30% 以内」= [0.7, 1.3] を厳格に適用する。
+  it("ステータスへの mul は ±30% 以内(GDD 7.2)", () => {
+    expect(validateTrait({ ...validTrait, effects: [mul("vigor", 1.3)] }).ok).toBe(true);
+    expect(validateTrait({ ...validTrait, effects: [mul("vigor", 1.4)] }).ok).toBe(false);
+    expect(validateTrait({ ...validTrait, effects: [mul("combatPower", 1.3)] }).ok).toBe(true);
+    expect(validateTrait({ ...validTrait, effects: [mul("combatPower", 1.4)] }).ok).toBe(false);
+  });
+
+  it("ステータス以外への mul は 0.7〜1.5(成文化速度など)", () => {
+    expect(validateTrait({ ...validTrait, effects: [mul("codifySpeed", 1.4)] }).ok).toBe(true);
+    expect(validateTrait({ ...validTrait, effects: [mul("yieldMul", 1.5)] }).ok).toBe(true);
+    expect(validateTrait({ ...validTrait, effects: [mul("yieldMul", 1.6)] }).ok).toBe(false);
   });
 
   it("effects が空だと reject する", () => {

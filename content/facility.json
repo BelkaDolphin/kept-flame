@@ -17,6 +17,13 @@
     "overflowCapPolicy": "discardExcess",
     "footprint": { "width": 2, "height": 1 },
     "harshWork": true,
+    "statWeights": {
+      "vigor": 0.4,
+      "dexterity": 0.3,
+      "intellect": 0,
+      "fortitude": 0.3,
+      "will": 0
+    },
     "output": { "kind": "resource", "resourceId": "iron" }
   },
   {
@@ -27,6 +34,13 @@
     "overflowCapPolicy": "discardExcess",
     "footprint": { "width": 1, "height": 1 },
     "harshWork": false,
+    "statWeights": {
+      "vigor": 0,
+      "dexterity": 0.4,
+      "intellect": 0.5,
+      "fortitude": 0,
+      "will": 0.1
+    },
     "output": { "kind": "research" }
   }
 ]

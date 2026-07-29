@@ -167,6 +167,20 @@ export function entityIdFromString(value: string): EntityId {
 export type EntityKind = "codify" | "facility" | "research" | "resident" | "resource";
 
 /**
+ * [M7] 1 住民が保持できる trait の個数上限(GDD 7.2「1住民の trait 保持上限
+ * ＝ 3個に固定」)。**engine 側の正本**であり、
+ *   - state 構築時の強制  : `state/update.ts` の `createGameState`
+ *     (セーブ復元もここを通るので、壊れたセーブは復元時点で停止する)
+ *   - content 側の強制    : `schema/trait.ts` の `maxPerResident` がこの値を参照
+ * の 2 経路で守る。
+ *
+ * この上限は飾りではなく **`rules/stats.ts` の mulFixProven の値域証明の前提**
+ * でもある(1 住民あたりの加算効果の上界 = 30 × 6 効果 × 3 trait = 540)。
+ * 緩めるなら証明側も同時に見直すこと。
+ */
+export const MAX_TRAITS_PER_RESIDENT = 3;
+
+/**
  * 住民。(C)想起困難の発生式(GDD 11.2)
  * `p = clamp(0, base_p × loadW + moraleW + dispatchW − masteryResist, p_max)`
  * が読む変数だけを持つ。
@@ -185,7 +199,14 @@ export interface ResidentState {
   readonly assignedFacilityId: EntityId | null;
   /** 探索派遣中か(dispatchW +0.15 の条件)。派遣先の詳細は T4 では持たない。 */
   readonly dispatched: boolean;
-  /** 保持する trait の content ID(ID 昇順)。記憶巧者 trait の判定に使う。 */
+  /**
+   * 保持する trait の content ID(ID 昇順・重複なし)。記憶巧者 trait の判定と
+   * 生産式の trait 倍率(GDD 11.1)に使う。
+   *
+   * 長さは {@link MAX_TRAITS_PER_RESIDENT} 以下(GDD 7.2)。順序と重複なしは
+   * 「同種効果の総乗合成が floor 丸めを挟むため順序依存」という決定論要件から
+   * 来る不変条件であり、`createGameState` が機械強制する。
+   */
   readonly traitIds: readonly EntityId[];
   /** 想起困難が解ける tick。0 は「発生していない」。 */
   readonly recallImpairedUntilTick: number;

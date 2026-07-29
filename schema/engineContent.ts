@@ -100,9 +100,12 @@ import {
   type Fix,
 } from "../src/engine/fp";
 import {
+  RESIDENT_DERIVED_STAT_IDS,
   RESIDENT_STAT_IDS,
   STAT_WEIGHT_SUM_FIX,
+  isResidentDerivedStatId,
   isResidentStatId,
+  type ResidentDerivedStatId,
   type ResidentStatId,
   type StatWeights,
   type TraitDef,
@@ -195,10 +198,26 @@ export const UNREPRESENTABLE_CONTENT_EFFECTS: { readonly [contentEffect: string]
 export const TRAIT_YIELD_MUL_STAT_KEY = "yieldMul";
 
 /**
+ * [M7] `trait.effects[].stat` が取り得るキーの全体(エラーメッセージ用・昇順)。
+ * 基礎ステ 5 種 + 派生値(`combatPower`)+ 予約語 `yieldMul`。
+ */
+export const TRAIT_STAT_KEYS: readonly string[] = [
+  ...RESIDENT_STAT_IDS,
+  ...RESIDENT_DERIVED_STAT_IDS,
+  TRAIT_YIELD_MUL_STAT_KEY,
+].sort(compareUtf16);
+
+/**
  * GDD 7.2 の trait が対象にし得るが engine が**未実装**のキーと、その理由。
  * ここに載っているキーは reject せず読み飛ばし、
  * {@link EngineContent.unrepresentedTraitEffects} に記録する(§1(e))。
  * 載っていない未知キーは reject する。
+ *
+ * **[M7] `combatPower` はこの表から外れた**。派生値の算出式が
+ * `src/engine/rules/stats.ts` §5 で確定したため、写せる側
+ * ({@link RESIDENT_DERIVED_STAT_IDS})へ移っている。実装が追いついたキーは
+ * このように表から移すこと(表に残したまま実装すると、効いているのに
+ * 「読み飛ばした」と記録される嘘が生じる)。
  */
 export const UNREPRESENTABLE_CONTENT_TRAIT_STATS: { readonly [stat: string]: string } =
   Object.freeze({
@@ -212,7 +231,6 @@ export const UNREPRESENTABLE_CONTENT_TRAIT_STATS: { readonly [stat: string]: str
     recallResist:
       "想起困難への耐性(GDD 11.2 記憶巧者)は balance.recallRiskParams.memoryKeeperResist 側で表現しており、trait effect 経由の一般化は未実装",
     morale: "士気への効果(GDD 7.3 楽観/悲観)は士気の更新規則そのものが未実装",
-    combatPower: "戦力(GDD 7.1 の派生値・8.2)は襲撃/探索システムに属し未実装",
   });
 
 // --- 2. 人間可読値 → FP raw(§2) -----------------------------------------
@@ -476,10 +494,29 @@ interface TraitConversion {
   readonly unrepresented: readonly string[];
 }
 
+/** 同一 trait 内の同一対象への効果を合成する(add は総和 / mul は総乗)。 */
+function mergeEffect<K>(
+  addById: Map<K, Fix>,
+  mulById: Map<K, Fix>,
+  key: K,
+  op: "add" | "mul",
+  valueFix: Fix,
+): void {
+  if (op === "add") {
+    addById.set(key, addFix(addById.get(key) ?? FIX_ZERO, valueFix));
+    return;
+  }
+  const previous = mulById.get(key);
+  mulById.set(key, previous === undefined ? valueFix : mulFix(previous, valueFix));
+}
+
 function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConversion | undefined {
   const path = `trait.${content.id}`;
   const statAddFixById = new Map<ResidentStatId, Fix>();
   const statMulFixById = new Map<ResidentStatId, Fix>();
+  // [M7] 派生値(combatPower)は基礎ステと**別名前空間**で持つ(GDD 7.1 の注記)。
+  const derivedAddFixById = new Map<ResidentDerivedStatId, Fix>();
+  const derivedMulFixById = new Map<ResidentDerivedStatId, Fix>();
   const unrepresented: string[] = [];
   let yieldMulFix = FIX_ONE;
   let failed = false;
@@ -489,13 +526,16 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
     if (effect === undefined) continue;
     const effectPath = `${path}.effects[${String(i)}]`;
 
-    if (!isResidentStatId(effect.stat) && effect.stat !== TRAIT_YIELD_MUL_STAT_KEY) {
+    const statId = isResidentStatId(effect.stat) ? effect.stat : undefined;
+    const derivedId = isResidentDerivedStatId(effect.stat) ? effect.stat : undefined;
+    const isYieldMul = effect.stat === TRAIT_YIELD_MUL_STAT_KEY;
+    if (statId === undefined && derivedId === undefined && !isYieldMul) {
       const reason = UNREPRESENTABLE_CONTENT_TRAIT_STATS[effect.stat];
       if (reason === undefined) {
         issues.add(
           `${effectPath}.stat`,
           `trait 効果の対象 "${effect.stat}" が未知(写せる対象: ` +
-            `${[...RESIDENT_STAT_IDS, TRAIT_YIELD_MUL_STAT_KEY].join(",")}、` +
+            `${TRAIT_STAT_KEYS.join(",")}、` +
             `engine 未実装として読み飛ばす対象: ` +
             `${Object.keys(UNREPRESENTABLE_CONTENT_TRAIT_STATS).sort(compareUtf16).join(",")})`,
         );
@@ -513,7 +553,7 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
       continue;
     }
 
-    if (effect.stat === TRAIT_YIELD_MUL_STAT_KEY) {
+    if (isYieldMul) {
       if (effect.op !== "mul") {
         issues.add(
           `${effectPath}.op`,
@@ -528,18 +568,25 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
       continue;
     }
 
-    const statId = effect.stat;
-    if (effect.op === "add") {
-      statAddFixById.set(statId, addFix(statAddFixById.get(statId) ?? FIX_ZERO, valueFix));
-    } else {
-      const previous = statMulFixById.get(statId);
-      statMulFixById.set(statId, previous === undefined ? valueFix : mulFix(previous, valueFix));
+    if (derivedId !== undefined) {
+      mergeEffect(derivedAddFixById, derivedMulFixById, derivedId, effect.op, valueFix);
+      continue;
+    }
+    if (statId !== undefined) {
+      mergeEffect(statAddFixById, statMulFixById, statId, effect.op, valueFix);
     }
   }
 
   if (failed) return undefined;
   return {
-    def: { id: entityIdFromString(content.id), statAddFixById, statMulFixById, yieldMulFix },
+    def: {
+      id: entityIdFromString(content.id),
+      statAddFixById,
+      statMulFixById,
+      yieldMulFix,
+      derivedAddFixById,
+      derivedMulFixById,
+    },
     unrepresented,
   };
 }

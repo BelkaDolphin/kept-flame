@@ -32,10 +32,23 @@
 //   GDD 8.1 は距離帯を「近郊/遠隔/深部」の日本語のみで表記し、英字IDの正本が
 //   無い(facility タグ7種は tags-spec.md が正本を持つが、距離帯には対応する
 //   spec が無い)。本ファイルは近郊=near/遠隔=far/深部=deep という英字IDを
-//   オーサリング側で暫定採用した({@link EVENT_DEST_TAGS})。正本が別途定まれば
-//   置き換えること。GDD 7.1 のステータス名(体力/器用/知性/頑健/意志)も同様に
-//   英字ID正本が無く、`statWeights` のキーは trait.ts の `stat` フィールド同様
-//   自由文字列のまま検証している(§4)。
+//   オーサリング側で暫定採用した({@link EVENT_DEST_TAGS})。
+//
+//   **[2026-07-27裁定 B7/B8 で両方の正本が確定した。** 距離帯は near/far/deep
+//   (= 本ファイルの暫定採用がそのまま正本になった)、ステータスは
+//   `vigor`/`dexterity`/`intellect`/`fortitude`/`will` + 派生値 `combatPower`。
+//   **`statWeights` のキーを正本語彙へ制限するのは event content を
+//   ContentBundle へ組み込む段(探索ランタイム = M21/M22)で行う**。理由は 2 つ:
+//     (a) 本ファイルはまだ ContentBundle に載っておらず(冒頭の注記)、engine へ
+//         写す経路が無いため、制限しても効くのは計測用サンプルの検証だけ。
+//     (b) `docs/measurements/authoring-samples/*.retest-*.json` は
+//         **正本確定前のオーサリング計測の成果物**であり、裁定 B8 が
+//         「計測サンプルは書き換え不要」と明記している(`resilience`/`power` の
+//         ような自由文字列が残っている)。今ここを締めると計測の記録を
+//         壊すことになる。
+//   M21/M22 で締めるときは、engine の RESIDENT_STAT_IDS /
+//   RESIDENT_DERIVED_STAT_IDS を単一の権威として参照すること
+//   (`schema/engineContent.ts` の trait 側と同じ形)。**
 // ---------------------------------------------------------------------------
 
 import jsep from "jsep";
@@ -334,8 +347,8 @@ const STAT_WEIGHT_RANGE: NumericRange = { min: 0, max: 1 };
 
 /**
  * GDD 8.2「関連ステータスはイベント種別で変わる」を表す stat名→重みの record。
- * stat 名は trait.ts の `stat` フィールドと同様に自由文字列(GDD 7.1 のステータス名
- * に英字ID正本が無いため。ファイル冒頭の要ユーザー判断を参照)。
+ * stat 名は現状**自由文字列**のまま検証している。正本語彙(裁定 B8)への制限を
+ * M21/M22 まで遅らせる理由はファイル冒頭の注記を参照。
  */
 function validateStatWeights(
   raw: unknown,
