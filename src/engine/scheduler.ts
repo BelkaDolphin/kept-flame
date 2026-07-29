@@ -22,10 +22,12 @@
 //
 //   **中心的な不変条件**: レートを変える状態変化は必ず境界イベントとして heap に
 //   載っていること。載っていない変化があると (A) の閉形式が静かに誤差を持ち、
-//   golden vector にしか現れないバグになる。T5 時点でレートを変えるのは
+//   golden vector にしか現れないバグになる。レートを変えるのは
 //     研究完了(研究レートの向き先が変わる)/ 想起困難の発生(就労者が落ちる)/
-//     想起困難の回復(就労者が戻る)
-//   の 3 つだけであり、発生は (C) ステップ境界と同 tick なので新たな境界を要さない。
+//     想起困難の回復(就労者が戻る)/ [M11] 寿命死(就労者が減る)/
+//     [M11] 晴天漂着(住民が増える = (C) の判定ペアが増える)
+//   であり、想起困難の発生は (C) ステップ境界と同 tick なので新たな境界を要さない。
+//   M11 の 2 つは新しい境界イベント(段65 加入 / 段70 死亡)として heap に載る。
 //
 //   段階2(逆 CDF で次発生 tick を一発サンプリングして (C) 区間も飛ばす)は
 //   ADR-018(3) のとおり MVP 後。段階1 のステップ境界は「(C) がある限り
@@ -82,8 +84,17 @@
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "./canonicalize";
-import { entitiesOfKind, type EntityId, type GameState, type ResearchState } from "./state/state";
+import {
+  entitiesOfKind,
+  isAliveResident,
+  requireEntity,
+  type EntityId,
+  type GameState,
+  type ResearchState,
+} from "./state/state";
 import { setField } from "./state/update";
+import { deathTickOf } from "./rules/lifespan";
+import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
 import { applyProduction, computeProductionRates, type ProductionRates } from "./rules/production";
 import {
   applyResearchProgress,
@@ -151,7 +162,17 @@ export const PIPELINE_STAGE = {
   codify: 50,
   /** 探索解決(未実装)。 */
   exploration: 60,
-  /** 死亡/全滅判定(未実装)。 */
+  /**
+   * [M11] 晴天漂着による加入(GDD 7.7)。**GDD 11.7 の一覧に無い段**であり、
+   * 予約番号 60〜70 の間に置いた解釈である(裁定 B1 と同種の GDD 側の穴)。
+   * 根拠は 2 つ:
+   *   (a) 探索での保護(段60)も加入経路なので、加入系をまとめて置ける
+   *   (b) **死亡判定(段70)より前**でなければ、GDD 7.6 の「6未満なら次回加入
+   *       イベントを前倒し確定」による同一 tick の救済が成立しない
+   *       (加入で人口が増えた後に死亡ゲートを評価する順序になる)
+   */
+  arrival: 65,
+  /** 死亡/全滅判定([M11] 寿命死・GDD 11.7 段70)。 */
   death: 70,
   /** 衛星供給(未実装)。 */
   satellite: 80,
@@ -159,11 +180,14 @@ export const PIPELINE_STAGE = {
   dust: 90,
 } as const;
 
-/** T5 の離散事象の種類。 */
-export type SchedulerEventKind = "recallRecover" | "stochasticStep" | "researchComplete";
+/** 離散事象の種類(T5 の 3 種 + M11 の 2 種)。 */
+export type SchedulerEventKind =
+  "recallRecover" | "residentArrival" | "residentDeath" | "stochasticStep" | "researchComplete";
 
 const STAGE_BY_KIND: { readonly [K in SchedulerEventKind]: number } = {
   recallRecover: PIPELINE_STAGE.recallRecover,
+  residentArrival: PIPELINE_STAGE.arrival,
+  residentDeath: PIPELINE_STAGE.death,
   stochasticStep: PIPELINE_STAGE.recallRoll,
   researchComplete: PIPELINE_STAGE.research,
 };
@@ -185,8 +209,12 @@ export type BoundaryClass =
  */
 export function classifyEventBoundary(kind: SchedulerEventKind): BoundaryClass {
   switch (kind) {
+    // [M11] `residentArrival` は就労可能な住民を増やし、`residentDeath` は減らす。
+    // どちらも次の区間の生産レートを変える = (B) レート変化イベントである。
     case "recallRecover":
     case "researchComplete":
+    case "residentArrival":
+    case "residentDeath":
       return "rateChange";
     case "stochasticStep":
       return "stochastic";
@@ -406,15 +434,24 @@ export class EventQueue {
  * state から離散事象キューを組み立てる。**セーブに eventQueueSnapshot を持たず、
  * 毎回ここで再構成する**(state.ts §4 の設計判断)。
  *
- * 積むのは 2 種:
+ * 積むのは 4 種:
  *   (C) 粗粒度ステップ — tick の絶対グリッド上で state.tick 以降の最初の 1 個
  *       (以降はステップ処理の中で次を予約する)
  *   (B) 想起困難の回復 — `recallImpairedUntilTick` が未来の住民ぶん
+ *   (B) [M11] 寿命死 — `life` を持つ生存住民の死亡 tick ぶん
+ *   (B) [M11] 晴天漂着 — 加入グリッド上で state.tick 以降の最初の 1 個
  * 研究完了 (B) は**レート依存**なので、区間ごとに
  * {@link syncResearchCompletionEvent} が予測して同期する。
  *
  * `toTick` 以降のイベントは積まない(この advance では処理されないため。
  * 次回の advance で state から再構成される)。
+ *
+ * **死亡だけは「既に過ぎている」場合も積む**(`max(死亡tick, state.tick)`)。
+ * 回復イベントは状態遷移を持たないので取りこぼしても state が食い違わないが
+ * (rules/recall.ts 末尾)、死亡は state を変えるので取りこぼすと分割不変性が
+ * 壊れる。ちょうど死亡 tick で advance を区切ると、前半は `< toTick` に掛からず
+ * 積まれず、後半は `state.tick == 死亡tick` で積まれてその場で発火する
+ * = 一括で進めた場合と一致する。
  */
 export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: number): EventQueue {
   const queue = new EventQueue();
@@ -429,6 +466,18 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
     if (until > state.tick && until < toTick) {
       queue.push({ tick: until, kind: "recallRecover", entityId: resident.id });
     }
+    // [M11] 寿命を持たない住民(既存 conformance シナリオの全員)は死なない。
+    if (resident.life === undefined || !isAliveResident(resident)) continue;
+    const dieAt = Math.max(deathTickOf(resident.life), state.tick);
+    if (dieAt < toTick) {
+      queue.push({ tick: dieAt, kind: "residentDeath", entityId: resident.id });
+    }
+  }
+
+  // [M11] 晴天漂着。加入機構が不活性(寝床上限 0 / townParams 不在)なら null。
+  const arrivalTick = nextArrivalTick(state, ctx.content, state.tick);
+  if (arrivalTick !== null && arrivalTick < toTick) {
+    queue.push({ tick: arrivalTick, kind: "residentArrival", entityId: null });
   }
 
   return queue;
@@ -504,6 +553,15 @@ export interface ScheduleReport {
   readonly rateChangeEventCount: number;
   /** 新規に発生した想起困難の件数(計測 #5 の頻度の分子)。 */
   readonly recallOccurrenceCount: number;
+  /** [M11] 晴天漂着で実際に加入した人数(判定回数ではない)。 */
+  readonly residentArrivalCount: number;
+  /** [M11] 実際に死亡した人数。 */
+  readonly residentDeathCount: number;
+  /**
+   * [M11] 人口下限の保持で**延期された**死亡の件数(GDD 7.6・
+   * rules/population.ts §3)。同じ住民が複数回延期されれば複数回数える。
+   */
+  readonly deferredDeathCount: number;
   /** `collectSegments` を有効にしたときだけ非空。 */
   readonly segments: readonly SegmentRecord[];
 }
@@ -555,6 +613,9 @@ export function runSchedule(
   let stochasticTrialCount = 0;
   let rateChangeEventCount = 0;
   let recallOccurrenceCount = 0;
+  let residentArrivalCount = 0;
+  let residentDeathCount = 0;
+  let deferredDeathCount = 0;
 
   if (toTick === state.tick) {
     return {
@@ -564,6 +625,9 @@ export function runSchedule(
       stochasticTrialCount,
       rateChangeEventCount,
       recallOccurrenceCount,
+      residentArrivalCount,
+      residentDeathCount,
+      deferredDeathCount,
       segments,
     };
   }
@@ -653,6 +717,58 @@ export function runSchedule(
           rateChangeEventCount++;
           break;
         }
+        case "residentArrival": {
+          // [M11] 晴天漂着(GDD 7.7)。寝床が埋まっていれば判定だけ行って誰も
+          // 増えないが、次の判定 tick は必ず積み直す(周期の grid を切らさない)。
+          const result = applyArrival(next, ctx, cursor);
+          next = result.state;
+          rateChangeEventCount++;
+          if (result.arrivedId !== null) {
+            residentArrivalCount++;
+            // **加入した住民の死亡イベントをその場で積む。** buildEventQueue は
+            // advance の入口で 1 回しか走らないので、ここで積まないと「この
+            // advance の中で生まれて死ぬはずだった住民」の死亡が丸ごと落ちる
+            // (= 一括で進めた場合と刻んで進めた場合で state が食い違う)。
+            // createResidentLife が「必ず 1 tick 以上生きる」を保証しているので
+            // 死亡 tick は必ず cursor より後 = pushAfter の前提を満たす。
+            const arrived = requireEntity(next, result.arrivedId, "resident");
+            if (arrived.life !== undefined) {
+              const dieAt = deathTickOf(arrived.life);
+              if (dieAt < toTick) {
+                queue.pushAfter(
+                  { tick: dieAt, kind: "residentDeath", entityId: result.arrivedId },
+                  cursor,
+                );
+              }
+            }
+          }
+          const followUp = nextArrivalTick(next, ctx.content, cursor + 1);
+          if (followUp !== null && followUp < toTick) {
+            queue.pushAfter({ tick: followUp, kind: "residentArrival", entityId: null }, cursor);
+          }
+          break;
+        }
+        case "residentDeath": {
+          // [M11] 寿命死(GDD 7.5)。人口下限を割る死は延期される(GDD 7.6 /
+          // rules/population.ts §3)。延期は取り消しではないので、人口が増えうる
+          // 唯一の未来 tick = 次の加入 tick へ再予約して取りこぼさない。
+          const residentId = requireEventEntityId(event);
+          const result = applyResidentDeath(next, ctx, residentId, cursor);
+          next = result.state;
+          rateChangeEventCount++;
+          if (result.died) residentDeathCount++;
+          if (result.deferredByFloor) {
+            deferredDeathCount++;
+            const retryTick = nextArrivalTick(next, ctx.content, cursor + 1);
+            if (retryTick !== null && retryTick < toTick) {
+              queue.pushAfter(
+                { tick: retryTick, kind: "residentDeath", entityId: residentId },
+                cursor,
+              );
+            }
+          }
+          break;
+        }
         default: {
           const unhandled: never = event.kind;
           throw new SchedulerError(`未知のイベント種別 ${String(unhandled)}`);
@@ -679,6 +795,9 @@ export function runSchedule(
     stochasticTrialCount,
     rateChangeEventCount,
     recallOccurrenceCount,
+    residentArrivalCount,
+    residentDeathCount,
+    deferredDeathCount,
     segments,
   };
 }

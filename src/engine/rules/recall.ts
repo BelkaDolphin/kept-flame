@@ -70,6 +70,7 @@ import {
 } from "../stochastic";
 import {
   entitiesOfKind,
+  isAliveResident,
   requireEntity,
   type EntityId,
   type GameState,
@@ -197,6 +198,9 @@ export function evaluateRecallCoarseStep(
   const occurrences: RecallOccurrence[] = [];
 
   for (const resident of residents) {
+    // [M11] 死者は判定ペアに入らない(記憶ごと失われている)。試行数も引かない
+    // ので、死者が 1 人も居ない盤面では M11 以前と試行列が完全に一致する。
+    if (!isAliveResident(resident)) continue;
     // 士気・派遣・配属はステップ内で変わらないので p は住民あたり 1 回計算。
     const pStep = perCoarseStepProbability(
       recallRiskPerDay(state, content, resident),

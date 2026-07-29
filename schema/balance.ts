@@ -6,16 +6,21 @@
 // ADR-030)は範囲外。
 //
 // T4 state.ts §3 が明記する「3 rules(生産/研究/想起困難)が読む値」に合わせ、
-// このスキーマも recallRiskParams を中心とした最小フィールドのみを対象と
-// する。ADR のサンプル(641行)にある lifespan/populationFloor/eraTable/
-// caravanRatio/roiRange/assistEfficiencyCap は住民寿命モデル・人口下限・
-// 周回・アシストAI等 T4/T6 のスコープ外システム向けであり、T6 では未実装
-// (state.ts §3 が明示的に除外した対象と同じ理由。それらのシステム実装時に
-// 追加すること)。
+// このスキーマは recallRiskParams を中心とした最小フィールドから始まり、
+// システム実装ごとに additive で伸ばしている。ADR のサンプル(641行)にある
+// うち eraTable(M6 `eras`)・lifespan/populationFloor(M11 `townParams`)は
+// 実装済み、caravanRatio/roiRange/assistEfficiencyCap は周回・アシストAI等
+// 未実装システム向けで引き続き対象外(それらのシステム実装時に追加すること)。
+//
+// **追加は必ず「ブロックごと省略可・省略時は当該システムが不活性」の形で行う**
+// (M5 `storage` / M6 `eras`・`recordMedia` / M11 `townParams` の全てがこの形)。
+// これが「新フィールド追加で既存 golden vector が動かない」ことの schema 側の
+// 根拠である。
 // ---------------------------------------------------------------------------
 
 import {
   IssueCollector,
+  expectArray,
   expectBoolean,
   expectExactNumber,
   expectInteger,
@@ -158,6 +163,54 @@ export interface RecordMediaContent {
   readonly paper: RecordMediumContent;
 }
 
+/**
+ * [M11] 人口下限 `min(寝床上限 × bedRatio, absolute)`(GDD 7.6 / 11.4-9)。
+ * GDD 12.1 の `townParams(... populationFloor)` を式のまま分解したもの。
+ */
+export interface PopulationFloorContent {
+  /** GDD 7.6 の 0.5(寝床上限に掛ける比率)。 */
+  readonly bedRatio: number;
+  /** GDD 7.6 の 6(絶対保証される人数の上限側)。 */
+  readonly absolute: number;
+}
+
+/**
+ * [M11] 住民寿命モデル・人口下限・獲得/規模(GDD 7.5〜7.7 / 12.1 `townParams`)。
+ *
+ * **ブロックごと省略可**(欠落は null)。省略時は engine 側で寿命の抽選も
+ * 晴天漂着も走らない = M11 以前と完全に同一挙動。
+ *
+ * `lifespanQuantileMul` は「対数正規の逆 CDF をオーサリング時に等確率分位で
+ * 展開した倍率表」であり、GDD 11.7 /ADR-006 が定める「非整数べき乗は実行時に
+ * 計算せず JSON へ個別値として書き出す」の分布版である(詳細は
+ * `src/engine/rules/lifespan.ts` §1)。表が本当に `lifespanSigma` の対数正規かは
+ * `schema/engineContent.ts` が平均と変動係数を整数演算で検証する。
+ */
+export interface TownParamsContent {
+  /** GDD 7.5 の平均寿命(432,000 tick = 約300日)。 */
+  readonly lifespanMeanTicks: number;
+  /**
+   * GDD 7.5 の σ。**「平均の 0.25」という GDD の文言どおり変動係数
+   * (標準偏差 ÷ 平均)として解釈する**。`lifespanQuantileMul` の生成パラメータ
+   * であり、engine へは写らない代わりにローダーが表と突き合わせて検証する。
+   */
+  readonly lifespanSigma: number;
+  /** 平均寿命に対する倍率の分位表(昇順・全て正・連続版の期待値が 1.0)。 */
+  readonly lifespanQuantileMul: readonly number[];
+  /** GDD 7.5 の記憶巧者 `memoryDecayDelay`(1.5)。 */
+  readonly memoryDecayDelay: number;
+  /** GDD 7.6 の人口下限。 */
+  readonly populationFloor: PopulationFloorContent;
+  /** GDD 7.7 の晴天漂着の周期(tick)。 */
+  readonly arrivalIntervalTicks: number;
+  /** GDD 7.6「下限を下回ると漂着加入頻度 ×1.5」の 1.5。 */
+  readonly scarcityArrivalFrequencyMul: number;
+  /** 加入時年齢(tick)の下限。 */
+  readonly joinAgeMinTicks: number;
+  /** 加入時年齢(tick)の上限。 */
+  readonly joinAgeMaxTicks: number;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -171,6 +224,8 @@ export interface BalanceContent {
   readonly eras: readonly EraContent[] | null;
   /** [M6] GDD 11.1 追補の記録媒体パラメータ。JSON に無ければ null(成文化不可)。 */
   readonly recordMedia: RecordMediaContent | null;
+  /** [M11] GDD 7.5〜7.7 の住民系パラメータ。JSON に無ければ null(寿命/漂着なし)。 */
+  readonly townParams: TownParamsContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -475,6 +530,207 @@ function validateRecordMedia(
   };
 }
 
+// --- [M11] townParams(GDD 7.5〜7.7 / 12.1)---------------------------------
+
+/** 平均寿命の保守境界。1 tick 〜 100 年相当(GDD 7.5 は 432,000 = 約300日)。 */
+const LIFESPAN_MEAN_RANGE: NumericRange = { min: 1, max: 52_560_000 };
+/** GDD 7.5 の σ(変動係数)。0 は「全員が同じ寿命」= 分布が退化するので除外。 */
+const LIFESPAN_SIGMA_RANGE: NumericRange = { min: 0.01, max: 1 };
+/** 分位倍率の保守境界。0 以下は寿命 0 を生むので除外。 */
+const LIFESPAN_QUANTILE_MUL_RANGE: NumericRange = { min: 0.000_001, max: 100 };
+/** 分位表の分割数。粗すぎると寿命が数値化けするので下限 8。上限は一様分布の実装上限。 */
+const LIFESPAN_QUANTILE_COUNT_RANGE: NumericRange = { min: 8, max: 2_097_152 };
+/** GDD 7.5 の memoryDecayDelay。1 未満は「猶予」でなく短縮になるので除外。 */
+const MEMORY_DECAY_DELAY_RANGE: NumericRange = { min: 1, max: 10 };
+/** GDD 7.6 の寝床比率。 */
+const POPULATION_FLOOR_BED_RATIO_RANGE: NumericRange = { min: 0, max: 1 };
+/** GDD 7.6 の絶対保証人数(6)。GDD 7.7 の規模 8〜20 を超える値は設定ミス。 */
+const POPULATION_FLOOR_ABSOLUTE_RANGE: NumericRange = { min: 0, max: 20 };
+/** 晴天漂着の周期。上限は 30 日ぶん(1 分 tick 換算)。 */
+const ARRIVAL_INTERVAL_RANGE: NumericRange = { min: 1, max: 43_200 };
+/** GDD 7.6 の頻度倍率(1.5)。1 未満は「不足時に遅くなる」ので除外。 */
+const SCARCITY_FREQUENCY_MUL_RANGE: NumericRange = { min: 1, max: 10 };
+/** 加入時年齢(tick)。0(新生児)〜 100 年相当。 */
+const JOIN_AGE_RANGE: NumericRange = { min: 0, max: 52_560_000 };
+/**
+ * 加入時年齢のレンジ幅の上限。`src/engine/stochastic.ts` の `UNIFORM_SPAN_MAX`
+ * (= floor((2^53-1)/(2^32-1)))と同値。ここを超えると一様抽選の中間積が
+ * 2^53 を超えて厳密でなくなる。engine 側は例外を投げるが、content の段で止める。
+ */
+const JOIN_AGE_SPAN_MAX = 2_097_152;
+
+function validatePopulationFloor(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): PopulationFloorContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const bedRatio = expectNumber(
+    obj["bedRatio"],
+    `${path}.bedRatio`,
+    issues,
+    POPULATION_FLOOR_BED_RATIO_RANGE,
+  );
+  const absolute = expectInteger(
+    obj["absolute"],
+    `${path}.absolute`,
+    issues,
+    POPULATION_FLOOR_ABSOLUTE_RANGE,
+  );
+  if (bedRatio === undefined || absolute === undefined) return undefined;
+  return { bedRatio, absolute };
+}
+
+function validateLifespanQuantileMul(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (
+    arr.length < LIFESPAN_QUANTILE_COUNT_RANGE.min ||
+    arr.length > LIFESPAN_QUANTILE_COUNT_RANGE.max
+  ) {
+    issues.add(
+      path,
+      `分位表の要素数 ${String(arr.length)} が [${String(LIFESPAN_QUANTILE_COUNT_RANGE.min)}, ` +
+        `${String(LIFESPAN_QUANTILE_COUNT_RANGE.max)}] の外`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const value = expectNumber(
+      arr[i],
+      `${path}[${String(i)}]`,
+      issues,
+      LIFESPAN_QUANTILE_MUL_RANGE,
+    );
+    if (value !== undefined) values.push(value);
+  }
+  if (values.length !== arr.length) return undefined;
+
+  // 逆 CDF は単調非減少でなければならない。崩れていれば「分位表」ではない。
+  for (let i = 1; i < values.length; i++) {
+    const previous = values[i - 1] ?? 0;
+    const current = values[i] ?? 0;
+    if (current < previous) {
+      issues.add(
+        `${path}[${String(i)}]`,
+        `分位表は昇順が必須(逆 CDF の単調性)。${String(previous)} の次が ${String(current)}`,
+      );
+      return undefined;
+    }
+  }
+  return values;
+}
+
+function validateTownParams(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): TownParamsContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const lifespanMeanTicks = expectInteger(
+    obj["lifespanMeanTicks"],
+    `${path}.lifespanMeanTicks`,
+    issues,
+    LIFESPAN_MEAN_RANGE,
+  );
+  const lifespanSigma = expectNumber(
+    obj["lifespanSigma"],
+    `${path}.lifespanSigma`,
+    issues,
+    LIFESPAN_SIGMA_RANGE,
+  );
+  const lifespanQuantileMul = validateLifespanQuantileMul(
+    obj["lifespanQuantileMul"],
+    `${path}.lifespanQuantileMul`,
+    issues,
+  );
+  const memoryDecayDelay = expectNumber(
+    obj["memoryDecayDelay"],
+    `${path}.memoryDecayDelay`,
+    issues,
+    MEMORY_DECAY_DELAY_RANGE,
+  );
+  const populationFloor = validatePopulationFloor(
+    obj["populationFloor"],
+    `${path}.populationFloor`,
+    issues,
+  );
+  const arrivalIntervalTicks = expectInteger(
+    obj["arrivalIntervalTicks"],
+    `${path}.arrivalIntervalTicks`,
+    issues,
+    ARRIVAL_INTERVAL_RANGE,
+  );
+  const scarcityArrivalFrequencyMul = expectNumber(
+    obj["scarcityArrivalFrequencyMul"],
+    `${path}.scarcityArrivalFrequencyMul`,
+    issues,
+    SCARCITY_FREQUENCY_MUL_RANGE,
+  );
+  const joinAgeMinTicks = expectInteger(
+    obj["joinAgeMinTicks"],
+    `${path}.joinAgeMinTicks`,
+    issues,
+    JOIN_AGE_RANGE,
+  );
+  const joinAgeMaxTicks = expectInteger(
+    obj["joinAgeMaxTicks"],
+    `${path}.joinAgeMaxTicks`,
+    issues,
+    JOIN_AGE_RANGE,
+  );
+
+  if (
+    lifespanMeanTicks === undefined ||
+    lifespanSigma === undefined ||
+    lifespanQuantileMul === undefined ||
+    memoryDecayDelay === undefined ||
+    populationFloor === undefined ||
+    arrivalIntervalTicks === undefined ||
+    scarcityArrivalFrequencyMul === undefined ||
+    joinAgeMinTicks === undefined ||
+    joinAgeMaxTicks === undefined
+  ) {
+    return undefined;
+  }
+
+  if (joinAgeMinTicks > joinAgeMaxTicks) {
+    issues.add(
+      path,
+      `joinAgeMinTicks (${String(joinAgeMinTicks)}) は joinAgeMaxTicks (${String(joinAgeMaxTicks)}) 以下が必須`,
+    );
+    return undefined;
+  }
+  if (joinAgeMaxTicks - joinAgeMinTicks + 1 > JOIN_AGE_SPAN_MAX) {
+    issues.add(
+      path,
+      `加入時年齢のレンジ幅が上限 ${String(JOIN_AGE_SPAN_MAX)} を超えている` +
+        "(一様抽選の中間積が 2^53 を超えて厳密でなくなる・src/engine/stochastic.ts §3)",
+    );
+    return undefined;
+  }
+
+  return {
+    lifespanMeanTicks,
+    lifespanSigma,
+    lifespanQuantileMul,
+    memoryDecayDelay,
+    populationFloor,
+    arrivalIntervalTicks,
+    scarcityArrivalFrequencyMul,
+    joinAgeMinTicks,
+    joinAgeMaxTicks,
+  };
+}
+
 function validateRecallRiskParams(
   raw: unknown,
   path: string,
@@ -683,6 +939,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawRecordMedia === undefined
       ? null
       : (validateRecordMedia(rawRecordMedia, "$.recordMedia", issues) ?? undefined);
+  const rawTownParams = obj["townParams"];
+  const townParams =
+    rawTownParams === undefined
+      ? null
+      : (validateTownParams(rawTownParams, "$.townParams", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -693,7 +954,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     recallRiskParams === undefined ||
     storage === undefined ||
     eras === undefined ||
-    recordMedia === undefined
+    recordMedia === undefined ||
+    townParams === undefined
   ) {
     return fail(issues.list());
   }
@@ -708,5 +970,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     storage,
     eras,
     recordMedia,
+    townParams,
   });
 }

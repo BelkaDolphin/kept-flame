@@ -181,6 +181,34 @@ export type EntityKind = "codify" | "facility" | "research" | "resident" | "reso
 export const MAX_TRAITS_PER_RESIDENT = 3;
 
 /**
+ * [M11] 住民 1 人の生涯(GDD 7.5 住民寿命モデル)。
+ *
+ * **3 つの値が対で 1 つの意味を成す**ので、フィールドをばらさず 1 オブジェクトに
+ * まとめてある(直列化の分岐が 2^3 通りに膨れるのを避ける実務上の理由もある・
+ * serialize.ts §5)。
+ *
+ * ここに載る量はすべて **tick(整数)** であり、Fix ではない。寿命の抽選は
+ * `rules/lifespan.ts` が content の分位テーブルから行う。
+ *
+ * ```
+ *   deathTick   = bornTick + lifespanTick
+ *   ageTick(t)  = t − bornTick
+ *   残存想定tick(t) = lifespanTick − ageTick(t) = deathTick − t     ← GDD 11.4-4
+ * ```
+ */
+export interface ResidentLife {
+  /**
+   * 誕生 tick。**負値を許す** — 晴天漂着(GDD 7.7)や初期住民はゲーム開始時点で
+   * 既に年齢を持つため、`bornTick = 加入tick − 加入時年齢` が負になりうる。
+   */
+  readonly bornTick: number;
+  /** 寿命(GDD 7.5 `lifespanTick`)。**期間**であって絶対 tick ではない。1 以上。 */
+  readonly lifespanTick: number;
+  /** 死亡した tick。生存中は null(GDD 11.7 段70「死亡/全滅判定」で書き込まれる)。 */
+  readonly diedTick: number | null;
+}
+
+/**
  * 住民。(C)想起困難の発生式(GDD 11.2)
  * `p = clamp(0, base_p × loadW + moraleW + dispatchW − masteryResist, p_max)`
  * が読む変数だけを持つ。
@@ -222,6 +250,32 @@ export interface ResidentState {
    * これにより既存セーブ・既存 golden vector のバイト列が 1 bit も動かない。
    */
   readonly stats?: ResidentStats;
+  /**
+   * [M11] 生涯(GDD 7.5)。**省略可**。
+   *
+   * **省略された住民は寿命で死なない**(死亡イベントが 1 件も積まれない)。これが
+   * M11 以前と 1 bit も違わないことの根拠であり、既存 conformance シナリオの住民は
+   * 全員この形のままなので golden vector 37 本が動かない。新規ゲーム・晴天漂着で
+   * 生成される住民には `rules/lifespan.ts` の {@link createResidentLife} が必ず付ける。
+   */
+  readonly life?: ResidentLife;
+}
+
+/**
+ * [M11] その住民が生存しているか。**死亡判定の唯一の述語**であり、
+ * 生産(rules/production.ts の isWorkerActive)・想起困難の判定ペア
+ * (rules/recall.ts)・人口計数(rules/population.ts)がすべてここを通る。
+ *
+ * 死亡した住民は entity ごと消さず `life.diedTick` を立てて残す(tombstone)。
+ * 消さない理由は 2 つ:
+ *   (a) memoirLog / bond(GDD 7.3・M12)は「失った人が何を覚えていたか」を
+ *       名指しで提示する = 死後もデータが要る
+ *   (b) entity 削除は他 entity からの ID 参照(facility.workerIds 等)を
+ *       ぶら下がり参照にする。死亡処理は参照側を掃除するが、掃除漏れが
+ *       「黙って例外」でなく「黙って消える」形になるのを避ける
+ */
+export function isAliveResident(resident: ResidentState): boolean {
+  return resident.life === undefined || resident.life.diedTick === null;
 }
 
 /**
@@ -428,6 +482,20 @@ export function entitiesOfKind<K extends EntityKind>(
   for (const entity of state.entityStateById.values()) {
     if (entity.kind === kind) {
       result.push(entity as EntityOfKind<K>);
+    }
+  }
+  return result;
+}
+
+/**
+ * [M11] 生存している住民を正準順(ID 昇順)で返す。人口(GDD 7.6 の下限判定・
+ * 7.7 の規模)を数える唯一の入口。tombstone された住民は含まない。
+ */
+export function livingResidents(state: GameState): readonly ResidentState[] {
+  const result: ResidentState[] = [];
+  for (const entity of state.entityStateById.values()) {
+    if (entity.kind === "resident" && isAliveResident(entity)) {
+      result.push(entity);
     }
   }
   return result;

@@ -94,8 +94,12 @@ import {
   FIX_SCALE,
   FIX_ZERO,
   addFix,
+  fixFromInt,
   fixFromRaw,
+  floorDivFix,
+  floorDivInt,
   mulFix,
+  sqrtFix,
   toRaw,
   type Fix,
 } from "../src/engine/fp";
@@ -121,6 +125,7 @@ import type {
   RecordMediumParams,
   StorageParams,
   TechDef,
+  TownParams,
 } from "../src/engine/rules/types";
 import { entityIdFromString, type EntityId } from "../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../src/engine/stochastic";
@@ -131,6 +136,7 @@ import type {
   RecordMediaContent,
   RecordMediumContent,
   StorageParamsContent,
+  TownParamsContent,
 } from "./balance";
 import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
@@ -473,13 +479,25 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
 
   // exactOptionalPropertyTypes ゆえ `x: undefined` を書けないので分岐で組み立てる
   // (キー不在 = 中立既定値、という engine 側の契約を型でも守る)。
-  const base = {
-    id: entityIdFromString(content.id),
-    tags,
-    harshWork: content.harshWork,
-    outputPerTickByLevel,
-    output,
-  };
+  // [M11] 寝床上限は整数の人数なので FP 変換を通さない(そのまま写す)。
+  const beds = content.bedCapacityCurve;
+  const base =
+    beds === null
+      ? {
+          id: entityIdFromString(content.id),
+          tags,
+          harshWork: content.harshWork,
+          outputPerTickByLevel,
+          output,
+        }
+      : {
+          id: entityIdFromString(content.id),
+          tags,
+          harshWork: content.harshWork,
+          outputPerTickByLevel,
+          output,
+          bedCapacityByLevel: [...beds],
+        };
   if (statWeights === null && storage === null) return base;
   if (statWeights === null) return { ...base, storage: storage as FacilityStorageDef };
   if (storage === null) return { ...base, statWeights };
@@ -932,6 +950,181 @@ function toRecallRiskParams(
   };
 }
 
+// --- 6c. townParams(GDD 7.5〜7.7 / 12.1)— M11 ------------------------------
+
+/**
+ * [M11] `townParams` のうち **engine へ写さない**フィールドと、その理由。
+ *
+ * §1 の「写せないものは黙って捨てず reject」の例外にあたるので、何を写して
+ * いないかを機械可読で残す(trait 効果の
+ * {@link UNREPRESENTABLE_CONTENT_TRAIT_STATS} と同じ扱い)。
+ *
+ * `lifespanSigma` は**捨てているのではなく、写す代わりにこの層で検証に使う**:
+ * 分位表 `lifespanQuantileMul` が本当に σ の対数正規かを
+ * {@link validateLifespanQuantileTable} が整数演算だけで突き合わせる。engine は
+ * 検証済みの表だけを引くので σ 自体を持つ必要が無い(持つと「表と σ の
+ * どちらが正か」という二重の真実になる)。
+ */
+export const UNMAPPED_TOWN_PARAM_FIELDS: { readonly [field: string]: string } = Object.freeze({
+  lifespanSigma:
+    "分位表 lifespanQuantileMul の生成パラメータ。engine へは写さず、本ローダーが" +
+    "「表の変動係数 ≒ lifespanSigma」「表の平均 ≒ 1.0」を整数演算で検証する側に使う" +
+    "(schema/engineContent.ts の validateLifespanQuantileTable)",
+  scarcityArrivalFrequencyMul:
+    "GDD 7.6 の頻度 ×1.5。engine へは**周期**へ変換して写す" +
+    "(TownParams.scarcityArrivalIntervalTicks)。実行時に固定小数点の除算を" +
+    "持ち込まないため、変換はロード時 1 回に閉じる",
+});
+
+/**
+ * 分位表の平均が 1.0 から外れてよい幅(raw)。離散化(等確率 N 分位の代表値)に
+ * よる誤差ぶんの余裕であり、0.01 = 平均寿命が 1% ずれる所まで許す。
+ */
+const LIFESPAN_TABLE_MEAN_TOLERANCE_RAW = 10_000;
+
+/**
+ * 表の変動係数が `lifespanSigma` から外れてよい幅(raw)。0.02。
+ * 離散化誤差(N=64 で約 0.0036)より十分広く、「σ を 0.25 と書いたまま表だけ
+ * 0.5 相当に差し替える」ような静かな分布変更は捕まる幅。
+ */
+const LIFESPAN_TABLE_SIGMA_TOLERANCE_RAW = 20_000;
+
+/**
+ * [M11] 分位表が「平均 1.0・変動係数 = lifespanSigma の分布」であることを
+ * **整数演算だけで**検証する(engine 側 rules/lifespan.ts §1 の番人)。
+ *
+ * 対数正規かどうかそのもの(形)は超越関数なしには検証できないため、ここで
+ * 見るのは 1 次・2 次モーメントと単調性(schema/balance.ts が検証済み)である。
+ * 表を丸ごと別分布に差し替えれば通ってしまうが、**平均寿命と散らばりを静かに
+ * ずらす**という現実的な事故は確実に捕まる。形の正しさは
+ * `tests/engine/lifespan.test.ts` が正規分布 CDF の数値積分で突き合わせる
+ * (テストは engine 外なので `Math.exp` を使える)。
+ */
+export function validateLifespanQuantileTable(
+  table: readonly Fix[],
+  sigmaFix: Fix,
+  path: string,
+  issues: IssueCollector,
+): boolean {
+  const count = table.length;
+  if (count === 0) {
+    issues.add(path, "分位表が空");
+    return false;
+  }
+
+  let sumRaw = 0;
+  for (const value of table) {
+    sumRaw += toRaw(value);
+  }
+  const meanRaw = floorDivInt(sumRaw, count);
+  if (Math.abs(meanRaw - FIX_SCALE) > LIFESPAN_TABLE_MEAN_TOLERANCE_RAW) {
+    issues.add(
+      path,
+      `分位表の平均倍率は 1.0 が必須(実際: raw ${String(meanRaw)}、許容差 ` +
+        `${String(LIFESPAN_TABLE_MEAN_TOLERANCE_RAW)})。平均が 1.0 でないと ` +
+        "lifespanMeanTicks が実際の平均寿命と一致しない(GDD 7.5)",
+    );
+    return false;
+  }
+
+  // 分散 = Σ(m_i − 平均)² / N。偏差は raw で高々 1e6 オーダーなので
+  // mulFix の number 経路(中間積 <= 1e12)に収まる。
+  const meanFix = fixFromRaw(meanRaw);
+  let varianceSumRaw = 0;
+  for (const value of table) {
+    const deviation = fixFromRaw(toRaw(value) - meanRaw);
+    varianceSumRaw += toRaw(mulFix(deviation, deviation));
+  }
+  const varianceFix = fixFromRaw(floorDivInt(varianceSumRaw, count));
+  const sdFix = sqrtFix(varianceFix);
+  const cvFix = floorDivFix(sdFix, meanFix);
+
+  if (Math.abs(toRaw(cvFix) - toRaw(sigmaFix)) > LIFESPAN_TABLE_SIGMA_TOLERANCE_RAW) {
+    issues.add(
+      path,
+      `分位表の変動係数(標準偏差÷平均)は lifespanSigma と一致が必須` +
+        `(表: raw ${String(toRaw(cvFix))} / σ: raw ${String(toRaw(sigmaFix))}、許容差 ` +
+        `${String(LIFESPAN_TABLE_SIGMA_TOLERANCE_RAW)})。GDD 7.5「σ＝平均の0.25」は変動係数として解釈する`,
+    );
+    return false;
+  }
+  return true;
+}
+
+function toTownParams(content: TownParamsContent, issues: IssueCollector): TownParams | undefined {
+  const path = "balance.townParams";
+
+  const quantileMul: Fix[] = [];
+  for (let i = 0; i < content.lifespanQuantileMul.length; i++) {
+    const raw = content.lifespanQuantileMul[i];
+    if (raw === undefined) continue;
+    const fix = toFix(raw, `${path}.lifespanQuantileMul[${String(i)}]`, issues, "寿命の分位倍率");
+    if (fix !== undefined) quantileMul.push(fix);
+  }
+  const sigmaFix = toFix(content.lifespanSigma, `${path}.lifespanSigma`, issues, "寿命の σ");
+  const memoryDecayDelayFix = toFix(
+    content.memoryDecayDelay,
+    `${path}.memoryDecayDelay`,
+    issues,
+    "memoryDecayDelay",
+  );
+  const populationFloorBedRatioFix = toFix(
+    content.populationFloor.bedRatio,
+    `${path}.populationFloor.bedRatio`,
+    issues,
+    "人口下限の寝床比率",
+  );
+  const scarcityMulFix = toFix(
+    content.scarcityArrivalFrequencyMul,
+    `${path}.scarcityArrivalFrequencyMul`,
+    issues,
+    "不足時の漂着頻度倍率",
+  );
+
+  if (
+    quantileMul.length !== content.lifespanQuantileMul.length ||
+    sigmaFix === undefined ||
+    memoryDecayDelayFix === undefined ||
+    populationFloorBedRatioFix === undefined ||
+    scarcityMulFix === undefined
+  ) {
+    return undefined;
+  }
+
+  if (
+    !validateLifespanQuantileTable(quantileMul, sigmaFix, `${path}.lifespanQuantileMul`, issues)
+  ) {
+    return undefined;
+  }
+
+  // GDD 7.6 の「頻度 ×1.5」を周期へ変換する(rules/types.ts TownParams の doc)。
+  // 実行時に固定小数点の除算を持ち込まないため、変換はここ 1 回に閉じる。
+  const scarcityIntervalTicks = floorDivInt(
+    toRaw(floorDivFix(fixFromInt(content.arrivalIntervalTicks), scarcityMulFix)),
+    FIX_SCALE,
+  );
+  if (scarcityIntervalTicks < 1) {
+    issues.add(
+      `${path}.scarcityArrivalFrequencyMul`,
+      `不足時の加入周期が ${String(scarcityIntervalTicks)} tick になる` +
+        `(arrivalIntervalTicks ${String(content.arrivalIntervalTicks)} ÷ 頻度倍率)。1 以上が必須`,
+    );
+    return undefined;
+  }
+
+  return {
+    lifespanMeanTicks: content.lifespanMeanTicks,
+    lifespanQuantileMulFix: quantileMul,
+    memoryDecayDelayFix,
+    populationFloorBedRatioFix,
+    populationFloorAbsolute: content.populationFloor.absolute,
+    arrivalIntervalTicks: content.arrivalIntervalTicks,
+    scarcityArrivalIntervalTicks: scarcityIntervalTicks,
+    joinAgeMinTicks: content.joinAgeMinTicks,
+    joinAgeMaxTicks: content.joinAgeMaxTicks,
+  };
+}
+
 // --- 6b. storage(GDD 6.7・M5) ---------------------------------------------
 
 /** resource 定義 ID → Fix の Map を作る(キーは ID 昇順の正準順)。 */
@@ -1065,6 +1258,11 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     bundle.balance.recordMedia === null
       ? null
       : (toRecordMediaParams(bundle.balance.recordMedia, issues) ?? undefined);
+  // [M11] 省略可。キー不在 = engine 側の「寿命も晴天漂着も走らない」既定。
+  const town =
+    bundle.balance.townParams === null
+      ? null
+      : (toTownParams(bundle.balance.townParams, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -1082,7 +1280,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     recallRisk === undefined ||
     storage === undefined ||
     eraDefs === undefined ||
-    recordMedia === undefined
+    recordMedia === undefined ||
+    town === undefined
   ) {
     return fail(issues.list());
   }
@@ -1100,7 +1299,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   };
   const withStorage = storage === null ? base : { ...base, storage };
   const withEras = eraDefs === null ? withStorage : { ...withStorage, eraDefs };
-  return ok(recordMedia === null ? withEras : { ...withEras, recordMedia });
+  const withMedia = recordMedia === null ? withEras : { ...withEras, recordMedia };
+  return ok(town === null ? withMedia : { ...withMedia, town });
 }
 
 /**

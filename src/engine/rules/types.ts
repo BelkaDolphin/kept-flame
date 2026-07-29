@@ -81,6 +81,16 @@ export interface FacilityDef {
    * 役割限定」)。**省略時はこの施設が容量を提供しない**。
    */
   readonly storage?: FacilityStorageDef;
+  /**
+   * [M11] Lv 別の寝床上限(index 0 = Lv1・**整数の人数**)。GDD 7.7
+   * 「寝床上限内の決定論的定期加入」と GDD 7.6 の人口下限 `min(寝床×0.5, 6)` の
+   * 「寝床」がこれである。
+   *
+   * **省略時はこの施設が寝床を提供しない**。現 content には寝床施設が無いので
+   * 盤面の寝床上限は 0 になり、その状態では人口下限が 0・晴天漂着も起きない
+   * = M11 以前と 1 bit も違わない(rules/population.ts §1)。
+   */
+  readonly bedCapacityByLevel?: readonly number[];
 }
 
 /**
@@ -318,6 +328,77 @@ export interface RecordMediaParams {
   readonly byMedium: { readonly [K in RecordMedium]: RecordMediumParams };
 }
 
+// --- 3d. townParams(GDD 7.5〜7.7 / 12.1)— M11 ------------------------------
+
+/**
+ * [M11] 住民寿命モデル・人口下限・獲得/規模のパラメータ
+ * (`balance.json` の `townParams` ブロック・GDD 12.1 の `townParams(...)`)。
+ *
+ * **このブロックが content に無ければ {@link EngineContent.town} は undefined**
+ * であり、寿命の抽選も晴天漂着も一切走らない(= M11 以前と同一挙動)。
+ *
+ * ===========================================================================
+ * 寿命分布の表現方法(GDD 7.5「離散対数正規近似」を ADR-006 の下で実装する)
+ * ===========================================================================
+ * GDD 7.5 は「seed 駆動の離散対数正規近似(平均 = 432,000 tick、σ = 平均の 0.25)」
+ * と定めるが、対数正規の逆 CDF は `exp` を要し **ADR-006 の Math 許可リストで
+ * 禁止**(implementation-approximated = エンジン間 bit 不一致)である。
+ *
+ * そこで GDD 11.7 の既定路線 —「非整数べき乗は実行時計算を一切禁止し、
+ * オーサリング時に固定小数点値を事前計算し JSON へ個別値として書き出す」— を
+ * そのまま分布へ適用する:
+ *
+ *   1. オーサリング時に、対数正規の逆 CDF を **等確率 N 分位の代表値**として
+ *      展開し、平均寿命に対する**倍率**の配列にして content へ書く
+ *      ({@link lifespanQuantileMulFix})。
+ *   2. 実行時は「一様 uint32 draw → 添字(整数除算)→ 倍率 → 平均寿命に乗算」
+ *      だけを行う。**超越関数は 1 度も現れない**。
+ *
+ * これは近似ではなく「離散化した対数正規そのもの」であり、GDD の 離散 という
+ * 語とも整合する。分布の妥当性(平均 = 1.0・変動係数 = `lifespanSigma`)は
+ * content ローダー(`schema/engineContent.ts`)が **整数演算だけで機械検証**する
+ * ので、テーブルを手で書き換えて分布を静かにずらすことはできない。
+ *
+ * ADR-018 の段階との関係: 本モジュールが引くのは「住民 1 人につき 1 回の独立な
+ * 逆 CDF サンプリング」であり、他の確率系の状態に依存しない = 段階2 の
+ * next-reaction 依存カスケード(ADR-018(2))には**一切踏み込まない**。
+ */
+export interface TownParams {
+  /** GDD 7.5 の平均寿命(既定 432,000 tick = 約 300 日)。1 以上の整数。 */
+  readonly lifespanMeanTicks: number;
+  /**
+   * 平均寿命に対する倍率の分位テーブル(**昇順・全て正**)。
+   * 添字 i は等確率 `1/N` の分位に対応し、代表値は分位区間の中点 `(i+0.5)/N`。
+   * 連続版の期待値が 1.0 になるよう正規化してある(= 平均寿命が
+   * {@link lifespanMeanTicks} に一致する)。
+   */
+  readonly lifespanQuantileMulFix: readonly Fix[];
+  /**
+   * GDD 7.5 の `memoryDecayDelay`(記憶巧者 = 1.5)。
+   * 「成文化猶予 = 寿命換算で 1.5 倍の余裕」を GDD 11.4-4 の
+   * 「唯一保持者残存想定tick ≥ 成文化所要tick × 安全係数」判定へ供給する
+   * (rules/lifespan.ts の {@link codifyDeadlineMarginTicks})。
+   */
+  readonly memoryDecayDelayFix: Fix;
+  /** GDD 7.6 の人口下限 `min(寝床上限 × 0.5, 6)` の **0.5**。 */
+  readonly populationFloorBedRatioFix: Fix;
+  /** GDD 7.6 の人口下限 `min(寝床上限 × 0.5, 6)` の **6**(絶対保証の上限側)。 */
+  readonly populationFloorAbsolute: number;
+  /** GDD 7.7「定期加入(晴天漂着)」の周期(tick)。1 以上の整数。 */
+  readonly arrivalIntervalTicks: number;
+  /**
+   * GDD 7.6「人口が下限を下回ると漂着加入頻度 ×1.5」を**周期**の側で表したもの
+   * (= `floor(arrivalIntervalTicks / 頻度倍率)`)。周期どうしの比較は整数のまま
+   * 行えるので、実行時に固定小数点の除算が要らない。
+   * 不変条件: `1 <= scarcityArrivalIntervalTicks <= arrivalIntervalTicks`。
+   */
+  readonly scarcityArrivalIntervalTicks: number;
+  /** 加入時年齢(tick)の下限。0 以上の整数。 */
+  readonly joinAgeMinTicks: number;
+  /** 加入時年齢(tick)の上限。{@link joinAgeMinTicks} 以上。 */
+  readonly joinAgeMaxTicks: number;
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -365,6 +446,11 @@ export interface EngineContent {
    * (rules/codify.ts の全コマンドが RulesError)。
    */
   readonly recordMedia?: RecordMediaParams;
+  /**
+   * [M11] 住民寿命・人口下限・獲得/規模のパラメータ(GDD 7.5〜7.7 / 12.1)。
+   * **省略時は寿命の抽選も晴天漂着も走らない**(rules/population.ts §1)。
+   */
+  readonly town?: TownParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------

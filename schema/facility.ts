@@ -118,6 +118,12 @@ export interface FacilityContent {
   /** [M5] 容量の対象資源 ID。JSON に無ければ null(= 全資源)。 */
   readonly storedResourceIds: readonly string[] | null;
   /**
+   * [M11] Lv 別の寝床上限(人数・整数)。GDD 7.7「寝床上限内の決定論的定期加入」と
+   * GDD 7.6 の人口下限 `min(寝床×0.5, 6)` の「寝床」。
+   * JSON に無ければ null(= この施設は寝床を提供しない)。
+   */
+  readonly bedCapacityCurve: readonly number[] | null;
+  /**
    * GDD 11.2 の過酷業務(製錬/鍛冶/高炉等)か。JSON に無ければ null
    * (= engine へ写す段で reject。ファイル冒頭 [T7] の節を参照)。
    */
@@ -313,6 +319,43 @@ function validateCapacityCurve(
   return values;
 }
 
+/** [M11] 寝床上限の Lv 別カーブ。人数なので**非負整数**(容量カーブと違い小数不可)。 */
+const BED_CAPACITY_VALUE_RANGE = { min: 0, max: 1_000 };
+
+/** [M11] `bedCapacityCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負整数・単調非減少。 */
+function validateBedCapacityCurve(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (arr.length !== LV_CURVE_LENGTH) {
+    issues.add(
+      path,
+      `bedCapacityCurve は長さ ${String(LV_CURVE_LENGTH)}(Lv1〜Lv5)が必須(実際: ${String(arr.length)})`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const n = expectInteger(arr[i], `${path}[${String(i)}]`, issues, BED_CAPACITY_VALUE_RANGE);
+    if (n === undefined) return undefined;
+    // 増築で寝床が減ると人口下限(GDD 7.6)が跳ね下がり、下限保証の議論が
+    // 「増築するほど守られる人数が減る」形になる。設定ミスとして止める。
+    const previous = values[i - 1];
+    if (previous !== undefined && n < previous) {
+      issues.add(
+        `${path}[${String(i)}]`,
+        `bedCapacityCurve は単調非減少が必須(Lv を上げて寝床が減らない)。${String(previous)} の次が ${String(n)}`,
+      );
+      return undefined;
+    }
+    values.push(n);
+  }
+  return values;
+}
+
 /** [M5] `storedResourceIds`(省略可)の検証。ID 規則に一致する文字列の配列。 */
 function validateStoredResourceIds(
   raw: unknown,
@@ -370,6 +413,13 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
       : (validateStoredResourceIds(rawStoredResourceIds, "$.storedResourceIds", issues) ??
         undefined);
 
+  // [M11] 追加の省略可フィールド。
+  const rawBedCapacityCurve = obj["bedCapacityCurve"];
+  const bedCapacityCurve =
+    rawBedCapacityCurve === undefined
+      ? null
+      : (validateBedCapacityCurve(rawBedCapacityCurve, "$.bedCapacityCurve", issues) ?? undefined);
+
   if (
     id === undefined ||
     tags === undefined ||
@@ -381,7 +431,8 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     output === undefined ||
     statWeights === undefined ||
     storageCapacityCurve === undefined ||
-    storedResourceIds === undefined
+    storedResourceIds === undefined ||
+    bedCapacityCurve === undefined
   ) {
     return fail(issues.list());
   }
@@ -398,5 +449,6 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     statWeights,
     storageCapacityCurve,
     storedResourceIds,
+    bedCapacityCurve,
   });
 }

@@ -65,6 +65,7 @@ import {
 import { FIX_ONE, FIX_ZERO, addFix, mulFix, mulFixInt, toRaw, type Fix } from "../fp";
 import {
   entitiesOfKind,
+  isAliveResident,
   requireEntity,
   type EntityId,
   type FacilityState,
@@ -171,6 +172,10 @@ export interface ProductionRates {
  * できるようにしてある = 二重防御)。
  */
 export function isWorkerActive(resident: ResidentState, tick: number): boolean {
+  // [M11] 死亡した住民は稼働しない。死亡処理(rules/population.ts §3)は
+  // facility.workerIds からも取り除くのでここへ来ないのが正常だが、掃除漏れを
+  // 「静かに死者が働き続ける」形で通さないための二重防御。
+  if (!isAliveResident(resident)) return false;
   if (resident.dispatched) return false;
   return tick >= resident.recallImpairedUntilTick;
 }

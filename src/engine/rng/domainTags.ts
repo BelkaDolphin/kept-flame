@@ -29,6 +29,14 @@
  *                    ストリーム状態を持たない(hash アドレス方式)。
  *   exploration    : 探索の分岐 RNG。salt = (dispatchId, nodeIndex, branchId, choiceKey)、
  *                    撤退枝/強行枝・慎重/大胆が各々独立の counter 起点を持つ(ADR-007)。
+ *   joinAge        : [M11] 住民が加入した時点の年齢(GDD 7.7 晴天漂着・初期住民)。
+ *                    salt = (fnv1a32(residentId))。住民 1 人につき 1 回しか引かず、
+ *                    寿命(lifespan)とは独立な確率変数なので別タグに分ける(ADR-024(2))。
+ *                    hash アドレス方式(ストリーム状態を持たない)。
+ *   lifespan       : [M11] 住民の寿命 lifespanTick(GDD 7.5 の離散対数正規近似)。
+ *                    salt = (fnv1a32(residentId))。引くのは分位テーブルの添字 1 個だけで、
+ *                    テーブル本体(逆CDF)は content の `townParams.lifespanQuantileMul`。
+ *                    hash アドレス方式 = 住民の生成順に依存しない(同じ ID なら常に同じ寿命)。
  *   recall         : 想起困難の発生ベルヌーイ試行(GDD 11.2 / 段階1・ADR-009/018(1))。
  *                    salt = (fnv1a32(residentId), fnv1a32(techId), coarseStepIndex)。
  *                    per-step 全再評価が順序非依存であることを構造で保証するため
@@ -42,7 +50,14 @@
  * 入れる段階でこのファイルへ追加する)。使われないタグを先に登録すると
  * 「どの確率系がどのストリームを使うか」の対応が曇るので置かない。
  */
-const DOMAIN_TAG_LIST = ["adjacency", "exploration", "recall", "recallDuration"] as const;
+const DOMAIN_TAG_LIST = [
+  "adjacency",
+  "exploration",
+  "joinAge",
+  "lifespan",
+  "recall",
+  "recallDuration",
+] as const;
 
 type DomainTagList = typeof DOMAIN_TAG_LIST;
 

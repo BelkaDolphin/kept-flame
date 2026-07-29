@@ -85,6 +85,20 @@
 //
 //   resource の 2 つの累計は**常に対で存在するか対で不在**である(会計は上限が
 //   有限な資源でのみ走る)。片方だけの直列化形は壊れた入力として reject する。
+//
+// ===========================================================================
+// 5. [M11] 住民の `life` は 3 値を 1 オブジェクトにまとめる
+// ===========================================================================
+//   §4 の「無ければキーごと出さない」を守りつつ、`bornTick` / `lifespanTick` /
+//   `diedTick` を独立した省略可フィールドにすると、生スプレッド禁止(ADR-028(1))の
+//   もとで書き分けるリテラルが 2^3 = 8 通りに膨れる。3 値は「生涯」という 1 つの
+//   意味の分解であって独立に欠けることが無いので、state 側(state.ts の
+//   {@link ResidentLife})から 1 オブジェクトにまとめてあり、直列化の分岐も
+//   `stats` × `life` の 4 通りで済む。
+//
+//   `diedTick` はオブジェクト内では**省略しない**(生存中は明示的に null)。
+//   「キーが無い = 生きている」という表現にすると、`life` 自体の不在(= 寿命を
+//   持たない住民)と区別が付きにくくなるため。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson } from "../canonicalize";
@@ -103,6 +117,7 @@ import {
   type GameState,
   type GameStateMeta,
   type ResearchState,
+  type ResidentLife,
   type ResidentState,
   type ResourceState,
 } from "./state";
@@ -130,6 +145,13 @@ export type SerializedResidentStats = {
   readonly will: number;
 };
 
+/** [M11] 住民の生涯(GDD 7.5)。値は素の tick 整数(Fix ではない)。 */
+export type SerializedResidentLife = {
+  readonly bornTick: number;
+  readonly lifespanTick: number;
+  readonly diedTick: number | null;
+};
+
 export type SerializedResident = {
   readonly kind: "resident";
   readonly id: string;
@@ -141,6 +163,8 @@ export type SerializedResident = {
   readonly recallImpairedUntilTick: number;
   /** [M5] 未設定(中立既定値)なら**キーごと省略**する(§4)。 */
   readonly stats?: SerializedResidentStats;
+  /** [M11] 寿命を持たない住民は**キーごと省略**する(§5)。 */
+  readonly life?: SerializedResidentLife;
 };
 
 export type SerializedFacility = {
@@ -210,10 +234,30 @@ export type SerializedGameState = {
 
 // --- 2. state → JSON -------------------------------------------------------
 
-/** [M5] 省略可の `stats` を持つ resident の直列化(§4 の 2 リテラル分岐)。 */
+/** [M5/M11] 省略可の `stats` / `life` を持つ resident の直列化(§4 / §5 の 4 分岐)。 */
 function serializeResident(entity: ResidentState): SerializedResident {
-  const stats = entity.stats;
-  if (stats === undefined) {
+  const rawStats = entity.stats;
+  const stats: SerializedResidentStats | undefined =
+    rawStats === undefined
+      ? undefined
+      : {
+          vigor: toRaw(rawStats.vigor),
+          dexterity: toRaw(rawStats.dexterity),
+          intellect: toRaw(rawStats.intellect),
+          fortitude: toRaw(rawStats.fortitude),
+          will: toRaw(rawStats.will),
+        };
+  const rawLife = entity.life;
+  const life: SerializedResidentLife | undefined =
+    rawLife === undefined
+      ? undefined
+      : {
+          bornTick: rawLife.bornTick,
+          lifespanTick: rawLife.lifespanTick,
+          diedTick: rawLife.diedTick,
+        };
+
+  if (stats === undefined && life === undefined) {
     return {
       kind: "resident",
       id: entity.id,
@@ -225,6 +269,32 @@ function serializeResident(entity: ResidentState): SerializedResident {
       recallImpairedUntilTick: entity.recallImpairedUntilTick,
     };
   }
+  if (life === undefined) {
+    return {
+      kind: "resident",
+      id: entity.id,
+      morale: toRaw(entity.morale),
+      mastery: toRaw(entity.mastery),
+      assignedFacilityId: entity.assignedFacilityId,
+      dispatched: entity.dispatched,
+      traitIds: [...entity.traitIds],
+      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+      stats: stats as SerializedResidentStats,
+    };
+  }
+  if (stats === undefined) {
+    return {
+      kind: "resident",
+      id: entity.id,
+      morale: toRaw(entity.morale),
+      mastery: toRaw(entity.mastery),
+      assignedFacilityId: entity.assignedFacilityId,
+      dispatched: entity.dispatched,
+      traitIds: [...entity.traitIds],
+      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+      life,
+    };
+  }
   return {
     kind: "resident",
     id: entity.id,
@@ -234,13 +304,8 @@ function serializeResident(entity: ResidentState): SerializedResident {
     dispatched: entity.dispatched,
     traitIds: [...entity.traitIds],
     recallImpairedUntilTick: entity.recallImpairedUntilTick,
-    stats: {
-      vigor: toRaw(stats.vigor),
-      dexterity: toRaw(stats.dexterity),
-      intellect: toRaw(stats.intellect),
-      fortitude: toRaw(stats.fortitude),
-      will: toRaw(stats.will),
-    },
+    stats,
+    life,
   };
 }
 
@@ -451,6 +516,27 @@ function requireResidentStatsOrUndefined(value: unknown, path: string): Resident
   };
 }
 
+/**
+ * [M11] `life`(省略可・§5)を読む。キーが無ければ undefined。
+ *
+ * `bornTick` は**負値を許す**(ゲーム開始前に生まれた住民・state.ts の
+ * {@link ResidentLife})。`lifespanTick` は 1 以上、`diedTick` は非負または null。
+ */
+function requireResidentLifeOrUndefined(value: unknown, path: string): ResidentLife | undefined {
+  if (value === undefined) return undefined;
+  const o = requireObject(value, path);
+  const bornTick = requireInt(o["bornTick"], `${path}.bornTick`);
+  const lifespanTick = requireInt(o["lifespanTick"], `${path}.lifespanTick`);
+  if (lifespanTick < 1) {
+    throw new SerializeError(
+      `${path}.lifespanTick: 1 以上を期待したが ${String(lifespanTick)} だった(寿命 0 の住民は生成されない)`,
+    );
+  }
+  const rawDied = o["diedTick"];
+  const diedTick = rawDied === null ? null : requireNonNegativeInt(rawDied, `${path}.diedTick`);
+  return { bornTick, lifespanTick, diedTick };
+}
+
 function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string): ResidentState {
   const morale = requireFix(o["morale"], `${p}.morale`);
   const mastery = requireFix(o["mastery"], `${p}.mastery`);
@@ -465,8 +551,34 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
     `${p}.recallImpairedUntilTick`,
   );
   const stats = requireResidentStatsOrUndefined(o["stats"], `${p}.stats`);
+  const life = requireResidentLifeOrUndefined(o["life"], `${p}.life`);
   // exactOptionalPropertyTypes 下では `stats: undefined` を書けず、生スプレッドも
-  // 使えない(§4)ので 2 リテラルに書き分ける。
+  // 使えない(§4 / §5)ので 4 リテラルに書き分ける。
+  if (stats === undefined && life === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+    };
+  }
+  if (life === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      stats: stats as ResidentStats,
+    };
+  }
   if (stats === undefined) {
     return {
       kind: "resident",
@@ -477,6 +589,7 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
       dispatched,
       traitIds,
       recallImpairedUntilTick,
+      life,
     };
   }
   return {
@@ -489,6 +602,7 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
     traitIds,
     recallImpairedUntilTick,
     stats,
+    life,
   };
 }
 
