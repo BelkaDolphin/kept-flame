@@ -13,17 +13,20 @@
 //   | `worldLoaded`     | 起動/セーブ復元/インポート(M29/M33) | content + state を総入れ替え |
 //   | `ticked`          | フォアグラウンド tick 駆動(M29)   | engine advance で toTick まで進める |
 //   | `catchUpApplied`  | Worker catch-up 完了(platform/workerClient) | スナップショットを据える |
-//   | `stateApplied`    | コマンド適用の**暫定口**          | 同じ世界の次の state を据える |
+//   | `commandApplied`  | プレイヤー操作(画面)             | engine の `apply(Command)` の結果を据える |
 //   | `cellSelected`    | ②格子ビューのタップ(M18/M30)     | 選択セルの変更(UI 状態) |
 //   | `screenOpened`    | 自前ハッシュルータ(M29・ADR-027) | 現在画面の写しを更新 |
 //
-//   **engine コマンド(施設設置・住民配置・研究開始…)の語彙はまだ無い**。
-//   `src/engine/commands.ts` と `apply(Command)`(ADR リポ構成)が未実装で、
-//   state を動かす純関数が存在しないため。実装されたら
-//   `{ type: "commandApplied", command }` を 1 件足して `stateApplied` を撤去する
-//   (手順は docs/design/architecture.md §7)。
-//   **それらしいイベント名だけ先に生やして中で何もしない、はしない**
-//   (黙って効かないコマンドは最悪の壊れ方をするため)。
+//   **[M49] `stateApplied`(コマンド適用の暫定口)は撤去した。** 世界の中の
+//   state 遷移は `ticked` / `catchUpApplied` / `commandApplied` の 3 経路だけで
+//   あり、engine の外で組み立てた任意の state を据えられるのは**世界の総入れ替え
+//   (`worldLoaded`)だけ**である。判定(置けるか・払えるか)は engine の
+//   `src/engine/commands.ts` にあり、ストアにも画面にも 1 行も無い。
+//
+//   コマンドが拒否されたときは**例外を投げない**。`DispatchResult.command` に
+//   engine の {@link CommandResult}(`ok: false` + 機械可読の `rejection`)が
+//   そのまま載るので、画面はそれを見てメッセージを出す(黙って何も起きない、を
+//   作らない・commands.ts §3)。
 //
 // ===========================================================================
 // 2. state は複製しない(ADR-028 の単一正準実装から外れる経路を作らない)
@@ -55,6 +58,7 @@
 
 import { advance, createAdvanceContext } from "../engine/advance";
 import { GRID_CELL_COUNT } from "../engine/adjacency";
+import { apply, type CommandInput, type CommandResult } from "../engine/commands";
 import type { AdvanceContext, EngineContent } from "../engine/rules/types";
 import type { GameState } from "../engine/state/state";
 import { worldSeedToUint32 } from "../engine/stochastic";
@@ -119,21 +123,16 @@ export interface CatchUpAppliedEvent {
 }
 
 /**
- * engine の純関数が作った次の state を据える(**コマンド適用の暫定口**)。
+ * [M49] プレイヤー操作(engine コマンド)の適用。
  *
- * `src/engine/commands.ts` と `apply(Command)`(ADR リポ構成)が入ったら
- * `{ type: "commandApplied", command }` に置き換え、本イベントは撤去する。
- * それまでの間、施設の設置/撤去・住民の配置換えといった「tick を進めない
- * state 遷移」をストアへ届ける口がこれしかない。
+ * ストアは `apply(state, content, command)` を呼んで結果を据えるだけで、
+ * **判定は 1 行も持たない**。`command` には 1 個または列(原子適用)を渡せる。
  *
- * **同じ世界の続き**であることを検査する(worldSeed / algoVersion 一致・tick が
- * 巻き戻らない)。別の世界を入れたいなら `worldLoaded` を使うこと。
+ * 拒否は例外ではなく `DispatchResult.command` に載る(§1)。tick は動かない。
  */
-export interface StateAppliedEvent {
-  readonly type: "stateApplied";
-  readonly state: GameState;
-  /** 何がこの state を作ったか(診断・ログ用の自由文字列)。 */
-  readonly reason: string;
+export interface CommandAppliedEvent {
+  readonly type: "commandApplied";
+  readonly command: CommandInput;
 }
 
 /** 選択セルの変更(GDD 6.6 の 2 ステップ配置)。null は選択解除。 */
@@ -151,8 +150,8 @@ export interface ScreenOpenedEvent {
 export type StoreEvent =
   | CatchUpAppliedEvent
   | CellSelectedEvent
+  | CommandAppliedEvent
   | ScreenOpenedEvent
-  | StateAppliedEvent
   | TickedEvent
   | WorldLoadedEvent;
 
@@ -169,6 +168,14 @@ export interface DispatchResult {
   readonly advanceContextRebuilt: boolean;
   /** 転送済みコンテキストを据えたか(engine 再計算なし・§3)。 */
   readonly advanceContextRestored: boolean;
+  /**
+   * [M49] `commandApplied` のときの engine の判定結果(他のイベントでは null)。
+   *
+   * DispatchResult の他のフィールドは診断用だが、**これだけは画面が読んでよい**
+   * — 拒否されたことを利用者へ伝える手段が他に無いため(黙って何も起きない、を
+   * 作らない・§1)。分岐は `rejection.code` で行い、`message` は表示のみに使う。
+   */
+  readonly command: CommandResult | null;
 }
 
 // --- 2. 画面のマウント単位(ADR-027) ---------------------------------------
@@ -323,6 +330,7 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
         changedPlacementCells: [],
         advanceContextRebuilt: false,
         advanceContextRestored: false,
+        command: null,
       };
     }
     if (chooseCatchUpRoute(delta) !== "main-structural-sharing") {
@@ -340,6 +348,7 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       changedPlacementCells: installed.report.changedPlacementCells,
       advanceContextRebuilt: installed.rebuilt,
       advanceContextRestored: installed.restored,
+      command: null,
     };
   }
 
@@ -362,6 +371,7 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       changedPlacementCells: installed.report.changedPlacementCells,
       advanceContextRebuilt: installed.rebuilt,
       advanceContextRestored: installed.restored,
+      command: null,
     };
   }
 
@@ -381,33 +391,36 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       changedPlacementCells: installed.report.changedPlacementCells,
       advanceContextRebuilt: installed.rebuilt,
       advanceContextRestored: installed.restored,
+      command: null,
     };
   }
 
-  function applyStateApplied(event: StateAppliedEvent): DispatchResult {
-    const current = sources.state.peek();
-    if (event.state.worldSeed !== current.worldSeed) {
-      throw new StoreError(
-        `stateApplied("${event.reason}"): worldSeed が違う(現在 "${current.worldSeed}" / 与えられた "${event.state.worldSeed}")。別の世界は worldLoaded を使う`,
-      );
+  /**
+   * [M49] プレイヤー操作。**engine の判定結果をそのまま据える**だけで、
+   * ストア側に検査は無い(worldSeed / tick の整合は `apply` が現在の state から
+   * 次の state を作る構造そのものが保証している)。
+   */
+  function applyCommand(event: CommandAppliedEvent): DispatchResult {
+    const result = apply(sources.state.peek(), sources.content.peek(), event.command);
+    if (!result.ok) {
+      // 拒否は例外にしない(§1)。state も signal も 1 つも動かさない。
+      return {
+        type: "commandApplied",
+        stateChanged: false,
+        changedPlacementCells: [],
+        advanceContextRebuilt: false,
+        advanceContextRestored: false,
+        command: result,
+      };
     }
-    if (event.state.algoVersion !== current.algoVersion) {
-      throw new StoreError(
-        `stateApplied("${event.reason}"): algoVersion が違う(現在 ${String(current.algoVersion)} / 与えられた ${String(event.state.algoVersion)})`,
-      );
-    }
-    if (event.state.tick < current.tick) {
-      throw new StoreError(
-        `stateApplied("${event.reason}"): tick ${String(event.state.tick)} が現在 ${String(current.tick)} より過去`,
-      );
-    }
-    const installed = installWorldState(event.state, sources.content.peek(), null, false);
+    const installed = installWorldState(result.state, sources.content.peek(), null, false);
     return {
-      type: "stateApplied",
+      type: "commandApplied",
       stateChanged: installed.report.stateChanged,
       changedPlacementCells: installed.report.changedPlacementCells,
       advanceContextRebuilt: installed.rebuilt,
       advanceContextRestored: installed.restored,
+      command: result,
     };
   }
 
@@ -415,8 +428,8 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
     switch (event.type) {
       case "worldLoaded":
         return applyWorldLoaded(event);
-      case "stateApplied":
-        return applyStateApplied(event);
+      case "commandApplied":
+        return applyCommand(event);
       case "ticked":
         return applyTicked(event);
       case "catchUpApplied":
@@ -430,6 +443,7 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
           changedPlacementCells: [],
           advanceContextRebuilt: false,
           advanceContextRestored: false,
+          command: null,
         };
       }
       case "screenOpened": {
@@ -443,6 +457,7 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
           changedPlacementCells: [],
           advanceContextRebuilt: false,
           advanceContextRestored: false,
+          command: null,
         };
       }
       default: {

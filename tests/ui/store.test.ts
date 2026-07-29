@@ -12,11 +12,11 @@
 import { describe, expect, it } from "vitest";
 
 import { advance, createAdvanceContext } from "../../src/engine/advance";
+import { apply } from "../../src/engine/commands";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "../../src/platform/catchUp";
 import { toSerializable } from "../../src/engine/state/serialize";
 import { getEntity, requireEntity } from "../../src/engine/state/state";
-import { putEntity, setField, updateEntity } from "../../src/engine/state/update";
-import { StoreError, createGameStore } from "../../src/ui/store";
+import { StoreError, createGameStore, type StoreEvent } from "../../src/ui/store";
 import { StoreSourceError } from "../../src/ui/sources";
 import {
   CELL_CENTER,
@@ -30,6 +30,7 @@ import {
   createTestStore,
   facility,
   id,
+  placeHearth,
 } from "./fixtures";
 
 describe("ストアの初期化", () => {
@@ -180,63 +181,114 @@ describe("catchUpApplied(Worker catch-up の完了・ADR-019/029)", () => {
   });
 });
 
-describe("stateApplied(コマンド適用の暫定口)", () => {
-  it("state を複製せずそのまま据える(ADR-028 の複製経路を増やさない)", () => {
-    const { store, state } = createTestStore();
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test" });
+describe("commandApplied(engine コマンド層の単一入口・M49)", () => {
+  it("engine が作った state を複製せずそのまま据える(ADR-028 の複製経路を増やさない)", () => {
+    const { store } = createTestStore();
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: placeHearth("fSouth", CELL_SOUTHEAST),
+    });
+    expect(result.command?.ok).toBe(true);
     // 参照同一 = ストア側にコピーが 1 箇所も無いことの直接証拠。
-    expect(store.peekState()).toBe(next);
+    if (result.command?.ok === true) expect(store.peekState()).toBe(result.command.state);
   });
 
   it("配置が変わったときだけ AdvanceContext を作り直す", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     const buildsBefore = store.stats().advanceContextBuildCount;
 
-    const levelUp = updateEntity(state, id("fHearth"), "facility", (f) => setField(f, "level", 2));
     const noPlacementChange = store.dispatch({
-      type: "stateApplied",
-      state: levelUp,
-      reason: "test: 増築",
+      type: "commandApplied",
+      command: { kind: "upgradeFacility", facilityId: id("fHearth") },
     });
     expect(noPlacementChange.changedPlacementCells).toEqual([]);
     expect(store.stats().advanceContextBuildCount).toBe(buildsBefore);
 
-    const placed = putEntity(levelUp, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
     const placementChange = store.dispatch({
-      type: "stateApplied",
-      state: placed,
-      reason: "test: 設置",
+      type: "commandApplied",
+      command: placeHearth("fSouth", CELL_SOUTHEAST),
     });
     expect(placementChange.changedPlacementCells).toEqual([CELL_SOUTHEAST]);
     expect(placementChange.advanceContextRebuilt).toBe(true);
     expect(store.stats().advanceContextBuildCount).toBe(buildsBefore + 1);
   });
 
-  it("別の世界(worldSeed / algoVersion 違い)は拒否する", () => {
+  it("拒否されたコマンドは例外にならず、state も signal も 1 つも動かない", () => {
     const { store } = createTestStore();
+    const before = store.peekState();
+    const stateInstallsBefore = store.stats().stateInstallCount;
+
+    // セル 14 は fHearth が建っている(GDD 6.1: 1 セル = 1 施設)。
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: placeHearth("fBlocked", CELL_CENTER),
+    });
+
+    expect(result.command?.ok).toBe(false);
+    if (result.command?.ok === false) {
+      expect(result.command.rejection.code).toBe("cellOccupied");
+      expect(result.command.rejection.cellIndex).toBe(CELL_CENTER);
+    }
+    expect(result.stateChanged).toBe(false);
+    expect(store.peekState()).toBe(before);
+    expect(store.stats().stateInstallCount).toBe(stateInstallsBefore);
+  });
+
+  it("列コマンドは 1 dispatch で原子適用される(途中の state を誰にも見せない)", () => {
+    const { store } = createTestStore();
+    const seen: number[] = [];
+    const mount = store.mountScreen("grid");
+    mount.scope.effect(() => {
+      seen.push(store.derived.gridSummary.value.occupiedCellCount);
+    });
+
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: [placeHearth("fSouth", CELL_SOUTHEAST), placeHearth("fWest", 13)],
+    });
+
+    expect(result.command?.ok).toBe(true);
+    if (result.command?.ok === true) expect(result.command.commandCount).toBe(2);
+    // 初回 + 1 回の再評価だけ(3 → 5 に 1 手で飛ぶ)。
+    expect(seen).toEqual([3, 5]);
+    mount.dispose();
+  });
+
+  it("列の途中で拒否されたら全部捨てる(部分適用しない)", () => {
+    const { store } = createTestStore();
+    const before = store.peekState();
+
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: [placeHearth("fSouth", CELL_SOUTHEAST), placeHearth("fBad", CELL_CENTER)],
+    });
+
+    expect(result.command?.ok).toBe(false);
+    if (result.command?.ok === false) expect(result.command.rejection.commandIndex).toBe(1);
+    expect(store.peekState()).toBe(before);
+    expect(getEntity(store.peekState(), id("fSouth"))).toBeUndefined();
+  });
+
+  it("tick は動かさない(コマンドは現在 tick の状態遷移)", () => {
+    const { store } = createTestStore();
+    store.dispatch({ type: "ticked", toTick: 10 });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
+    expect(store.peekState().tick).toBe(10);
+  });
+
+  it("撤去した stateApplied は語彙外として弾かれる(暫定口が復活していない)", () => {
+    const { store, state } = createTestStore();
     expect(() =>
-      store.dispatch({
-        type: "stateApplied",
-        state: boardState([], { worldSeed: "seedBeta" }),
-        reason: "test",
-      }),
-    ).toThrow(StoreError);
-    expect(() =>
-      store.dispatch({
-        type: "stateApplied",
-        state: boardState([], { algoVersion: 99 }),
-        reason: "test",
-      }),
+      store.dispatch({ type: "stateApplied", state, reason: "test" } as unknown as StoreEvent),
     ).toThrow(StoreError);
   });
 
-  it("過去の tick は拒否する", () => {
-    const { store, state } = createTestStore();
-    store.dispatch({ type: "ticked", toTick: 10 });
-    expect(() => store.dispatch({ type: "stateApplied", state, reason: "test" })).toThrow(
-      StoreError,
-    );
+  it("ストアは判定を持たない(dispatch の結果が engine の apply と同一)", () => {
+    const { store, state, content } = createTestStore();
+    const command = placeHearth("fBlocked", CELL_CENTER);
+    const direct = apply(state, content, command);
+    const viaStore = store.dispatch({ type: "commandApplied", command });
+    expect(viaStore.command).toEqual(direct);
   });
 });
 
@@ -281,11 +333,7 @@ describe("診断カウンタ", () => {
     const { store } = createTestStore();
     const before = store.stats();
     store.dispatch({ type: "ticked", toTick: 5 });
-    store.dispatch({
-      type: "stateApplied",
-      state: putEntity(store.peekState(), facility("fSouth", HEARTH.id, CELL_SOUTHEAST)),
-      reason: "test",
-    });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     const after = store.stats();
     expect(after.dispatchCount).toBe(before.dispatchCount + 2);
     expect(after.placementChangeCount).toBe(before.placementChangeCount + 1);

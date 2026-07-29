@@ -26,7 +26,9 @@ import {
   type SaveClock,
 } from "../../src/platform/saveScheduler";
 
-import { resident, stateOf } from "../engine/fixtures";
+import { apply, type Command } from "../../src/engine/commands";
+
+import { HEARTH, content, facility, id, resident, stateOf } from "../engine/fixtures";
 
 const STATE = stateOf([resident("residentA")]);
 const STATE_B = stateOf([resident("residentA"), resident("residentB")]);
@@ -512,6 +514,58 @@ describe("設定と後始末", () => {
     const { scheduler } = harness();
     expect(() => scheduler.recordCommands(STATE, 0)).toThrow();
     expect(() => scheduler.recordCommands(STATE, 1.5)).toThrow();
+    scheduler.dispose();
+  });
+});
+
+// --- 6. コマンド適用との結線(M49) ----------------------------------------
+
+describe("recordCommandOutcome(engine コマンド層との結線・M49)", () => {
+  const CONTENT = content();
+  const BOARD = stateOf([facility("fHearth", HEARTH.id, 14), resident("aRui")]);
+
+  const PLACE: Command = {
+    kind: "placeFacility",
+    facilityId: id("fNew"),
+    defId: HEARTH.id,
+    cellIndex: 21,
+  };
+
+  it("受理されたコマンドは書込トリガとして数える", async () => {
+    const { clock, scheduler, writes } = harness();
+    const result = apply(BOARD, CONTENT, PLACE);
+
+    expect(scheduler.recordCommandOutcome(result)).toBe(true);
+    expect(scheduler.pendingCommandCount).toBe(1);
+    await clock.advance(SAVE_DEBOUNCE_MS);
+    expect(writes).toHaveLength(1);
+    if (result.ok) expect(writes[0]).toBe(result.state);
+    scheduler.dispose();
+  });
+
+  it("拒否されたコマンドは 1 件も数えない(state が動いていないので書く理由が無い)", async () => {
+    const { clock, scheduler, writes } = harness();
+    // セル 14 は占有済み = cellOccupied で reject される。
+    const result = apply(BOARD, CONTENT, { ...PLACE, cellIndex: 14 });
+
+    expect(result.ok).toBe(false);
+    expect(scheduler.recordCommandOutcome(result)).toBe(false);
+    expect(scheduler.isDirty).toBe(false);
+    expect(scheduler.pendingCommandCount).toBe(0);
+    await clock.advance(SAVE_MAX_INTERVAL_MS * 2);
+    expect(writes).toHaveLength(0);
+    scheduler.dispose();
+  });
+
+  it("列コマンドは要素数ぶん数える(25 件の絶対フラッシュの単位を取り違えない)", () => {
+    const { scheduler } = harness();
+    const result = apply(BOARD, CONTENT, [
+      PLACE,
+      { kind: "assignResident", residentId: id("aRui"), facilityId: id("fNew") },
+    ]);
+
+    expect(scheduler.recordCommandOutcome(result)).toBe(true);
+    expect(scheduler.pendingCommandCount).toBe(2);
     scheduler.dispose();
   });
 });

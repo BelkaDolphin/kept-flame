@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { neighborCellIndices } from "../../src/engine/adjacency";
+import type { PlaceFacilityCommand } from "../../src/engine/commands";
 import type { EngineContent } from "../../src/engine/rules/types";
 import type { EntityState, GameState, GameStateMeta } from "../../src/engine/state/state";
 import { createGameStore, type GameStore } from "../../src/ui/store";
@@ -84,6 +85,19 @@ export function createTestStore(extra: readonly EntityState[] = []): TestStoreSe
     store: createGameStore({ state, content: engineContent }),
     state,
     content: engineContent,
+  };
+}
+
+/**
+ * [M49] かまどを 1 基置くコマンド。UI テストの「盤面を 1 手動かす」はすべて
+ * engine のコマンド経由になったので(`stateApplied` 撤去)、その定型を畳んである。
+ */
+export function placeHearth(facilityName: string, cellIndex: number): PlaceFacilityCommand {
+  return {
+    kind: "placeFacility",
+    facilityId: id(facilityName),
+    defId: HEARTH.id,
+    cellIndex,
   };
 }
 

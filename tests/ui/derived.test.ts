@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { GRID_CELL_COUNT } from "../../src/engine/adjacency";
 import { toRaw } from "../../src/engine/fp";
 import { entitiesOfKind, requireEntity } from "../../src/engine/state/state";
-import { putEntity, removeEntity, setField, updateEntity } from "../../src/engine/state/update";
+import { setField, updateEntity } from "../../src/engine/state/update";
 import {
   CELL_CENTER,
   CELL_EAST,
@@ -33,18 +33,18 @@ import {
   facility,
   id,
   neighborhoodOf,
+  placeHearth,
   primeAllCells,
   recomputeCounts,
 } from "./fixtures";
 
 describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限定される(ADR-002(2))", () => {
   it("施設を 1 基置くと、隣接 computed が再計算されるのは近傍の占有セルだけ", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     primeAllCells(store);
     const before = recomputeCounts(store.derived.cellAdjacency);
 
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 施設設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     primeAllCells(store);
 
     const recomputed = changedCells(before, recomputeCounts(store.derived.cellAdjacency));
@@ -58,12 +58,11 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
   });
 
   it("遠方セル(近傍でない 44 セル)は 1 度も再計算されない", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     primeAllCells(store);
     const before = recomputeCounts(store.derived.cellAdjacency);
 
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 施設設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     primeAllCells(store);
 
     const after = recomputeCounts(store.derived.cellAdjacency);
@@ -79,12 +78,11 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
   });
 
   it("セルの表示モデル(cellView)も近傍に限定される", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     primeAllCells(store);
     const before = recomputeCounts(store.derived.cellView);
 
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 施設設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     primeAllCells(store);
 
     expect(changedCells(before, recomputeCounts(store.derived.cellView))).toEqual([
@@ -95,12 +93,14 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
   });
 
   it("施設の撤去も同じ上界に収まる", () => {
-    const { store, state } = createTestStore([facility("fSouth", HEARTH.id, CELL_SOUTHEAST)]);
+    const { store } = createTestStore([facility("fSouth", HEARTH.id, CELL_SOUTHEAST)]);
     primeAllCells(store);
     const before = recomputeCounts(store.derived.cellAdjacency);
 
-    const next = removeEntity(state, id("fSouth"));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 施設撤去" });
+    store.dispatch({
+      type: "commandApplied",
+      command: { kind: "demolishFacility", facilityId: id("fSouth") },
+    });
     primeAllCells(store);
 
     expect(changedCells(before, recomputeCounts(store.derived.cellAdjacency))).toEqual([
@@ -111,13 +111,15 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
   });
 
   it("Lv 変更(配置は不変)では近傍の隣接 computed が 1 個も再計算されない", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     primeAllCells(store);
     const beforeAdjacency = recomputeCounts(store.derived.cellAdjacency);
     const beforeView = recomputeCounts(store.derived.cellView);
 
-    const next = updateEntity(state, id("fHearth"), "facility", (f) => setField(f, "level", 2));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 増築" });
+    store.dispatch({
+      type: "commandApplied",
+      command: { kind: "upgradeFacility", facilityId: id("fHearth") },
+    });
     primeAllCells(store);
 
     // 隣接ボーナスは Lv に依存しない = 近傍は無関係。
@@ -144,16 +146,19 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
   });
 
   it("同じタグの施設へ差し替えると、近傍の隣接値は変わらないので表示は再計算されない", () => {
-    const { store, state } = createTestStore([facility("fSouth", HEARTH.id, CELL_SOUTHEAST)]);
+    const { store } = createTestStore([facility("fSouth", HEARTH.id, CELL_SOUTHEAST)]);
     primeAllCells(store);
     const beforeAdjacency = recomputeCounts(store.derived.cellAdjacency);
     const beforeView = recomputeCounts(store.derived.cellView);
 
-    const next = putEntity(
-      removeEntity(state, id("fSouth")),
-      facility("fSouth2", HEARTH.id, CELL_SOUTHEAST),
-    );
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 同タグ施設へ差し替え" });
+    // 解体 → 建て直しを 1 dispatch で原子適用する(途中の state を誰にも見せない)。
+    store.dispatch({
+      type: "commandApplied",
+      command: [
+        { kind: "demolishFacility", facilityId: id("fSouth") },
+        placeHearth("fSouth2", CELL_SOUTHEAST),
+      ],
+    });
     primeAllCells(store);
 
     // 配置素性(施設 ID)が変わったので近傍の隣接は再計算される…
@@ -182,19 +187,17 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
 
 describe("隣接値そのもの(engine と同じ 1 実装であること)", () => {
   it("熱源が隣り合うと +20%、3 つ目からは過密ペナルティ(GDD 6.2/6.3)", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     // 初期状態: セル 14 の熱源近傍は 15 の 1 基だけ。
     expect(toRaw(at(store.derived.cellView, CELL_CENTER).value.multiplierFix)).toBe(1_200_000);
 
     // 近傍を 2 基へ: まだ threshold(3)未満なので加算のみ。
-    const two = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: two, reason: "test: 近傍 2 基" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     expect(toRaw(at(store.derived.cellView, CELL_CENTER).value.multiplierFix)).toBe(1_400_000);
     expect(at(store.derived.cellView, CELL_CENTER).value.overcrowded).toBe(false);
 
     // 3 基目で過密: ボーナスは先頭 2 件のみ有効、超過 1 件につき -10%。
-    const three = putEntity(two, facility("fWest", HEARTH.id, CELL_WEST));
-    store.dispatch({ type: "stateApplied", state: three, reason: "test: 近傍 3 基" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fWest", CELL_WEST) });
     const view = at(store.derived.cellView, CELL_CENTER).value;
     expect(toRaw(view.multiplierFix)).toBe(1_300_000);
     expect(view.overcrowdedNeighborCount).toBe(1);
@@ -202,12 +205,11 @@ describe("隣接値そのもの(engine と同じ 1 実装であること)", () =
   });
 
   it("UI の乗数と engine の multiplierByFacilityId が一致する(単一正準実装)", () => {
-    const { store, state } = createTestStore([
+    const { store } = createTestStore([
       facility("fSouth", HEARTH.id, CELL_SOUTHEAST),
       facility("fWest", STUDY_DESK.id, CELL_WEST),
     ]);
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 盤面確定" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth2", 22) });
 
     const multipliers = store.peekAdvanceContext().multiplierByFacilityId;
     let checked = 0;
@@ -247,15 +249,14 @@ describe("全体集計はセル表示の依存に置かない(ADR-002(2))", () =
   });
 
   it("全体集計を購読してもセル表示の再計算回数は増えない", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     primeAllCells(store);
     void store.derived.gridSummary.value;
     const beforeView = recomputeCounts(store.derived.cellView);
     const summaryBefore = store.derived.gridSummary.recomputeCount;
 
     // 遠方セルの近傍(41)へ 1 基置く。
-    const next = putEntity(state, facility("fFarEast", HEARTH.id, 41));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 遠方へ設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fFarEast", 41) });
     void store.derived.gridSummary.value;
 
     // 全体集計は作り直されるが、基準セル(14)の表示は無関係のまま。
@@ -287,11 +288,13 @@ describe("値の派生(資源・研究・住民・ホームハブ)", () => {
   });
 
   it("想起困難は現在 tick との比較で表示される", () => {
-    const { store, state } = createTestStore();
+    const { store, state, content } = createTestStore();
+    // 想起困難は advance が作る state であってコマンドでは作れない。engine の外で
+    // 組み立てた state を据えられる口は worldLoaded だけ(store.ts §1・M49)。
     const next = updateEntity(state, id("aRui"), "resident", (r) =>
       setField(r, "recallImpairedUntilTick", 100),
     );
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 想起困難" });
+    store.dispatch({ type: "worldLoaded", state: next, content, source: "save" });
     expect(at(store.derived.residents.value, 0).recallImpaired).toBe(true);
     expect(store.derived.homeBadges.value.impairedResidentCount).toBe(1);
   });
@@ -328,7 +331,7 @@ describe("値の派生(資源・研究・住民・ホームハブ)", () => {
 
 describe("12画面が同一状態をリアルタイム共有する", () => {
   it("2 画面が同じセルを購読しても再計算は 1 回だけ(派生値は共有インスタンス)", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     const gridMount = store.mountScreen("grid");
     const detailMount = store.mountScreen("facility", { activate: false });
 
@@ -344,8 +347,7 @@ describe("12画面が同一状態をリアルタイム共有する", () => {
     });
 
     const before = at(store.derived.cellView, CELL_CENTER).recomputeCount;
-    const next = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: next, reason: "test: 施設設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
 
     expect(at(store.derived.cellView, CELL_CENTER).recomputeCount).toBe(before + 1);
     expect(gridRenders).toBe(2);

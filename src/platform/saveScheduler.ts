@@ -46,6 +46,7 @@
 //   繋ぎ、飛行中に溜まった変更は次の 1 回にまとめる(= 書込回数も減る)。
 // ---------------------------------------------------------------------------
 
+import type { CommandResult } from "../engine/commands";
 import type { GameState } from "../engine/state/state";
 
 // --- 1. 注入する時計 --------------------------------------------------------
@@ -212,6 +213,28 @@ export class SaveScheduler {
     // デバウンスは絶対時間の締切を越えられない(§0)。
     const delay = Math.min(this.debounceMs, untilDeadline);
     this.armTimer(delay, delay < this.debounceMs ? "elapsed" : "debounce");
+  }
+
+  /**
+   * [M49] engine コマンド層({@link ../engine/commands.ts apply})の結果を
+   * そのまま渡す、**コマンド適用側の唯一の結線点**。
+   *
+   * `recordCommands` を直に呼ぶ形だと、呼び出し側が
+   *   (a) reject されたコマンドまで数えて 25 件の締切を早める
+   *   (b) 列コマンド(原子適用)を 1 件と数えるか N 件と数えるかを取り違える
+   * という 2 つの間違いを起こしやすい。ここで一元的に:
+   *   - `ok: false`(reject)     → **何も記録しない**(state は 1 bit も
+   *     変わっていないので、書く理由が無い)
+   *   - `changed: false`         → 記録しない(同上)
+   *   - 上記以外                 → `commandCount` 件として記録する
+   * と決めておく。
+   *
+   * @returns 記録した(= 書込トリガの対象にした)なら true
+   */
+  recordCommandOutcome(result: CommandResult): boolean {
+    if (!result.ok || !result.changed) return false;
+    this.recordCommands(result.state, result.commandCount);
+    return true;
   }
 
   /**

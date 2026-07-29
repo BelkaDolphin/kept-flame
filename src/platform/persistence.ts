@@ -68,6 +68,13 @@
 //   「下位区間は親を過不足なく分割する」(perf-boundaries §2 R7)を保つ。
 // ---------------------------------------------------------------------------
 
+import {
+  CONCURRENT_DISPATCH_MAX,
+  DISPATCH_BRANCH_FACTOR,
+  DISPATCH_EVENT_NODES_MAX,
+  DISPATCH_TREE_NODES_MAX,
+  DISPATCH_TREE_NODES_TOTAL_MAX,
+} from "../engine/commands";
 import { fnv1a32 } from "../engine/rng/fnv1a32";
 import { fromSerializable, toSerializable } from "../engine/state/serialize";
 import type { GameState } from "../engine/state/state";
@@ -265,7 +272,13 @@ export function decodeSaveRecord(value: unknown): GameState {
 //   choices が各ノード最大2分岐ゆえ、総ノード ≤2×maxNodes(8)=16/派遣、
 //   同時派遣 ≤2 で ≤32 ノード」と述べる。上界は**設計値の積**なので、
 //   マジックナンバーではなく積の形で書き下す(ADR「拡張時は再算定」に対応:
-//   派遣枠やイベントノード数が動いたら下の 2 定数だけを直す)。
+//   派遣枠やイベントノード数が動いたら素の 3 定数だけを直す)。
+//
+//   **[M49] 定数の正本は engine の `commands.ts` へ移した**(ここは再輸出)。
+//   上界を実際に満たすのは「派遣確定コマンドが何本の木を何ノード作るか」という
+//   engine 側の生成規則であって、セーブ層はそれを検算しているだけである。
+//   2 箇所に数値があると、片方だけ直したときに「セーブは通るが生成が上界を破る」
+//   /「生成は正しいのにセーブが弾く」という食い違いが起きる。
 //
 //   **超過時の挙動は ADR に明文が無い**。本実装は「破損は黙って直さない」
 //   (T11 からの一貫方針)に揃えて **SaveBoundsError で停止**する。上界は
@@ -278,20 +291,17 @@ export function decodeSaveRecord(value: unknown): GameState {
 //   M21〜M23 なので、子ノードの辿り方は下の DISPATCH_TREE_CHILD_KEYS 1 箇所に
 //   集約してある(木の形が決まったらここだけを直す)。
 
-/** 1 派遣で生成されるイベントノードの最大数(GDD 探索: イベント列 3〜8 ノード)。 */
-export const DISPATCH_EVENT_NODES_MAX = 8;
-
-/** choices の分岐数(撤退 / 強行の 2 分岐・GDD)。 */
-export const DISPATCH_BRANCH_FACTOR = 2;
-
-/** 同時派遣枠(GDD: 派遣枠上限 = 同時2枠)。 */
-export const CONCURRENT_DISPATCH_MAX = 2;
-
-/** 1 派遣の resolvedTree の総ノード上界 = 2 × maxNodes(8) = 16。 */
-export const DISPATCH_TREE_NODES_MAX = DISPATCH_BRANCH_FACTOR * DISPATCH_EVENT_NODES_MAX;
-
-/** セーブ 1 本が持ちうる分岐木ノードの総数上界 = 16 × 2 = 32。 */
-export const DISPATCH_TREE_NODES_TOTAL_MAX = DISPATCH_TREE_NODES_MAX * CONCURRENT_DISPATCH_MAX;
+/**
+ * 分岐木ノード上界(ADR-012(3))。**正本は `src/engine/commands.ts` §5**であり、
+ * ここは従来どおりこのモジュールから輸入できるようにするための再輸出である。
+ */
+export {
+  CONCURRENT_DISPATCH_MAX,
+  DISPATCH_BRANCH_FACTOR,
+  DISPATCH_EVENT_NODES_MAX,
+  DISPATCH_TREE_NODES_MAX,
+  DISPATCH_TREE_NODES_TOTAL_MAX,
+};
 
 /**
  * 分岐木の子ノードが載るキー。**木の形の唯一の仮定**であり、M21〜M23 で

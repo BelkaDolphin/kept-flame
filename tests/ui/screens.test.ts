@@ -8,7 +8,6 @@
 
 import { describe, expect, it } from "vitest";
 
-import { putEntity } from "../../src/engine/state/update";
 import { ReactiveError } from "../../src/ui/reactive";
 import {
   DEFAULT_SCREEN_ID,
@@ -18,7 +17,7 @@ import {
   SCREEN_META,
   isScreenId,
 } from "../../src/ui/screens";
-import { CELL_CENTER, CELL_SOUTHEAST, HEARTH, at, createTestStore, facility } from "./fixtures";
+import { CELL_CENTER, CELL_SOUTHEAST, at, createTestStore, placeHearth } from "./fixtures";
 
 describe("画面 ID の語彙(GDD 6.6)", () => {
   it("①〜⑫ + セーブ/設定 の 13 マウント単位を持つ", () => {
@@ -71,7 +70,7 @@ describe("画面のマウント/アンマウント(ADR-027)", () => {
   });
 
   it("アンマウントすると、その画面の購読は二度と走らない", () => {
-    const { store, state } = createTestStore();
+    const { store } = createTestStore();
     const mount = store.mountScreen("grid");
     let renders = 0;
     mount.scope.effect(() => {
@@ -80,17 +79,12 @@ describe("画面のマウント/アンマウント(ADR-027)", () => {
     });
     expect(renders).toBe(1);
 
-    const placed = putEntity(state, facility("fSouth", HEARTH.id, CELL_SOUTHEAST));
-    store.dispatch({ type: "stateApplied", state: placed, reason: "test: 設置" });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
     expect(renders).toBe(2);
 
     mount.dispose();
     store.dispatch({ type: "ticked", toTick: 10 });
-    store.dispatch({
-      type: "stateApplied",
-      state: putEntity(store.peekState(), facility("fWest", HEARTH.id, 13)),
-      reason: "test: 設置2",
-    });
+    store.dispatch({ type: "commandApplied", command: placeHearth("fWest", 13) });
     expect(renders).toBe(2);
   });
 

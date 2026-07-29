@@ -91,6 +91,20 @@ export interface FacilityDef {
    * = M11 以前と 1 bit も違わない(rules/population.ts §1)。
    */
   readonly bedCapacityByLevel?: readonly number[];
+  /**
+   * [M49] Lv 別の就労スロット数(index 0 = Lv1・**整数の人数**)。
+   * GDD 7.7「割り振りは施設ごと就労スロット(Lvで増加)」の上限であり、
+   * `content/facility.json` の `slots.lv1〜lv5` がそのまま写る。
+   *
+   * **省略時は上限なし**(就労者を何人でも割り当てられる)。省略を許すのは
+   * engine のテストフィクスチャのような縮約 facility 定義でも rules が動く
+   * ようにするためで、実 content は必ず値を持つ(schema で必須)。
+   *
+   * 読むのは `commands.ts`(住民割当の上限検査)**だけ**である。生産式は
+   * 「実際に workerIds に載っている人数」で計算するので、この値を後から
+   * 増減しても既存 state の産出は変わらない = golden vector に影響しない。
+   */
+  readonly workerSlotsByLevel?: readonly number[];
 }
 
 /**

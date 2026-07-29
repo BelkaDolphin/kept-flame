@@ -434,6 +434,16 @@ function toFacilityStorage(
   };
 }
 
+/**
+ * [M49] `slots.lv1〜lv5` → engine の `workerSlotsByLevel`(index 0 = Lv1)。
+ *
+ * schema 側で「整数・レンジ内・Lv 単調非減少」まで検証済みなので、ここは並べ替え
+ * るだけである(検証を二重に持たない)。Lv 数は schema の 5 段固定。
+ */
+function toWorkerSlotsByLevel(slots: FacilityContent["slots"]): readonly number[] {
+  return [slots.lv1, slots.lv2, slots.lv3, slots.lv4, slots.lv5];
+}
+
 function toFacilityDef(content: FacilityContent, issues: IssueCollector): FacilityDef | undefined {
   const path = `facility.${content.id}`;
   const tags = toEngineTags(content, path, issues);
@@ -480,6 +490,10 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
   // exactOptionalPropertyTypes ゆえ `x: undefined` を書けないので分岐で組み立てる
   // (キー不在 = 中立既定値、という engine 側の契約を型でも守る)。
   // [M11] 寝床上限は整数の人数なので FP 変換を通さない(そのまま写す)。
+  // [M49] 就労スロット(GDD 7.7)は content 側で必須なので条件分岐が要らない。
+  // 読むのは engine の commands.ts(住民割当の上限検査)だけで、生産式は
+  // 実際の workerIds を数えるため golden vector には影響しない。
+  const workerSlotsByLevel = toWorkerSlotsByLevel(content.slots);
   const beds = content.bedCapacityCurve;
   const base =
     beds === null
@@ -489,6 +503,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           harshWork: content.harshWork,
           outputPerTickByLevel,
           output,
+          workerSlotsByLevel,
         }
       : {
           id: entityIdFromString(content.id),
@@ -496,6 +511,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           harshWork: content.harshWork,
           outputPerTickByLevel,
           output,
+          workerSlotsByLevel,
           bedCapacityByLevel: [...beds],
         };
   if (statWeights === null && storage === null) return base;
