@@ -1,0 +1,304 @@
+# 継ぐ火 -Kept Flame- guardrail・正準パイプライン(ADR-015)
+#
+# 週次 content 運営が実際に踏む唯一の CI パスを、ADR-015(改訂)が定義する
+# 正準順序と一致させる(M46・ロードマップ Phase 8 先頭):
+#
+#   1. schema検証 -> 2. canonicalize -> 3. id-registry検証 -> 4. 段階sim1000
+#   -> 5. content-diff-gate -> 6. conformance 3ブラウザ -> 7. 統計クリープ検出
+#   -> 8. bot作成PRをhuman承認merge -> 9. betaソーク -> 10. 本番
+#
+# ジョブは needs: で上記の順に直列連結してある(並列化すると「順序」という
+# 検収対象そのものが CI 記述から読み取れなくなるため、意図的に直列)。
+#
+# 4(段階sim1000)と 7(統計クリープ検出)は実体が M38 で差し込まれる予定であり、
+# 現時点では未実装。緑色で誤魔化さず、ジョブ名と出力(機械可読 JSON)の両方で
+# 「未実装で保護効果ゼロ」であることを正直に表明する(docs/design/
+# perf-boundaries.md の `hydrateFidelity: "placeholder"` と同じ流儀)。
+#
+# 8(bot作成PRをhuman承認merge)はこの workflow のジョブではなく、ブランチ保護
+# (require_code_owner_reviews)+ CODEOWNERS(ADR-030・本タスクで新設)+
+# scripts/bot-token.mjs / scripts/bot-pr.mjs(M45)で構成される手続き。
+# 9(betaソーク)・10(本番)は ADR-031 の実体(wrangler.toml の [env.stable]/
+# [env.beta]・soak N=3日 の promotion 判定)を実装する M47 の担当であり、
+# この workflow には**含めない**(push トリガ主体の別 workflow になる想定。
+# pull_request 主体のこの guardrail に無理に押し込むと「マージ前ゲート」と
+# 「マージ後デプロイ」が混ざり、正準順序の見通しがかえって悪化するため)。
+#
+# LLM/AIサービス連携は一切含まない(CLAUDE.md 絶対ルール)。トリガーは
+# pull_request と workflow_dispatch のみ(Actions を心臓にしない方針・
+# ONBOARDING.md §3。scheduled/push トリガは持たない)。
+name: Content Guardrail
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # PR スコープ判定(ADR-015 の説明文「content-only PR の tsc/Vitest は
+  # goldenVector 検証のみにスコープ」を機械判定するための前段。
+  # 10段の正準順序そのものではなく、下の typecheck-and-test ジョブの
+  # 実行範囲を決めるための補助ジョブ)。
+  # ---------------------------------------------------------------------
+  detect-scope:
+    name: "スコープ判定: content-only PR か否か"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      content_only: ${{ steps.scope.outputs.content_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: "変更ファイル一覧が content/ 配下のみかを判定"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true)"
+          echo "変更ファイル一覧:"
+          echo "$changed"
+          if [ -z "$changed" ]; then
+            echo "content_only=false" >> "$GITHUB_OUTPUT"
+          elif echo "$changed" | grep -qvE '^content/'; then
+            echo "content_only=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "content_only=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------
+  # 1-3. schema検証 -> canonicalize -> id-registry検証
+  # `schema/contentBundle.ts` が canonicalizeJson -> カテゴリ別 validate ->
+  # checkGlobalIdUniqueness を単一パイプラインとして実装しており、
+  # `tests/schema/contentBundle.test.ts` が実際の content/*.json 5ファイルを
+  # そのパイプラインへ通す(tests/schema/contentBundle.test.ts 冒頭 import
+  # 参照)。3段が実装上ひとつの関数呼び出しであるため、ジョブも1つにまとめる
+  # (無理に3ジョブへ分割すると同じ処理を3回動かす見せかけになり不誠実)。
+  # ---------------------------------------------------------------------
+  schema-canonicalize-idregistry:
+    name: "1-3. schema検証 + canonicalize + id-registry検証"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: "実 content/*.json を schema + canonicalize + id-registry で検証"
+        run: npx vitest run tests/schema
+
+  # ---------------------------------------------------------------------
+  # 4. 段階sim1000 [PLACEHOLDER] — 実体は M38(夜間ゲート/クリープ検出)で
+  # 差し込む。ここでは「未実装」を機械可読(JSON artifact)かつ人間可読
+  # ($GITHUB_STEP_SUMMARY)の両方で宣言するのみ。常に exit 0 だが、保護効果は
+  # ゼロであることを明記する。
+  # ---------------------------------------------------------------------
+  sim-1000:
+    name: "4. 段階sim1000 [PLACEHOLDER・未実装 M38]"
+    needs: schema-canonicalize-idregistry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "未実装であることを機械可読に宣言する"
+        run: |
+          set -euo pipefail
+          mkdir -p pipeline-stage-status
+          cat > pipeline-stage-status/sim1000.json <<'JSON'
+          {
+            "stage": "段階sim1000",
+            "adrOrderIndex": 4,
+            "adrRef": "ADR-015 正準順序 4/10",
+            "implemented": false,
+            "trackedIn": "M38",
+            "protectionEffect": "none",
+            "note": "多戦略/敵対botによる段階的sim1000回のサニティチェックは未実装。このジョブは検証を一切行わず常にexit 0を返す(緑色に見えるが保護効果はゼロ)。"
+          }
+          JSON
+          cat pipeline-stage-status/sim1000.json
+          {
+            echo "### 4. 段階sim1000 — PLACEHOLDER(未実装・M38予定)"
+            echo ""
+            echo '```json'
+            cat pipeline-stage-status/sim1000.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload placeholder status
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-stage-status-sim1000
+          path: pipeline-stage-status/sim1000.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------
+  # 5. content-diff-gate: symlink すり抜け対策 + 通常ファイル型限定チェック
+  # (ADR-015(1)・本タスクで新設した scripts/content-diff-gate.mjs)。
+  # ---------------------------------------------------------------------
+  content-diff-gate:
+    name: "5. content-diff-gate(symlink/非通常ファイル reject)"
+    needs: sim-1000
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run content-diff-gate
+        run: npm run content:diff-gate
+
+  # ---------------------------------------------------------------------
+  # 6. conformance 3ブラウザ(ADR-017)。Chromium/Firefox/WebKit で
+  # golden vector と bit 一致することを確認(playwright.config.ts の
+  # projects 定義どおり3エンジン)。
+  # ---------------------------------------------------------------------
+  conformance-3browsers:
+    name: "6. conformance 3ブラウザ(Chromium/Firefox/WebKit)"
+    needs: content-diff-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run cross-engine conformance
+        run: npm run conformance:e2e
+
+  # ---------------------------------------------------------------------
+  # 7. 統計クリープ検出 [PLACEHOLDER] — 実体は M38 で `sim/creep.ts`
+  # (Z-score・§12.4)として差し込む。4と同じ流儀で正直に未実装宣言する。
+  # ---------------------------------------------------------------------
+  statistical-creep-detection:
+    name: "7. 統計クリープ検出 [PLACEHOLDER・未実装 M38]"
+    needs: conformance-3browsers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "未実装であることを機械可読に宣言する"
+        run: |
+          set -euo pipefail
+          mkdir -p pipeline-stage-status
+          cat > pipeline-stage-status/creep.json <<'JSON'
+          {
+            "stage": "統計クリープ検出",
+            "adrOrderIndex": 7,
+            "adrRef": "ADR-015 正準順序 7/10、実体は sim/creep.ts(Z-score・ADR §12.4)",
+            "implemented": false,
+            "trackedIn": "M38",
+            "protectionEffect": "none",
+            "note": "Z-scoreベースの統計クリープ検出(sim/creep.ts)は未実装。このジョブは検証を一切行わず常にexit 0を返す(緑色に見えるが保護効果はゼロ)。"
+          }
+          JSON
+          cat pipeline-stage-status/creep.json
+          {
+            echo "### 7. 統計クリープ検出 — PLACEHOLDER(未実装・M38予定)"
+            echo ""
+            echo '```json'
+            cat pipeline-stage-status/creep.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload placeholder status
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-stage-status-creep
+          path: pipeline-stage-status/creep.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------
+  # ADR-015 の説明文(正準順序そのものではない補助ゲート): content-only PR
+  # では tsc/Vitest を goldenVector 検証のみへスコープする。engine 側の変更を
+  # 含む PR は従来どおり全テストを実行する。
+  # ---------------------------------------------------------------------
+  typecheck-and-test:
+    name: "tsc/Vitest(content-only PR は goldenVector 検証のみへスコープ)"
+    needs: detect-scope
+    if: always() && needs.detect-scope.result != 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: "Vitest(スコープはPRの変更範囲で決定)"
+        env:
+          CONTENT_ONLY: ${{ needs.detect-scope.outputs.content_only }}
+        run: |
+          set -euo pipefail
+          if [ "$CONTENT_ONLY" = "true" ]; then
+            echo "content-only PR検出 -> goldenVector検証のみ実行"
+            npx vitest run tests/conformance/goldenVectors.test.ts
+          else
+            echo "engine側の変更あり、またはスコープ判定なし(workflow_dispatch等) -> 全テスト実行"
+            npm test
+          fi
+
+  # ---------------------------------------------------------------------
+  # 正準順序10段の対応表を自己検分できる形で出力する(ADR-015と1段もずれて
+  # いないことのCI記述上の証跡)。
+  # ---------------------------------------------------------------------
+  pipeline-summary:
+    name: "正準パイプライン10段 対応表(自己検分)"
+    if: always()
+    needs:
+      - schema-canonicalize-idregistry
+      - sim-1000
+      - content-diff-gate
+      - conformance-3browsers
+      - statistical-creep-detection
+      - typecheck-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "10段対応表を出力"
+        run: |
+          set -euo pipefail
+          {
+            echo "# ADR-015 正準パイプライン10段 -- CI対応表"
+            echo ""
+            echo "| # | 段 | このworkflowでの扱い |"
+            echo "|---|---|---|"
+            echo "| 1 | schema検証 | job: schema-canonicalize-idregistry |"
+            echo "| 2 | canonicalize | job: schema-canonicalize-idregistry(同一パイプライン) |"
+            echo "| 3 | id-registry検証 | job: schema-canonicalize-idregistry(同一パイプライン) |"
+            echo "| 4 | 段階sim1000 | job: sim-1000(PLACEHOLDER・未実装・M38) |"
+            echo "| 5 | content-diff-gate | job: content-diff-gate |"
+            echo "| 6 | conformance 3ブラウザ | job: conformance-3browsers |"
+            echo "| 7 | 統計クリープ検出 | job: statistical-creep-detection(PLACEHOLDER・未実装・M38) |"
+            echo "| 8 | bot作成PRをhuman承認merge | このworkflow外: ブランチ保護 + CODEOWNERS + bot-token.mjs/bot-pr.mjs(M45) |"
+            echo "| 9 | betaソーク | このworkflow外・未着手: M47(ADR-031)が別workflowで実装予定 |"
+            echo "| 10 | 本番 | このworkflow外・未着手: M47(ADR-031)が別workflowで実装予定 |"
+          } >> "$GITHUB_STEP_SUMMARY"

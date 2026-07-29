@@ -1,0 +1,51 @@
+# CODEOWNERS — ADR-030(2)(4) の require_code_owner_reviews 完全化(M46)。
+#
+# 目的: 週次 content PR は GitHub App `kept-flame-bot[bot]` が作成し、運営者
+# 本人(human)がここに列挙された領域のレビュアーとして承認する。作成者(bot)
+# ≠ 承認者(human)により、ソロ運営でも自己承認デッドロックなしに必須レビュー
+# 1件が正当に成立する(ADR-030(2))。
+#
+# 対象は ADR §2.4 リポジトリ構成図(`├─ CODEOWNERS # engine/sim/schema/
+# workflows/balance/conformance/tools/domainTags を人間専用`)に列挙された
+# 8領域のみ。content/**(balance.json を除く)・docs/** 等は意図的に列挙しない
+# — bot 作成 PR が additive に書く領域を CODEOWNERS レビュー必須にすると
+# 週次運営そのものが毎回ブロックされてしまうため(ADR-030 の趣旨に反する)。
+#
+# 重要な限界(ADR-030(5)に準拠した正直な開示): これは技術的な強制ではなく
+# 手続き的規律である。personal リポジトリの admin(=運営者本人)は保護設定
+# 自体を無効化できるため、意図的な運用逸脱への防壁にはならない。防壁の実体は
+# 決定論ゲート側(schema/sim/conformance)が担う。
+#
+# マッチング規則(GitHub 公式・.gitignore 風パターン、後方一致優先): 末尾 `/`
+# はそのディレクトリ配下を再帰的に含む。個別ファイル指定はそのファイルのみ。
+
+# engine(決定論コア。純粋関数・PRNG・固定小数点・ルール系統)
+/src/engine/                         @BelkaDolphin
+
+# sim(engine 共有検証ハーネス・戦略/敵対 bot・夜間ゲート・校正・クリープ検出)
+/sim/                                @BelkaDolphin
+
+# schema(JSON Schema・cond DSL・ID/domainTag レジストリ・content ローダー)
+/schema/                             @BelkaDolphin
+
+# workflows(CI 定義そのもの。guardrail の自己改変を防ぐ)
+/.github/workflows/                  @BelkaDolphin
+
+# balance(content 内で唯一 CODEOWNERS 対象。全域バランス係数・era/recordMedia)
+/content/balance.json                @BelkaDolphin
+
+# conformance(golden vector・in-browser conformance harness)
+/conformance/                        @BelkaDolphin
+
+# tools(オーサリング支援・golden vector 生成器・content-diff-gate 本体)
+/tools/                              @BelkaDolphin
+
+# domainTags(RNG ドメイン分離レジストリ。ADR-024 の一意性強制の要)
+# /src/engine/ 配下に含まれ二重指定だが、ADR のリポジトリ構成図が個別に
+# 名指ししているため明示しておく。
+/src/engine/rng/domainTags.ts         @BelkaDolphin
+
+# このファイル自身(レビュー規律の定義そのものの無審査書換を防ぐ)。
+# ADR の8領域リストには無いが、CODEOWNERS の自己保護は一般的なプラクティスの
+# ため追加した(要ユーザー確認事項としてタスク報告に明記)。
+/CODEOWNERS                          @BelkaDolphin

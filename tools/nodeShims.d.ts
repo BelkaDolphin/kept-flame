@@ -56,6 +56,11 @@ declare module "node:child_process" {
     command: string,
     args: readonly string[],
     options?: {
+      readonly cwd?: string;
+      // M46: tests/scripts/content-diff-gate.test.ts が一時 git リポジトリの
+      // フィクスチャ操作(git init/add/hash-object/update-index)を子プロセスで
+      // 行うために cwd/input を追加(既存呼び出し元は省略可能なので後方互換)。
+      readonly input?: string;
       readonly env?: Readonly<Record<string, string | undefined>>;
       readonly encoding?: "utf8";
     },
