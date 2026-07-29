@@ -99,9 +99,23 @@
 //   `diedTick` はオブジェクト内では**省略しない**(生存中は明示的に null)。
 //   「キーが無い = 生きている」という表現にすると、`life` 自体の不在(= 寿命を
 //   持たない住民)と区別が付きにくくなるため。
+//
+// ===========================================================================
+// 6. [M12] `resident.memoir` は §4/§5 と同じ規約、`bondByPairKey` は §3 と同型
+// ===========================================================================
+//   `memoir` は §4 の「無ければキーごと出さない」規約に従う省略可フィールドで
+//   あり、`stats` / `life` と組み合わせると分岐が 2^3 = 8 通りに膨れる
+//   (state.ts の `ResidentState.memoir` の doc 参照。独立 entity にしなかった
+//   理由 = `src/ui/derived.ts` 等の既存の網羅 switch を壊さないため)。
+//
+//   `bondByPairKey` は GameState 直下の Map であり、**§3 の rngState と全く同じ
+//   規約**(空なら書き出さない・キーは正準順)に従う。キー文字列
+//   `"residentAId|residentBId"`(前者が辞書順で必ず前)の妥当性は
+//   `fromSerializable` の入口で検査する(未知の domainTag を reject するのと
+//   同じ層)。
 // ---------------------------------------------------------------------------
 
-import { canonicalizeJson } from "../canonicalize";
+import { canonicalizeJson, compareUtf16 } from "../canonicalize";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
 import type { ResidentStats } from "../rules/stats";
 import { RECORD_MEDIA, isRecordMedium, type RecordMedium } from "../rules/types";
@@ -110,12 +124,16 @@ import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   entityIdFromString,
   isEntityId,
+  isMemoirEntryKind,
   type CodifyState,
   type EntityId,
   type EntityState,
   type FacilityState,
   type GameState,
   type GameStateMeta,
+  type MemoirEntry,
+  type MemoirEntryKind,
+  type MemoirLogState,
   type ResearchState,
   type ResidentLife,
   type ResidentState,
@@ -165,6 +183,8 @@ export type SerializedResident = {
   readonly stats?: SerializedResidentStats;
   /** [M11] 寿命を持たない住民は**キーごと省略**する(§5)。 */
   readonly life?: SerializedResidentLife;
+  /** [M12] memoirLog を持たない住民は**キーごと省略**する(§6)。 */
+  readonly memoir?: SerializedMemoirLog;
 };
 
 export type SerializedFacility = {
@@ -209,6 +229,37 @@ export type SerializedCodify = {
   readonly completedTick: number | null;
 };
 
+/**
+ * [M12] memoirLog 1 件の直列化形(kind で判別)。値は素の tick/index/文字列。
+ * `state.ts` の {@link MemoirEntry} と 1 対 1(EntityId は素の文字列として載る)。
+ */
+export type SerializedMemoirEntry =
+  | { readonly kind: "arrival"; readonly tick: number }
+  | {
+      readonly kind: "bioCatchphrase" | "bioFear" | "bioOrigin";
+      readonly tick: number;
+      readonly variantIndex: number;
+    }
+  | {
+      readonly kind: "bondMilestone";
+      readonly tick: number;
+      readonly partnerId: string;
+      readonly tier: number;
+    }
+  | { readonly kind: "death"; readonly tick: number }
+  | { readonly kind: "partnerLost"; readonly tick: number; readonly partnerId: string };
+
+/**
+ * [M12] memoirLog(state.ts の {@link MemoirLogState})。resident 側の省略可
+ * フィールドの値の形(§6)であり、それ自体に省略可フィールドは無い(件数上限の
+ * 折り畳みは `foldedCount` という値の形で表すので、キー自体を省略する必要が
+ * 無い)。
+ */
+export type SerializedMemoirLog = {
+  readonly entries: readonly SerializedMemoirEntry[];
+  readonly foldedCount: number;
+};
+
 export type SerializedEntity =
   | SerializedCodify
   | SerializedFacility
@@ -220,7 +271,8 @@ export type SerializedEntity =
  * GameState の直列化形。ADR「セーブフォーマット」(649行)のうち現状扱う範囲
  * (state.ts §3 / §4 参照)。
  *
- * `rngState` は空のとき省略される(§3)。
+ * `rngState` は空のとき省略される(§3)。[M12] `bondByPairKey` も同じ規約で
+ * 省略される(§6)。
  */
 export type SerializedGameState = {
   readonly saveSchemaVersion: number;
@@ -230,11 +282,29 @@ export type SerializedGameState = {
   readonly tick: number;
   readonly entityStateById: { readonly [id: string]: SerializedEntity };
   readonly rngState?: { readonly [domainTag: string]: readonly number[] };
+  /** [M12] pairKey(`"residentAId|residentBId"`)→ 蓄積 bond 値(raw 整数)。 */
+  readonly bondByPairKey?: { readonly [pairKey: string]: number };
 };
 
 // --- 2. state → JSON -------------------------------------------------------
 
-/** [M5/M11] 省略可の `stats` / `life` を持つ resident の直列化(§4 / §5 の 4 分岐)。 */
+/** [M12] memoirLog の直列化(state.ts の {@link MemoirLogState} 参照・§6)。 */
+function serializeMemoirLog(log: MemoirLogState): SerializedMemoirLog {
+  return {
+    entries: log.entries.map(serializeMemoirEntry),
+    foldedCount: log.foldedCount,
+  };
+}
+
+/**
+ * [M5/M11/M12] 省略可の `stats` / `life` / `memoir` を持つ resident の直列化
+ * (§4 / §5 / §6 の 8 分岐)。3 つの独立した省略可フィールドを持つため、
+ * 生スプレッド禁止(ADR-028(1)。このファイルも免除対象外)・
+ * exactOptionalPropertyTypes 下では 2^3 = 8 通りのリテラルを素直に書き分ける
+ * ほかない(state.ts の `ResidentState.memoir` の doc に経緯を記載)。
+ * 共通の 8 フィールドはローカル変数へ切り出し、各分岐で明示的に書き並べる
+ * (スプレッドではなく個別代入なので、値の再計算は起きない)。
+ */
 function serializeResident(entity: ResidentState): SerializedResident {
   const rawStats = entity.stats;
   const stats: SerializedResidentStats | undefined =
@@ -256,56 +326,123 @@ function serializeResident(entity: ResidentState): SerializedResident {
           lifespanTick: rawLife.lifespanTick,
           diedTick: rawLife.diedTick,
         };
+  const rawMemoir = entity.memoir;
+  const memoir: SerializedMemoirLog | undefined =
+    rawMemoir === undefined ? undefined : serializeMemoirLog(rawMemoir);
 
+  const id = entity.id;
+  const morale = toRaw(entity.morale);
+  const mastery = toRaw(entity.mastery);
+  const assignedFacilityId = entity.assignedFacilityId;
+  const dispatched = entity.dispatched;
+  const traitIds = [...entity.traitIds];
+  const recallImpairedUntilTick = entity.recallImpairedUntilTick;
+
+  if (stats === undefined && life === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+    };
+  }
+  if (life === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      stats: stats as SerializedResidentStats,
+    };
+  }
+  if (stats === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      life: life as SerializedResidentLife,
+    };
+  }
   if (stats === undefined && life === undefined) {
     return {
       kind: "resident",
-      id: entity.id,
-      morale: toRaw(entity.morale),
-      mastery: toRaw(entity.mastery),
-      assignedFacilityId: entity.assignedFacilityId,
-      dispatched: entity.dispatched,
-      traitIds: [...entity.traitIds],
-      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      memoir: memoir as SerializedMemoirLog,
+    };
+  }
+  if (memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      stats: stats as SerializedResidentStats,
+      life: life as SerializedResidentLife,
     };
   }
   if (life === undefined) {
     return {
       kind: "resident",
-      id: entity.id,
-      morale: toRaw(entity.morale),
-      mastery: toRaw(entity.mastery),
-      assignedFacilityId: entity.assignedFacilityId,
-      dispatched: entity.dispatched,
-      traitIds: [...entity.traitIds],
-      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
       stats: stats as SerializedResidentStats,
+      memoir,
     };
   }
   if (stats === undefined) {
     return {
       kind: "resident",
-      id: entity.id,
-      morale: toRaw(entity.morale),
-      mastery: toRaw(entity.mastery),
-      assignedFacilityId: entity.assignedFacilityId,
-      dispatched: entity.dispatched,
-      traitIds: [...entity.traitIds],
-      recallImpairedUntilTick: entity.recallImpairedUntilTick,
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
       life,
+      memoir,
     };
   }
   return {
     kind: "resident",
-    id: entity.id,
-    morale: toRaw(entity.morale),
-    mastery: toRaw(entity.mastery),
-    assignedFacilityId: entity.assignedFacilityId,
-    dispatched: entity.dispatched,
-    traitIds: [...entity.traitIds],
-    recallImpairedUntilTick: entity.recallImpairedUntilTick,
+    id,
+    morale,
+    mastery,
+    assignedFacilityId,
+    dispatched,
+    traitIds,
+    recallImpairedUntilTick,
     stats,
     life,
+    memoir,
   };
 }
 
@@ -329,6 +466,35 @@ function serializeResource(entity: ResourceState): SerializedResource {
     cumulativeProduced: toRaw(produced),
     cumulativeOverflow: toRaw(overflow),
   };
+}
+
+/** [M12] memoirLog エントリ 1 件の直列化(state.ts の {@link MemoirEntry} 判別)。 */
+function serializeMemoirEntry(entry: MemoirEntry): SerializedMemoirEntry {
+  switch (entry.kind) {
+    case "arrival":
+      return { kind: "arrival", tick: entry.tick };
+    case "bioCatchphrase":
+    case "bioFear":
+    case "bioOrigin":
+      return { kind: entry.kind, tick: entry.tick, variantIndex: entry.variantIndex };
+    case "bondMilestone":
+      return {
+        kind: "bondMilestone",
+        tick: entry.tick,
+        partnerId: entry.partnerId,
+        tier: entry.tier,
+      };
+    case "death":
+      return { kind: "death", tick: entry.tick };
+    case "partnerLost":
+      return { kind: "partnerLost", tick: entry.tick, partnerId: entry.partnerId };
+    default: {
+      const unhandled: never = entry;
+      throw new SerializeError(
+        `serializeMemoirEntry: 未知のエントリ種別 ${String((unhandled as MemoirEntry).kind)}`,
+      );
+    }
+  }
 }
 
 function serializeEntity(entity: EntityState): SerializedEntity {
@@ -394,28 +560,59 @@ export function toSerializable(state: GameState): SerializedGameState {
     rngEntries.push([domainTag, [...words]]);
   }
 
-  // 空の rngState はキーごと省略する(§3)。オブジェクトの生スプレッドは
-  // ADR-028(1) で禁止(このファイルも免除対象外)なので、条件分岐で 2 つの
-  // リテラルを書き分けている。
-  const raw: SerializedGameState =
-    rngEntries.length === 0
-      ? {
-          saveSchemaVersion: state.saveSchemaVersion,
-          contentVersion: state.contentVersion,
-          algoVersion: state.algoVersion,
-          worldSeed: state.worldSeed,
-          tick: state.tick,
-          entityStateById,
-        }
-      : {
-          saveSchemaVersion: state.saveSchemaVersion,
-          contentVersion: state.contentVersion,
-          algoVersion: state.algoVersion,
-          worldSeed: state.worldSeed,
-          tick: state.tick,
-          entityStateById,
-          rngState: Object.fromEntries(rngEntries),
-        };
+  // [M12] bondByPairKey も rngState と同じ規約(§6): 空なら省略する。
+  const bondEntries: [string, number][] = [];
+  for (const [pairKey, value] of state.bondByPairKey) {
+    bondEntries.push([pairKey, toRaw(value)]);
+  }
+
+  // 空の rngState / bondByPairKey はキーごと省略する(§3 / §6)。オブジェクトの
+  // 生スプレッドは ADR-028(1) で禁止(このファイルも免除対象外)なので、
+  // 条件分岐で 4 通り(2 フィールド × 有無)のリテラルを書き分けている。
+  const hasRng = rngEntries.length > 0;
+  const hasBond = bondEntries.length > 0;
+  let raw: SerializedGameState;
+  if (!hasRng && !hasBond) {
+    raw = {
+      saveSchemaVersion: state.saveSchemaVersion,
+      contentVersion: state.contentVersion,
+      algoVersion: state.algoVersion,
+      worldSeed: state.worldSeed,
+      tick: state.tick,
+      entityStateById,
+    };
+  } else if (!hasBond) {
+    raw = {
+      saveSchemaVersion: state.saveSchemaVersion,
+      contentVersion: state.contentVersion,
+      algoVersion: state.algoVersion,
+      worldSeed: state.worldSeed,
+      tick: state.tick,
+      entityStateById,
+      rngState: Object.fromEntries(rngEntries),
+    };
+  } else if (!hasRng) {
+    raw = {
+      saveSchemaVersion: state.saveSchemaVersion,
+      contentVersion: state.contentVersion,
+      algoVersion: state.algoVersion,
+      worldSeed: state.worldSeed,
+      tick: state.tick,
+      entityStateById,
+      bondByPairKey: Object.fromEntries(bondEntries),
+    };
+  } else {
+    raw = {
+      saveSchemaVersion: state.saveSchemaVersion,
+      contentVersion: state.contentVersion,
+      algoVersion: state.algoVersion,
+      worldSeed: state.worldSeed,
+      tick: state.tick,
+      entityStateById,
+      rngState: Object.fromEntries(rngEntries),
+      bondByPairKey: Object.fromEntries(bondEntries),
+    };
+  }
 
   // 正準化がバイト同一性の根拠(§1(a))。ここを外すと呼び出し側の
   // オブジェクトリテラル定義順が JSON に漏れる。
@@ -537,6 +734,12 @@ function requireResidentLifeOrUndefined(value: unknown, path: string): ResidentL
   return { bornTick, lifespanTick, diedTick };
 }
 
+/**
+ * [M5/M11/M12] resident の復元。`stats` / `life` / `memoir` の 3 つの独立した
+ * 省略可フィールドを持つため、serializeResident と対になる 8 分岐(§4 / §5 / §6)。
+ * exactOptionalPropertyTypes 下では `stats: undefined` を書けず、生スプレッドも
+ * 使えないので素直に書き分ける。
+ */
 function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string): ResidentState {
   const morale = requireFix(o["morale"], `${p}.morale`);
   const mastery = requireFix(o["mastery"], `${p}.mastery`);
@@ -552,8 +755,46 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
   );
   const stats = requireResidentStatsOrUndefined(o["stats"], `${p}.stats`);
   const life = requireResidentLifeOrUndefined(o["life"], `${p}.life`);
-  // exactOptionalPropertyTypes 下では `stats: undefined` を書けず、生スプレッドも
-  // 使えない(§4 / §5)ので 4 リテラルに書き分ける。
+  const memoir = requireMemoirLogOrUndefined(o["memoir"], `${p}.memoir`);
+
+  if (stats === undefined && life === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+    };
+  }
+  if (life === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      stats: stats as ResidentStats,
+    };
+  }
+  if (stats === undefined && memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      life: life as ResidentLife,
+    };
+  }
   if (stats === undefined && life === undefined) {
     return {
       kind: "resident",
@@ -564,6 +805,21 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
       dispatched,
       traitIds,
       recallImpairedUntilTick,
+      memoir: memoir as MemoirLogState,
+    };
+  }
+  if (memoir === undefined) {
+    return {
+      kind: "resident",
+      id,
+      morale,
+      mastery,
+      assignedFacilityId,
+      dispatched,
+      traitIds,
+      recallImpairedUntilTick,
+      stats: stats as ResidentStats,
+      life: life as ResidentLife,
     };
   }
   if (life === undefined) {
@@ -577,6 +833,7 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
       traitIds,
       recallImpairedUntilTick,
       stats: stats as ResidentStats,
+      memoir,
     };
   }
   if (stats === undefined) {
@@ -590,6 +847,7 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
       traitIds,
       recallImpairedUntilTick,
       life,
+      memoir,
     };
   }
   return {
@@ -603,6 +861,7 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
     recallImpairedUntilTick,
     stats,
     life,
+    memoir,
   };
 }
 
@@ -671,6 +930,76 @@ function deserializeCodify(id: EntityId, o: Record<string, unknown>, p: string):
     requiredWork: requireFix(o["requiredWork"], `${p}.requiredWork`),
     progress: requireFix(o["progress"], `${p}.progress`),
     completedTick: requireIntOrNull(o["completedTick"], `${p}.completedTick`),
+  };
+}
+
+/** [M12] memoir エントリ種別を検査する(未知は reject)。 */
+function requireMemoirEntryKind(value: unknown, path: string): MemoirEntryKind {
+  const raw = requireString(value, path);
+  if (!isMemoirEntryKind(raw)) {
+    throw new SerializeError(
+      `${path}: "${raw}" は memoir エントリ種別ではない(state.ts の MEMOIR_ENTRY_KINDS 参照)`,
+    );
+  }
+  return raw;
+}
+
+/** [M12] memoirLog エントリ 1 件の復元(state.ts の {@link MemoirEntry} 判別)。 */
+function deserializeMemoirEntry(value: unknown, path: string): MemoirEntry {
+  const o = requireObject(value, path);
+  const kind = requireMemoirEntryKind(o["kind"], `${path}.kind`);
+  const tick = requireNonNegativeInt(o["tick"], `${path}.tick`);
+  switch (kind) {
+    case "arrival":
+      return { kind, tick };
+    case "bioCatchphrase":
+    case "bioFear":
+    case "bioOrigin":
+      return {
+        kind,
+        tick,
+        variantIndex: requireNonNegativeInt(o["variantIndex"], `${path}.variantIndex`),
+      };
+    case "bondMilestone":
+      return {
+        kind,
+        tick,
+        partnerId: requireEntityId(o["partnerId"], `${path}.partnerId`),
+        tier: requireNonNegativeInt(o["tier"], `${path}.tier`),
+      };
+    case "death":
+      return { kind, tick };
+    case "partnerLost":
+      return { kind, tick, partnerId: requireEntityId(o["partnerId"], `${path}.partnerId`) };
+    default: {
+      const unhandled: never = kind;
+      throw new SerializeError(`deserializeMemoirEntry: 未知の種別 ${String(unhandled)}`);
+    }
+  }
+}
+
+function deserializeMemoirEntryArray(value: unknown, path: string): readonly MemoirEntry[] {
+  if (!Array.isArray(value)) {
+    throw new SerializeError(`${path}: 配列を期待したが ${describe(value)} だった`);
+  }
+  const source = value as readonly unknown[];
+  const result: MemoirEntry[] = [];
+  for (let i = 0; i < source.length; i++) {
+    result.push(deserializeMemoirEntry(source[i], `${path}[${String(i)}]`));
+  }
+  return result;
+}
+
+/**
+ * [M12] `memoir`(省略可・§6)を読む。キーが無ければ undefined。
+ * nested な `entries` は {@link deserializeMemoirEntryArray} を通す。
+ */
+function requireMemoirLogOrUndefined(value: unknown, path: string): MemoirLogState | undefined {
+  if (value === undefined) return undefined;
+  const o = requireObject(value, path);
+  return {
+    entries: deserializeMemoirEntryArray(o["entries"], `${path}.entries`),
+    foldedCount: requireNonNegativeInt(o["foldedCount"], `${path}.foldedCount`),
   };
 }
 
@@ -744,6 +1073,46 @@ function deserializeRngState(value: unknown): readonly (readonly [DomainTag, Xos
 }
 
 /**
+ * [M12] pairKey が `bondPairKeyOf`(rules/bond.ts)の正準形 `"a|b"`(a<b・
+ * 両者とも ID 規則に合致)かを検査して分解する。
+ */
+function splitBondPairKey(pairKey: string, path: string): readonly [EntityId, EntityId] {
+  const parts = pairKey.split("|");
+  if (parts.length !== 2) {
+    throw new SerializeError(
+      `${path}: pairKey "${pairKey}" は "residentAId|residentBId" の形式でない`,
+    );
+  }
+  const [rawA, rawB] = parts;
+  const residentAId = requireEntityId(rawA, `${path}(residentAId)`);
+  const residentBId = requireEntityId(rawB, `${path}(residentBId)`);
+  if (compareUtf16(residentAId, residentBId) >= 0) {
+    throw new SerializeError(
+      `${path}: "${residentAId}" は "${residentBId}" より辞書順で前でなければならない` +
+        "(rules/bond.ts の bondPairKeyOf が課す正準形)",
+    );
+  }
+  return [residentAId, residentBId];
+}
+
+/**
+ * [M12] `bondByPairKey`(§6)を読む。キーは `"residentAId|residentBId"`
+ * (a<b の正準形)、値は raw 整数。未登録形式・辞書順違反は reject する
+ * (rngState の未登録 domainTag reject と同じ層)。
+ */
+function deserializeBondByPairKey(value: unknown): readonly (readonly [string, Fix])[] {
+  if (value === undefined) return [];
+  const o = requireObject(value, "$.bondByPairKey");
+  const result: (readonly [string, Fix])[] = [];
+  for (const key of Object.keys(o)) {
+    const path = `$.bondByPairKey.${key}`;
+    splitBondPairKey(key, path); // 形式検査のみ(戻り値は Map のキーには使わない)。
+    result.push([key, requireFix(o[key], path)]);
+  }
+  return result;
+}
+
+/**
  * 直列化形(JSON.parse の結果)から GameState を復元する。オブジェクト → Map。
  * 入力のキー順には依存しない(必要なキーを名指しで読み、Map は ID 昇順で
  * 作り直す)ので、整形ツールがキー順を変えたセーブでも同じ state になる。
@@ -773,5 +1142,10 @@ export function fromSerializable(input: unknown): GameState {
     entities.push(deserializeEntity(entityIdFromString(key), rawEntities[key], path));
   }
 
-  return createGameState(meta, entities, deserializeRngState(root["rngState"]));
+  return createGameState(
+    meta,
+    entities,
+    deserializeRngState(root["rngState"]),
+    deserializeBondByPairKey(root["bondByPairKey"]),
+  );
 }

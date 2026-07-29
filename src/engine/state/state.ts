@@ -259,6 +259,30 @@ export interface ResidentState {
    * 生成される住民には `rules/lifespan.ts` の {@link createResidentLife} が必ず付ける。
    */
   readonly life?: ResidentLife;
+  /**
+   * [M12] memoirLog(GDD 7.3「決定論エピソードログ」)。**省略可**。
+   *
+   * 保存するのは「テンプレ ID({@link MemoirEntryKind})+ 決定論パラメータ」だけ
+   * であり、実際の文言(日本語プロース)は持たない(M12 はデータ層のみ・UI は
+   * 対象外)。ADR-012 のセーブ容量目標(512KB)と GDD 8.2 の探索スナップショット
+   * 方式(結果を丸ごと保存せず、再現に要る最小パラメータだけを保存する)に倣った
+   * 設計判断であり、テンプレ ID → 実文言の対応表は今後 content/UI 層が持つ。
+   *
+   * **独立 entity にしなかった理由**: 当初は `kind: "memoir"` の独立 entity 案を
+   * 検討したが、`EntityKind`/`EntityState` へ新種別を足すと `src/ui/derived.ts`
+   * 等の**既存の網羅 switch(`default: never`)が壊れる**ことが typecheck で
+   * 判明した。UI 層はこのタスクの担当外(タスク指示「`src/ui/**` は触るな」)
+   * なので、既存の union に手を入れない本フィールド方式を採用する。
+   *
+   * 代償は直列化の分岐が `stats?` / `life?` と合わせて 2^3 = 8 通りに膨れる
+   * ことだが(serialize.ts §5 の教訓の延長)、生スプレッド禁止の下でも
+   * `undefined` の 3 変数を素直に 8 リテラルへ書き分ければ済む(既存の 4 分岐と
+   * 質的には同じパターン)。
+   *
+   * **省略された住民は memoirLog を持たない**(既存 conformance シナリオ・
+   * 既存セーブは 1 bit も変わらない)。
+   */
+  readonly memoir?: MemoirLogState;
 }
 
 /**
@@ -379,6 +403,121 @@ export interface CodifyState {
   readonly completedTick: number | null;
 }
 
+// ===========================================================================
+// [M12] memoirLog(GDD 7.3「決定論エピソードログ」)
+// ===========================================================================
+//   保存するのは「テンプレ ID(MemoirEntryKind)+ 決定論パラメータ」だけであり、
+//   実際の文言(日本語プロース)は**持たない**(M12 はデータ層のみ・UI は対象外)。
+//   これは ADR-012 のセーブ容量目標(512KB)と GDD 8.2 の探索スナップショット
+//   方式(結果を丸ごと保存せず、決定論的に再現可能な最小パラメータだけを保存
+//   する)に倣った設計判断であり、テンプレ ID → 実文言の対応表は今後
+//   content/UI 層が持つ。
+//
+//   bioOrigin / bioCatchphrase / bioFear : 加入時に決定論生成される簡易バイオ
+//     (GDD 7.3「出自・口癖・恐れ」)。`variantIndex` は候補の何番目かを指す
+//     (候補数・実文言の管理は rules/memoir.ts と将来の content/UI 層の担当)。
+//   arrival       : 加入(誕生)の記録。
+//   bondMilestone : 特定の相方(partnerId)との bond(rules/bond.ts が
+//     GameState.bondByPairKey で管理)が節目(tier)を超えた。GDD 7.3
+//     「記憶の可視化」が参照する主要な材料。
+//   partnerLost   : bond を結んでいた相方(partnerId)を喪失した
+//     (GDD 7.3「相方の喪失で bond 相手に一時的士気ペナ」の記録側)。
+//   death         : 本人が死亡した(ResidentLife.diedTick と対になる記録)。
+
+/**
+ * [M12] memoirLog のエントリ種別(上記)。宣言順に意味は無く UTF-16 昇順に
+ * 揃えてある(rules/memoir.ts の候補走査順は別に配列で固定するので、この定数の
+ * 並びが選択の決定論性に影響することは無い)。
+ */
+export const MEMOIR_ENTRY_KINDS = [
+  "arrival",
+  "bioCatchphrase",
+  "bioFear",
+  "bioOrigin",
+  "bondMilestone",
+  "death",
+  "partnerLost",
+] as const;
+
+/** {@link MEMOIR_ENTRY_KINDS} のいずれか。 */
+export type MemoirEntryKind = (typeof MEMOIR_ENTRY_KINDS)[number];
+
+/** 未知の文字列が memoir エントリ種別のいずれかか(型ガード)。 */
+export function isMemoirEntryKind(value: string): value is MemoirEntryKind {
+  for (const kind of MEMOIR_ENTRY_KINDS) {
+    if (kind === value) return true;
+  }
+  return false;
+}
+
+/** GDD 7.3 の bio 3 カテゴリ(出自/口癖/恐れ)のいずれか。 */
+export type MemoirBioKind = "bioCatchphrase" | "bioFear" | "bioOrigin";
+
+/** 加入時に決定論生成されるバイオ 1 件(上記)。 */
+export interface MemoirBioEntry {
+  readonly kind: MemoirBioKind;
+  readonly tick: number;
+  /** 候補の何番目か(rules/memoir.ts の `MEMOIR_BIO_VARIANT_COUNT` 未満)。 */
+  readonly variantIndex: number;
+}
+
+/** 加入(誕生)の記録。 */
+export interface MemoirArrivalEntry {
+  readonly kind: "arrival";
+  readonly tick: number;
+}
+
+/** bond が節目を超えた記録(rules/bond.ts / GameState.bondByPairKey)。 */
+export interface MemoirBondMilestoneEntry {
+  readonly kind: "bondMilestone";
+  readonly tick: number;
+  readonly partnerId: EntityId;
+  /** 節目の段(1 始まり・rules/bond.ts の `BOND_MILESTONE_TIER_FIXES` の添字+1)。 */
+  readonly tier: number;
+}
+
+/** bond を結んでいた相方を喪失した記録。 */
+export interface MemoirPartnerLostEntry {
+  readonly kind: "partnerLost";
+  readonly tick: number;
+  readonly partnerId: EntityId;
+}
+
+/** 本人が死亡した記録。 */
+export interface MemoirDeathEntry {
+  readonly kind: "death";
+  readonly tick: number;
+}
+
+/** memoirLog 1 件のエントリ(判別共用体)。 */
+export type MemoirEntry =
+  | MemoirArrivalEntry
+  | MemoirBioEntry
+  | MemoirBondMilestoneEntry
+  | MemoirDeathEntry
+  | MemoirPartnerLostEntry;
+
+/**
+ * [M12] 住民 1 人の memoirLog(GDD 7.3)。`ResidentState.memoir`(上記)の値の形。
+ *
+ * 独立 entity(`kind: "memoir"`)にする案も検討したが、`EntityKind`/`EntityState`
+ * へ新種別を足すと `src/ui/derived.ts` 等の既存の網羅 switch が壊れる
+ * (typecheck で確認済み・UI はこのタスクの担当外)ため、resident の省略可能
+ * フィールドとして持つ(`ResidentState.memoir` の doc 参照)。
+ *
+ * `kind`/`id` を持たない**値オブジェクト**である(entity ではない)。
+ */
+export interface MemoirLogState {
+  /**
+   * 記録(古い順・重複なし)。件数上限(rules/memoir.ts の `MAX_MEMOIR_ENTRIES`)
+   * を超えた分は先頭から落とし、{@link foldedCount} に繰り込む
+   * (GDD 7.3「件数上限で古いものは要約に畳む」)。
+   */
+  readonly entries: readonly MemoirEntry[];
+  /** 上限超過で畳まれた(=詳細を失った)件数。0 以上。 */
+  readonly foldedCount: number;
+}
+
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
 export type EntityState =
   CodifyState | FacilityState | ResearchState | ResidentState | ResourceState;
@@ -417,6 +556,8 @@ export interface GameStateMeta {
  *   (b) キーと値の `id` が一致する
  *   (c) 全 ID が {@link ENTITY_ID_PATTERN} に一致する(§1)
  *   (d) `rngState` の反復順は domainTag の UTF-16 コードユニット昇順(§4)
+ *   (e) [M12] `bondByPairKey` の反復順はキーの UTF-16 コードユニット昇順
+ *       (rules/bond.ts の `bondPairKeyOf` が課す正準形。(d) と同じ扱い)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -429,6 +570,17 @@ export interface GameState extends GameStateMeta {
    * (adjacency / recall)は永久にここへ現れない。
    */
   readonly rngState: ReadonlyMap<DomainTag, Xoshiro128State>;
+  /**
+   * [M12] 住民ペアの絆(GDD 7.3)。キーは `rules/bond.ts` の
+   * `bondPairKeyOf(residentAId, residentBId)`(2 者の ID を UTF-16 昇順に
+   * 正規化して `"a|b"` の形に合成した文字列)。値は蓄積した絆値(Fix)。
+   *
+   * まだ 1 組も bond を持たないペアはキーを持たない(= 0 と同義・遅延初期化。
+   * rngState と同じ設計)。独立 entity にしなかった理由は
+   * {@link MemoirLogState} の doc と同じ(`src/ui/derived.ts` 等の既存の
+   * 網羅 switch を壊さないため)。
+   */
+  readonly bondByPairKey: ReadonlyMap<string, Fix>;
 }
 
 // --- 4. 参照 ---------------------------------------------------------------
@@ -515,4 +667,22 @@ export function getRngState(state: GameState, domainTag: DomainTag): Xoshiro128S
  */
 export function rngStateDomains(state: GameState): readonly DomainTag[] {
   return [...state.rngState.keys()];
+}
+
+/**
+ * [M12] 住民ペアの絆値(GameState.bondByPairKey の doc 参照)。まだ形成されて
+ * いないペアは undefined(「引いたことがあるか」自体は結果に影響しない遅延
+ * 初期化・rngState と同じ規約)。キーの構成は `rules/bond.ts` の
+ * `bondPairKeyOf` を通すこと(このモジュールはキー文字列の意味を解釈しない)。
+ */
+export function getBondValue(state: GameState, pairKey: string): Fix | undefined {
+  return state.bondByPairKey.get(pairKey);
+}
+
+/**
+ * bond を保持しているペアキーを正準順(昇順)で返す。`rngStateDomains` と同じく
+ * Map の反復順をそのまま使う(防御的な再ソートはしない)。
+ */
+export function bondPairKeys(state: GameState): readonly string[] {
+  return [...state.bondByPairKey.keys()];
 }

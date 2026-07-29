@@ -62,6 +62,7 @@
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "../canonicalize";
+import type { Fix } from "../fp";
 import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
@@ -263,19 +264,39 @@ function buildRngStateMap(
 }
 
 /**
+ * [M12] bond の Map を pairKey 昇順の正準順で作る(§3 / state.ts §4 と同じ扱い)。
+ * 入力の並び順には依存しない。キー文字列の妥当性(形式・EntityId 規則)は
+ * このモジュールでは検査しない(rules/bond.ts の `bondPairKeyOf` を通した
+ * 文字列だけが engine 内部で作られる。境界検査は serialize.ts の担当)。
+ */
+function buildBondMap(entries: readonly (readonly [string, Fix])[]): ReadonlyMap<string, Fix> {
+  const map = new Map<string, Fix>();
+  for (const [pairKey, value] of [...entries].sort((a, b) => compareUtf16(a[0], b[0]))) {
+    if (map.has(pairKey)) {
+      throw new StateUpdateError(`bond のペアキー "${pairKey}" が重複している`);
+    }
+    map.set(pairKey, value);
+  }
+  return map;
+}
+
+/**
  * GameState を作る唯一の入口。entity 列は渡された順に依らず ID 昇順の正準順で
  * Map 化される(§3)。新規セーブの生成と fromSerializable(serialize.ts)が使う。
  *
  * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
+ * `bondByPairKey` も同じ規約([M12]・省略時は空)。
  *
  * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
- *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)がある場合
+ *   bond ペアキー重複 / 住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)
+ *   がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
   entities: readonly EntityState[],
   rngState: readonly (readonly [DomainTag, Xoshiro128State])[] = [],
+  bondByPairKey: readonly (readonly [string, Fix])[] = [],
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -289,6 +310,7 @@ export function createGameState(
     tick: meta.tick,
     entityStateById: buildEntityMap(sortedById(entities)),
     rngState: buildRngStateMap(rngState),
+    bondByPairKey: buildBondMap(bondByPairKey),
   };
 }
 
@@ -315,6 +337,26 @@ export function setRngState(
   const merged: (readonly [DomainTag, Xoshiro128State])[] = [...state.rngState.entries()];
   merged.push([domainTag, value]);
   return setField(state, "rngState", buildRngStateMap(merged));
+}
+
+/**
+ * [M12] 住民ペアの絆値を差し替える(新規ペアなら追加する)。`bondByPairKey` の
+ * 反復順を pairKey 昇順に保つ責務を持つ({@link setRngState} と同型)。
+ *
+ * 既存ペアの差し替えは Map.set が挿入位置を変えないので順序は不変。新規ペアの
+ * 追加時のみ Map を作り直す。
+ */
+export function setBondValue(state: GameState, pairKey: string, value: Fix): GameState {
+  const previous = state.bondByPairKey.get(pairKey);
+  if (previous !== undefined) {
+    if (Object.is(previous, value)) return state;
+    const next = new Map(state.bondByPairKey);
+    next.set(pairKey, value);
+    return setField(state, "bondByPairKey", next);
+  }
+  const merged: (readonly [string, Fix])[] = [...state.bondByPairKey.entries()];
+  merged.push([pairKey, value]);
+  return setField(state, "bondByPairKey", buildBondMap(merged));
 }
 
 /**

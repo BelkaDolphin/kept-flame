@@ -37,6 +37,11 @@
  *                    salt = (fnv1a32(residentId))。引くのは分位テーブルの添字 1 個だけで、
  *                    テーブル本体(逆CDF)は content の `townParams.lifespanQuantileMul`。
  *                    hash アドレス方式 = 住民の生成順に依存しない(同じ ID なら常に同じ寿命)。
+ *   memoir         : [M12] memoirLog の bio テンプレ候補選択(GDD 7.3「出自/口癖/
+ *                    恐れ」)。salt = (fnv1a32(residentId), fnv1a32(bioKind))。
+ *                    候補数の中から等確率で 1 つを選ぶだけで、選んだ後は状態を
+ *                    参照しない。hash アドレス方式(住民の生成順・呼び出し順に
+ *                    依存しない・rules/memoir.ts §3)。
  *   recall         : 想起困難の発生ベルヌーイ試行(GDD 11.2 / 段階1・ADR-009/018(1))。
  *                    salt = (fnv1a32(residentId), fnv1a32(techId), coarseStepIndex)。
  *                    per-step 全再評価が順序非依存であることを構造で保証するため
@@ -55,6 +60,7 @@ const DOMAIN_TAG_LIST = [
   "exploration",
   "joinAge",
   "lifespan",
+  "memoir",
   "recall",
   "recallDuration",
 ] as const;
