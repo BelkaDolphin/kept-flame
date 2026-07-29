@@ -20,9 +20,10 @@ import { buildVector, diffVectors, loadStoredVector } from "../../tools/genGolde
 const registry = coverageJson as CoverageRegistry;
 
 describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
-  it("ベクタ計画が spec §6 のとおり 37 本ある", () => {
-    // 36 → 37: sc16-overcrowd-fine-alpha を追加(2026-07-26 裁定・spec §4.5)。
-    expect(VECTOR_PLANS.length).toBe(37);
+  it("ベクタ計画が spec §6 + M10 拡張のとおり 40 本ある", () => {
+    // 37 → 40: M10 で sc17-prod-full-alpha / sc18-sto-overflow-alpha /
+    // sc18-sto-overflow-split-alpha の 3 本を追加(spec §9・conformance 拡張 #1)。
+    expect(VECTOR_PLANS.length).toBe(40);
   });
 
   it("vectorId に重複が無い", () => {

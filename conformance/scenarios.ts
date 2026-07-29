@@ -25,6 +25,7 @@ import type { FacilityContent } from "../schema/facility";
 import type { TechContent } from "../schema/tech";
 
 import { fixFromInt, fixFromRaw, type Fix } from "../src/engine/fp";
+import type { ResidentStats } from "../src/engine/rules/stats";
 import type { EngineContent } from "../src/engine/rules/types";
 import {
   entityIdFromString,
@@ -150,18 +151,35 @@ function patchTechResearchCost(
   });
 }
 
-/** sc09: 記憶巧者 trait を追加し、balance 側の対応付けを張る。 */
+/**
+ * sc09: 記憶巧者 trait を追加し、balance 側の対応付けを張る。
+ *
+ * **[2026-07-29 M10] 冪等化**: base content の trait ID 統一(裁定③)により
+ * `content/trait.json` は既に `traitMemoryKeeper`(旧 `traitLivingLibrary`)を持つ。
+ * このパッチは元々「base に無い trait を patch で足す」T7 時点の設計だったため、
+ * ID が既に存在する場合に素朴に追加すると ADR-024(1) のグローバル ID 一意性
+ * 違反で `validateContentBundle` が reject する。したがって **ID が base に
+ * 既にあれば追加しない**(base の定義をそのまま使う)。`balance.recallRiskParams.
+ * memoryKeeperTraitId` の設定は無条件に行う(base に既に同値が設定されていれば
+ * 単なる上書き = 冪等)。
+ */
 function patchAddMemoryKeeperTrait(): (raw: RawContentBundle) => RawContentBundle {
   return (raw) => {
-    const trait = [
-      ...(clone(raw.trait) as unknown[]),
-      {
-        id: "traitMemoryKeeper",
-        effects: [{ stat: "recallResist", op: "add", value: -15 }],
-        stackRule: "multiplicative",
-        maxPerResident: 3,
-      },
-    ];
+    const existingTrait = clone(raw.trait) as unknown[];
+    const alreadyPresent = existingTrait.some(
+      (entry) => (entry as Record<string, unknown>)["id"] === "traitMemoryKeeper",
+    );
+    const trait = alreadyPresent
+      ? existingTrait
+      : [
+          ...existingTrait,
+          {
+            id: "traitMemoryKeeper",
+            effects: [{ stat: "recallResist", op: "add", value: -15 }],
+            stackRule: "multiplicative",
+            maxPerResident: 3,
+          },
+        ];
     const balance = clone(raw.balance) as Record<string, unknown>;
     const recallRiskParams = {
       ...(balance["recallRiskParams"] as Record<string, unknown>),
@@ -259,6 +277,34 @@ function patchZeroSeedOffset(): (raw: RawContentBundle) => RawContentBundle {
   });
 }
 
+/**
+ * [M10] sc18: 保管庫オーバーフロー(GDD 6.7)を発動させるため
+ * `balance.storage.baseCapacity` へ firewood/iron の上限を追加する。
+ * `wasteConversionRatio`(firewood=0.5)は base content に既にあるので触らない
+ * (firewood はスポンジ変換・iron は変換率未登録のため破棄のみ、の対比を作る)。
+ */
+function patchStorageCapacity(
+  capacityByResourceId: Record<string, number>,
+): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    const storage = clone(balance["storage"]) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: {
+        ...balance,
+        storage: {
+          ...storage,
+          baseCapacity: {
+            ...(storage["baseCapacity"] as Record<string, unknown>),
+            ...capacityByResourceId,
+          },
+        },
+      },
+    };
+  };
+}
+
 // ===========================================================================
 // 4. state 構築ヘルパ(spec §4.2: entity ID は ADR-011、fromTick は 0)
 // ===========================================================================
@@ -276,6 +322,12 @@ interface ResidentOverrides {
   readonly dispatched?: boolean;
   readonly traitIds?: readonly string[];
   readonly recallImpairedUntilTick?: number;
+  /**
+   * [M10] ステータス 5 種(裁定 B8)を明示指定する。省略時は
+   * {@link ResidentState.stats} が undefined のままで、rules/stats.ts の
+   * `NEUTRAL_RESIDENT_STATS` 既定(全て基準 50)が使われる。
+   */
+  readonly stats?: ResidentStats;
 }
 
 function mkResident(name: string, overrides: ResidentOverrides = {}): ResidentState {
@@ -292,6 +344,7 @@ function mkResident(name: string, overrides: ResidentOverrides = {}): ResidentSt
     dispatched: overrides.dispatched ?? false,
     traitIds: (overrides.traitIds ?? []).map(eid),
     recallImpairedUntilTick: overrides.recallImpairedUntilTick ?? 0,
+    ...(overrides.stats === undefined ? {} : { stats: overrides.stats }),
   };
 }
 
@@ -530,6 +583,66 @@ function sc16BuildState(worldSeed: string): GameState {
   return createGameState(baseMeta(worldSeed), entities);
 }
 
+// --- sc17-prod-full(M5→M10: 生産式の実 content 被覆) -------------------------
+
+/**
+ * [M10] 実 content の facility.statWeights(forge: vigor0.4/dex0.3/intellect0/
+ * fortitude0.3/will0)+ trait(traitArtisan: dexterity ×1.2 mul + yieldMul ×1.1)
+ * が生産式の重み付き和(GDD 11.1)まで実際に届くことを固定する。
+ *
+ * 住民のステータス(80,60,10,70,20)と trait の組合せは
+ * `tests/engine/rulesStatsContent.test.ts`(「職人: 器用 ×1.2 と yieldMul ×1.1
+ * が別項として掛かる」)で手検算済みの値をそのまま流用する
+ * (`residentContribution` = raw 1,641,200)。forge 1 基のみを孤立配置し隣接効果を
+ * 発生させない(worldSeed 依存性を持ち込まず生産式だけを見るため)。
+ */
+function sc17BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentArtisan", {
+      assignedFacilityId: "facilityForgeA",
+      stats: {
+        vigor: fixFromInt(80),
+        dexterity: fixFromInt(60),
+        intellect: fixFromInt(10),
+        fortitude: fixFromInt(70),
+        will: fixFromInt(20),
+      },
+      traitIds: ["traitArtisan"],
+    }),
+    mkFacility("facilityForgeA", "forge", 0, ["residentArtisan"], 1),
+    mkResource("resourceIron", "iron", 0),
+  ]);
+}
+
+// --- sc18-sto-overflow(M5→M10: 保管庫オーバーフロー全系統) --------------------
+
+/**
+ * [M10] GDD 6.7 の保管庫オーバーフロー・廃材スポンジ・資源ごと独立判定を
+ * golden vector で固定する。hearth(firewood 産出・cell 0)と forge(iron 産出・
+ * cell 47)は 8 近傍が重ならない配置にして隣接効果を無効化する(= worldSeed に
+ * 依存しない、production/storage だけを見るシナリオ)。research entity を
+ * 置かないため recall の試行が 0 件になり((C) 判定ペアは全 resident × 全
+ * research entity の techId・recall.ts §3(a))、想起困難による稼働停止も
+ * 発生しない = 全 1440 tick が単一の (A) 区間(rate-change イベントが 1 件も
+ * 無い)。よってオーバーフロー会計は「区間全体の産出を一括で容量へ通す」
+ * 純粋な形になる。
+ *
+ * firewood は base content が既に持つ `wasteConversionRatio.firewood = 0.5`
+ * によりスポンジ変換(超過分の一部が廃材化)、iron は変換率未登録のため
+ * 超過分が単純破棄される対比を作る。
+ */
+function sc18BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentHearthKeeper", { assignedFacilityId: "facilityHearthA" }),
+    mkResident("residentSmith", { assignedFacilityId: "facilityForgeA" }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentHearthKeeper"], 1),
+    mkFacility("facilityForgeA", "forge", 47, ["residentSmith"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceWaste", "waste", 0),
+  ]);
+}
+
 // ===========================================================================
 // 6. SCENARIOS(spec §4.3 の表)
 // ===========================================================================
@@ -584,6 +697,12 @@ export const SCENARIOS: readonly Scenario[] = [
       penaltyPerExcessFP: -0.15,
     }),
     buildState: sc16BuildState,
+  },
+  { id: "sc17-prod-full", contentPatch: null, buildState: sc17BuildState },
+  {
+    id: "sc18-sto-overflow",
+    contentPatch: patchStorageCapacity({ firewood: 500, iron: 2000 }),
+    buildState: sc18BuildState,
   },
 ];
 

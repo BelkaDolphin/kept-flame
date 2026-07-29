@@ -39,6 +39,7 @@ import {
   checkCoverage,
   compareCounters,
   compareObservations,
+  singleCoverageWarnings,
   vectorFileName,
   type CoverageRegistry,
   type GoldenVector,
@@ -286,6 +287,19 @@ async function main(): Promise<void> {
   if (bigRunTimings.length > 0) {
     console.log("72h(4320 tick)以上のベクタの生成時間(計測 #3 の一次データ):");
     for (const t of bigRunTimings) console.log(`  ${t.vectorId}: ${String(t.ms)} ms`);
+  }
+
+  // spec §9.3(5)(3): 1 本のベクタだけが守っている経路の可視化(fail ではない・
+  // checkCoverage のシグネチャは変えない別関数)。
+  const singleWarnings = singleCoverageWarnings(registry, built);
+  if (singleWarnings.length > 0) {
+    console.log(
+      `単一ベクタ被覆の警告(${String(singleWarnings.length)} 経路。そのベクタが消える/` +
+        "プランが変わると被覆に穴が空く。fail ではない・spec §9.3(5)(3)):",
+    );
+    for (const w of singleWarnings) {
+      console.log(`  - ${w.pathId}(${w.title}) ← ${w.vectorId} のみ`);
+    }
   }
 }
 

@@ -413,6 +413,136 @@
       "refs": ["schema/facility.ts 冒頭 [T7]", "schema/balance.ts 冒頭 [T7]"],
       "observedBy": ["loader-reject"],
       "note": "既定値で黙って埋めない"
+    },
+    {
+      "id": "prod-trait-stat-mul",
+      "title": "trait のステータス乗算効果(dexterity ×1.2 等)が生産式の重み付き和まで届く",
+      "refs": [
+        "GDD 11.1",
+        "GDD 7.2",
+        "src/engine/rules/stats.ts §3(a)",
+        "src/engine/rules/production.ts residentContribution"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M10] sc17-prod-full-alpha が固定(traitArtisan の dexterity 60→72)。反証: dexterity 乗算を無視すると residentContribution が raw 1,641,200 ではなく 1,562,000 になる(手検算は tests/engine/rulesStatsContent.test.ts と同一の入力値を流用)"
+    },
+    {
+      "id": "prod-trait-yield-mul",
+      "title": "trait の yieldMul(GDD 11.1 の「trait 倍率」項)が重み付き和の後に別項として掛かる",
+      "refs": [
+        "GDD 11.1",
+        "src/engine/rules/stats.ts workerContribution",
+        "src/engine/rules/production.ts residentContribution"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M10] sc17-prod-full-alpha が固定。反証: yieldMul ×1.1 を掛けないと residentContribution が raw 1,641,200 ではなく 1,492,000 になる"
+    },
+    {
+      "id": "sto-capacity-overflow-discard",
+      "title": "上限つき資源は超過分が破棄され在庫が上限で頭打ちになる(廃材変換率 0 の場合)",
+      "refs": ["GDD 6.7(1)", "src/engine/rules/storage.ts applyGainWithCapacity"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M10] sc18-sto-overflow-alpha の iron(容量 2000・変換率未登録)が固定。1440 tick で 150×1440=216,000 産出のところ在庫は 2000 で頭打ちになる"
+    },
+    {
+      "id": "sto-waste-sponge-convert",
+      "title": "低次資源は超過分の一定比率が廃材資源へ変換される(スポンジ機構)",
+      "refs": ["GDD 6.7(2)", "src/engine/rules/storage.ts §3 telescoping"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M10] sc18-sto-overflow-alpha の firewood(容量 500・base content の wasteConversionRatio.firewood=0.5)が固定。反証: 変換率を無視すると廃材資源の在庫が増えない"
+    },
+    {
+      "id": "sto-capacity-independent",
+      "title": "資源ごとに上限判定が独立し、片方の頭打ちが他方の産出を止めない(連鎖停止の否定)",
+      "refs": ["GDD 6.7(3)", "src/engine/rules/storage.ts resolveCapacityByResourceId"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M10] sc18-sto-overflow-alpha は firewood/iron の両方が独立に頭打ちになることを 1 本で固定する(施設単位で止める実装だと連鎖停止が起きる)"
+    },
+    {
+      "id": "sto-capacity-split-invariant",
+      "title": "分割不変性: 保管庫オーバーフロー + 廃材スポンジの telescoping が advance の分割位置に依存しない",
+      "refs": ["src/engine/rules/storage.ts §2/§3", "src/engine/advance.ts §3"],
+      "observedBy": ["split-digest"],
+      "note": "[M10] sc18-sto-overflow-split-alpha(splitTicks=[500])。tests/engine/rulesStorage.test.ts の分割不変性テストは rules 層の純関数呼び出しで検証済みだが、scheduler/advance の実行経路(golden vector)でオーバーフロー会計が分割不変であることは本経路が初めて固定する"
+    },
+    {
+      "id": "stat-facility-weights-content",
+      "title": "実 content の facility.statWeights(等分でない配分)が生産式の重み付き和を実際に決める",
+      "refs": [
+        "GDD 11.1",
+        "content/facility.json forge.statWeights",
+        "src/engine/rules/stats.ts weightedStatSum"
+      ],
+      "observedBy": ["digest", "probe", "unit-test"],
+      "note": "[M7 提案・M10 登録] golden 側は sc17-prod-full-alpha(反証: forge の実重み 0.4/0.3/0/0.3/0 の代わりに等分 0.2 を使うと residentContribution が raw 1,641,200 ではなく 1,108,800 になる)。単体テスト側は tests/engine/rulesStatsContent.test.ts が実 content の複数施設で網羅"
+    },
+    {
+      "id": "stat-combat-power-weights",
+      "title": "combatPower の重み付き和(vigor0.35/dexterity0.20/intellect0/fortitude0.30/will0.15)の算出式",
+      "refs": ["GDD 8.2 [2026-07-29裁定]", "src/engine/rules/stats.ts §5 COMBAT_POWER_WEIGHTS"],
+      "observedBy": ["unit-test"],
+      "note": "[M7 提案・M10 登録] combatPower は探索解決(M21)未実装のため advance()/scheduler に一切結線されておらず golden vector では観測不能(src/engine/advance.ts / scheduler.ts に combatPower 参照が無いことを grep で確認済み)。tests/engine/rulesCombat.test.ts の「算出式」節が担保"
+    },
+    {
+      "id": "stat-combat-power-derived-trait",
+      "title": "trait は基礎ステ経由と派生値(combatPower)への直接効果の 2 経路で戦力に効き、二重計上しない",
+      "refs": [
+        "GDD 8.2",
+        "GDD 7.2 [2026-07-28追補]",
+        "src/engine/rules/stats.ts §5(3) applyTraitsToDerived"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M7 提案・M10 登録] combatPower 自体が advance() に未結線(stat-combat-power-weights と同じ理由)。tests/engine/rulesCombat.test.ts の「trait の 2 経路」節が担保"
+    },
+    {
+      "id": "stat-namespace-separation",
+      "title": "派生値 ID(combatPower)は基礎ステ 5 種と名前空間が重ならない",
+      "refs": ["GDD 7.1 注記", "src/engine/rules/stats.ts RESIDENT_DERIVED_STAT_IDS"],
+      "observedBy": ["unit-test"],
+      "note": "[M7 提案・M10 登録] 静的な ID 集合の非交差性であり golden vector の実行結果には現れない。tests/engine/rulesCombat.test.ts の「名前空間」節が担保"
+    },
+    {
+      "id": "stat-trait-cap",
+      "title": "住民の trait 保持上限 3 個(GDD 7.2)は state 側で強制され、超過は例外で拒否される",
+      "refs": [
+        "GDD 7.2",
+        "src/engine/state/state.ts MAX_TRAITS_PER_RESIDENT",
+        "src/engine/state/update.ts requireValidResidentTraits"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M7 提案・M10 登録] 上限超過は createGameState/updateEntity が例外で止める(黙って切り詰めない)ため、そのような state 自体が golden vector の入力として構築できず観測不能。tests/engine/state/update.test.ts の「trait 4 個は reject する」が担保"
+    },
+    {
+      "id": "codex-single-queue-advance",
+      "title": "成文化キューは研究と同型の単一キュー(未完了の ID 昇順先頭 1 件だけが進む)",
+      "refs": ["GDD 11.8(B)", "src/engine/rules/codify.ts currentCodification"],
+      "observedBy": ["unit-test"],
+      "note": "[M10] M6 は成文化を tick ループへ結線していない(scheduler/advance が codify entity を一切進めない設計・rules/codify.ts 冒頭 §1)ため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「成文化キュー」節が担保"
+    },
+    {
+      "id": "codex-record-media-cost-duration",
+      "title": "記録媒体 2 種のコスト/所要時間(時代係数・媒体倍率・E3 印刷は紙のみ)の算出式",
+      "refs": [
+        "GDD 11.1 [2026-07-27追補]",
+        "GDD 5.2",
+        "src/engine/rules/codify.ts planCodification"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M10] codex-single-queue-advance と同じ理由(tick ループ未結線)で golden vector では観測不能。tests/engine/rulesCodify.test.ts の「媒体別コスト/時間」節が担保"
+    },
+    {
+      "id": "codex-multi-medium-coexist",
+      "title": "同一 tech の別媒体(紙/石板)の記録が並存できる(副本動線)",
+      "refs": ["GDD 11.1 [2026-07-27追補]", "src/engine/rules/codify.ts beginCodification"],
+      "observedBy": ["unit-test"],
+      "note": "[M10] tick ループ未結線のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「同一 tech の別媒体は並存できる」が担保"
+    },
+    {
+      "id": "codex-waste-substitution-stone-only",
+      "title": "成文化の粘土コスト廃材代替は石板のみに適用され、紙では代替しない",
+      "refs": ["GDD 11.1 [2026-07-27追補]", "src/engine/rules/codify.ts codifyWasteSubstitution"],
+      "observedBy": ["unit-test"],
+      "note": "[M10] コマンド適用時の純関数(tick 流量ではない)であり、コマンド層(M49)未実装のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「粘土コストの廃材代替は石板のみ」が担保"
     }
   ]
 }

@@ -129,7 +129,9 @@ describe("正準化パスの配線(ADR-023(1))", () => {
   it("キー順序が異なる同値 JSON は canonicalizeJson で同一バイト列になる", () => {
     const reordered = {
       leaf: false,
-      unlocks: ["techPottery", "techBasketWeaving"],
+      // [M10] techFireStarting.unlocks の stale 修正(GDD 12.1 [2026-07-29追補])に
+      // 合わせて techStoneTools / techWaterDrawing を追加済み。
+      unlocks: ["techPottery", "techBasketWeaving", "techStoneTools", "techWaterDrawing"],
       fieldRequirement: { count: 3, recipe: "recipeKindling", facility: "hearth" },
       researchCost: 30,
       prereqs: [],

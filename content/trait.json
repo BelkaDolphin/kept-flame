@@ -30,7 +30,7 @@
     "maxPerResident": 3
   },
   {
-    "id": "traitLivingLibrary",
+    "id": "traitMemoryKeeper",
     "effects": [
       { "stat": "recallResist", "op": "add", "value": -15 },
       { "stat": "intellect", "op": "add", "value": 5 }

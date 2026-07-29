@@ -67,7 +67,7 @@ ADR-016(1) は `algoVersion` bump の必要十分条件を「**golden vector が
 | `unit-test` | **golden vector では観測できない**。engine の単体テストが担保する |
 | `loader-reject` | **golden vector では観測できない**。content ローダーの reject が担保する |
 
-`unit-test` / `loader-reject` のみの経路は `requiresVector()` が false を返すのでベクタ申告を要求しない。現在 5 + 3 件がこれに該当する(`rng-hash-address-order-free` / `fp-mulfixproven-bound` / `fp-decimal-exact` / `clock-elapsed-floor` / `load-*` 5 件)。
+`unit-test` / `loader-reject` のみの経路は `requiresVector()` が false を返すのでベクタ申告を要求しない。現在 **9 件**(**[2026-07-29 M10] 修正**: 旧「5 + 3 件」は数え間違いだった。内訳は `rng-hash-address-order-free` / `fp-mulfixproven-bound` / `fp-decimal-exact` / `clock-elapsed-floor` の 4 件 + `load-*` 5 件 = 9 件)がこれに該当する(§9.1 実測と一致)。
 
 ### 2.3 経路の内訳(全 58 件)
 
@@ -616,6 +616,8 @@ ADR-016(1) の必要十分条件「golden vector が変化すること」を MVP
 1. **仕様が先に変わっていて実装が追従した** → 意図した挙動変更。**bump する**((3) の手順)。仕様変更が ADR / GDD へ反映済みであることを先に確認する(未反映なら文書が先)。
 2. **仕様は変えていないのに動いた** → **バグの疑い**。ベクタを再生成せず、実装を修正 / revert して golden を元へ戻す。**`npm run golden:write` で緑にするのは禁止**(テストを通すためにテストを書き換えるのと同型)。原因が特定できないまま 3 回試して直らなければ停止して報告する。
 3. **シナリオ / プラン側の変更が原因**(content patch の値・`toTick`・`splitTicks` を触った)→ engine 挙動は不変なので **bump 不要**。ただしこの場合は、**既存ベクタを書き換えるのではなく新しい vectorId のベクタを足す**のが原則である(既存ベクタの意味を後から変えると、そのベクタが過去に何を固定していたかが読めなくなる)。既存ベクタの `expected` を書き換えてよいのは 1. の場合だけ。
+
+**[2026-07-29 M10 追記] `content/*.json`(base content 本体)の値そのものを修正する場合の扱い。** 上記 3 択はシナリオ側の patch を前提にしているが、base content(patch なしで全シナリオが共有して読む入力)の**欠陥修正**は次のように扱う。統率者裁定: **fixture/content の値修正は engine 挙動変更ではないので algoVersion bump ではない**(bump の権威は「同一シナリオ・同一 content での観測挙動」= ADR-016(1)であり、content 自体の値が変わるのは前提が変わっただけで engine の挙動関数は 1 行も変わっていない)。この点は 3. の「シナリオ/プラン側の変更」と結論(bump 不要)は同じだが、**「既存ベクタは書き換えず新規 vectorId を足す」という手続きまでは適用しない**— base content は特定のシナリオが恣意的に選んだ値ではなく全シナリオの共有入力であり、欠陥修正後の値が新しい正本になるため、**base content シナリオ(patch なし)の既存ベクタは `golden:write` で上書き再生成してよい**。ただし必須条件が 2 つある: ①再生成前に反証(§9.2(3))と同じ精神で「どの経路がどう動くか、あるいは動かないか」を実際の値で確認し報告すること ②動いたベクタがあれば §9.5 のチェックリストと同様に diff の形を報告すること。**M10 の実例(実測・0 本が動いた)**: `techBasketWeaving.researchCost`(25→GDD 12.3 帯内の 40)と trait ID 統一(`traitLivingLibrary`→`traitMemoryKeeper`)はいずれも `npm run golden:check` で確認した結果、37 本中 1 本も動かなかった。理由は数値で説明できる: 前者は researchCost を参照する `sc06Board`(sc06/07/08/09/13 が使う共通盤面)に研究産出施設(workbench)が無く `researchRateFix` が常に 0 のため、研究コストの値そのものが一度も評価されない(`ticksUntilResearchComplete` はレート 0 で常に null を返す)。後者は sc09 が trait を付ける対象施設 `forge` の実 content `statWeights` が `intellect: 0` を明示しているため、trait の `intellect +5` 加算効果が生産式の重み付き和(`Σ weight_s × stat_s`)に一切寄与しない(想起困難側の `recallResist` 効果は元々 trait の effects テーブルを経由せず `balance.recallRiskParams.memoryKeeperTraitId` の直接参照で実装されているため、ID の呼び名を変えても resolveable な参照が保たれていれば無関係)。**「0 本動く」ことも「動いたベクタが具体的に何本、なぜ動くか」と同じ重みの結論であり、動かなかった理由を数値で示せないなら安易に「動かなかった」と報告してはならない。**
 
 #### (3) bump する手順
 

@@ -206,4 +206,31 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     "adj-overcrowd-multi-tag",
     "adj-penalty-clamp",
   ]),
+
+  // --- sc17-prod-full(M10: 生産式の実 content 被覆) --------------------------------------
+  // 隣接効果を発生させない孤立配置(scenarios.ts のコメント参照)のため worldSeed は
+  // 結果に一切影響しない(rng 消費も無い)。C7 の alpha/beta 2 本義務はこの理由で
+  // alpha 1 本のみとする(2 本目は byte-identical になり情報を増やさない)。
+  plan("sc17-prod-full-alpha", "sc17-prod-full", SEEDS.alpha, 100, [
+    "prod-trait-stat-mul",
+    "prod-trait-yield-mul",
+    "stat-facility-weights-content",
+  ]),
+
+  // --- sc18-sto-overflow(M10: 保管庫オーバーフロー全系統) --------------------------------
+  // sc17 と同じ理由で worldSeed 非依存(隣接効果なし・research entity なしで
+  // recall 試行も 0 件)なので alpha 1 本のみ。
+  plan("sc18-sto-overflow-alpha", "sc18-sto-overflow", SEEDS.alpha, 1440, [
+    "sto-capacity-overflow-discard",
+    "sto-waste-sponge-convert",
+    "sto-capacity-independent",
+  ]),
+  plan(
+    "sc18-sto-overflow-split-alpha",
+    "sc18-sto-overflow",
+    SEEDS.alpha,
+    1440,
+    ["sto-capacity-split-invariant"],
+    { splitTicks: [500] },
+  ),
 ];

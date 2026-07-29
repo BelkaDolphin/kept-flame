@@ -23,7 +23,8 @@
     "sc06-split-recover-a",
     "sc07-clamp-p-alpha",
     "sc08-mastery-alpha",
-    "sc10-morale-edge-alpha"
+    "sc10-morale-edge-alpha",
+    "sc17-prod-full-alpha"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -63,6 +64,9 @@
     { "file": "sc14-offset-zero-alpha.json", "vectorId": "sc14-offset-zero-alpha" },
     { "file": "sc15-tie-alpha.json", "vectorId": "sc15-tie-alpha" },
     { "file": "sc15-tie-split-alpha.json", "vectorId": "sc15-tie-split-alpha" },
-    { "file": "sc16-overcrowd-fine-alpha.json", "vectorId": "sc16-overcrowd-fine-alpha" }
+    { "file": "sc16-overcrowd-fine-alpha.json", "vectorId": "sc16-overcrowd-fine-alpha" },
+    { "file": "sc17-prod-full-alpha.json", "vectorId": "sc17-prod-full-alpha" },
+    { "file": "sc18-sto-overflow-alpha.json", "vectorId": "sc18-sto-overflow-alpha" },
+    { "file": "sc18-sto-overflow-split-alpha.json", "vectorId": "sc18-sto-overflow-split-alpha" }
   ]
 }

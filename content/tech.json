@@ -6,7 +6,7 @@
     "prereqs": [],
     "researchCost": 30,
     "fieldRequirement": { "facility": "hearth", "recipe": "recipeKindling", "count": 3 },
-    "unlocks": ["techPottery", "techBasketWeaving"],
+    "unlocks": ["techPottery", "techBasketWeaving", "techStoneTools", "techWaterDrawing"],
     "leaf": false
   },
   {
@@ -16,7 +16,7 @@
     "prereqs": ["techFireStarting"],
     "researchCost": 36,
     "fieldRequirement": { "facility": "workbench", "recipe": "recipeClayPot", "count": 2 },
-    "unlocks": [],
+    "unlocks": ["techStorage"],
     "leaf": false
   },
   {
@@ -24,9 +24,9 @@
     "era": "e1",
     "lossClass": "criticalRecoverable",
     "prereqs": ["techFireStarting"],
-    "researchCost": 25,
+    "researchCost": 40,
     "fieldRequirement": { "facility": "workbench", "recipe": "recipeBasket", "count": 2 },
-    "unlocks": [],
+    "unlocks": ["techGatheringHut"],
     "leaf": true
   },
   {

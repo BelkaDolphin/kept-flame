@@ -260,13 +260,32 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
   });
 
   it("記憶巧者 trait が content に無ければ memoryKeeperTraitId は null", () => {
-    const result = loadEngineContent(validBundle());
+    // [M10] 実 content(content/balance.json)は trait ID 統一(裁定③)により
+    // memoryKeeperTraitId="traitMemoryKeeper" を既に持つ。「content に無い」場合を
+    // 見るにはここでフィールドを取り除いた bundle を作る必要がある。
+    const bundle = clone(rawBundle()) as {
+      tech: unknown[];
+      facility: unknown[];
+      trait: unknown[];
+      adjacency: unknown;
+      balance: { recallRiskParams: Record<string, unknown> };
+    };
+    delete bundle.balance.recallRiskParams["memoryKeeperTraitId"];
+
+    const validated = validateContentBundle(bundle as RawContentBundle);
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    const result = loadEngineContent(validated.value);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.recallRisk.memoryKeeperTraitId).toBeNull();
   });
 
   it("balance で指定した記憶巧者 trait が写る", () => {
+    // [M10] 実 content には既に "traitMemoryKeeper" が存在する(ADR-024(1) の
+    // グローバル ID 一意性のため同じ ID は追加できない)。ここは「balance が
+    // 指すどんな trait ID でも recallRisk.memoryKeeperTraitId へ写る」ことを見る
+    // テストなので、実 content と衝突しない別名の trait を新規に足す。
     const bundle = clone(rawBundle()) as {
       tech: unknown[];
       facility: unknown[];
@@ -275,12 +294,12 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
       balance: { recallRiskParams: Record<string, unknown> };
     };
     bundle.trait.push({
-      id: "traitMemoryKeeper",
+      id: "traitProbeMemoryKeeper",
       effects: [{ stat: "recallResist", op: "add", value: -15 }],
       stackRule: "multiplicative",
       maxPerResident: 3,
     });
-    bundle.balance.recallRiskParams["memoryKeeperTraitId"] = "traitMemoryKeeper";
+    bundle.balance.recallRiskParams["memoryKeeperTraitId"] = "traitProbeMemoryKeeper";
 
     const validated = validateContentBundle(bundle as RawContentBundle);
     expect(validated.ok).toBe(true);
@@ -288,7 +307,7 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
     const result = loadEngineContent(validated.value);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.recallRisk.memoryKeeperTraitId).toBe("traitMemoryKeeper");
+    expect(result.value.recallRisk.memoryKeeperTraitId).toBe("traitProbeMemoryKeeper");
   });
 
   it("adjacency のタグペアが正準キーで写り、シード揺らぎ前の係数を持つ", () => {

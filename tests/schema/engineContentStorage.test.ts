@@ -88,7 +88,7 @@ describe("(a) trait 効果の写像(§1(e))", () => {
       "traitArtisan",
       "traitExplorer",
       "traitFrail",
-      "traitLivingLibrary",
+      "traitMemoryKeeper",
       "traitOptimist",
       "traitPessimist",
       "traitScholar",

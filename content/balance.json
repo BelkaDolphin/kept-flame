@@ -16,6 +16,7 @@
     "dispatchW": 0.15,
     "masteryResistMax": 0.2,
     "memoryKeeperResist": -0.15,
+    "memoryKeeperTraitId": "traitMemoryKeeper",
     "durationTicksMin": 1440,
     "durationTicksMax": 2880
   },

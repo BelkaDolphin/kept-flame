@@ -537,3 +537,45 @@ export function buildCoverageMatrix(
   }
   return matrix;
 }
+
+// --- 7. 単一被覆の警告(spec §9.3(5)(3)・M10) --------------------------------
+//
+//   `checkCoverage` が検出するのは「1 本も踏まれていない経路」だけであり、
+//   「1 本だけで踏まれている経路」(そのベクタが消える/プランが変わると穴が
+//   空く)は検出しない。これは fail 条件ではなく**可視化**が目的なので、
+//   `checkCoverage` のシグネチャは変えず別関数として足す(spec §9.3(1) の指示)。
+
+/** 1 つの経路を「ベクタ 1 本だけ」が守っている状態の警告 1 件。 */
+export interface SingleCoverageWarning {
+  readonly pathId: string;
+  readonly title: string;
+  /** その経路を申告している唯一のベクタ ID。 */
+  readonly vectorId: string;
+}
+
+/**
+ * golden vector で観測する経路(`requiresVector()` が true)のうち、
+ * ちょうど 1 本のベクタだけが申告している経路を一覧する(spec §9.1 実測の
+ * 「36 経路が 1 本のみ」の可視化)。**fail ではない**警告であり、
+ * `checkCoverage` のシグネチャ・戻り値は変更しない。
+ *
+ * 未登録の経路 ID を申告するベクタ(タイポ等)は `checkCoverage` 側の責務なので
+ * ここでは無視する(型の広い `buildCoverageMatrix` と同じ理由で、存在しない
+ * 経路 ID は matrix に現れないため自然に除外される)。
+ */
+export function singleCoverageWarnings(
+  registry: CoverageRegistry,
+  vectors: readonly GoldenVector[],
+): readonly SingleCoverageWarning[] {
+  const matrix = buildCoverageMatrix(registry, vectors);
+  const warnings: SingleCoverageWarning[] = [];
+  for (const entry of registry.paths) {
+    if (!requiresVector(entry)) continue;
+    const claimedBy = matrix[entry.id] ?? [];
+    if (claimedBy.length !== 1) continue;
+    const vectorId = claimedBy[0];
+    if (vectorId === undefined) continue;
+    warnings.push({ pathId: entry.id, title: entry.title, vectorId });
+  }
+  return warnings.sort((a, b) => compareUtf16(a.pathId, b.pathId));
+}

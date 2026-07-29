@@ -15,6 +15,7 @@ import {
   isValidVectorId,
   observe,
   requiresVector,
+  singleCoverageWarnings,
   sumCounters,
   vectorFileName,
   type CoverageRegistry,
@@ -345,27 +346,28 @@ describe("conformance/coverage.json の形式", () => {
   });
 });
 
-describe("checkCoverage", () => {
-  const smallRegistry: CoverageRegistry = {
-    formatVersion: GOLDEN_VECTOR_FORMAT_VERSION,
-    paths: [
-      {
-        id: "p-one",
-        title: "one",
-        refs: ["ref"],
-        observedBy: ["digest"],
-        note: "",
-      },
-      {
-        id: "p-two",
-        title: "two",
-        refs: ["ref"],
-        observedBy: ["unit-test"],
-        note: "単体テストで担保",
-      },
-    ],
-  };
+/** `checkCoverage` / `singleCoverageWarnings` 共通のミニレジストリ。 */
+const smallRegistry: CoverageRegistry = {
+  formatVersion: GOLDEN_VECTOR_FORMAT_VERSION,
+  paths: [
+    {
+      id: "p-one",
+      title: "one",
+      refs: ["ref"],
+      observedBy: ["digest"],
+      note: "",
+    },
+    {
+      id: "p-two",
+      title: "two",
+      refs: ["ref"],
+      observedBy: ["unit-test"],
+      note: "単体テストで担保",
+    },
+  ],
+};
 
+describe("checkCoverage", () => {
   it("golden 観測の経路が全部踏まれていれば問題なし", () => {
     expect(checkCoverage(smallRegistry, [vectorOf("v-a", ["p-one"])])).toEqual([]);
   });
@@ -419,5 +421,41 @@ describe("buildCoverageMatrix", () => {
   it("全経路がキーとして現れる", () => {
     const matrix = buildCoverageMatrix(registry, []);
     expect(Object.keys(matrix).length).toBe(registry.paths.length);
+  });
+});
+
+// --- 7. 単一被覆の警告(spec §9.3(5)(3)・M10) --------------------------------
+
+describe("singleCoverageWarnings", () => {
+  it("golden 観測の経路がちょうど 1 本のベクタでしか踏まれていなければ警告する", () => {
+    const warnings = singleCoverageWarnings(smallRegistry, [vectorOf("v-a", ["p-one"])]);
+    expect(warnings).toEqual([{ pathId: "p-one", title: "one", vectorId: "v-a" }]);
+  });
+
+  it("2 本以上で踏まれていれば警告しない", () => {
+    const warnings = singleCoverageWarnings(smallRegistry, [
+      vectorOf("v-a", ["p-one"]),
+      vectorOf("v-b", ["p-one"]),
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("0 本(未被覆)は checkCoverage の担当なのでここでは警告しない", () => {
+    expect(singleCoverageWarnings(smallRegistry, [])).toEqual([]);
+  });
+
+  it("unit-test のみの経路(requiresVector = false)は対象外", () => {
+    const warnings = singleCoverageWarnings(smallRegistry, [vectorOf("v-a", ["p-two"])]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("checkCoverage のシグネチャ(引数・戻り値)を変えていない", () => {
+    // 型検査そのものがレビュー対象: checkCoverage は従来どおり (registry, vectors) => string[]。
+    const problems: readonly string[] = checkCoverage(smallRegistry, [vectorOf("v-a", ["p-one"])]);
+    expect(problems).toEqual([]);
+  });
+
+  it("実 coverage.json に対して実行できる(型検査・実行時エラーが無いことの確認)", () => {
+    expect(() => singleCoverageWarnings(registry, [])).not.toThrow();
   });
 });

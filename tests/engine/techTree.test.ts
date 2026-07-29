@@ -51,16 +51,19 @@ function realContent(): EngineContent {
 const CONTENT = realContent();
 
 /**
- * **既知の未解決欠陥(要裁定)**。
+ * **既知の未解決欠陥(要裁定)** — **[2026-07-29 M10 で解消]**。
  *
- * `techBasketWeaving` の researchCost 25 は T6 のダミー content 由来で、
- * GDD 12.3 の ±25% 帯(到達可能 n = 1〜3 → raw 38_880_000〜45_000_000)へ入らない。
- * この値は golden vector が観測している(sc06 の現在研究は ID 昇順先頭 =
- * researchBasketWeaving)ため、**直すとベクタ 37 本が動く**。M6 は「既存エントリの
- * 値変更禁止」の制約下にあるので、直さずここに 1 件だけ固定して可視化する。
- * この配列が伸びたらオーサリングが GDD 12.3 を破った合図。
+ * `techBasketWeaving` の researchCost は T6 のダミー content 由来の 25 で、
+ * GDD 12.3 の ±25% 帯(到達可能 n = 1〜3 → raw 38_880_000〜45_000_000)へ入らな
+ * かった。M10 の裁定(fixture/content の値修正は engine 挙動変更ではないので
+ * algoVersion bump ではない・golden-vector-spec.md §9.4(2) 明確化)により、
+ * 帯内の 40 へ修正した(spec §9.4(2) [2026-07-29] 追記参照)。**この修正は
+ * sc06 系列の golden vector を動かさない**: sc06Board は workbench(研究産出)を
+ * 持たず researchRateFix が常に 0 のため、researchCost の値そのものは
+ * どの golden vector の観測値にも現れない(`npm run golden:check` で実測確認
+ * 済み・差分ゼロ)。この配列が再び伸びたらオーサリングが GDD 12.3 を破った合図。
  */
-const KNOWN_RESEARCH_COST_BAND_VIOLATIONS: readonly string[] = ["techBasketWeaving"];
+const KNOWN_RESEARCH_COST_BAND_VIOLATIONS: readonly string[] = [];
 
 describe("techTree — エラとクリティカルパス(GDD 5.1 / 5.2)", () => {
   it("E1〜E3 の 3 エラが order 昇順で読める", () => {
@@ -157,7 +160,7 @@ describe("techTree — 1.2^n は整数 n の反復乗算(ADR-006: 非整数べ�
 });
 
 describe("techTree — researchCost レンジ(GDD 12.3)", () => {
-  it("既知の 1 件を除き、到達可能 n の全域で ±25% 帯に収まる", () => {
+  it("全 24 tech が到達可能 n の全域で ±25% 帯に収まる(M10 で techBasketWeaving 修正済み)", () => {
     const offenders = researchCostBandIssues(CONTENT).map((issue) => issue.techId);
     expect(offenders).toEqual(KNOWN_RESEARCH_COST_BAND_VIOLATIONS);
   });
@@ -181,10 +184,14 @@ describe("techTree — researchCost レンジ(GDD 12.3)", () => {
     }
   });
 
-  it("許容幅を広げれば既知の 1 件も通る(tolerance が効いている)", () => {
-    // techBasketWeaving(25)は n=3 の理想 51.84 から 51.8% 低い。
-    const offenders = researchCostBandIssues(CONTENT, fixFromRaw(600_000)).map((i) => i.techId);
-    expect(offenders).toEqual([]);
+  it("許容幅を広げれば既定の帯で落ちる値も通る(tolerance 引数が効いている)", () => {
+    // techStorage(n=2)の理想 43.2 から見て raw 60_000_000 は +38.9%。既定 ±25% では
+    // 外れるが、tolerance を ±40% へ広げると帯 [25.92, 60.48] に収まる。
+    const broken = withTechCost(CONTENT, "techStorage", fixFromRaw(60_000_000));
+    expect(researchCostBandIssues(broken).map((i) => i.techId)).toContain("techStorage");
+    expect(researchCostBandIssues(broken, fixFromRaw(400_000)).map((i) => i.techId)).not.toContain(
+      "techStorage",
+    );
   });
 });
 

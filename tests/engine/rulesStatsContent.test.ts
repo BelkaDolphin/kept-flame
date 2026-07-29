@@ -122,7 +122,7 @@ describe("実 content の trait 8 種が生産式へ効く(GDD 7.2)", () => {
 
   it("記憶巧者: 想起側の効果は生産へ漏れず、知性 +5 だけが効く", () => {
     // workbench の 知性0.5: 50 → 55 で +2.5 → (0.5×55 + 0.4×50 + 0.1×50) = 52.5 → 1.05
-    const keeper = worker({ traitIds: ["traitLivingLibrary"] });
+    const keeper = worker({ traitIds: ["traitMemoryKeeper"] });
     expect(toRaw(residentContribution(keeper, facilityDef("workbench"), CONTENT))).toBe(1_050_000);
   });
 });
