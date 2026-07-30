@@ -166,15 +166,23 @@ export function buildVectorFromResolvedInputs(
     }
   }
 
-  if (plan.paths.includes("rng-state-nonempty-roundtrip")) {
+  // [M20] "rng-state-nonempty-roundtrip" と "foot-serialize-roundtrip" は
+  // どちらも同じ検証(toSerializable → JSON 往復 → fromSerializable → digest 再計算)
+  // を要求する。前者は rngState、後者は facility.footprint(GDD 6.1
+  // [2026-07-30裁定]・§7 の 1×1 省略正準形)の往復不変性を主張する経路であり、
+  // 対象フィールドが違うだけで検証ロジックは共通なので 1 箇所にまとめる。
+  if (
+    plan.paths.includes("rng-state-nonempty-roundtrip") ||
+    plan.paths.includes("foot-serialize-roundtrip")
+  ) {
     const roundTripped = fromSerializable(
       JSON.parse(JSON.stringify(toSerializable(oneShotReport.state))),
     );
     const roundTripDigest = digestOfCanonicalJson(canonicalJsonOfState(roundTripped));
     if (roundTripDigest !== expected.stateDigest) {
       throw new GeneratorError(
-        `vector "${plan.vectorId}": rngState 往復後の digest(${roundTripDigest})が` +
-          `一括実行(${expected.stateDigest})と一致しない(spec §7.2 規則6)。`,
+        `vector "${plan.vectorId}": 状態往復後の digest(${roundTripDigest})が` +
+          `一括実行(${expected.stateDigest})と一致しない(spec §7.2 規則6 / footprint.ts §2)。`,
       );
     }
   }

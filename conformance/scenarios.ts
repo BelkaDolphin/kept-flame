@@ -31,6 +31,7 @@ import type { EngineContent } from "../src/engine/rules/types";
 import {
   entityIdFromString,
   type EntityState,
+  type FacilityFootprint,
   type FacilityState,
   type GameState,
   type GameStateMeta,
@@ -450,12 +451,22 @@ function lifeDyingAt(deathTick: number, lifespanTick = 500): ResidentLife {
   return { bornTick: deathTick - lifespanTick, lifespanTick, diedTick: null };
 }
 
+/**
+ * [M20] `footprint` は省略可の第 6 引数(既定 undefined = 1×1・footprint.ts §2)。
+ * 既存呼び出し(footprint 省略)は従来どおり `footprint` キーを持たない
+ * `FacilityState` を返すので、既存 56 本の golden vector は 1 bit も動かない。
+ *
+ * content 側の footprint 定義(例: `forge` の 2×1)とは無関係に、ここで渡した
+ * 値が state 側の footprint として焼き込まれる(GDD 6.1 [2026-07-30裁定]:
+ * 隣接判定の権威は state であり content ではない)。
+ */
 function mkFacility(
   name: string,
   defId: string,
   cellIndex: number,
   workerIds: readonly string[] = [],
   level = 1,
+  footprint?: FacilityFootprint,
 ): FacilityState {
   return {
     kind: "facility",
@@ -464,6 +475,7 @@ function mkFacility(
     level,
     cellIndex,
     workerIds: workerIds.map(eid),
+    ...(footprint === undefined ? {} : { footprint }),
   };
 }
 
@@ -1039,7 +1051,147 @@ function sc27BuildState(worldSeed: string): GameState {
 }
 
 // ===========================================================================
-// 6. SCENARIOS(spec §4.3 の表)
+// 6. footprint / 過密シナリオ(M20: conformance 拡張 #3・GDD 6.1/6.3・M16/M17 正本化)
+// ===========================================================================
+//
+// [2026-07-30追記・M17申し送り] 既存 golden 56 本には大型施設が1基も無かった
+// (forge の content 定義は 2×1 だが、state 側に footprint を焼き込んだ盤面が
+// 一度も無かったため常に 1×1 相当で動いていた)。以下 5 本は
+// tests/engine/adjacencyFootprint.test.ts の配置・数値をそのまま流用し、
+// 同じ反証(壊すと動く)を full engine pipeline(production → advance →
+// golden digest/probe)側でも固定する。反証確認の実測値は
+// `docs/MVP実装ロードマップ.md` M20 タスクの完了報告に記録する。
+
+/** 2×1(横長)。W2H1 = width2 height1。 */
+const FOOT_2X1: FacilityFootprint = { width: 2, height: 1 };
+/** 2×2。 */
+const FOOT_2X2: FacilityFootprint = { width: 2, height: 2 };
+
+// --- sc28-foot-basis-2x1(2×1施設の判定基準セルは1×1の8近傍と異なる) -----------
+
+/**
+ * [M20] GDD 6.3 の判定基準セル集合(全占有セルの外周8近傍の和集合 − 自セル群)は
+ * 1×1 の8近傍と異なる集合になる。base content(no patch)の `heat|heat`
+ * (target=forge・+0.2)を使い、forge(content上も2×1定義)を anchor 8 へ
+ * state footprint 2×1 で置く。
+ *
+ * `adjacencyBasisCells(occupiedCells(8, 2×1))` は実測 `[1,2,3,4,7,10,13,14,15,16]`
+ * (10 セル)。一方 `neighborCellIndices(8)`(1×1 の8近傍)は実測
+ * `[1,2,3,7,9,13,14,15]`。差分の cell 4 は 2×1 の基準セルには入るが 1×1 の
+ * 8近傍には入らない ―― cell 4 へ hearth(heat)を置くことで両者の差が
+ * `forge` の隣接乗数(1.2 vs 1.0)として観測できる(footprint を外すと
+ * multiplier が動く反証は adjacencyFootprint.test.ts の同一配置が数値で
+ * 固定済み・conformance 側の反証確認は M20 完了報告に記録)。
+ */
+function sc28BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentForge", { assignedFacilityId: "facilityForgeA" }),
+    mkFacility("facilityForgeA", "forge", 8, ["residentForge"], 1, FOOT_2X1),
+    mkFacility("facilityHeatFar", "hearth", 4),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// --- sc29-foot-basis-2x2(2×2施設の判定基準セル) -------------------------------
+
+/**
+ * [M20] 2×2 の基準セルは 2×1 よりさらに外周が広がる。実測
+ * `adjacencyBasisCells(occupiedCells(8, 2×2))` = `[1,2,3,4,7,10,13,16,19,20,21,22]`
+ * (12セル)。cell 19/22 は 2×1@8 の基準にも 1×1@8 の8近傍にも含まれない
+ * 2×2 固有の下辺外周であり、そこへ hearth を置くことで 2×2 の基準セルが
+ * 正しく使われていることが観測できる。
+ *
+ * content 上 forge は 2×1 定義のままだが GDD 6.1 [2026-07-30裁定]により
+ * 隣接判定は state の footprint が権威なので、ここでは state 側だけ 2×2 へ
+ * 焼き込む(content 側は無改変 = 配置時焼き込みと隣接判定の分離そのものの
+ * 反証を兼ねる)。
+ */
+function sc29BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentForge", { assignedFacilityId: "facilityForgeA" }),
+    mkFacility("facilityForgeA", "forge", 8, ["residentForge"], 1, FOOT_2X2),
+    mkFacility("facilityHeatSouthA", "hearth", 19),
+    mkFacility("facilityHeatSouthB", "hearth", 22),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// --- sc30-foot-neighbor-dedup(近傍側の大型施設も1施設1回) ----------------------
+
+/**
+ * [M20] forge(1×1)@8 の8近傍のうち cell 1 と cell 2 の**両方**を、1 基の
+ * 2×1 hearth(anchor 1)が占有する。adjacency.ts §3(f)「近傍側の大型施設も
+ * 1施設1回」により forge のボーナスは1件分(+0.2)にしかならない ――
+ * 施設単位の重複除去が壊れて占有セルごとに数えると2件分(+0.4)になる
+ * (反証は adjacencyFootprint.test.ts「2セルで接する2×1の近傍はボーナスも
+ * 過密カウントも1件」と同一配置・数値は raw 200,000 vs 400,000)。
+ */
+function sc30BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentForge", { assignedFacilityId: "facilityForgeA" }),
+    mkFacility("facilityForgeA", "forge", 8, ["residentForge"], 1),
+    mkFacility("facilityHeatWide", "hearth", 1, [], 1, FOOT_2X1),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// --- sc31-foot-overcrowd-clamp(過密+大型・クランプはタグ横断で1回) -------------
+
+/** 2×1@8 の判定基準セル(実測・昇順)。sc31 は基準セル全部を smelter で埋める。 */
+const SC31_BASIS_2X1_AT_8 = [1, 2, 3, 4, 7, 10, 13, 14, 15, 16] as const;
+
+/**
+ * [M20] sc16-overcrowd-fine と同じ content patch(`patchOvercrowdFixtures`:
+ * heat|heat target=any +0.1・noise|noise target=any +0.1・threshold 3・
+ * penaltyPerExcess -0.15・clamp ±0.6)を流用し、中心の smelter(heat+noise)を
+ * 2×1 にして基準セル 10 個全部を smelter(heat+noise・1×1)で埋める。
+ * tests/engine/adjacencyFootprint.test.ts「タグごとに独立集計し、ペナは
+ * **タグ横断の合計**を1回だけクランプする」と同一設定 ―― heat/noise 各10件
+ * → 有効2件+超過8件、ペナ生値 2タグ×8×-0.15=-2.40 が clampFix(±0.6)で
+ * -0.60 に丸まり乗数 0.8 になる。**タグごとに別々クランプしていたら**
+ * 各タグ -1.20→クランプ-0.60ずつで合計-1.20、乗数0.2になる ――
+ * この「0.8 vs 0.2」がロードマップ M20 追記の反証素材そのもの
+ * (実際の golden 値はシード揺らぎ±20%を含むため素の 0.1 とは僅かに異なるが、
+ * 「タグ横断1回 vs タグ別」の相対差はシード非依存で残る)。
+ */
+function sc31BuildState(worldSeed: string): GameState {
+  const entities: EntityState[] = [
+    mkResident("residentSmelterCenter", { assignedFacilityId: "facilitySmelterCenter" }),
+    mkFacility("facilitySmelterCenter", "smelter", 8, ["residentSmelterCenter"], 1, FOOT_2X1),
+    mkResource("resourceIron", "iron", 0),
+  ];
+  for (const cell of SC31_BASIS_2X1_AT_8) {
+    entities.push(mkFacility(`facilitySmelterN${String(cell)}`, "smelter", cell));
+  }
+  return createGameState(baseMeta(worldSeed), entities);
+}
+
+// --- sc32-foot-board-edge(大型施設の盤端配置・回り込み無し) --------------------
+
+/**
+ * [M20] forge(2×1)を盤端(anchor 4・x=4,width2 で x+2=6 ちょうど = 右端)へ置く。
+ * 基準セルは盤外がクリップされて実測 `[3,9,10,11]`(4セルのみ・8近傍満杯の
+ * 10セルより少ない)。cell 3(基準セル内)の hearth は効き、cell 6(次行の
+ * 先頭・横方向の回り込みでのみヒットする位置)の hearth は効かない ――
+ * 回り込みが起きればここが動く(反証は adjacencyFootprint.test.ts「盤端の
+ * 大型施設は回り込まない」と同一配置・数値は raw 0 vs 200,000)。
+ */
+function sc32BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentForge", { assignedFacilityId: "facilityForgeA" }),
+    mkFacility("facilityForgeA", "forge", 4, ["residentForge"], 1, FOOT_2X1),
+    mkFacility("facilityHeatBasis", "hearth", 3),
+    mkFacility("facilityHeatWrap", "hearth", 6),
+    mkResource("resourceIron", "iron", 0),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// ===========================================================================
+// 7. SCENARIOS(spec §4.3 の表)
 // ===========================================================================
 
 const sc06BoardDefault = sc06Board();
@@ -1127,6 +1279,19 @@ export const SCENARIOS: readonly Scenario[] = [
   { id: "sc25-life-opt-in", contentPatch: null, buildState: sc25BuildState },
   { id: "sc26-bond-milestone", contentPatch: null, buildState: sc26BuildState },
   { id: "sc27-partner-loss", contentPatch: null, buildState: sc27BuildState },
+  { id: "sc28-foot-basis-2x1", contentPatch: null, buildState: sc28BuildState },
+  { id: "sc29-foot-basis-2x2", contentPatch: null, buildState: sc29BuildState },
+  { id: "sc30-foot-neighbor-dedup", contentPatch: null, buildState: sc30BuildState },
+  {
+    id: "sc31-foot-overcrowd-clamp",
+    contentPatch: patchOvercrowdFixtures({
+      heatHeatValueFP: 0.1,
+      noiseNoiseValueFP: 0.1,
+      penaltyPerExcessFP: -0.15,
+    }),
+    buildState: sc31BuildState,
+  },
+  { id: "sc32-foot-board-edge", contentPatch: null, buildState: sc32BuildState },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

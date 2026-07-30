@@ -32,7 +32,12 @@
     "sc25-life-opt-in-alpha",
     "sc26-bond-milestone-alpha",
     "sc26-bond-milestone-split-alpha",
-    "sc27-partner-loss-alpha"
+    "sc27-partner-loss-alpha",
+    "sc28-foot-basis-2x1-alpha",
+    "sc28-foot-basis-2x1-split-alpha",
+    "sc29-foot-basis-2x2-alpha",
+    "sc30-foot-neighbor-dedup-alpha",
+    "sc32-foot-board-edge-alpha"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -106,6 +111,18 @@
       "file": "sc26-bond-milestone-split-alpha.json",
       "vectorId": "sc26-bond-milestone-split-alpha"
     },
-    { "file": "sc27-partner-loss-alpha.json", "vectorId": "sc27-partner-loss-alpha" }
+    { "file": "sc27-partner-loss-alpha.json", "vectorId": "sc27-partner-loss-alpha" },
+    { "file": "sc28-foot-basis-2x1-alpha.json", "vectorId": "sc28-foot-basis-2x1-alpha" },
+    {
+      "file": "sc28-foot-basis-2x1-split-alpha.json",
+      "vectorId": "sc28-foot-basis-2x1-split-alpha"
+    },
+    { "file": "sc29-foot-basis-2x2-alpha.json", "vectorId": "sc29-foot-basis-2x2-alpha" },
+    { "file": "sc30-foot-neighbor-dedup-alpha.json", "vectorId": "sc30-foot-neighbor-dedup-alpha" },
+    {
+      "file": "sc31-foot-overcrowd-clamp-alpha.json",
+      "vectorId": "sc31-foot-overcrowd-clamp-alpha"
+    },
+    { "file": "sc32-foot-board-edge-alpha.json", "vectorId": "sc32-foot-board-edge-alpha" }
   ]
 }

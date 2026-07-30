@@ -337,4 +337,32 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     "mem-partner-loss-morale-penalty",
     "mem-death-consequence-order",
   ]),
+
+  // --- sc28〜sc32: footprint / 過密(M20: conformance 拡張 #3・GDD 6.1/6.3) --------------
+  // seedOffset(±20%)の影響下でもタグペア係数は発火する(sc16 と同じ理由で seed
+  // 依存だが、rngState を逐次消費する系統ではない = C7 対象外)。sc16-overcrowd-fine
+  // が alpha のみで足りているのと同じ理由(rng-worldseed-variation は sc01/sc06/
+  // sc11/sc24 が既に踏んでいる)で、footprint 系も alpha 1本のみとする。
+  plan("sc28-foot-basis-2x1-alpha", "sc28-foot-basis-2x1", SEEDS.alpha, 300, [
+    "foot-basis-cells-2x1",
+    "foot-serialize-roundtrip",
+  ]),
+  plan(
+    "sc28-foot-basis-2x1-split-alpha",
+    "sc28-foot-basis-2x1",
+    SEEDS.alpha,
+    300,
+    ["foot-split-invariant"],
+    { splitTicks: [150] },
+  ),
+  plan("sc29-foot-basis-2x2-alpha", "sc29-foot-basis-2x2", SEEDS.alpha, 300, [
+    "foot-basis-cells-2x2",
+  ]),
+  plan("sc30-foot-neighbor-dedup-alpha", "sc30-foot-neighbor-dedup", SEEDS.alpha, 300, [
+    "foot-neighbor-dedup",
+  ]),
+  plan("sc31-foot-overcrowd-clamp-alpha", "sc31-foot-overcrowd-clamp", SEEDS.alpha, 1440, [
+    "foot-overcrowd-cross-tag-clamp",
+  ]),
+  plan("sc32-foot-board-edge-alpha", "sc32-foot-board-edge", SEEDS.alpha, 300, ["foot-board-edge"]),
 ];
