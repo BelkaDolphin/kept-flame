@@ -179,6 +179,9 @@
   - **要ユーザー判断(未処理・次セッションで裁定)**: ①M49★建設/増築コストがcontentスキーマに無い(GDD 12.1のfacilityにコスト項なし→配置/増築が資源を払わない。廃材3出口(1)の呼び出し元不在)→facilityスキーマかbalanceに置く裁定 ②M49★`beginResearch`(研究対象選択)の担当タスク不在(解消はgolden変動=bump伴う) ③M12★memoir/bond定数(bio8種・上限12件・bond上限100/日次+1.0/節目10,25,50/相方喪失=bond値50%士気ペナ)のGDD 7.3追記 ④M12★memoir/bondのtick結線タスク未割当(M13でrecall結線と同時が候補) ⑤M46: CODEOWNERS自己保護行の承認/status checks粒度(ADR-030(4)の個別命名 vs 1job化)/additive意味論diff(削除reject等)の機械強制が未実装と判明=別タスク化要否/PLACEHOLDERジョブはM38までrequired checksに含めない運用。
   - 非ブロッキング: M12のrecentMemoirHighlightsは現状bondMilestoneのみ(成文化・探索保護はCodifyState作業者紐付け/M21待ち)。M46のconformance CIジョブ(playwright install)は実runner未検証。
 
+- [2026-07-30] **持ち越し裁定5群を全件「推奨どおり」でユーザー承認・文書反映完了**(Fable5編集): ①建設/増築コスト=**facilityスキーマ側**(GDD 12.1に[2026-07-30裁定]、実装はM50) ②beginResearch=**新タスクM50**として独立登録(bump束ね運用・実施時期は統率者判断) ③memoir/bond定数(bio8種/上限12件/bond上限100・日次+1.0・節目10,25,50/相方喪失=bond値50%一時士気ペナ)をGDD 7.3に正本化 ④memoir/bond tick結線=**M13に含める**(recall結線と同時、GDD 7.3+ロードマップM13行に明記) ⑤M46細目4点確定(CODEOWNERS自己保護行承認/status checks個別命名維持/additive意味論diff=**新タスクM51**登録/PLACEHOLDERはM38までrequired checksに含めない)。ロードマップはタスク数48→**51**(+980k・タイトルもM1〜M51へ)。
+- [2026-07-30] **content-guardrail.yml 実runner初回確認**: workflow_dispatchで実行→9/10段パスだが `typecheck-and-test` が失敗。原因=`conformance/harnessData.json` はgitignoreされた生成物なのにtypecheck前に生成していない(ローカルでは常に存在するためクリーンcheckoutでのみ発現)。**修正済み**(コミットbd3c2f8: typecheck前に`conformance:gen-harness-data`実行)→再ディスパッチ済み。
+
 ## 次のステップ
 
 **[2026-07-27 再整理]** #12再測定・ロードマップ化が完了したため再構成。
