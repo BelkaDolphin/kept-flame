@@ -251,6 +251,8 @@ jobs:
           cache: "npm"
       - name: Install dependencies
         run: npm ci
+      - name: "conformance/harnessData.json を生成(gitignored 生成物。tsc が conformance/harnessMain.ts 経由で参照するため typecheck 前に必須)"
+        run: npm run conformance:gen-harness-data
       - name: Typecheck
         run: npm run typecheck
       - name: "Vitest(スコープはPRの変更範囲で決定)"
