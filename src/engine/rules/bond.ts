@@ -62,7 +62,7 @@ import {
   type EntityId,
   type GameState,
 } from "../state/state";
-import { setBondValue, setField, updateEntity } from "../state/update";
+import { setBondValues, setField, updateEntity } from "../state/update";
 import { appendMemoirEntry } from "./memoir";
 import { isWorkerActive } from "./production";
 import { RulesError } from "./types";
@@ -202,20 +202,65 @@ export function computeBondRates(state: GameState, tick: number): BondRates {
 }
 
 /**
- * `before` → `after` の間に新たに超えた節目のうち**最高位**を返す(複数またぎは
- * 最高位 1 件だけを記録し、1 度の区間で bondMilestone が段階分だけ増殖しない
- * ようにする)。超えていなければ null。tier は 1 始まり。
+ * 節目 1 件の到達(`tier` は 1 始まり、`tick` は到達した**絶対 tick**)。
+ * `residentAId`/`residentBId` は memoirLog を書く 2 者。
  */
-function highestTierCrossed(before: Fix, after: Fix): number | null {
-  let crossed: number | null = null;
+interface MilestoneCrossing {
+  readonly tick: number;
+  readonly tier: number;
+  readonly residentAId: EntityId;
+  readonly residentBId: EntityId;
+}
+
+/**
+ * [M13] `before`(区間開始時の値)から `after`(区間終了時の値)へ進む間に新たに
+ * 超えた節目を**すべて**、それぞれの**到達 tick を解析的に求めて**返す。
+ *
+ * ===========================================================================
+ * なぜ「最高位 1 件・tick は区間終端」から変えたのか(分割不変性)
+ * ===========================================================================
+ * M12 の初版は「複数またぎは最高位 1 件」+「tick は呼び出し側が渡す区間終端」
+ * だった。tick ループへ結線すると、この 2 点はどちらも**分割不変性を壊す**
+ * (advance.ts §3 / M13 検収条件):
+ *
+ *   (1) tick = 区間終端 だと、区間 [0,20) を 1 回で進めた場合と [0,10)+[10,20) に
+ *       割った場合で、到達が (10,15] に入る節目の記録 tick が 20 と 15 に分かれる。
+ *   (2) 最高位 1 件 だと、tier1 を t=5、tier2 を t=15 で超える区間を t=10 で割ると
+ *       「tier1 と tier2 の 2 件」になり、割らない場合の「tier2 の 1 件」と食い違う。
+ *
+ * 到達 tick は 1 次関数なので閉形式で厳密に求まる:
+ *   到達 tick = fromTick + ceil((閾値 − before) / レート)
+ * これを整数演算(`ceil(a/b) = floor((a + b − 1) / b)`)で計算する。どこで区切っても
+ * 同じ節目・同じ tick になり、記録件数も一致する。
+ *
+ * 返す配列は (tick, tier) 昇順。呼び出し側は複数ペアぶんを集めてから
+ * (tick, pairKey, tier) 昇順へ並べ替えて追記する({@link applyBondProgress})。
+ */
+function crossingsInInterval(
+  before: Fix,
+  after: Fix,
+  gainPerTickFix: Fix,
+  fromTick: number,
+  residentAId: EntityId,
+  residentBId: EntityId,
+): readonly MilestoneCrossing[] {
+  const rate = toRaw(gainPerTickFix);
+  if (rate <= 0) return [];
+  const result: MilestoneCrossing[] = [];
   for (let i = 0; i < BOND_MILESTONE_TIER_FIXES.length; i++) {
     const threshold = BOND_MILESTONE_TIER_FIXES[i];
     if (threshold === undefined) continue;
-    if (toRaw(before) < toRaw(threshold) && toRaw(after) >= toRaw(threshold)) {
-      crossed = i + 1;
-    }
+    const need = toRaw(threshold) - toRaw(before);
+    if (need <= 0) continue; // 区間開始時点で既に超えている。
+    if (toRaw(after) < toRaw(threshold)) continue; // この区間では届かない。
+    result.push({
+      tick: fromTick + floorDivInt(need + rate - 1, rate),
+      tier: i + 1,
+      residentAId,
+      residentBId,
+    });
   }
-  return crossed;
+  return result;
 }
 
 /**
@@ -224,11 +269,15 @@ function highestTierCrossed(before: Fix, after: Fix): number | null {
  * ({@link BOND_MILESTONE_TIER_FIXES})を新たに超えたペアには両者の memoirLog へ
  * `bondMilestone` エントリを追記する(GDD 7.3「記憶の可視化」の材料)。
  *
- * `atTick` はエントリのタイムスタンプに使う絶対 tick(呼び出し側が
- * production.ts と同じ「区間の終端(boundary)」を渡すことを想定)。
+ * `atTick` は**区間の終端**(呼び出し側が production.ts と同じ boundary を渡す)。
+ * [M13] 区間の開始は `atTick − deltaTicks` として導出し、節目の記録 tick は
+ * そこから**解析的に求めた到達 tick**にする({@link crossingsInInterval})。
+ * これが分割不変性の要件(advance.ts §3)。
  *
- * 決定論: {@link BondRates.entries} は既に pairKey 昇順(§3)なので、この関数は
- * 受け取った順にそのまま処理するだけでよい(再ソートしない)。
+ * 決定論: {@link BondRates.entries} は既に pairKey 昇順(§3)だが、追記順は
+ * **(到達 tick, pairKey, tier) 昇順**へ並べ替える。pairKey 昇順のまま追記すると
+ * 「区間を割ると 2 ペアの追記順が入れ替わる」形で分割不変性が壊れる
+ * (到達 tick の早い側が必ず先に記録される、が正しい順序)。
  *
  * @throws {RulesError} deltaTicks が 1 以上の整数でない場合
  */
@@ -241,31 +290,55 @@ export function applyBondProgress(
   if (!Number.isSafeInteger(deltaTicks) || deltaTicks < 1) {
     throw new RulesError(`applyBondProgress: deltaTicks ${String(deltaTicks)} は 1 以上の整数`);
   }
-  let next = state;
+  const fromTick = atTick - deltaTicks;
+  const crossings: MilestoneCrossing[] = [];
+  const updates: [string, Fix][] = [];
   for (const rateEntry of rates.entries) {
     if (toRaw(rateEntry.gainPerTickFix) === 0) continue;
     const gain = mulFixInt(rateEntry.gainPerTickFix, deltaTicks);
-    const before = bondValueOf(next, rateEntry.residentAId, rateEntry.residentBId);
+    const before = bondValueOf(state, rateEntry.residentAId, rateEntry.residentBId);
     const after = clampFix(addFix(before, gain), FIX_ZERO, BOND_MAX_FIX);
     if (toRaw(after) === toRaw(before)) continue;
 
-    next = setBondValue(next, bondPairKeyOf(rateEntry.residentAId, rateEntry.residentBId), after);
-
-    const crossedTier = highestTierCrossed(before, after);
-    if (crossedTier !== null) {
-      next = appendMemoirEntry(next, rateEntry.residentAId, {
-        kind: "bondMilestone",
-        tick: atTick,
-        partnerId: rateEntry.residentBId,
-        tier: crossedTier,
-      });
-      next = appendMemoirEntry(next, rateEntry.residentBId, {
-        kind: "bondMilestone",
-        tick: atTick,
-        partnerId: rateEntry.residentAId,
-        tier: crossedTier,
-      });
+    updates.push([bondPairKeyOf(rateEntry.residentAId, rateEntry.residentBId), after]);
+    for (const crossing of crossingsInInterval(
+      before,
+      after,
+      rateEntry.gainPerTickFix,
+      fromTick,
+      rateEntry.residentAId,
+      rateEntry.residentBId,
+    )) {
+      crossings.push(crossing);
     }
+  }
+
+  // Map の複製を 1 枚に抑える(update.ts の setBondValues)。`rates.entries` は
+  // pairKey 昇順で重複が無いので、1 件ずつ書いた場合と結果は同一。
+  let next = setBondValues(state, updates);
+
+  crossings.sort((x, y) => {
+    if (x.tick !== y.tick) return x.tick < y.tick ? -1 : 1;
+    const keyOrder = compareUtf16(
+      bondPairKeyOf(x.residentAId, x.residentBId),
+      bondPairKeyOf(y.residentAId, y.residentBId),
+    );
+    if (keyOrder !== 0) return keyOrder;
+    return x.tier - y.tier;
+  });
+  for (const crossing of crossings) {
+    next = appendMemoirEntry(next, crossing.residentAId, {
+      kind: "bondMilestone",
+      tick: crossing.tick,
+      partnerId: crossing.residentBId,
+      tier: crossing.tier,
+    });
+    next = appendMemoirEntry(next, crossing.residentBId, {
+      kind: "bondMilestone",
+      tick: crossing.tick,
+      partnerId: crossing.residentAId,
+      tier: crossing.tier,
+    });
   }
   return next;
 }

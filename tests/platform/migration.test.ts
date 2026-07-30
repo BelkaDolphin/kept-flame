@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { DOMAIN_TAGS } from "../../src/engine/rng/domainTags";
-import { toSerializable } from "../../src/engine/state/serialize";
+import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
 import type { GameState } from "../../src/engine/state/state";
 import { createGameState } from "../../src/engine/state/update";
 import {
@@ -338,7 +338,90 @@ describe("migrateSavePayload", () => {
   });
 
   it("移行経路の無い旧版は黙って読まない", () => {
-    // 現在 PAYLOAD_MIGRATIONS は空なので、v0 の payload は経路が無い = 停止する。
+    // PAYLOAD_MIGRATIONS の最古の段は v1→v2([M16])なので、v0 の payload は
+    // 経路が無い = 停止する。
     expect(() => migrateSavePayload({ saveSchemaVersion: 0 })).toThrow(SaveMigrationError);
+  });
+});
+
+// --- 7. [M16] v1 → v2(facility の footprint 導入) ------------------------
+//
+//   v1 は「全施設 1×1」であり、v2 では 1×1 は footprint キーを持たない正準形
+//   (serialize.ts §7)なので、**構造変換は無く版だけが進む**。よってこの節が
+//   固定するのは「版が進むこと」と「移行後のバイト列が現行ビルドの出力と同一で
+//   あること」の 2 点である。
+
+describe("v1 → v2(saveSchemaVersion・M16)", () => {
+  /** v1 のセーブ(= 現行より 1 つ古いスキーマ版を名乗る payload)。 */
+  const V1_STATE = stateOf([...STATE.entityStateById.values()], { saveSchemaVersion: 1 });
+
+  it("現行版は 2 で、連鎖は v1→v2 の 1 段だけ", () => {
+    expect(SAVE_SCHEMA_VERSION).toBe(2);
+    expect(PAYLOAD_MIGRATIONS).toHaveLength(1);
+    expect(PAYLOAD_MIGRATIONS[0]?.from).toBe(1);
+    expect(PAYLOAD_MIGRATIONS[0]?.to).toBe(2);
+  });
+
+  it("v1 の payload は 1 段だけ適用されて v2 を名乗る", () => {
+    const result = migrateSavePayload(plainSerialized(V1_STATE));
+    expect(result.fromVersion).toBe(1);
+    expect(result.appliedSteps).toHaveLength(1);
+    expect((result.value as Record<string, unknown>)["saveSchemaVersion"]).toBe(
+      SAVE_SCHEMA_VERSION,
+    );
+  });
+
+  it("入力の payload を破壊しない(純関数)", () => {
+    const parsed = plainSerialized(V1_STATE);
+    const snapshot = JSON.stringify(parsed);
+    migrateSavePayload(parsed);
+    expect(JSON.stringify(parsed)).toBe(snapshot);
+  });
+
+  it("v1 以外のキーは触らない(§1(c) 意味を解釈しない)", () => {
+    const parsed = plainSerialized(V1_STATE);
+    parsed["futureField"] = 7;
+    const migrated = migrateSavePayload(parsed).value as Record<string, unknown>;
+    expect(migrated["futureField"]).toBe(7);
+    expect(migrated["entityStateById"]).toEqual(parsed["entityStateById"]);
+  });
+
+  it("v1 セーブ → v2 の往復が現行ビルドの出力とバイト同一(検収条件)", () => {
+    const migrated = migrateSavePayload(plainSerialized(V1_STATE)).value;
+    const restored = fromSerializable(migrated);
+    expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
+    // 同じ entity 集合を現行版として書いたセーブと 1 bit も違わない。
+    expect(JSON.stringify(toSerializable(restored))).toBe(encodeSaveRecord(STATE).payload);
+  });
+
+  it("v1 セーブの全施設は 1×1 のまま(既定値が現行挙動と厳密一致)", () => {
+    const restored = fromSerializable(migrateSavePayload(plainSerialized(V1_STATE)).value);
+    const facilities = [...restored.entityStateById.values()].filter(
+      (entity) => entity.kind === "facility",
+    );
+    expect(facilities).not.toHaveLength(0);
+    for (const entity of facilities) {
+      if (entity.kind !== "facility") throw new Error("kind が facility でない");
+      expect(entity.footprint).toBeUndefined();
+    }
+  });
+
+  it("エンベロープ v0 かつ スキーマ v1 の旧セーブは 2 軸が連鎖してロードできる", () => {
+    const restored = decodeSaveRecord(legacySave(V1_STATE));
+    expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
+    expect([...restored.entityStateById.keys()]).toEqual([...STATE.entityStateById.keys()]);
+    expect(JSON.stringify(toSerializable(restored))).toBe(encodeSaveRecord(STATE).payload);
+  });
+
+  it("v2 セーブは 1 段も走らない(現行版はそのまま通す)", () => {
+    const parsed = plainSerialized(STATE);
+    const result = migrateSavePayload(parsed);
+    expect(result.appliedSteps).toEqual([]);
+    expect(result.value).toBe(parsed);
+  });
+
+  it("payload がオブジェクトでなければ v1 段は拒否する", () => {
+    expect(() => PAYLOAD_MIGRATIONS[0]?.migrate("text")).toThrow(SaveMigrationError);
+    expect(() => PAYLOAD_MIGRATIONS[0]?.migrate(null)).toThrow(SaveMigrationError);
   });
 });

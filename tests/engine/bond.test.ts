@@ -146,7 +146,12 @@ describe("[M12] applyBondProgress((A) 区間の閉形式・production.ts と同�
     // 節目をちょうど超えるだけの deltaTicks を逆算する必要はなく、十分に大きく
     // 取って「少なくとも 1 段は超える」ことだけを確認すれば良い。
     const rates = computeBondRates(state, 0);
-    const after = applyBondProgress(state, rates, 100_000, 42);
+    // [M13] 第 4 引数は**区間の終端**であり、区間開始は `終端 − deltaTicks` として
+    // 導出される。節目の記録 tick は「その節目へ到達した解析的な tick」なので、
+    // 区間 [0, 100_000) では tier1(=10.0)への到達 = ceil(10e6 / 694) = 14410。
+    // (以前は「区間終端をそのまま記録」だったが、それでは分割不変性が壊れる。
+    //  理由は rules/bond.ts の crossingsInInterval を参照)
+    const after = applyBondProgress(state, rates, 100_000, 100_000);
 
     const logA = memoirLogOf(after, eid("residentA"));
     const logB = memoirLogOf(after, eid("residentB"));
@@ -156,8 +161,8 @@ describe("[M12] applyBondProgress((A) 区間の閉形式・production.ts と同�
     expect(milestoneB).toBeDefined();
     if (milestoneA?.kind === "bondMilestone") {
       expect(milestoneA.partnerId).toBe(eid("residentB"));
-      expect(milestoneA.tick).toBe(42);
-      expect(milestoneA.tier).toBeGreaterThanOrEqual(1);
+      expect(milestoneA.tick).toBe(14_410);
+      expect(milestoneA.tier).toBe(1);
     }
     if (milestoneB?.kind === "bondMilestone") {
       expect(milestoneB.partnerId).toBe(eid("residentA"));

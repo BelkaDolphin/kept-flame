@@ -295,22 +295,63 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 1。
+ * payload の中身の版(ADR 3軸(a))。現行 = 2([M16] facility の footprint 導入)。
  *
- * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` および
- * `conformance/scenarios.ts` の `baseMeta()` が返す値と一致していること。
+ * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
+ * (= 現行ビルドが書くセーブの形)。
+ *
+ * **`conformance/scenarios.ts` の `baseMeta()` は 1 のまま**である。golden vector は
+ * 「過去に採った観測値」であって現行ビルドのセーブではなく、メタ 3 軸を固定
+ * リテラルにしてあるのは意図(golden-vector-spec §3.4)だからである。結果として
+ * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
+ * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 1;
+export const SAVE_SCHEMA_VERSION = 2;
 
 /**
- * セーブスキーマ版の連鎖。**現在は空**である。
+ * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
  *
- * 空なのは「まだスキーマを一度も変えていない」からであって、枠組みが無いから
- * ではない。`entityStateById` の形やフィールドを変える変更を入れる際は、
- * ここへ `{from: 1, to: 2, migrate}` を足すだけで
- * `migrateSavePayload` が自動的に連鎖する(§1(b) の検査も自動で効く)。
+ * **構造の変換は無く、版だけを進める**。v1 のセーブは全施設が 1×1 であり、v2 では
+ * 1×1 は `footprint` キーを持たない正準形(serialize.ts §7)だからで、
+ * 「v1 の payload をそのまま v2 として読む」と現行挙動に厳密一致する。
+ *
+ * それでも版を上げる理由は**旧ビルドに新セーブを読ませない**ことである:
+ * `fromSerializable` は entity の未知フィールドを読み飛ばす(serialize.ts §2)ので、
+ * v1 ビルドが v2 のセーブを読むと 2×2 の施設が**黙って 1×1 になる**
+ * ——盤面が別物になり、隣接乗数も産出も静かにずれる。`migrateSavePayload` の
+ * 未来版拒否(§1(d))が働くのは payload の `saveSchemaVersion` が現行より大きい
+ * ときだけなので、この版差が無いと旧ビルドはその静かな縮退を検出できない。
+ *
+ * 版フィールドを書き換えるのは §1(c) の「意味を解釈しない」に反しない(v0→v1 段が
+ * `saveFormatVersion: 1` を立てるのと同じ)。書き換えないと復元後の state が
+ * v1 を名乗り続け、保存し直しても永久に v1 のままになる。
  */
-export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [];
+const migratePayloadV1ToV2: SaveMigrationStep = {
+  from: 1,
+  to: 2,
+  summary:
+    "facility の footprint(GDD 6.1 の 2×1 / 2×2)を導入。v1 の全施設は 1×1 = v2 の既定値" +
+    "(キー省略)なので構造変換は無く、saveSchemaVersion のみ 2 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v1 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 2;
+    return next;
+  },
+};
+
+/**
+ * セーブスキーマ版の連鎖(`from` 昇順)。
+ *
+ * 段を足すときは `{from: N, to: N+1, migrate}` を末尾へ追加し
+ * {@link SAVE_SCHEMA_VERSION} を +1 するだけでよい(§1(b) の検査が自動で効く)。
+ */
+export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [migratePayloadV1ToV2];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");
 

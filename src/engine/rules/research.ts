@@ -37,15 +37,24 @@ import {
   type ResearchState,
 } from "../state/state";
 import { setField, updateEntity } from "../state/update";
+import { isIrreversiblyLost } from "./techMemory";
 import { RulesError, requireTechDef, type EngineContent } from "./types";
 
 /**
  * 研究点が入る「現在の研究」= 未完了の research entity のうち ID 昇順で最初の 1 件
  * (§2)。全て完了済みなら undefined。
+ *
+ * [M13] (B) 一回性喪失した技術(GDD 7.4 `rareIrreversible`)は**対象から外す**。
+ * 喪失時に `completedTick` は null へ戻る(= 解禁の取り消し)ので、外さないと
+ * 「永久に失ったはずの技術へ研究点が吸われ続ける」状態になる。(A)
+ * `criticalRecoverable` は `loss` が付いていても対象に残る = 再研究できる
+ * (GDD 7.4「失っても必ず再取得可能」)。
  */
 export function currentResearch(state: GameState): ResearchState | undefined {
   for (const research of entitiesOfKind(state, "research")) {
-    if (research.completedTick === null) return research;
+    if (research.completedTick !== null) continue;
+    if (isIrreversiblyLost(research)) continue;
+    return research;
   }
   return undefined;
 }

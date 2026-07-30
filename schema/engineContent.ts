@@ -127,7 +127,11 @@ import type {
   TechDef,
   TownParams,
 } from "../src/engine/rules/types";
-import { entityIdFromString, type EntityId } from "../src/engine/state/state";
+import {
+  entityIdFromString,
+  type EntityId,
+  type FacilityFootprint,
+} from "../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../src/engine/stochastic";
 import type { AdjacencyContent, AdjacencyRule } from "./adjacency";
 import type {
@@ -444,6 +448,21 @@ function toWorkerSlotsByLevel(slots: FacilityContent["slots"]): readonly number[
   return [slots.lv1, slots.lv2, slots.lv3, slots.lv4, slots.lv5];
 }
 
+/**
+ * [M16] `footprint` → engine の {@link FacilityDef.footprint}(GDD 6.1)。
+ *
+ * schema 側で「整数・1〜2」まで検証済み(`schema/facility.ts` の
+ * `FOOTPRINT_DIMENSION_RANGE`)なので写すだけである。engine 側の上限
+ * `FOOTPRINT_DIM_MAX` との突き合わせは `tests/schema/engineContent*.test.ts` が
+ * 固定する(ADJACENCY_TAGS と FACILITY_TAGS の突き合わせと同じ流儀)。
+ *
+ * 1×1 も**そのまま写す**(engine 側は `FacilityState` の直列化でのみ 1×1 を省略
+ * する)。content 内部表現は直列化されないので、ここで畳む理由が無い。
+ */
+function toFootprint(footprint: FacilityContent["footprint"]): FacilityFootprint {
+  return { width: footprint.width, height: footprint.height };
+}
+
 function toFacilityDef(content: FacilityContent, issues: IssueCollector): FacilityDef | undefined {
   const path = `facility.${content.id}`;
   const tags = toEngineTags(content, path, issues);
@@ -493,7 +512,9 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
   // [M49] 就労スロット(GDD 7.7)は content 側で必須なので条件分岐が要らない。
   // 読むのは engine の commands.ts(住民割当の上限検査)だけで、生産式は
   // 実際の workerIds を数えるため golden vector には影響しない。
+  // [M16] footprint は content 側で必須なので条件分岐が要らない(slots と同じ)。
   const workerSlotsByLevel = toWorkerSlotsByLevel(content.slots);
+  const footprint = toFootprint(content.footprint);
   const beds = content.bedCapacityCurve;
   const base =
     beds === null
@@ -504,6 +525,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           outputPerTickByLevel,
           output,
           workerSlotsByLevel,
+          footprint,
         }
       : {
           id: entityIdFromString(content.id),
@@ -512,6 +534,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           outputPerTickByLevel,
           output,
           workerSlotsByLevel,
+          footprint,
           bedCapacityByLevel: [...beds],
         };
   if (statWeights === null && storage === null) return base;
@@ -637,12 +660,19 @@ function toTechDef(content: TechContent, issues: IssueCollector): TechDef | unde
   if (researchCostFix === undefined) return undefined;
   // [M6] era / lossClass / prereqs を engine へ渡す(GDD 5.1 / 7.4 / 11.4-1)。
   // prereqs は ID 昇順へ正規化する(rules/techTree.ts の走査順の前提)。
+  // [M13] 実地要件の施設(GDD 5 の「該当施設」)。engine は
+  //   (1) masteryResist(u,t) の蓄積場所
+  //   (2) 想起困難の「当該 tech 関連生産」の解決
+  // に使う(rules/techMemory.ts §1)。`recipe` / `count`(N 回稼働)はレシピ系が
+  // 未実装なので**写さない**(黙って捨てるのではなく、この注記が唯一の宣言)。
+  // facility の実在確認は contentBundle.ts の cross-ref が済ませている。
   return {
     id: entityIdFromString(content.id),
     researchCostFix,
     eraId: content.era,
     lossClass: content.lossClass,
     prereqs: [...content.prereqs].sort(compareUtf16).map((id) => entityIdFromString(id)),
+    fieldFacilityId: entityIdFromString(content.fieldRequirement.facility),
   };
 }
 
@@ -947,6 +977,17 @@ function toRecallRiskParams(
     return fix;
   };
 
+  // [M13] 省略可(欠落 = 定着が蓄積しない)。指定されていれば 1e6 化する。
+  const masteryGainFix =
+    p.masteryGainPerFieldWorkDay === null
+      ? undefined
+      : toFix(
+          p.masteryGainPerFieldWorkDay,
+          `${path}.masteryGainPerFieldWorkDay`,
+          issues,
+          "masteryGainPerFieldWorkDay",
+        );
+
   return {
     basePFix: get("base_p"),
     pMaxFix: get("p_max"),
@@ -963,6 +1004,9 @@ function toRecallRiskParams(
       p.memoryKeeperTraitId === null ? null : entityIdFromString(p.memoryKeeperTraitId),
     durationMinTicks: p.durationTicksMin,
     durationMaxTicks: p.durationTicksMax,
+    // [M13] 定着度の蓄積速度。省略時はフィールドごと出さない
+    // (`masteryGainPerFieldWorkDayFix` 不在 = 蓄積しない・rules/types.ts)。
+    ...(masteryGainFix === undefined ? {} : { masteryGainPerFieldWorkDayFix: masteryGainFix }),
   };
 }
 

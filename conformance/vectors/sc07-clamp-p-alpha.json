@@ -2,26 +2,26 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1365,
+    "canonicalJsonLength": 1837,
     "counters": {
-      "rateChangeEventCount": 2,
-      "recallOccurrenceCount": 3,
+      "rateChangeEventCount": 3,
+      "recallOccurrenceCount": 6,
       "segmentCount": 434,
       "stochasticStepCount": 432,
       "stochasticTrialCount": 3888
     },
     "probe": {
       "entityCount": 8,
-      "recallImpairedResidentCount": 1,
-      "recallImpairedUntilTickSum": 10321,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 538350000000,
+      "resourceStockSumRaw": 1296000000000,
       "rngStateDomainCount": 1,
-      "rngStateWordsXor": 813177570,
+      "rngStateWordsXor": 2391803534,
       "tick": 4320
     },
-    "stateDigest": "207abe2b5d565d4fe70aeaf5266aec5b"
+    "stateDigest": "b22b133435731c58fae4f21a22625424"
   },
   "formatVersion": 1,
   "fromTick": 0,

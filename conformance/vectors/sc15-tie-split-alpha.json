@@ -2,7 +2,7 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1023,
+    "canonicalJsonLength": 1108,
     "counters": {
       "rateChangeEventCount": 4,
       "recallOccurrenceCount": 0,
@@ -21,7 +21,7 @@
       "rngStateWordsXor": 0,
       "tick": 2000
     },
-    "stateDigest": "91c76258788c025c544223761b59e308"
+    "stateDigest": "3c4662265a6c03e254835820bc865f56"
   },
   "formatVersion": 1,
   "fromTick": 0,

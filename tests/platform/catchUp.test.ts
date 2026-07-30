@@ -186,6 +186,7 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     entityStateById: new Map(entries),
     rngState: state.rngState,
     bondByPairKey: state.bondByPairKey,
+    techMemoryByKey: state.techMemoryByKey,
   };
 }
 
@@ -215,6 +216,7 @@ describe("assertCanonicalSnapshot", () => {
       entityStateById: new Map([[id("residentZzz"), first]]),
       rngState: BOARD.rngState,
       bondByPairKey: BOARD.bondByPairKey,
+      techMemoryByKey: BOARD.techMemoryByKey,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);

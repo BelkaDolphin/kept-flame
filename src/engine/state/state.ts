@@ -303,6 +303,23 @@ export function isAliveResident(resident: ResidentState): boolean {
 }
 
 /**
+ * [M16] 施設の占有形状(GDD 6.1「1 セル = 1 施設(大型は 2×1 / 2×2 占有)」)。
+ *
+ * 幅・高さはともに 1〜`FOOTPRINT_DIM_MAX`(= 2)の整数。占有セル集合そのものは
+ * 持たず、基準セル(アンカー)`FacilityState.cellIndex` と本値から
+ * `footprint.ts` の `occupiedCells` が導出する(理由は footprint.ts §1)。
+ *
+ * `ResidentLife` / `MemoirLogState` と同じく **`kind`/`id` を持たない値
+ * オブジェクト**である(entity ではない)。
+ */
+export interface FacilityFootprint {
+  /** 横方向(x)のセル数。1〜2。 */
+  readonly width: number;
+  /** 縦方向(y)のセル数。1〜2。 */
+  readonly height: number;
+}
+
+/**
  * 施設。(A)生産の主体。
  *
  * tags / lvCurve / 過酷業務かどうかといった定義値は content 側(facility 定義)に
@@ -316,10 +333,27 @@ export interface FacilityState {
   readonly defId: EntityId;
   /** Lv 1〜5(GDD)。上限の検証は schema 検証器(T6)の担当。 */
   readonly level: number;
-  /** 6×8 格子の通し番号 0〜47(ADR-002(2) の近傍集計はこの番号で行う)。 */
+  /**
+   * 6×8 格子の通し番号 0〜47(ADR-002(2) の近傍集計はこの番号で行う)。
+   *
+   * [M16] 大型施設では**占有矩形のアンカー(= 占有セル番号の最小 = 左上)**である。
+   * 1×1 では従来どおり「建っているセル」そのものであり、意味は変わらない。
+   */
   readonly cellIndex: number;
   /** 就労中の住民 ID(ID 昇順。順序は集合演算の決定論のため・GDD 11.7)。 */
   readonly workerIds: readonly EntityId[];
+  /**
+   * [M16] 占有形状(GDD 6.1)。**省略可**。
+   *
+   * **省略 ⇔ 1×1** の 1 対 1 対応であり、直列化形では 1×1 をキーごと省略する
+   * (`stats` / `life` / `memoir` と同じ規約・serialize.ts §7)。これにより
+   * M16 以前のセーブと golden vector 40 本のバイト列が 1 bit も動かない。
+   *
+   * content 側の定義(`FacilityDef.footprint`)から**配置時に焼き込む**
+   * (`commands.ts` の `placeFacility`)。content の footprint 変更が既存盤面の
+   * 占有形状を遡って書き換えないようにするためであり、理由は footprint.ts §1。
+   */
+  readonly footprint?: FacilityFootprint;
 }
 
 /**
@@ -337,6 +371,40 @@ export interface ResearchState {
   readonly progress: Fix;
   /** 完了した tick。未完了は null。 */
   readonly completedTick: number | null;
+  /**
+   * [M13] 技術喪失(GDD 7.4 の二層 / GDD §10.2 と同一規則)。**省略可**。
+   *
+   * 「生存保持者ゼロ かつ 記録ゼロ」になった瞬間に
+   * `rules/techMemory.ts` の `applyTechLossOnDeath` が書き込む。書き込みと同時に
+   * `completedTick` は null・`progress` は 0 へ戻る(= 解禁が取り消される)ので、
+   *   (A) criticalRecoverable : 再研究できる = **停滞コストのみ**(GDD 7.4)
+   *   (B) rareIrreversible    : {@link TechLossState.irreversible} が true で
+   *                             `rules/research.ts` の `currentResearch` が
+   *                             対象から外す = **一回性喪失**
+   * という二層がこの 1 フィールドで表現される。
+   *
+   * **省略された research entity は一度も喪失していない**(既存 conformance
+   * シナリオ・既存セーブは 1 bit も変わらない・serialize.ts §7)。
+   */
+  readonly loss?: TechLossState;
+}
+
+/**
+ * [M13] 技術喪失 1 件の記録(GDD 7.4)。`ResearchState.loss` の値の形。
+ *
+ * `kind`/`id` を持たない**値オブジェクト**である(entity ではない)。
+ */
+export interface TechLossState {
+  /** 喪失した tick(GDD 11.7 段70 = 死亡/全滅判定の tick)。 */
+  readonly tick: number;
+  /**
+   * 一回性(取り返しのつかない)喪失か。`tech.lossClass` が
+   * `rareIrreversible` のときだけ true(GDD 7.4「『取り返しのつかない喪失』は
+   * (B) のみ、(A) には使わない」)。
+   */
+  readonly irreversible: boolean;
+  /** 最後の保持者(この住民の死亡で保持者ゼロになった)の ID。 */
+  readonly lastHolderId: EntityId;
 }
 
 /**
@@ -558,6 +626,8 @@ export interface GameStateMeta {
  *   (d) `rngState` の反復順は domainTag の UTF-16 コードユニット昇順(§4)
  *   (e) [M12] `bondByPairKey` の反復順はキーの UTF-16 コードユニット昇順
  *       (rules/bond.ts の `bondPairKeyOf` が課す正準形。(d) と同じ扱い)
+ *   (f) [M13] `techMemoryByKey` の反復順はキーの UTF-16 コードユニット昇順
+ *       (rules/techMemory.ts の `techMemoryKeyOf` が課す正準形。(e) と同じ扱い)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -581,6 +651,49 @@ export interface GameState extends GameStateMeta {
    * 網羅 switch を壊さないため)。
    */
   readonly bondByPairKey: ReadonlyMap<string, Fix>;
+  /**
+   * [M13] 住民 × 技術の記憶(GDD 11.2 の `masteryResist(u,t)` と
+   * 「当該住民の当該 tech 関連生産のみ停止」の担い手)。キーは
+   * `rules/techMemory.ts` の `techMemoryKeyOf(residentId, techId)`
+   * (`"residentId|techId"`)。
+   *
+   * まだ実地稼働も想起困難も無いペアはキーを持たない(= 全ゼロと同義・遅延
+   * 初期化。`bondByPairKey` と同じ設計)。**この Map が空である state は
+   * M13 以前と 1 bit も違わない**(想起困難の抽選が per-tech 記録を書き始めた
+   * 時点で初めてキーが生える)。
+   *
+   * 独立 entity(`kind: "techMemory"`)にしなかった理由は
+   * {@link MemoirLogState} の doc と同じ(`src/ui/derived.ts` 等の既存の
+   * 網羅 switch を壊さないため)。resident 側の省略可フィールドにしなかった
+   * 理由は、`stats?` / `life?` / `memoir?` に 4 つめを足すと serialize.ts の
+   * 分岐が 2^4 = 16 通りへ膨れるため(serialize.ts §7)。
+   */
+  readonly techMemoryByKey: ReadonlyMap<string, TechMemoryState>;
+}
+
+/**
+ * [M13] 住民 1 人 × 技術 1 本ぶんの記憶(GDD 11.2 / 7.4)。
+ * `GameState.techMemoryByKey` の値の形であり、値オブジェクト(entity ではない)。
+ *
+ * 2 つの量が 1 つの意味(「その人がその技術をどれだけ体で覚えているか / いま
+ * 想起できているか」)を成すので、1 オブジェクトにまとめてある
+ * (`ResidentLife` と同じ理由・serialize の分岐を増やさない)。
+ */
+export interface TechMemoryState {
+  /**
+   * 実地稼働で蓄積した定着度(GDD 11.2 `masteryResist` の「実地稼働で蓄積する
+   * 定着度(0〜0.20)」の当該 tech ぶん)。人間単位の Fix。
+   *
+   * **0 より大きいことが「その住民がその技術の保持者である」ことの定義**
+   * (GDD 7.4 の (B) 一回性喪失判定 = `rules/techMemory.ts` の `techHoldersOf`)。
+   */
+  readonly masteryFix: Fix;
+  /**
+   * その (住民, 技術) の想起困難が解ける tick。0 は「発生していない」。
+   * 住民単位スカラの `ResidentState.recallImpairedUntilTick` の tech 別版で
+   * あり、**本式(M13)の抽選はこちらへ書く**(rules/recall.ts §3)。
+   */
+  readonly impairedUntilTick: number;
 }
 
 // --- 4. 参照 ---------------------------------------------------------------
@@ -685,4 +798,22 @@ export function getBondValue(state: GameState, pairKey: string): Fix | undefined
  */
 export function bondPairKeys(state: GameState): readonly string[] {
   return [...state.bondByPairKey.keys()];
+}
+
+/**
+ * [M13] 住民 × 技術の記憶({@link GameState.techMemoryByKey} の doc 参照)。
+ * まだ実地稼働も想起困難も無いペアは undefined(遅延初期化・`getBondValue` と
+ * 同じ規約)。キーの構成は `rules/techMemory.ts` の `techMemoryKeyOf` を通すこと
+ * (このモジュールはキー文字列の意味を解釈しない)。
+ */
+export function getTechMemory(state: GameState, key: string): TechMemoryState | undefined {
+  return state.techMemoryByKey.get(key);
+}
+
+/**
+ * [M13] 記憶を保持しているキーを正準順(昇順)で返す。`bondPairKeys` と同じく
+ * Map の反復順をそのまま使う(防御的な再ソートはしない)。
+ */
+export function techMemoryKeys(state: GameState): readonly string[] {
+  return [...state.techMemoryByKey.keys()];
 }

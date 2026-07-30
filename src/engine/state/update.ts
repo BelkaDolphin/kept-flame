@@ -62,6 +62,7 @@
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "../canonicalize";
+import { FOOTPRINT_DIM_MAX, footprintFitsGrid, isValidFootprintDims } from "../footprint";
 import type { Fix } from "../fp";
 import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
@@ -76,6 +77,7 @@ import {
   type EntityState,
   type GameState,
   type GameStateMeta,
+  type TechMemoryState,
 } from "./state";
 
 /** 更新経路の使い方の誤り(空 path・ID 不整合・重複 ID など)。 */
@@ -242,6 +244,37 @@ function requireValidResidentTraits(entity: EntityState): void {
   }
 }
 
+/**
+ * [M16] 施設の footprint(GDD 6.1)の不変条件を強制する。
+ *
+ * **footprint を持たない施設(= 1×1)は一切検査しない**。cellIndex 単独の値域は
+ * schema 検証器の担当という既存の層分け(serialize.ts §2)を M16 で変えないため
+ * であり、これが「既存の全施設 1×1 セーブの読み込み挙動が 1 bit も変わらない」
+ * ことの根拠である。
+ *
+ * 逆に footprint を持つ施設では、`cellIndex` と footprint の**関係**(占有矩形が
+ * 6×8 に収まるか)を検査する。関係の破れを通すと、占有セル集合の導出
+ * (footprint.ts の `occupiedCells`)が後続の任意の場所で FootprintError を投げ、
+ * 「壊れたセーブ」が「実行時のどこかで落ちるバグ」に化けるためである。
+ */
+function requireValidFacilityFootprint(entity: EntityState): void {
+  if (entity.kind !== "facility") return;
+  const footprint = entity.footprint;
+  if (footprint === undefined) return;
+  if (!isValidFootprintDims(footprint)) {
+    throw new StateUpdateError(
+      `施設 "${entity.id}" の footprint ${String(footprint.width)}×${String(footprint.height)} が` +
+        `1〜${String(FOOTPRINT_DIM_MAX)} の整数でない(GDD 6.1 の大型施設は 2×1 / 2×2)`,
+    );
+  }
+  if (!footprintFitsGrid(entity.cellIndex, footprint)) {
+    throw new StateUpdateError(
+      `施設 "${entity.id}" の footprint ${String(footprint.width)}×${String(footprint.height)} は` +
+        `基準セル ${String(entity.cellIndex)} から格子(6×8)へ収まらない(GDD 6.1)`,
+    );
+  }
+}
+
 function sortedById(entities: readonly EntityState[]): EntityState[] {
   return [...entities].sort((a, b) => compareUtf16(a.id, b.id));
 }
@@ -281,26 +314,46 @@ function buildBondMap(entries: readonly (readonly [string, Fix])[]): ReadonlyMap
 }
 
 /**
+ * [M13] 住民 × 技術の記憶の Map をキー昇順の正準順で作る
+ * (§3 / state.ts 不変条件 (f)。{@link buildBondMap} と同型)。
+ */
+function buildTechMemoryMap(
+  entries: readonly (readonly [string, TechMemoryState])[],
+): ReadonlyMap<string, TechMemoryState> {
+  const map = new Map<string, TechMemoryState>();
+  for (const [key, value] of [...entries].sort((a, b) => compareUtf16(a[0], b[0]))) {
+    if (map.has(key)) {
+      throw new StateUpdateError(`techMemory のキー "${key}" が重複している`);
+    }
+    map.set(key, value);
+  }
+  return map;
+}
+
+/**
  * GameState を作る唯一の入口。entity 列は渡された順に依らず ID 昇順の正準順で
  * Map 化される(§3)。新規セーブの生成と fromSerializable(serialize.ts)が使う。
  *
  * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
- * `bondByPairKey` も同じ規約([M12]・省略時は空)。
+ * `bondByPairKey`([M12])・`techMemoryByKey`([M13])も同じ規約(省略時は空)。
  *
  * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
- *   bond ペアキー重複 / 住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)
- *   がある場合
+ *   bond ペアキー重複 / [M13] techMemory キー重複 /
+ *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)/
+ *   [M16] 施設 footprint の値域違反・盤外はみ出し がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
   entities: readonly EntityState[],
   rngState: readonly (readonly [DomainTag, Xoshiro128State])[] = [],
   bondByPairKey: readonly (readonly [string, Fix])[] = [],
+  techMemoryByKey: readonly (readonly [string, TechMemoryState])[] = [],
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
     requireValidResidentTraits(entity);
+    requireValidFacilityFootprint(entity);
   }
   return {
     saveSchemaVersion: meta.saveSchemaVersion,
@@ -311,6 +364,7 @@ export function createGameState(
     entityStateById: buildEntityMap(sortedById(entities)),
     rngState: buildRngStateMap(rngState),
     bondByPairKey: buildBondMap(bondByPairKey),
+    techMemoryByKey: buildTechMemoryMap(techMemoryByKey),
   };
 }
 
@@ -357,6 +411,80 @@ export function setBondValue(state: GameState, pairKey: string, value: Fix): Gam
   const merged: (readonly [string, Fix])[] = [...state.bondByPairKey.entries()];
   merged.push([pairKey, value]);
   return setField(state, "bondByPairKey", buildBondMap(merged));
+}
+
+/**
+ * [M13] bond 値を**まとめて**差し替える(新規ペアなら追加する)。
+ *
+ * 1 件ずつ {@link setBondValue} を呼ぶと呼び出しごとに Map を 1 枚複製するため、
+ * 区間ごとに数十ペアを更新する tick ループでは複製が O(ペア数 × 総キー数) になる。
+ * ここは複製を **1 枚だけ**にする(結果は 1 件ずつ呼んだ場合と同一)。
+ */
+export function setBondValues(
+  state: GameState,
+  entries: readonly (readonly [string, Fix])[],
+): GameState {
+  if (entries.length === 0) return state;
+  let hasNewKey = false;
+  for (const [pairKey] of entries) {
+    if (!state.bondByPairKey.has(pairKey)) {
+      hasNewKey = true;
+      break;
+    }
+  }
+  const next = new Map(state.bondByPairKey);
+  for (const [pairKey, value] of entries) {
+    next.set(pairKey, value);
+  }
+  // 新規キーが 1 つでもあれば正準順(pairKey 昇順)へ作り直す(§3)。
+  if (!hasNewKey) return setField(state, "bondByPairKey", next);
+  return setField(state, "bondByPairKey", buildBondMap([...next.entries()]));
+}
+
+/**
+ * [M13] 住民 × 技術の記憶を差し替える(新規キーなら追加する)。
+ * `techMemoryByKey` の反復順をキー昇順に保つ責務を持つ({@link setBondValue} と
+ * 同型)。キー文字列の妥当性は検査しない(`rules/techMemory.ts` の
+ * `techMemoryKeyOf` を通した文字列だけが engine 内部で作られる。境界検査は
+ * serialize.ts の担当)。
+ */
+export function setTechMemory(state: GameState, key: string, value: TechMemoryState): GameState {
+  const previous = state.techMemoryByKey.get(key);
+  if (previous !== undefined) {
+    if (Object.is(previous, value)) return state;
+    const next = new Map(state.techMemoryByKey);
+    next.set(key, value);
+    return setField(state, "techMemoryByKey", next);
+  }
+  const merged: (readonly [string, TechMemoryState])[] = [...state.techMemoryByKey.entries()];
+  merged.push([key, value]);
+  return setField(state, "techMemoryByKey", buildTechMemoryMap(merged));
+}
+
+/**
+ * [M13] 住民 × 技術の記憶を**まとめて**差し替える({@link setBondValues} と同型)。
+ * 定着度の蓄積は区間ごとに数十件を同時更新するので、Map の複製を 1 枚に抑える。
+ */
+export function setTechMemories(
+  state: GameState,
+  entries: readonly (readonly [string, TechMemoryState])[],
+): GameState {
+  if (entries.length === 0) return state;
+  let hasNewKey = false;
+  for (const [key] of entries) {
+    if (!state.techMemoryByKey.has(key)) {
+      hasNewKey = true;
+      break;
+    }
+  }
+  const next = new Map(state.techMemoryByKey);
+  for (const [key, value] of entries) {
+    next.set(key, value);
+  }
+  // 新規キーが 1 つでもあれば正準順(キー昇順)へ作り直す。既存キーの差し替えだけ
+  // なら Map.set が挿入位置を変えないので順序は不変(§3)。
+  if (!hasNewKey) return setField(state, "techMemoryByKey", next);
+  return setField(state, "techMemoryByKey", buildTechMemoryMap([...next.entries()]));
 }
 
 /**

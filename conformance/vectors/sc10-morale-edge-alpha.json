@@ -2,7 +2,7 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1438,
+    "canonicalJsonLength": 1968,
     "counters": {
       "rateChangeEventCount": 1,
       "recallOccurrenceCount": 2,
@@ -12,16 +12,16 @@
     },
     "probe": {
       "entityCount": 7,
-      "recallImpairedResidentCount": 1,
-      "recallImpairedUntilTickSum": 8991,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 1974300000000,
+      "resourceStockSumRaw": 2592000000000,
       "rngStateDomainCount": 1,
       "rngStateWordsXor": 2204237653,
       "tick": 4320
     },
-    "stateDigest": "acc49c5556b351392cf0d2772090d5e5"
+    "stateDigest": "ccc896632f06904786b22a9910ccdbb3"
   },
   "formatVersion": 1,
   "fromTick": 0,

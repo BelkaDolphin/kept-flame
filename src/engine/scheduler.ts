@@ -29,6 +29,13 @@
 //   であり、想起困難の発生は (C) ステップ境界と同 tick なので新たな境界を要さない。
 //   M11 の 2 つは新しい境界イベント(段65 加入 / 段70 死亡)として heap に載る。
 //
+//   **[M13] 新しく区間内で積分する量を 2 つ足したが、境界は増えない**:
+//     bond(共働の絆・GDD 7.3)   — どのレートにも影響しない(士気補正は未実装)
+//     mastery(定着度・GDD 11.2) — 生産レートに影響せず、影響先の (C) 抽選確率は
+//                                  必ず粗粒度ステップ境界で評価される
+//   どちらも「レート × 区間長」の閉形式であり、節目(bond)の記録 tick は区間内の
+//   **解析的な到達 tick**を使うので分割不変(rules/bond.ts の crossingsInInterval)。
+//
 //   段階2(逆 CDF で次発生 tick を一発サンプリングして (C) 区間も飛ばす)は
 //   ADR-018(3) のとおり MVP 後。段階1 のステップ境界は「(C) がある限り
 //   coarseTickMinutes ごとに必ず区間が切れる」ことを意味するので、72h catch-up の
@@ -86,16 +93,21 @@
 import { compareUtf16 } from "./canonicalize";
 import {
   entitiesOfKind,
+  getTechMemory,
   isAliveResident,
   requireEntity,
+  techMemoryKeys,
   type EntityId,
   type GameState,
   type ResearchState,
 } from "./state/state";
 import { setField } from "./state/update";
+import { applyBondProgress, applyPartnerLossEffects, computeBondRates } from "./rules/bond";
 import { deathTickOf } from "./rules/lifespan";
+import { recordDeathMemoir } from "./rules/memoir";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
 import { applyProduction, computeProductionRates, type ProductionRates } from "./rules/production";
+import { applyMasteryProgress, applyTechLossOnDeath } from "./rules/techMemory";
 import {
   applyResearchProgress,
   completeResearch,
@@ -300,6 +312,18 @@ export class EventQueue {
   }
 
   /**
+   * その (tick, 段, entityId) のイベントが既に入っているか。
+   *
+   * [M13] 想起困難が (住民, tech) 別になったため、**同じ住民の別 tech が同じ tick に
+   * 回復する**ことが起きる。回復イベントは状態遷移を持たない純粋な区間境界
+   * (rules/recall.ts 末尾)なので、同じキーは 1 本あれば足りる。重複 push は
+   * §3 の全順序を壊すので、呼び出し側はここで存在を確かめてから積む。
+   */
+  hasEvent(event: ScheduledEvent): boolean {
+    return this.keys.has(eventKeyOf(event));
+  }
+
+  /**
    * イベントを積む。
    *
    * @throws {SchedulerError} tick が安全整数でない場合、または (tick, 段, entityId)
@@ -464,7 +488,7 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
   for (const resident of entitiesOfKind(state, "resident")) {
     const until = resident.recallImpairedUntilTick;
     if (until > state.tick && until < toTick) {
-      queue.push({ tick: until, kind: "recallRecover", entityId: resident.id });
+      pushRecallRecover(queue, until, resident.id);
     }
     // [M11] 寿命を持たない住民(既存 conformance シナリオの全員)は死なない。
     if (resident.life === undefined || !isAliveResident(resident)) continue;
@@ -474,6 +498,19 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
     }
   }
 
+  // [M13] (住民, tech) 別の想起困難の回復(GDD 11.2 の本式・rules/techMemory.ts)。
+  // キーは `"residentId|techId"` で反復順はキー昇順(state.ts 不変条件 (f))。
+  // 同じ住民の複数 tech が同じ tick に回復する場合は境界 1 本に畳む。
+  for (const key of techMemoryKeys(state)) {
+    const memory = getTechMemory(state, key);
+    if (memory === undefined) continue;
+    const until = memory.impairedUntilTick;
+    if (until <= state.tick || until >= toTick) continue;
+    const residentId = techMemoryResidentIdOf(key);
+    if (residentId === null) continue;
+    pushRecallRecover(queue, until, residentId);
+  }
+
   // [M11] 晴天漂着。加入機構が不活性(寝床上限 0 / townParams 不在)なら null。
   const arrivalTick = nextArrivalTick(state, ctx.content, state.tick);
   if (arrivalTick !== null && arrivalTick < toTick) {
@@ -481,6 +518,37 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
   }
 
   return queue;
+}
+
+/**
+ * [M13] `"residentId|techId"` の住民 ID 部分。形式が違えば null
+ * (engine 内で作られるキーは必ず `techMemoryKeyOf` を通るので通常は起きない。
+ * セーブ側の形式検査は serialize.ts の担当)。
+ */
+function techMemoryResidentIdOf(key: string): EntityId | null {
+  const separator = key.indexOf("|");
+  if (separator <= 0) return null;
+  return key.slice(0, separator) as EntityId;
+}
+
+/**
+ * [M13] 想起困難の回復境界を積む(同じキーが既にあれば何もしない)。
+ * 回復は状態遷移を持たない純粋な区間境界なので、1 本に畳んで問題ない
+ * ({@link EventQueue.hasEvent} の doc)。
+ */
+function pushRecallRecover(
+  queue: EventQueue,
+  tick: number,
+  residentId: EntityId,
+  cursorTick?: number,
+): void {
+  const event: ScheduledEvent = { tick, kind: "recallRecover", entityId: residentId };
+  if (queue.hasEvent(event)) return;
+  if (cursorTick === undefined) {
+    queue.push(event);
+    return;
+  }
+  queue.pushAfter(event, cursorTick);
 }
 
 /**
@@ -562,6 +630,14 @@ export interface ScheduleReport {
    * rules/population.ts §3)。同じ住民が複数回延期されれば複数回数える。
    */
   readonly deferredDeathCount: number;
+  /**
+   * [M13] 死亡によって喪失した技術の件数(GDD 7.4 の (A)+(B) 合計)。
+   * golden vector のカウンタ 5 種には**入れない**(conformance/goldenVector.ts の
+   * `countersOfReport` は固定 5 フィールド)。観測は #5 再計測(M14)と単体テスト。
+   */
+  readonly techLossCount: number;
+  /** [M13] うち (B) rareIrreversible = 永久喪失の件数。 */
+  readonly irreversibleTechLossCount: number;
   /** `collectSegments` を有効にしたときだけ非空。 */
   readonly segments: readonly SegmentRecord[];
 }
@@ -616,6 +692,8 @@ export function runSchedule(
   let residentArrivalCount = 0;
   let residentDeathCount = 0;
   let deferredDeathCount = 0;
+  let techLossCount = 0;
+  let irreversibleTechLossCount = 0;
 
   if (toTick === state.tick) {
     return {
@@ -628,6 +706,8 @@ export function runSchedule(
       residentArrivalCount,
       residentDeathCount,
       deferredDeathCount,
+      techLossCount,
+      irreversibleTechLossCount,
       segments,
     };
   }
@@ -641,6 +721,9 @@ export function runSchedule(
     // 1〜2. (A) 区間の入口: レート確定 → (B) 予測の同期。
     const rates = computeProductionRates(next, ctx);
     const researchTarget = currentResearch(next);
+    // [M12/M13] bond(共働の絆)も同じ (A) 区間のレートである。生産と同じ位置で
+    // 1 回だけ確定させる(区間中に共働の顔ぶれが変わらないことが (A) の前提)。
+    const bondRates = computeBondRates(next, cursor);
     syncResearchCompletionEvent(queue, ctx, researchTarget, rates, cursor);
 
     // 3. 境界の決定。イベントが toTick 以降なら地平線で切る。
@@ -654,6 +737,11 @@ export function runSchedule(
       if (researchTarget !== undefined) {
         next = applyResearchProgress(next, researchTarget.id, rates.researchRateFix, delta);
       }
+      // [M12] bond の蓄積と節目の記録(GDD 7.3)。節目の記録 tick は区間内の
+      // **解析的な到達 tick** なので分割不変(rules/bond.ts の crossingsInInterval)。
+      next = applyBondProgress(next, bondRates, delta, boundary);
+      // [M13] 実地稼働による定着度の蓄積(GDD 11.2 / 4)。生産と同じレート×区間長。
+      next = applyMasteryProgress(next, ctx.content, rates.masteryGains, delta);
       next = setField(next, "tick", boundary);
       cursor = boundary;
       segmentCount++;
@@ -688,14 +776,8 @@ export function runSchedule(
           // 地平線より後のものは積まない(次回の advance が state から再構成する)。
           for (const occurrence of result.occurrences) {
             if (occurrence.untilTick >= toTick) continue;
-            queue.pushAfter(
-              {
-                tick: occurrence.untilTick,
-                kind: "recallRecover",
-                entityId: occurrence.residentId,
-              },
-              cursor,
-            );
+            // [M13] 同じ住民の別 tech が同じ tick に回復する場合は境界 1 本に畳む。
+            pushRecallRecover(queue, occurrence.untilTick, occurrence.residentId, cursor);
           }
           const nextStep = cursor + ctx.content.coarseTickMinutes;
           if (nextStep < toTick) {
@@ -756,7 +838,22 @@ export function runSchedule(
           const result = applyResidentDeath(next, ctx, residentId, cursor);
           next = result.state;
           rateChangeEventCount++;
-          if (result.died) residentDeathCount++;
+          if (result.died) {
+            residentDeathCount++;
+            // [M12/M13] 死亡の 3 つの帰結を**この順で**適用する(memoirLog は
+            // 追記順がバイト列を決めるので順序が仕様・rules/memoir.ts):
+            //   (1) 本人の死亡記録
+            //   (2) bond を結んでいた相方の記録 + 一時士気ペナ(GDD 7.3)
+            //   (3) 技術喪失((A) は停滞のみ / (B) は永久・GDD 7.4)
+            next = recordDeathMemoir(next, residentId, cursor);
+            next = applyPartnerLossEffects(next, residentId, cursor);
+            const lossResult = applyTechLossOnDeath(next, ctx.content, residentId, cursor);
+            next = lossResult.state;
+            for (const lost of lossResult.lost) {
+              techLossCount++;
+              if (lost.irreversible) irreversibleTechLossCount++;
+            }
+          }
           if (result.deferredByFloor) {
             deferredDeathCount++;
             const retryTick = nextArrivalTick(next, ctx.content, cursor + 1);
@@ -798,6 +895,8 @@ export function runSchedule(
     residentArrivalCount,
     residentDeathCount,
     deferredDeathCount,
+    techLossCount,
+    irreversibleTechLossCount,
     segments,
   };
 }

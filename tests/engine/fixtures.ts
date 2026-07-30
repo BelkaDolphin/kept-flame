@@ -27,6 +27,7 @@ import {
   entityIdFromString,
   type EntityId,
   type EntityState,
+  type FacilityFootprint,
   type FacilityState,
   type GameState,
   type GameStateMeta,
@@ -39,7 +40,9 @@ import { createGameState } from "../../src/engine/state/update";
 export const id = (value: string): EntityId => entityIdFromString(value);
 
 export const META: GameStateMeta = {
-  saveSchemaVersion: 1,
+  // [M16] 現行のセーブスキーマ版(src/platform/migration.ts の SAVE_SCHEMA_VERSION)。
+  // ここが現行版でないと「現行版はそのまま通す」経路のテストが移行段を走ってしまう。
+  saveSchemaVersion: 2,
   contentVersion: 1,
   algoVersion: 1,
   worldSeed: "seedAlpha",
@@ -199,8 +202,13 @@ export function facility(
   cellIndex: number,
   workerIds: readonly EntityId[] = [],
   level = 1,
+  /** [M16] 占有形状(GDD 6.1)。省略 = 1×1(= キーごと持たない正準形)。 */
+  footprint?: FacilityFootprint,
 ): FacilityState {
-  return { kind: "facility", id: id(name), defId, level, cellIndex, workerIds };
+  if (footprint === undefined) {
+    return { kind: "facility", id: id(name), defId, level, cellIndex, workerIds };
+  }
+  return { kind: "facility", id: id(name), defId, level, cellIndex, workerIds, footprint };
 }
 
 export function research(name: string, techId: EntityId, progressHuman = 0): ResearchState {

@@ -2,34 +2,34 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1366,
+    "canonicalJsonLength": 1906,
     "counters": {
-      "rateChangeEventCount": 2,
-      "recallOccurrenceCount": 3,
+      "rateChangeEventCount": 3,
+      "recallOccurrenceCount": 6,
       "segmentCount": 434,
       "stochasticStepCount": 432,
       "stochasticTrialCount": 3888
     },
     "probe": {
       "entityCount": 8,
-      "recallImpairedResidentCount": 1,
-      "recallImpairedUntilTickSum": 10321,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 805350000000,
+      "resourceStockSumRaw": 1944000000000,
       "rngStateDomainCount": 1,
-      "rngStateWordsXor": 813177570,
+      "rngStateWordsXor": 2391803534,
       "tick": 4320
     },
-    "stateDigest": "160edc36d68c5f423c5922f016d72306"
+    "stateDigest": "b11285108316c65c2dff8302cc952880"
   },
   "formatVersion": 1,
   "fromTick": 0,
   "paths": ["split-at-recovery-tick"],
   "scenarioId": "sc06-recall",
   "splitCounters": {
-    "rateChangeEventCount": 1,
-    "recallOccurrenceCount": 3,
+    "rateChangeEventCount": 2,
+    "recallOccurrenceCount": 6,
     "segmentCount": 434,
     "stochasticStepCount": 432,
     "stochasticTrialCount": 3888

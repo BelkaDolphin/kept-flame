@@ -89,6 +89,18 @@ export interface RecallRiskParams {
   readonly durationTicksMin: number | null;
   /** [T7] 発生時の持続 tick の上限(GDD 11.2 の 2 日 = 2880。省略可)。 */
   readonly durationTicksMax: number | null;
+  /**
+   * [M13] masteryResist の**蓄積速度**: 実地稼働 1 ゲーム日(1440 tick)あたりの
+   * 定着度の増分(GDD 11.2「実地稼働で蓄積する定着度」・省略可・欠落は null)。
+   *
+   * GDD に速度の明示が無い暫定値であり、バランス調整段(M39〜M41)で裁定 N12
+   * (上限 0.20 の相殺挙動)と対で再評価する。省略時は engine 側で蓄積が起きない
+   * = M13 以前と完全に同一挙動。
+   *
+   * **1440 の約数になる値を選ぶこと**: engine は per-tick レートへ 1 回だけ
+   * floor 除算して落とすので(分割不変性のため)、約数でない値は静かに丸まる。
+   */
+  readonly masteryGainPerFieldWorkDay: number | null;
 }
 
 /**
@@ -803,6 +815,12 @@ function validateRecallRiskParams(
           issues,
           RECALL_DURATION_TICKS_RANGE,
         ) ?? undefined);
+  const rawMasteryGain = obj["masteryGainPerFieldWorkDay"];
+  const masteryGainPerFieldWorkDay =
+    rawMasteryGain === undefined
+      ? null
+      : (expectNumber(rawMasteryGain, `${path}.masteryGainPerFieldWorkDay`, issues, UNIT_RANGE) ??
+        undefined);
   const rawDurationMax = obj["durationTicksMax"];
   const durationTicksMax =
     rawDurationMax === undefined
@@ -828,7 +846,8 @@ function validateRecallRiskParams(
     memoryKeeperResist === undefined ||
     memoryKeeperTraitId === undefined ||
     durationTicksMin === undefined ||
-    durationTicksMax === undefined
+    durationTicksMax === undefined ||
+    masteryGainPerFieldWorkDay === undefined
   ) {
     return undefined;
   }
@@ -893,6 +912,7 @@ function validateRecallRiskParams(
     memoryKeeperTraitId,
     durationTicksMin,
     durationTicksMax,
+    masteryGainPerFieldWorkDay,
   };
 }
 

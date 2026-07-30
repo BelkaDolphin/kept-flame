@@ -32,7 +32,7 @@
 
 import type { AdjacencyMatrix, Tag } from "../adjacency";
 import type { Fix } from "../fp";
-import type { EntityId } from "../state/state";
+import type { EntityId, FacilityFootprint } from "../state/state";
 import type { StatWeights, TraitDef } from "./stats";
 
 /** rules の入力の誤り(content 定義の欠落・Lv 範囲外・産出先不在など)。 */
@@ -105,6 +105,20 @@ export interface FacilityDef {
    * 増減しても既存 state の産出は変わらない = golden vector に影響しない。
    */
   readonly workerSlotsByLevel?: readonly number[];
+  /**
+   * [M16] 占有形状(GDD 6.1「大型は 2×1 / 2×2 占有」)。
+   * `content/facility.json` の `footprint` がそのまま写る。
+   *
+   * **省略時は 1×1**。省略を許すのは engine のテストフィクスチャのような縮約
+   * facility 定義でも rules が動くようにするためで、実 content は必ず値を持つ
+   * (`schema/facility.ts` で必須)。
+   *
+   * 読むのは `commands.ts` の配置コマンド**だけ**であり、そこで
+   * `FacilityState.footprint` へ焼き込む(content 変更が既存盤面の占有形状を
+   * 遡って変えないため・footprint.ts §1)。既存 state の占有形状は
+   * この値を後から変えても動かない = golden vector に影響しない。
+   */
+  readonly footprint?: FacilityFootprint;
 }
 
 /**
@@ -169,6 +183,27 @@ export interface TechDef {
    * ここへ来る時点では解決済みの ID が並んでいる。
    */
   readonly prereqs?: readonly EntityId[];
+  /**
+   * [M13] 実地要件の施設(content の `tech.fieldRequirement.facility`)。
+   * GDD 5「テックは前提＋researchCost＋**実地要件(該当施設で該当レシピを N 回
+   * 稼働)**で解禁」の「該当施設」であり、GDD 4「技術は **解禁 → 実地稼働で記憶
+   * 定着 → 成文化で盤石**」の「実地稼働」の場所でもある。M13 はこれを 2 つの
+   * 用途に使う(`rules/techMemory.ts`):
+   *   (1) `masteryResist(u,t)` の蓄積 — この施設で稼働している間だけ定着する
+   *   (2) 「当該住民の**当該 tech 関連**生産のみ停止」(GDD 11.2)の
+   *       「関連生産」の解決 — 想起困難中はこの施設での寄与だけが 0 になる
+   *
+   * **省略可**。省略時は
+   *   (1) 定着が一切蓄積しない
+   *   (2) 停止範囲が決まらないので**住民単位の全停止**(= T5 縮約と同じ挙動)へ
+   *       フォールバックする
+   * となる。省略を許すのは engine のテストフィクスチャのような縮約 tech 定義でも
+   * rules が動くようにするためで、実 content は必ず値を持つ(schema で必須)。
+   *
+   * `fieldRequirement.recipe` / `count`(N 回稼働)は engine 未実装であり
+   * content ローダーが写さない(レシピ系が入る段の担当)。
+   */
+  readonly fieldFacilityId?: EntityId;
 }
 
 /**
@@ -245,6 +280,18 @@ export interface RecallRiskParams {
   readonly durationMinTicks: number;
   /** 発生時の持続 tick の上限(GDD: 2 日 = 2880)。 */
   readonly durationMaxTicks: number;
+  /**
+   * [M13] 実地稼働 1 ゲーム日(1440 tick)あたりの `masteryResist` 蓄積量
+   * (GDD 11.2「masteryResist: **実地稼働で蓄積する**定着度(0〜0.20)」の速度)。
+   *
+   * **GDD に速度の明示が無い**ため暫定値であり、バランス調整段(M39〜M41)で
+   * 再評価する(裁定 N12 の「mastery 上限 0.20 の相殺は MVP 現状維持」と対で
+   * 見直す量である)。
+   *
+   * **省略可**: 省略時は蓄積が一切起きない(= M13 以前と 1 bit も違わない)。
+   * 上限は {@link masteryResistMaxFix} で、蓄積側でも同じ値でクランプする。
+   */
+  readonly masteryGainPerFieldWorkDayFix?: Fix;
 }
 
 // --- 3b. 保管庫パラメータ(GDD 6.7)— M5 -----------------------------------

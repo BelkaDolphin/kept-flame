@@ -14,6 +14,7 @@ import { fixFromInt, fixFromRaw, toRaw } from "../../src/engine/fp";
 import { SchedulerError } from "../../src/engine/scheduler";
 import { toSerializable } from "../../src/engine/state/serialize";
 import { requireEntity, type GameState } from "../../src/engine/state/state";
+import { techMemoryOf } from "../../src/engine/rules/techMemory";
 import type { EngineContent } from "../../src/engine/rules/types";
 import {
   FORGE,
@@ -346,7 +347,9 @@ describe("(C) 想起困難 = 確率イベント区間(GDD 11.8(C) / 段階1)", (
 
     // tick 0 のステップで必ず発生 → 持続 720 tick → tick 720 が (B) 境界。
     expect(report.recallOccurrenceCount).toBe(1);
-    expect(requireEntity(report.state, WORKER, "resident").recallImpairedUntilTick).toBe(720);
+    // [M13] 想起困難の記録先は (住民, tech) 別の techMemoryByKey へ移った
+    // (住民単位スカラ recallImpairedUntilTick は抽選が書かなくなった・recall.ts §3)。
+    expect(techMemoryOf(report.state, WORKER, TECH_BRONZE.id)?.impairedUntilTick).toBe(720);
     const recover = report.segments.filter((s) => s.endEventKinds.includes("recallRecover"));
     expect(recover.map((s) => s.toTick)).toEqual([720]);
     expect(recover[0]?.endBoundary).toBe("rateChange");
@@ -396,7 +399,7 @@ describe("(C) 想起困難 = 確率イベント区間(GDD 11.8(C) / 段階1)", (
     expect(report.stochasticStepCount).toBe(2);
     expect(report.stochasticTrialCount).toBe(2);
     expect(report.recallOccurrenceCount).toBe(1);
-    expect(requireEntity(report.state, WORKER, "resident").recallImpairedUntilTick).toBe(2000);
+    expect(techMemoryOf(report.state, WORKER, TECH_BRONZE.id)?.impairedUntilTick).toBe(2000);
   });
 
   it("回復 tick ちょうどで区切っても state が一致する(分割不変)", () => {

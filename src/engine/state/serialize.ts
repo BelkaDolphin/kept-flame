@@ -113,9 +113,46 @@
 //   `"residentAId|residentBId"`(前者が辞書順で必ず前)の妥当性は
 //   `fromSerializable` の入口で検査する(未知の domainTag を reject するのと
 //   同じ層)。
+//
+// ===========================================================================
+// 7. [M16] `facility.footprint` は §4 と同じ規約 + 「1×1 の明示は非正準形」
+// ===========================================================================
+//   `footprint`(GDD 6.1 の 2×1 / 2×2)は §4 の「無ければキーごと出さない」規約に
+//   従う省略可フィールドであり、**省略 ⇔ 1×1** の 1 対 1 対応とする(footprint.ts §2)。
+//
+//   §4 との違いは、`{"width":1,"height":1}` という**書けてしまう非正準形**が
+//   存在する点である。これを黙って受け入れると
+//   `toSerializable(fromSerializable(j)) === j` (§1 の契約)が破れる —— 読み込み
+//   時に 1×1 は undefined へ畳まれ、書き出しでキーが消えるためバイト列が変わる。
+//   よって **1×1 を明示した直列化形は reject** する(resource の
+//   `cumulativeProduced` / `cumulativeOverflow` の片側だけの形を reject するのと
+//   同じ理屈: 正準形を 1 通りに保つことで往復不変性を定理として維持する)。
+//
+//   幅・高さの値域(1〜`FOOTPRINT_DIM_MAX`)もここで検査する。これは §2 が
+//   「値域は schema 検証器の担当」と書いているのと矛盾しない —— cellIndex や Lv と
+//   違い、footprint の値域は**セーブの表現能力そのもの**(3×3 を許すと占有形状の
+//   モデルが変わる)であり、`lifespanTick >= 1`(§5)と同じ層の不変条件である。
+//
+// ===========================================================================
+// 8. [M13] `techMemoryByKey` は §3 と同型、`research.loss` は §4 と同じ規約
+// ===========================================================================
+//   `techMemoryByKey`(住民 × 技術の記憶・GDD 11.2 / 7.4)は GameState 直下の
+//   Map であり、**§3 の rngState / §6 の bondByPairKey と全く同じ規約**
+//   (空なら書き出さない・キーは正準順)に従う。キー文字列 `"residentId|techId"`
+//   の妥当性は `fromSerializable` の入口で検査する(bondByPairKey と同じ層)。
+//
+//   `research.loss`(技術喪失)は §4 の「無ければキーごと出さない」規約に従う
+//   省略可フィールドである。
+//
+//   **省略可フィールドの組み立て方の変更**: 省略可トップレベルキーが 3 つに
+//   なったため、`toSerializable` の「2^n 通りのリテラルを書き分ける」形を
+//   「必須キーのリテラル + 省略可キーの entries 連結」へ改めた(生スプレッドは
+//   ADR-028(1) でこのファイルも禁止だが、`Object.entries`/`Object.fromEntries` は
+//   ADR-028(2) の単一正準実装としてこのファイルだけが免除されている)。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
+import { FOOTPRINT_DIM_MAX, isUnitFootprint, isValidFootprintDims } from "../footprint";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
 import type { ResidentStats } from "../rules/stats";
 import { RECORD_MEDIA, isRecordMedium, type RecordMedium } from "../rules/types";
@@ -128,6 +165,7 @@ import {
   type CodifyState,
   type EntityId,
   type EntityState,
+  type FacilityFootprint,
   type FacilityState,
   type GameState,
   type GameStateMeta,
@@ -138,6 +176,8 @@ import {
   type ResidentLife,
   type ResidentState,
   type ResourceState,
+  type TechLossState,
+  type TechMemoryState,
 } from "./state";
 import { createGameState } from "./update";
 
@@ -187,6 +227,12 @@ export type SerializedResident = {
   readonly memoir?: SerializedMemoirLog;
 };
 
+/** [M16] 占有形状(GDD 6.1)。1×1 は**キーごと省略**するので値も 1×1 にならない(§7)。 */
+export type SerializedFacilityFootprint = {
+  readonly width: number;
+  readonly height: number;
+};
+
 export type SerializedFacility = {
   readonly kind: "facility";
   readonly id: string;
@@ -194,6 +240,15 @@ export type SerializedFacility = {
   readonly level: number;
   readonly cellIndex: number;
   readonly workerIds: readonly string[];
+  /** [M16] 1×1(既定)なら**キーごと省略**する(§7)。 */
+  readonly footprint?: SerializedFacilityFootprint;
+};
+
+/** [M13] 技術喪失(state.ts の {@link TechLossState})。EntityId は素の文字列。 */
+export type SerializedTechLoss = {
+  readonly tick: number;
+  readonly irreversible: boolean;
+  readonly lastHolderId: string;
 };
 
 export type SerializedResearch = {
@@ -202,6 +257,8 @@ export type SerializedResearch = {
   readonly techId: string;
   readonly progress: number;
   readonly completedTick: number | null;
+  /** [M13] 一度も喪失していない tech は**キーごと省略**する(§8)。 */
+  readonly loss?: SerializedTechLoss;
 };
 
 export type SerializedResource = {
@@ -284,6 +341,19 @@ export type SerializedGameState = {
   readonly rngState?: { readonly [domainTag: string]: readonly number[] };
   /** [M12] pairKey(`"residentAId|residentBId"`)→ 蓄積 bond 値(raw 整数)。 */
   readonly bondByPairKey?: { readonly [pairKey: string]: number };
+  /**
+   * [M13] キー(`"residentId|techId"`)→ 住民 × 技術の記憶(§8)。
+   * 空なら `rngState` / `bondByPairKey` と同じ規約でキーごと省略される。
+   */
+  readonly techMemoryByKey?: { readonly [key: string]: SerializedTechMemory };
+};
+
+/** [M13] 住民 × 技術の記憶(state.ts の {@link TechMemoryState})。 */
+export type SerializedTechMemory = {
+  /** 定着度の raw 整数。 */
+  readonly mastery: number;
+  /** 想起困難が解ける tick(素の整数)。 */
+  readonly impairedUntilTick: number;
 };
 
 // --- 2. state → JSON -------------------------------------------------------
@@ -446,6 +516,46 @@ function serializeResident(entity: ResidentState): SerializedResident {
   };
 }
 
+/**
+ * [M16] 省略可の `footprint` を持つ facility の直列化(§7)。
+ * 1×1(= キー不在と同義)は**書き出さない**ので分岐は 2 通りで済む。
+ *
+ * 値域外の footprint は**書き出さずに停止する**。読めない形を書くと
+ * 「保存はできたのに次回ロードで SerializeError」= 静かなセーブ喪失になるため、
+ * 書込側で止めるのが早い停止点である(`assertDispatchTreeBounds` を書込側に
+ * 置いてあるのと同じ考え方・persistence.ts)。ここへ来るのは createGameState と
+ * 配置コマンドの両方を迂回した場合だけ = engine のバグである。
+ */
+function serializeFacility(entity: FacilityState): SerializedFacility {
+  const footprint = entity.footprint;
+  if (footprint !== undefined && !isValidFootprintDims(footprint)) {
+    throw new SerializeError(
+      `toSerializable: 施設 "${entity.id}" の footprint ` +
+        `${String(footprint.width)}×${String(footprint.height)} は値域外` +
+        `(1〜${String(FOOTPRINT_DIM_MAX)} の整数・§7)。読めない形は書き出さない`,
+    );
+  }
+  if (footprint === undefined || isUnitFootprint(footprint)) {
+    return {
+      kind: "facility",
+      id: entity.id,
+      defId: entity.defId,
+      level: entity.level,
+      cellIndex: entity.cellIndex,
+      workerIds: [...entity.workerIds],
+    };
+  }
+  return {
+    kind: "facility",
+    id: entity.id,
+    defId: entity.defId,
+    level: entity.level,
+    cellIndex: entity.cellIndex,
+    workerIds: [...entity.workerIds],
+    footprint: { width: footprint.width, height: footprint.height },
+  };
+}
+
 /** [M5] 省略可のオーバーフロー会計を持つ resource の直列化(§4)。 */
 function serializeResource(entity: ResourceState): SerializedResource {
   const produced = entity.cumulativeProduced;
@@ -497,6 +607,36 @@ function serializeMemoirEntry(entry: MemoirEntry): SerializedMemoirEntry {
   }
 }
 
+/**
+ * [M13] 省略可の `loss`(技術喪失・GDD 7.4)を持つ research の直列化(§8)。
+ * 分岐は 2 通りだけなので素直に書き分ける(resident の 8 分岐と同じ理由で
+ * 生スプレッドは使えない)。
+ */
+function serializeResearch(entity: ResearchState): SerializedResearch {
+  const rawLoss = entity.loss;
+  if (rawLoss === undefined) {
+    return {
+      kind: "research",
+      id: entity.id,
+      techId: entity.techId,
+      progress: toRaw(entity.progress),
+      completedTick: entity.completedTick,
+    };
+  }
+  return {
+    kind: "research",
+    id: entity.id,
+    techId: entity.techId,
+    progress: toRaw(entity.progress),
+    completedTick: entity.completedTick,
+    loss: {
+      tick: rawLoss.tick,
+      irreversible: rawLoss.irreversible,
+      lastHolderId: rawLoss.lastHolderId,
+    },
+  };
+}
+
 function serializeEntity(entity: EntityState): SerializedEntity {
   switch (entity.kind) {
     case "codify":
@@ -512,22 +652,9 @@ function serializeEntity(entity: EntityState): SerializedEntity {
     case "resident":
       return serializeResident(entity);
     case "facility":
-      return {
-        kind: "facility",
-        id: entity.id,
-        defId: entity.defId,
-        level: entity.level,
-        cellIndex: entity.cellIndex,
-        workerIds: [...entity.workerIds],
-      };
+      return serializeFacility(entity);
     case "research":
-      return {
-        kind: "research",
-        id: entity.id,
-        techId: entity.techId,
-        progress: toRaw(entity.progress),
-        completedTick: entity.completedTick,
-      };
+      return serializeResearch(entity);
     case "resource":
       return serializeResource(entity);
     default: {
@@ -566,53 +693,42 @@ export function toSerializable(state: GameState): SerializedGameState {
     bondEntries.push([pairKey, toRaw(value)]);
   }
 
-  // 空の rngState / bondByPairKey はキーごと省略する(§3 / §6)。オブジェクトの
-  // 生スプレッドは ADR-028(1) で禁止(このファイルも免除対象外)なので、
-  // 条件分岐で 4 通り(2 フィールド × 有無)のリテラルを書き分けている。
-  const hasRng = rngEntries.length > 0;
-  const hasBond = bondEntries.length > 0;
-  let raw: SerializedGameState;
-  if (!hasRng && !hasBond) {
-    raw = {
-      saveSchemaVersion: state.saveSchemaVersion,
-      contentVersion: state.contentVersion,
-      algoVersion: state.algoVersion,
-      worldSeed: state.worldSeed,
-      tick: state.tick,
-      entityStateById,
-    };
-  } else if (!hasBond) {
-    raw = {
-      saveSchemaVersion: state.saveSchemaVersion,
-      contentVersion: state.contentVersion,
-      algoVersion: state.algoVersion,
-      worldSeed: state.worldSeed,
-      tick: state.tick,
-      entityStateById,
-      rngState: Object.fromEntries(rngEntries),
-    };
-  } else if (!hasRng) {
-    raw = {
-      saveSchemaVersion: state.saveSchemaVersion,
-      contentVersion: state.contentVersion,
-      algoVersion: state.algoVersion,
-      worldSeed: state.worldSeed,
-      tick: state.tick,
-      entityStateById,
-      bondByPairKey: Object.fromEntries(bondEntries),
-    };
-  } else {
-    raw = {
-      saveSchemaVersion: state.saveSchemaVersion,
-      contentVersion: state.contentVersion,
-      algoVersion: state.algoVersion,
-      worldSeed: state.worldSeed,
-      tick: state.tick,
-      entityStateById,
-      rngState: Object.fromEntries(rngEntries),
-      bondByPairKey: Object.fromEntries(bondEntries),
-    };
+  // [M13] techMemoryByKey も同じ規約(§8)。
+  const techMemoryEntries: [string, SerializedTechMemory][] = [];
+  for (const [key, value] of state.techMemoryByKey) {
+    techMemoryEntries.push([
+      key,
+      { mastery: toRaw(value.masteryFix), impairedUntilTick: value.impairedUntilTick },
+    ]);
   }
+
+  // 空の rngState / bondByPairKey / techMemoryByKey はキーごと省略する
+  // (§3 / §6 / §8)。オブジェクトの生スプレッドは ADR-028(1) で禁止(このファイルも
+  // 免除対象外)なので、**必須キーだけのリテラル + 省略可キーの entries 連結**で
+  // 組む。省略可フィールドが 3 つになり、2^3 = 8 通りのリテラル書き分けでは
+  // 「1 箇所だけ直し忘れる」形の壊れ方を作るため、[M13] でこの形へ改めた
+  // (`Object.entries` / `Object.fromEntries` はこのファイルだけが免除されている)。
+  const required = {
+    saveSchemaVersion: state.saveSchemaVersion,
+    contentVersion: state.contentVersion,
+    algoVersion: state.algoVersion,
+    worldSeed: state.worldSeed,
+    tick: state.tick,
+    entityStateById,
+  };
+  const optional: [string, unknown][] = [];
+  if (rngEntries.length > 0) optional.push(["rngState", Object.fromEntries(rngEntries)]);
+  if (bondEntries.length > 0) optional.push(["bondByPairKey", Object.fromEntries(bondEntries)]);
+  if (techMemoryEntries.length > 0) {
+    optional.push(["techMemoryByKey", Object.fromEntries(techMemoryEntries)]);
+  }
+  const raw: SerializedGameState =
+    optional.length === 0
+      ? required
+      : (Object.fromEntries([
+          ...Object.entries(required),
+          ...optional,
+        ]) as unknown as SerializedGameState);
 
   // 正準化がバイト同一性の根拠(§1(a))。ここを外すと呼び出し側の
   // オブジェクトリテラル定義順が JSON に漏れる。
@@ -865,25 +981,72 @@ function deserializeResident(id: EntityId, o: Record<string, unknown>, p: string
   };
 }
 
+/**
+ * [M16] `footprint`(省略可・§7)を読む。キーが無ければ undefined。
+ *
+ * 1×1 の明示と値域外はどちらも reject する(§7 の 2 つの理由: 正準形の一意性と、
+ * セーブの表現能力の固定)。
+ */
+function requireFacilityFootprintOrUndefined(
+  value: unknown,
+  path: string,
+): FacilityFootprint | undefined {
+  if (value === undefined) return undefined;
+  const o = requireObject(value, path);
+  const footprint: FacilityFootprint = {
+    width: requireInt(o["width"], `${path}.width`),
+    height: requireInt(o["height"], `${path}.height`),
+  };
+  if (!isValidFootprintDims(footprint)) {
+    throw new SerializeError(
+      `${path}: 幅・高さは 1〜${String(FOOTPRINT_DIM_MAX)} の整数(GDD 6.1 の大型施設は 2×1 / 2×2)。` +
+        `実際: ${String(footprint.width)}×${String(footprint.height)}`,
+    );
+  }
+  if (isUnitFootprint(footprint)) {
+    throw new SerializeError(
+      `${path}: 1×1 は省略が正準形なのでキーごと書かないこと(§7)。` +
+        "明示を許すと同じ state に 2 通りの直列化形ができ、往復のバイト同一性が壊れる",
+    );
+  }
+  return footprint;
+}
+
 function deserializeFacility(id: EntityId, o: Record<string, unknown>, p: string): FacilityState {
+  const defId = requireEntityId(o["defId"], `${p}.defId`);
+  const level = requireNonNegativeInt(o["level"], `${p}.level`);
+  const cellIndex = requireNonNegativeInt(o["cellIndex"], `${p}.cellIndex`);
+  const workerIds = requireEntityIdArray(o["workerIds"], `${p}.workerIds`);
+  const footprint = requireFacilityFootprintOrUndefined(o["footprint"], `${p}.footprint`);
+  // 盤面へ収まるか(cellIndex と footprint の**関係**)の検査は createGameState の
+  // 担当である(update.ts の requireValidFacilityFootprint)。ここは JSON としての
+  // 形と値域までを見る(§2 の層分け)。
+  if (footprint === undefined) {
+    return { kind: "facility", id, defId, level, cellIndex, workerIds };
+  }
+  return { kind: "facility", id, defId, level, cellIndex, workerIds, footprint };
+}
+
+/** [M13] `research.loss`(省略可・§8)を読む。キーが無ければ undefined。 */
+function requireTechLossOrUndefined(value: unknown, path: string): TechLossState | undefined {
+  if (value === undefined) return undefined;
+  const o = requireObject(value, path);
   return {
-    kind: "facility",
-    id,
-    defId: requireEntityId(o["defId"], `${p}.defId`),
-    level: requireNonNegativeInt(o["level"], `${p}.level`),
-    cellIndex: requireNonNegativeInt(o["cellIndex"], `${p}.cellIndex`),
-    workerIds: requireEntityIdArray(o["workerIds"], `${p}.workerIds`),
+    tick: requireInt(o["tick"], `${path}.tick`),
+    irreversible: requireBoolean(o["irreversible"], `${path}.irreversible`),
+    lastHolderId: requireEntityId(o["lastHolderId"], `${path}.lastHolderId`),
   };
 }
 
 function deserializeResearch(id: EntityId, o: Record<string, unknown>, p: string): ResearchState {
-  return {
-    kind: "research",
-    id,
-    techId: requireEntityId(o["techId"], `${p}.techId`),
-    progress: requireFix(o["progress"], `${p}.progress`),
-    completedTick: requireIntOrNull(o["completedTick"], `${p}.completedTick`),
-  };
+  const techId = requireEntityId(o["techId"], `${p}.techId`);
+  const progress = requireFix(o["progress"], `${p}.progress`);
+  const completedTick = requireIntOrNull(o["completedTick"], `${p}.completedTick`);
+  const loss = requireTechLossOrUndefined(o["loss"], `${p}.loss`);
+  if (loss === undefined) {
+    return { kind: "research", id, techId, progress, completedTick };
+  }
+  return { kind: "research", id, techId, progress, completedTick, loss };
 }
 
 function deserializeResource(id: EntityId, o: Record<string, unknown>, p: string): ResourceState {
@@ -1113,6 +1276,44 @@ function deserializeBondByPairKey(value: unknown): readonly (readonly [string, F
 }
 
 /**
+ * [M13] `techMemoryByKey`(§8)を読む。キーは `"residentId|techId"`
+ * (`rules/techMemory.ts` の `techMemoryKeyOf` の正準形。両者とも ID 規則に合致)、
+ * 値は `{mastery, impairedUntilTick}`。形式違反は reject する
+ * (bondByPairKey の形式検査と同じ層)。
+ *
+ * bond と違い**辞書順の制約は無い**(キーは (住民, 技術) の**順序付き**対であり、
+ * 住民 ID と技術 ID を入れ替えた形は別の意味になるため)。
+ */
+function deserializeTechMemoryByKey(
+  value: unknown,
+): readonly (readonly [string, TechMemoryState])[] {
+  if (value === undefined) return [];
+  const o = requireObject(value, "$.techMemoryByKey");
+  const result: (readonly [string, TechMemoryState])[] = [];
+  for (const key of Object.keys(o)) {
+    const path = `$.techMemoryByKey.${key}`;
+    const parts = key.split("|");
+    if (parts.length !== 2) {
+      throw new SerializeError(`${path}: キー "${key}" は "residentId|techId" の形式でない`);
+    }
+    requireEntityId(parts[0], `${path}(residentId)`);
+    requireEntityId(parts[1], `${path}(techId)`);
+    const entry = requireObject(o[key], path);
+    result.push([
+      key,
+      {
+        masteryFix: requireFix(entry["mastery"], `${path}.mastery`),
+        impairedUntilTick: requireNonNegativeInt(
+          entry["impairedUntilTick"],
+          `${path}.impairedUntilTick`,
+        ),
+      },
+    ]);
+  }
+  return result;
+}
+
+/**
  * 直列化形(JSON.parse の結果)から GameState を復元する。オブジェクト → Map。
  * 入力のキー順には依存しない(必要なキーを名指しで読み、Map は ID 昇順で
  * 作り直す)ので、整形ツールがキー順を変えたセーブでも同じ state になる。
@@ -1147,5 +1348,6 @@ export function fromSerializable(input: unknown): GameState {
     entities,
     deserializeRngState(root["rngState"]),
     deserializeBondByPairKey(root["bondByPairKey"]),
+    deserializeTechMemoryByKey(root["techMemoryByKey"]),
   );
 }

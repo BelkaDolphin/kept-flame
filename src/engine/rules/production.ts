@@ -85,6 +85,14 @@ import {
   writeCapacityOutcome,
 } from "./storage";
 import {
+  buildImpairmentIndex,
+  computeMasteryGains,
+  indexStopsFacility,
+  isTechRelatedImpaired,
+  type ImpairmentIndex,
+  type MasteryGains,
+} from "./techMemory";
+import {
   RulesError,
   requireFacilityDef,
   type AdvanceContext,
@@ -163,6 +171,15 @@ export interface ProductionRates {
   readonly capacityByResourceId: ReadonlyMap<EntityId, Fix>;
   /** [M5] 保管庫パラメータ(GDD 6.7)。content に無ければ undefined。 */
   readonly storage: StorageParams | undefined;
+  /**
+   * [M13] (住民, 技術) ごとの定着度蓄積レート(GDD 11.2 の `masteryResist` を
+   * 「実地稼働で蓄積する」ぶん・キー昇順)。生産と同じ (A) 区間の閉形式で
+   * 積分されるレートなのでここに載せる(rules/techMemory.ts §4)。
+   *
+   * **就労者の走査を生産と共有する**ことが目的でもある: 「稼働している就労者」の
+   * 判定が生産式と定着で分岐しないよう、同じ 1 パスで両方を作る。
+   */
+  readonly masteryGains: MasteryGains;
 }
 
 /**
@@ -178,6 +195,31 @@ export function isWorkerActive(resident: ResidentState, tick: number): boolean {
   if (!isAliveResident(resident)) return false;
   if (resident.dispatched) return false;
   return tick >= resident.recallImpairedUntilTick;
+}
+
+/**
+ * [M13] その住民がこの**施設**で稼働しているか(GDD 11.2「当該住民の当該 tech
+ * 関連生産のみ停止」の本式)。
+ *
+ * {@link isWorkerActive}(住民単位の可否)に加えて、(住民, tech) 別の想起困難が
+ * この施設定義での寄与を止めていないかを見る(rules/techMemory.ts §2)。
+ *
+ * `state.techMemoryByKey` が空なら後段は O(1) で false を返すので、既存セーブ・
+ * 既存 conformance シナリオでは {@link isWorkerActive} と厳密に同値である。
+ */
+export function isWorkerActiveAtFacility(
+  state: GameState,
+  content: EngineContent,
+  resident: ResidentState,
+  facilityDefId: EntityId,
+  tick: number,
+  impairment?: ImpairmentIndex,
+): boolean {
+  if (!isWorkerActive(resident, tick)) return false;
+  // `impairment` は (A) 区間の入口で 1 回だけ作った索引(rules/techMemory.ts)。
+  // 省略時はその場で全件走査する(単体テスト・低頻度の問い合わせ向け)。
+  if (impairment !== undefined) return !indexStopsFacility(impairment, resident.id, facilityDefId);
+  return !isTechRelatedImpaired(state, content, resident.id, facilityDefId, tick);
 }
 
 /**
@@ -199,11 +241,26 @@ export function facilityOutputPerTick(
   return value;
 }
 
-/** 稼働している就労者の人数(state の workerIds は ID 昇順)。 */
-export function activeWorkerCount(state: GameState, facility: FacilityState, tick: number): number {
+/**
+ * 稼働している就労者の人数(state の workerIds は ID 昇順)。
+ *
+ * [M13] `content` を渡すと施設別の想起困難({@link isWorkerActiveAtFacility})を
+ * 考慮する。省略時は住民単位の可否だけを見る(診断・テスト用の縮約経路)。
+ */
+export function activeWorkerCount(
+  state: GameState,
+  facility: FacilityState,
+  tick: number,
+  content?: EngineContent,
+): number {
   let count = 0;
   for (const workerId of facility.workerIds) {
-    if (isWorkerActive(requireEntity(state, workerId, "resident"), tick)) count++;
+    const resident = requireEntity(state, workerId, "resident");
+    const active =
+      content === undefined
+        ? isWorkerActive(resident, tick)
+        : isWorkerActiveAtFacility(state, content, resident, facility.defId, tick);
+    if (active) count++;
   }
   return count;
 }
@@ -245,11 +302,15 @@ export function activeLaborFix(
   facility: FacilityState,
   def: FacilityDef,
   tick: number,
+  impairment?: ImpairmentIndex,
 ): Fix {
   let total = FIX_ZERO;
   for (const workerId of facility.workerIds) {
     const resident = requireEntity(state, workerId, "resident");
-    if (!isWorkerActive(resident, tick)) continue;
+    // [M13] 施設別の想起困難まで見る(GDD 11.2 の「当該 tech 関連生産のみ停止」)。
+    if (!isWorkerActiveAtFacility(state, content, resident, facility.defId, tick, impairment)) {
+      continue;
+    }
     total = addFix(total, residentContribution(resident, def, content));
   }
   return total;
@@ -266,13 +327,16 @@ export function activeLaborFix(
 export function computeProductionRates(state: GameState, ctx: AdvanceContext): ProductionRates {
   const resourceRateByResourceId = new Map<EntityId, Fix>();
   let researchRateFix = FIX_ZERO;
+  // [M13] 「誰のどの施設が想起困難で止まっているか」を 1 パスで索引化する
+  // (就労者ごとに全件走査すると区間あたり二乗になる・rules/techMemory.ts)。
+  const impairment = buildImpairmentIndex(state, ctx.content, state.tick);
 
   for (const facility of entitiesOfKind(state, "facility")) {
     const def = requireFacilityDef(ctx.content, facility.defId);
     const base = facilityOutputPerTick(def, facility.level);
     if (toRaw(base) === 0) continue;
 
-    const labor = activeLaborFix(state, ctx.content, facility, def, state.tick);
+    const labor = activeLaborFix(state, ctx.content, facility, def, state.tick, impairment);
     if (toRaw(labor) === 0) continue;
 
     const multiplier = ctx.multiplierByFacilityId.get(facility.id);
@@ -306,6 +370,11 @@ export function computeProductionRates(state: GameState, ctx: AdvanceContext): P
     researchRateFix,
     capacityByResourceId: resolveCapacityByResourceId(state, ctx.content),
     storage: ctx.content.storage,
+    // [M13] 定着度の蓄積レート。「稼働している就労者」の判定は生産式と同一の
+    // 述語({@link isWorkerActiveAtFacility})を渡して共有する。
+    masteryGains: computeMasteryGains(state, ctx.content, (resident, facilityDefId) =>
+      isWorkerActiveAtFacility(state, ctx.content, resident, facilityDefId, state.tick, impairment),
+    ),
   };
 }
 

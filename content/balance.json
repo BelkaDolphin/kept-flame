@@ -1,6 +1,6 @@
 {
   "fpScale": 1000000,
-  "algoVersion": 1,
+  "algoVersion": 2,
   "coarseTickMinutes": 10,
   "offlineClampTick": 4320,
   "safetyFactor": 1.5,
@@ -18,7 +18,8 @@
     "memoryKeeperResist": -0.15,
     "memoryKeeperTraitId": "traitMemoryKeeper",
     "durationTicksMin": 1440,
-    "durationTicksMax": 2880
+    "durationTicksMax": 2880,
+    "masteryGainPerFieldWorkDay": 0.00288
   },
   "storage": {
     "wasteResourceId": "waste",

@@ -82,6 +82,15 @@
 
 import { GRID_CELL_COUNT } from "./adjacency";
 import { compareUtf16 } from "./canonicalize";
+import {
+  FOOTPRINT_DIM_MAX,
+  UNIT_FOOTPRINT,
+  findOccupancyConflict,
+  footprintFitsGrid,
+  isUnitFootprint,
+  isValidFootprintDims,
+  occupiedCells,
+} from "./footprint";
 import { toRaw, type Fix } from "./fp";
 import {
   beginCodification as beginCodificationRule,
@@ -111,8 +120,10 @@ import { putEntity, removeEntity, setField, updateEntity } from "./state/update"
  * 1 ステップ目(選択)は UI 状態であって state を動かさないので、コマンドは
  * 確定の 1 発だけである(store の `cellSelected` が選択側の担当)。
  *
- * **footprint は 1×1 固定**(2×1 / 2×2 は M16 で state 側に占有セル集合が
- * 入ってから)。よって占有衝突の検査は `cellIndex` 1 個で閉じている。
+ * **[M16] footprint は content の facility 定義から引く**(GDD 6.1 の 2×1 / 2×2)。
+ * コマンド引数は基準セル(アンカー)1 個だけであり、占有セル集合は
+ * `footprint.ts` の `occupiedCells` が導出する。衝突検査は**全占有セル**に対して
+ * 行い、盤外へはみ出す配置は `footprintOutOfGrid` で拒否する。
  */
 export interface PlaceFacilityCommand {
   readonly kind: "placeFacility";
@@ -120,13 +131,20 @@ export interface PlaceFacilityCommand {
   readonly facilityId: EntityId;
   /** content の facility 定義 ID。 */
   readonly defId: EntityId;
-  /** 6×8 格子の通し番号 0〜47。 */
+  /**
+   * 6×8 格子の通し番号 0〜47。
+   * [M16] 大型施設では**占有矩形のアンカー(左上)**として解釈する。
+   */
   readonly cellIndex: number;
 }
 
 /**
  * 施設を解体する。就労者は**engine 側で**全員外す(UI に後始末をさせない)。
  * 解体で資源は戻らない(建設コストが content に無いため・§4)。
+ *
+ * **[M16] 大型施設の占有セルは全部同時に空く**。占有セル集合は施設 entity 自身の
+ * `cellIndex` + `footprint` から導出される(footprint.ts §1)ので、entity を
+ * 取り除けば占有も消える = 盤面側に掃除すべき副本が無い、という設計である。
  */
 export interface DemolishFacilityCommand {
   readonly kind: "demolishFacility";
@@ -196,7 +214,14 @@ export interface DispatchExpeditionCommand {
   readonly teamResidentIds: readonly EntityId[];
 }
 
-/** **型のみ予約**(担当 M18): 瓦礫セルの開墾(GDD 9.1)。地形は state に無い。 */
+/**
+ * **型のみ予約**(担当 M18): 瓦礫セルの開墾(GDD 9.1)。地形は state に無い。
+ *
+ * **[M16] 実装時の申し送り**: 瓦礫セルを state へ入れたら、`placeFacility` の
+ * 検査に「**全占有セル**が開墾済みか」を足すこと(基準セルだけを見ると、2×2 の
+ * 施設が瓦礫の上へ半分乗る)。占有セル集合は `footprint.ts` の `occupiedCells` で
+ * 得られ、既に `cellOccupied` / `footprintOutOfGrid` は全占有セルを見ている。
+ */
 export interface ReclaimCellCommand {
   readonly kind: "reclaimCell";
   readonly cellIndex: number;
@@ -292,7 +317,19 @@ export const COMMAND_REJECTION_CODES = [
   "contentUnsupported",
   /** セル番号が格子の外。 */
   "cellOutOfRange",
-  /** そのセルに既に施設が建っている(GDD 6.1: 1 セル = 1 施設)。 */
+  /**
+   * [M16] 基準セルは格子内だが、その施設の footprint(2×1 / 2×2)が盤外へはみ出す。
+   *
+   * `cellOutOfRange`(= タップ位置そのものが盤外 = UI/実装の異常)と分けてあるのは、
+   * こちらが**プレイヤーが普通に起こす失敗**(右端・下端に大型施設を置こうとした)
+   * であり、配置プレビュー(M19)の文言も「入りません」と別になるためである。
+   */
+  "footprintOutOfGrid",
+  /**
+   * そのセルに既に施設が建っている(GDD 6.1: 1 セル = 1 施設)。
+   * [M16] 大型施設では**占有セルのいずれか**が埋まっていれば該当し、
+   * `rejection.cellIndex` には衝突したセルのうち最小のものが載る。
+   */
   "cellOccupied",
   /** これ以上増築できない(Lv 上限)。 */
   "levelAtMax",
@@ -411,13 +448,6 @@ function rejected(kind: CommandKind | null, index: number, input: RejectionInput
 }
 
 // --- 3. 参照ヘルパ ---------------------------------------------------------
-
-function facilityAt(state: GameState, cellIndex: number): FacilityState | undefined {
-  for (const facility of entitiesOfKind(state, "facility")) {
-    if (facility.cellIndex === cellIndex) return facility;
-  }
-  return undefined;
-}
 
 function facilityOf(state: GameState, id: EntityId): FacilityState | undefined {
   const entity = getEntity(state, id);
@@ -577,24 +607,66 @@ function applyPlaceFacility(
       message: `entity ID "${command.facilityId}" は既に使われている`,
     });
   }
-  const occupant = facilityAt(state, command.cellIndex);
-  if (occupant !== undefined) {
+
+  // [M16] footprint(GDD 6.1)。content 側は schema が 1〜2 を強制しているので、
+  // ここへ値域外が来るのは engine のテストフィクスチャか壊れたローダー経由だけ。
+  // 黙って 1×1 へ倒すと「2×2 のつもりが 1×1 で建った」静かな縮退になるため拒否する。
+  const footprint = def.footprint ?? UNIT_FOOTPRINT;
+  if (!isValidFootprintDims(footprint)) {
     return rejected("placeFacility", index, {
-      code: "cellOccupied",
+      code: "contentUnsupported",
+      subjectId: command.defId,
+      limit: FOOTPRINT_DIM_MAX,
+      message:
+        `facility 定義 "${command.defId}" の footprint ` +
+        `${String(footprint.width)}×${String(footprint.height)} は engine が表現できない` +
+        `(1〜${String(FOOTPRINT_DIM_MAX)} の整数・GDD 6.1)`,
+    });
+  }
+  if (!footprintFitsGrid(command.cellIndex, footprint)) {
+    return rejected("placeFacility", index, {
+      code: "footprintOutOfGrid",
       cellIndex: command.cellIndex,
-      subjectId: occupant.id,
-      message: `セル ${String(command.cellIndex)} には施設 "${occupant.id}" が建っている(1 セル = 1 施設・GDD 6.1)`,
+      subjectId: command.defId,
+      message:
+        `基準セル ${String(command.cellIndex)} から footprint ` +
+        `${String(footprint.width)}×${String(footprint.height)} が格子(6×8)の外へはみ出す(GDD 6.1)`,
     });
   }
 
-  const next = putEntity(state, {
-    kind: "facility",
-    id: command.facilityId,
-    defId: command.defId,
-    level: 1,
-    cellIndex: command.cellIndex,
-    workerIds: [],
-  });
+  const cells = occupiedCells(command.cellIndex, footprint);
+  const conflict = findOccupancyConflict(state, cells);
+  if (conflict !== null) {
+    return rejected("placeFacility", index, {
+      code: "cellOccupied",
+      cellIndex: conflict.cellIndex,
+      subjectId: conflict.facility.id,
+      message: `セル ${String(conflict.cellIndex)} には施設 "${conflict.facility.id}" が建っている(1 セル = 1 施設・GDD 6.1)`,
+    });
+  }
+
+  // 1×1 は footprint キーを持たせない(省略 ⇔ 1×1 の正準形・footprint.ts §2)。
+  // content 由来のオブジェクトを共有せず値を写すのは、state を content から
+  // 独立させておく(content が動いても既存盤面が動かない)ため。
+  const placed: FacilityState = isUnitFootprint(footprint)
+    ? {
+        kind: "facility",
+        id: command.facilityId,
+        defId: command.defId,
+        level: 1,
+        cellIndex: command.cellIndex,
+        workerIds: [],
+      }
+    : {
+        kind: "facility",
+        id: command.facilityId,
+        defId: command.defId,
+        level: 1,
+        cellIndex: command.cellIndex,
+        workerIds: [],
+        footprint: { width: footprint.width, height: footprint.height },
+      };
+  const next = putEntity(state, placed);
   return { ok: true, state: next, changed: next !== state, commandCount: 1 };
 }
 

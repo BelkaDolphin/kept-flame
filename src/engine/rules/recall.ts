@@ -33,28 +33,43 @@
 //   {@link perCoarseStepProbability}(線形按分・pow 禁止の理由もそこに記載)。
 //
 // ===========================================================================
-// 3. 縮約(state.ts §3 のスコープに合わせた 3 点)
+// 3. 縮約と本式(T5 → M13)
 // ===========================================================================
-//   (a) **判定ペア** — GDD の `recallRisk(住民u, tech t)` は「u が記憶している
-//       未成文の tech」を走る。縮約 state は「誰がどの技術を記憶しているか」を
-//       持たない(住民系の記憶モデルは MVP 実装事項)ため、判定ペアは
-//       「全住民 × 全 research entity の techId」とする。ADR-014 の
-//       「20人×3tech×2,304step = 138,240 ベルヌーイ判定/run」と同じ判定数になる
-//       ので、先行計測 #3/#4(sec/run 校正)と #5(発生頻度)の入力として等価。
-//   (b) **停止の粒度** — GDD は「当該住民の当該 tech 関連生産のみ停止」だが、
-//       縮約 state の `recallImpairedUntilTick` は住民あたり 1 スカラなので、
-//       発生した住民の寄与を丸ごと 0 にする(rules/production.ts §2)。
-//   (c) **回復条件** — GDD の「通常業務就労かつ士気 ≥40 を持続、または療養所で
-//       休養1日」は縮約せず、持続 d(1〜2 日・seed 決定論)の満了のみで回復する。
-//       療養所・士気回復の実装は MVP 事項。
+//   T5(先行計測)は 3 点を縮約していた。**M13 で (b) を本式へ上げた**:
 //
-//   なお **既に想起困難中の住民には新規発生を積まない**(持続を延長しない)。
-//   これにより `recallImpairedUntilTick` の変化が「新規発生」と 1 対 1 対応し、
-//   計測 #5 の「週あたり発生回数/住民」が state の差分から数えられる。
-//   ただしベルヌーイ試行そのものは**発生中でも全ペアぶん引く**: 段階1 の
+//   (a) **判定ペア** — [縮約のまま] GDD の `recallRisk(住民u, tech t)` は
+//       「u が記憶している未成文の tech」を走る。判定ペアは
+//       「全生存住民 × 全 research entity の techId」のままである。理由は
+//       rules/techMemory.ts §2(a): ADR-014 の「20人×3tech×2,304step =
+//       138,240 ベルヌーイ判定/run」という計測 #3/#4 の入力を保つため、および
+//       保持していない tech の想起困難は上界として安全側だから。
+//   (b) **停止の粒度** — [M13 本式] GDD の「当該住民の当該 tech 関連生産のみ停止」
+//       を `GameState.techMemoryByKey` の (住民, tech) 別 `impairedUntilTick` で
+//       表現する。止まるのは当該 tech の実地要件施設
+//       (`tech.fieldRequirement.facility`)での寄与だけであり、実地要件が
+//       content に無い tech は住民単位の全停止へフォールバックする
+//       (rules/techMemory.ts §1・§2)。
+//       これに伴い **同一住民の別 tech は独立に発生する**(下記)。
+//   (c) **回復条件** — [縮約のまま] 「通常業務就労かつ士気 ≥40 を持続、または
+//       療養所で休養1日」は未実装で、持続 d(1〜2 日・seed 決定論)の満了のみ。
+//
+//   **発生の抑制は (住民, tech) 単位**(M13)。T5 は「既に想起困難中の**住民**には
+//   新規発生を積まない」という住民単位の抑制だったが、GDD 11.2 は
+//   「(u,t) ごとの確率」「他生産・他住民は影響なし」と定めており、同一住民の
+//   別 tech が同時に想起困難になることを排除していない。よって抑制は
+//   「その (u,t) が既に想起困難中なら積まない」に限る。
+//   **これは T5 と観測挙動が変わる本式化であり、golden vector の変化 = algoVersion
+//   bump を伴う**(ADR-016)。
+//
+//   ベルヌーイ試行そのものは**発生中でも全ペアぶん引く**: 段階1 の
 //   「per-step 全再評価」を試行数の面でも崩さないため(= #3 の 138,240 判定/run が
 //   状態依存で目減りしない)であり、hash アドレス方式ゆえ引いても引かなくても
 //   他ペアの結果は変わらない。
+//
+//   `ResidentState.recallImpairedUntilTick`(住民単位スカラ)は**残す**が、
+//   M13 以降の抽選はそこへ書かない。プリロードされたセーブ・テストフィクスチャ・
+//   sim パターンが「住民単位の全停止」を直接置く口として生き続け、生産側
+//   (rules/production.ts の `isWorkerActive`)はこれを従来どおり尊重する。
 // ---------------------------------------------------------------------------
 
 import { FIX_ZERO, addFix, clampFix, maxFix, minFix, mulFix, subFix, type Fix } from "../fp";
@@ -76,7 +91,7 @@ import {
   type GameState,
   type ResidentState,
 } from "../state/state";
-import { setField, updateEntity } from "../state/update";
+import { isTechImpaired, masteryResistBaseFix, setTechImpairedUntil } from "./techMemory";
 import { RulesError, requireFacilityDef, type AdvanceContext, type EngineContent } from "./types";
 
 /** 判定対象の技術 ID(§3(a): research entity の techId・ID 昇順)。 */
@@ -107,6 +122,7 @@ export function recallRiskPerDay(
   state: GameState,
   content: EngineContent,
   resident: ResidentState,
+  techId: EntityId | null = null,
 ): Fix {
   const p = content.recallRisk;
 
@@ -134,8 +150,14 @@ export function recallRiskPerDay(
     risk = addFix(risk, p.dispatchWFix);
   }
 
-  // masteryResist = min(mastery, 上限) + 記憶巧者 trait 耐性(負値)。
-  let resist = maxFix(FIX_ZERO, minFix(resident.mastery, p.masteryResistMaxFix));
+  // masteryResist = clamp(住民スカラ + 当該 tech の実地蓄積, 0, 上限)
+  //                 + 記憶巧者 trait 耐性(負値)。
+  // [M13] tech 別の蓄積は rules/techMemory.ts。techId を渡さない呼び出し
+  // (tech に依らない上界の見積り)では住民スカラだけを使う = T5 と同一。
+  let resist =
+    techId === null
+      ? maxFix(FIX_ZERO, minFix(resident.mastery, p.masteryResistMaxFix))
+      : maxFix(FIX_ZERO, masteryResistBaseFix(state, content, resident, techId));
   if (p.memoryKeeperTraitId !== null && resident.traitIds.includes(p.memoryKeeperTraitId)) {
     // memoryKeeperResistFix は負値(-0.15)。resist は「引く量」なので符号を反転して足す。
     resist = subFix(resist, p.memoryKeeperResistFix);
@@ -148,6 +170,8 @@ export function recallRiskPerDay(
 /** 想起困難が新たに発生した 1 件(scheduler が回復イベントを積むための情報)。 */
 export interface RecallOccurrence {
   readonly residentId: EntityId;
+  /** [M13] 発生した技術(GDD 11.2 の `recallRisk(u,t)` の t)。 */
+  readonly techId: EntityId;
   /** 回復する tick(= 発生 tick + 持続)。 */
   readonly untilTick: number;
 }
@@ -201,15 +225,19 @@ export function evaluateRecallCoarseStep(
     // [M11] 死者は判定ペアに入らない(記憶ごと失われている)。試行数も引かない
     // ので、死者が 1 人も居ない盤面では M11 以前と試行列が完全に一致する。
     if (!isAliveResident(resident)) continue;
-    // 士気・派遣・配属はステップ内で変わらないので p は住民あたり 1 回計算。
-    const pStep = perCoarseStepProbability(
-      recallRiskPerDay(state, content, resident),
-      content.coarseTickMinutes,
-    );
     const residentSalt = saltFromId(resident.id);
-    let impaired = stepTick < resident.recallImpairedUntilTick;
+    // [M13] 住民単位スカラの想起困難は「全 tech が止まっている」状態なので、
+    // その間は新規発生を積まない(T5 の抑制と同じ扱い。プリロードされたセーブや
+    // sim パターンがこのスカラを使う・§3 末尾)。
+    const residentWideImpaired = stepTick < resident.recallImpairedUntilTick;
 
     for (const techId of techIds) {
+      // [M13] mastery は (住民, tech) 別なので p も tech ごとに計算する
+      // (士気・派遣・配属はステップ内で変わらないので、変わるのは mastery 項だけ)。
+      const pStep = perCoarseStepProbability(
+        recallRiskPerDay(state, content, resident, techId),
+        content.coarseTickMinutes,
+      );
       const draw = hashedDrawUint32(ctx.worldSeedU32, DOMAIN_TAGS.recall, [
         residentSalt,
         saltFromId(techId),
@@ -217,20 +245,20 @@ export function evaluateRecallCoarseStep(
       ]);
       trialCount++;
       if (!bernoulliHit(pStep, draw)) continue;
-      // 発生中は新規発生としない(§3 末尾)。試行は上で引き終えているので
+      // [M13] 抑制は (住民, tech) 単位(§3)。試行は上で引き終えているので
       // 以降のペアの乱数列には影響しない。
-      if (impaired) continue;
+      if (residentWideImpaired) continue;
+      // `next` を見る(`state` ではない): 同じ techId を持つ research entity が
+      // 2 つある content でも同一 (u,t) を二重に発生させないため。
+      if (isTechImpaired(next, resident.id, techId, stepTick)) continue;
 
       const durationDraw = drawFromStream(next, DOMAIN_TAGS.recallDuration);
       next = durationDraw.state;
       const untilTick =
         stepTick +
         uniformIntFromDraw(durationDraw.value, params.durationMinTicks, params.durationMaxTicks);
-      next = updateEntity(next, resident.id, "resident", (r) =>
-        setField(r, "recallImpairedUntilTick", untilTick),
-      );
-      occurrences.push({ residentId: resident.id, untilTick });
-      impaired = true;
+      next = setTechImpairedUntil(next, resident.id, techId, untilTick);
+      occurrences.push({ residentId: resident.id, techId, untilTick });
     }
   }
 
@@ -241,9 +269,10 @@ export function evaluateRecallCoarseStep(
 // 回復について: **状態遷移を持たない**(scheduler の recallRecover イベントは
 // 区間境界としてのみ存在する)。
 //
-// 回復は `recallImpairedUntilTick` と現在 tick の比較だけで表現され
-// (`tick >= until` なら稼働・rules/production.ts の isWorkerActive)、回復 tick で
-// フラグを 0 に戻す処理は**入れない**。理由は分割不変性(advance.ts §3):
+// 回復は `impairedUntilTick`([M13] は techMemoryByKey 側・住民単位スカラは
+// `recallImpairedUntilTick`)と現在 tick の比較だけで表現され
+// (`tick >= until` なら稼働・rules/production.ts の isWorkerActiveAtFacility)、
+// 回復 tick でフラグを 0 に戻す処理は**入れない**。理由は分割不変性(advance.ts §3):
 // 半開区間の規約(scheduler.ts §2)により tick == toTick のイベントは処理されない
 // ため、ちょうど回復 tick で advance を区切ると「フラグを 0 に戻すイベント」が
 // どちらの advance でも発火せず、一括で進めた場合(発火する)と state が
