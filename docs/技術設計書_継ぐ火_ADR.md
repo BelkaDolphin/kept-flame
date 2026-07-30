@@ -729,7 +729,7 @@ kept-flame/
 
 ### バージョニング / マイグレーション(3軸)
 
-- **(a) saveSchemaVersion 差** → 純関数マイグレーション version 順連鎖。
+- **(a) saveSchemaVersion 差** → 純関数マイグレーション version 順連鎖。**[2026-07-30追記]** payload 軸の最初の実段 = M16 の v1→v2（facility footprint 追加。省略可フィールドでも「旧ビルドが新セーブを読むと盤面幾何が黙って潰れる」類の変更は版差で塞ぐ、が線引きの実例）。
 - **(b) contentVersion 差** → additive-only・未知 ID グレースフル無視・tombstone=ソフト削除ゆえ逆参照/救済が機械実行可能・着手済みは `snapshottedParams` で完了継続/未着手はコスト返還。
 - **(c) algoVersion 差** → 旧セーブは生成時 algoVersion の決定論バンドル全体実装 registry で未来 tick 計算(ライブは直近3世代ハード上限・ADR-025)。sunset 到達版の実装はライブ HEAD から物理削除し Cloudflare Workers 静的アセットの個別 Worker(固定サブドメイン・[2026-07-25改訂] 旧 Cloudflare Pages イミュータブル凍結アーカイブデプロイから変更、詳細は ADR-025)へ退役、sunset 版セーブは現行ビルドが計算拒否し「凍結ビルドで継続/エクスポート or 同意して再シード移行」を提示(ADR-025)。
 
