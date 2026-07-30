@@ -19,6 +19,7 @@ import { GRID_CELL_COUNT } from "../../src/engine/adjacency";
 import { toRaw } from "../../src/engine/fp";
 import { entitiesOfKind, requireEntity } from "../../src/engine/state/state";
 import { setField, updateEntity } from "../../src/engine/state/update";
+import { computePlacementPreview } from "../../src/ui/derived";
 import {
   CELL_CENTER,
   CELL_EAST,
@@ -28,6 +29,7 @@ import {
   HEARTH,
   STUDY_DESK,
   at,
+  boardContent,
   changedCells,
   createTestStore,
   facility,
@@ -477,5 +479,92 @@ describe("[M17] 大型施設の隣接判定(GDD 6.3 の判定基準セル)", () 
     expect(() => createTestStore([bigHearth(), facility("fClash", HEARTH.id, BIG_TAIL)])).toThrow(
       /1 セル = 1 施設/,
     );
+  });
+});
+
+describe("[M19] selectedCellBreakdown(GDD 6.5 内訳ビュー)", () => {
+  it("未選択なら null", () => {
+    const { store } = createTestStore();
+    expect(store.derived.selectedCellBreakdown.value).toBeNull();
+  });
+
+  it("空きセルを選択しても null", () => {
+    const { store } = createTestStore();
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_SOUTHEAST });
+    expect(store.derived.selectedCellBreakdown.value).toBeNull();
+  });
+
+  it("占有セルを選択すると cellView と同じ multiplierFix/bonusFix を返す", () => {
+    const { store } = createTestStore();
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_CENTER });
+    const breakdown = store.derived.selectedCellBreakdown.value;
+    expect(breakdown).not.toBeNull();
+    if (breakdown === null) return;
+    const view = at(store.derived.cellView, CELL_CENTER).value;
+    expect(toRaw(breakdown.multiplierFix)).toBe(toRaw(view.multiplierFix));
+    expect(toRaw(breakdown.bonusFix)).toBe(toRaw(view.bonusFix));
+    expect(toRaw(breakdown.overcrowdPenaltyFix)).toBe(toRaw(view.overcrowdPenaltyFix));
+    expect(breakdown.overcrowdedNeighborCount).toBe(view.overcrowdedNeighborCount);
+
+    const heatBucket = breakdown.buckets.find((b) => b.tag === "heat");
+    expect(heatBucket?.neighborAnchors).toEqual([CELL_EAST]);
+    expect(heatBucket?.effectiveAnchors).toEqual([CELL_EAST]);
+    expect(heatBucket?.excessAnchors).toEqual([]);
+  });
+});
+
+describe("[M19] computePlacementPreview(GDD 6.5 配置プレビュー)", () => {
+  it("既存施設に隣接する空きセルはボーナスが付き、遠方セルは付かない", () => {
+    const { store } = createTestStore();
+    const previews = computePlacementPreview(
+      store.sources,
+      store.peekContent(),
+      store.sources.worldSeedU32.peek(),
+      HEARTH.id,
+    );
+    expect(previews).toHaveLength(GRID_CELL_COUNT);
+
+    // CELL_WEST(13) は CELL_CENTER(14)の8近傍 = heat|heat +0.2 が付く。
+    const west = previews.find((p) => p.cellIndex === CELL_WEST);
+    expect(west?.fits).toBe(true);
+    expect(toRaw(west?.bonusFix ?? at(previews, 0).bonusFix)).toBe(200_000);
+
+    // cell 0(x0,y0)はどの既存施設(14/15/40)の8近傍でもない孤立セル。ボーナス無し。
+    const isolated = previews.find((p) => p.cellIndex === 0);
+    expect(isolated?.fits).toBe(true);
+    expect(toRaw(isolated?.bonusFix ?? at(previews, 0).bonusFix)).toBe(0);
+  });
+
+  it("既存施設が占有しているセルは fits=false", () => {
+    const { store } = createTestStore();
+    const previews = computePlacementPreview(
+      store.sources,
+      store.peekContent(),
+      store.sources.worldSeedU32.peek(),
+      HEARTH.id,
+    );
+    const occupied = previews.find((p) => p.cellIndex === CELL_CENTER);
+    expect(occupied?.fits).toBe(false);
+  });
+
+  it("大型施設(2×1)は盤外へはみ出すアンカーで fits=false になる", () => {
+    const wideDef = { ...HEARTH, id: id("wideHearth"), footprint: { width: 2, height: 1 } };
+    const { store } = createTestStore();
+    const contentWithWide = boardContent();
+    const previews = computePlacementPreview(
+      store.sources,
+      {
+        ...contentWithWide,
+        facilityDefs: new Map([...contentWithWide.facilityDefs, [wideDef.id, wideDef]]),
+      },
+      store.sources.worldSeedU32.peek(),
+      wideDef.id,
+    );
+    // GRID_WIDTH=6 の右端列(x=5)をアンカーにすると 2×1 が盤外へはみ出す。
+    const rightEdgeAnchor = 5; // (x=5, y=0)
+    expect(previews.find((p) => p.cellIndex === rightEdgeAnchor)?.fits).toBe(false);
+    // 1 列左(x=4)なら収まる(近傍に施設が無いので空きセルとして fits=true)。
+    const fitsAnchor = 4;
+    expect(previews.find((p) => p.cellIndex === fitsAnchor)?.fits).toBe(true);
   });
 });

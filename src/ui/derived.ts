@@ -55,17 +55,27 @@ import {
   type CellOccupant,
   type Tag,
 } from "../engine/adjacency";
-import { adjacencyBasisCells, isUnitFootprint, occupiedCells } from "../engine/footprint";
+import {
+  UNIT_FOOTPRINT,
+  adjacencyBasisCells,
+  footprintFitsGrid,
+  isUnitFootprint,
+  occupiedCells,
+} from "../engine/footprint";
 import { FIX_ONE, FIX_ZERO, toApproxNumber, toRaw, type Fix } from "../engine/fp";
-import type { RecordMedium } from "../engine/rules/types";
+import { requireFacilityDef, type EngineContent, type RecordMedium } from "../engine/rules/types";
 import {
   entitiesOfKind,
   type CodifyState,
   type EntityId,
   type GameState,
 } from "../engine/state/state";
+import {
+  computeAdjacencyBreakdown,
+  type CellAdjacencyBreakdown,
+} from "./screens/grid/adjacencyBreakdown";
 import { computed, type ReadonlyComputed } from "./reactive";
-import type { CellPlacement, StoreSources } from "./sources";
+import type { CellPlacement, ReadonlyStoreSources, StoreSources } from "./sources";
 
 /** 8 近傍の一覧は盤面形状だけで決まる静的値なので、モジュール読込時に 1 回作る。 */
 const NEIGHBOR_CELLS: readonly (readonly number[])[] = (() => {
@@ -276,6 +286,12 @@ export interface StoreDerived {
 
   /** 選択中セルの表示モデル(未選択は null)。③施設詳細と②の選択枠が読む。 */
   readonly selectedCell: ReadonlyComputed<CellViewModel | null>;
+  /**
+   * [M19] 選択中セルの内訳(GDD 6.5 の内訳ビュー)。未選択/空きセルは null。
+   * 依存は `selectedCell` と同じセル局所(自セル + 判定基準セル)なので
+   * fan-in 上界は崩れない(§3(a)と同型)。
+   */
+  readonly selectedCellBreakdown: ReadonlyComputed<CellAdjacencyBreakdown | null>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -558,6 +574,40 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "selectedCell" },
   );
 
+  // [M19] 選択セルの内訳(GDD 6.5)。cellAdjacency[i] と同じ基準セル収集を
+  // もう一度なぞる必要がある(computeCellAdjacency は内訳を返さないため・
+  // adjacencyBreakdown.ts 冒頭コメント参照)。依存はやはりセル局所のみ。
+  const selectedCellBreakdown = computed<CellAdjacencyBreakdown | null>(
+    () => {
+      const cellIndex = sources.selectedCellIndex.value;
+      if (cellIndex === null) return null;
+      const placementSignal = sources.cellPlacement[cellIndex];
+      if (placementSignal === undefined) {
+        throw new RangeError(`選択セル ${String(cellIndex)} が格子の範囲を外れている`);
+      }
+      const placement = placementSignal.value;
+      if (placement === null) return null;
+
+      const basisCells = basisCellsOfPlacement(placement);
+      const occupancy = new Map<number, CellOccupant>();
+      for (const basisCell of basisCells) {
+        const neighbor = sources.cellPlacement[basisCell]?.value ?? null;
+        if (neighbor === null) continue;
+        occupancy.set(basisCell, {
+          anchorCellIndex: neighbor.anchorCellIndex,
+          tags: neighbor.tags,
+        });
+      }
+      return computeAdjacencyBreakdown(adjacencyMatrix.value, occupancy, {
+        cellIndex: placement.anchorCellIndex,
+        defId: placement.defId,
+        tags: placement.tags,
+        basisCells,
+      });
+    },
+    { name: "selectedCellBreakdown" },
+  );
+
   return {
     adjacencyMatrix,
     cellAdjacency,
@@ -570,5 +620,95 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     codify,
     homeBadges,
     selectedCell,
+    selectedCellBreakdown,
   };
+}
+
+// --- 5. 配置プレビュー(GDD 6.5 MVP必須・M19) --------------------------------
+//
+// pendingPlacement(施設カタログでの選択・M30 が画面から渡す)は store の
+// signal ではなく画面コンポーネントの一時的な状態なので、他の派生値のように
+// signal グラフの computed() にはしない(architecture.md §6 の規律は「signal
+// グラフに新しい依存経路を書くな」であって、store から一回読みする純関数まで
+// 禁じるものではない)。GridBoard.tsx は `useMemo` の中からこの関数を呼ぶ。
+//
+// 判定と同じ 1 実装を使う(GDD 6.3 の共通ロジック要件): 既存施設の occupancy は
+// 変えず、候補アンカーセルへ**仮に**置いた場合の `computeCellAdjacency` を
+// 呼ぶだけで「置いたらどうなるか」を計算できる(adjacency.ts §1 のコメント
+// どおり・state を作らない)。
+
+export interface PlacementPreviewCell {
+  readonly cellIndex: number;
+  /** footprint が盤内に収まり、かつ全占有セルが空いている。 */
+  readonly fits: boolean;
+  readonly multiplierApprox: number;
+  readonly bonusFix: Fix;
+  readonly overcrowdPenaltyFix: Fix;
+  readonly overcrowdedNeighborCount: number;
+}
+
+const PREVIEW_UNFIT: Omit<PlacementPreviewCell, "cellIndex"> = {
+  fits: false,
+  multiplierApprox: 1,
+  bonusFix: FIX_ZERO,
+  overcrowdPenaltyFix: FIX_ZERO,
+  overcrowdedNeighborCount: 0,
+};
+
+/**
+ * 48 セル全部について「ここに `defId` を置いたら」の予測乗数を計算する。
+ * 既存の占有(peek・非追跡)はそのままに、候補アンカーだけを仮定するので
+ * 既存施設の乗数には一切触れない(= 二次効果の再計算はしない・最終報告の
+ * ★ 注記参照)。
+ *
+ * @throws {RulesError} `defId` が content に無い場合
+ */
+export function computePlacementPreview(
+  sources: ReadonlyStoreSources,
+  content: EngineContent,
+  worldSeedU32: number,
+  defId: EntityId,
+): readonly PlacementPreviewCell[] {
+  const def = requireFacilityDef(content, defId);
+  const footprint = def.footprint ?? UNIT_FOOTPRINT;
+  const matrix = applySeedOffsets(content.adjacency, worldSeedU32);
+
+  const occupancy = new Map<number, CellOccupant>();
+  for (let i = 0; i < GRID_CELL_COUNT; i++) {
+    const placement = sources.cellPlacement[i]?.peek() ?? null;
+    if (placement === null) continue;
+    occupancy.set(i, { anchorCellIndex: placement.anchorCellIndex, tags: placement.tags });
+  }
+
+  const results: PlacementPreviewCell[] = [];
+  for (let anchor = 0; anchor < GRID_CELL_COUNT; anchor++) {
+    if (!footprintFitsGrid(anchor, footprint)) {
+      results.push({ cellIndex: anchor, ...PREVIEW_UNFIT });
+      continue;
+    }
+    const cells = occupiedCells(anchor, footprint);
+    const allEmpty = cells.every((c) => !occupancy.has(c));
+    if (!allEmpty) {
+      results.push({ cellIndex: anchor, ...PREVIEW_UNFIT });
+      continue;
+    }
+    const basisCells = isUnitFootprint(footprint)
+      ? neighborCellIndices(anchor)
+      : adjacencyBasisCells(cells);
+    const result = computeCellAdjacency(matrix, occupancy, {
+      cellIndex: anchor,
+      defId,
+      tags: def.tags,
+      basisCells,
+    });
+    results.push({
+      cellIndex: anchor,
+      fits: true,
+      multiplierApprox: toApproxNumber(result.multiplierFix),
+      bonusFix: result.bonusFix,
+      overcrowdPenaltyFix: result.overcrowdPenaltyFix,
+      overcrowdedNeighborCount: result.overcrowdedNeighborCount,
+    });
+  }
+  return results;
 }

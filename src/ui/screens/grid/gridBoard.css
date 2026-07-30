@@ -1,14 +1,18 @@
 /*
- * 継ぐ火 -Kept Flame- 格子UI(M18)スタイル。
+ * 継ぐ火 -Kept Flame- 格子UI(M18/M19)スタイル。
  *
  * ライトテーマ固定(ユーザーのグローバルルール: ダークモード/ダークテーマ禁止)。
- * `prefers-color-scheme` の分岐は書かない。色/記号/パターンの4重符号化
- * (GDD 6.5・ADR-003)は M19 の担当なので、ここでは構造(枠・タップ領域の
- * 確保・パン/ピンチのためのブラウザ既定ジェスチャ抑止)だけを持つ。
+ * `prefers-color-scheme` の分岐は書かない。
  *
  * セルの実寸(CELL_SIZE_PX)は gridConstants.ts が単一の出典であり、ここでは
  * ハードコードしない——GridBoard.tsx が `width`/`height` をインラインスタイル
  * として都度渡す(このファイルはそれ以外の見た目だけを持つ)。
+ *
+ * [M19] 色/記号/パターン/数値の4重符号化(GDD 6.5・ADR-003)・配置プレビュー・
+ * 常時過密警告バッジ・タグチップ(凡例/内訳ビュー共通)を追加。色の具体値
+ * (ink/tint等)は tags-spec.md の値をそのまま使い(勝手に変えない)、
+ * JS 側(tagVisuals.ts)からインラインスタイルで渡す。このファイルには
+ * レイアウト・構造だけを持たせる。
  */
 
 .kf-grid-viewport {
@@ -89,4 +93,219 @@
 .kf-cell__badge {
   font-size: 0.62rem;
   color: #5b534b;
+}
+
+/* --- [M19] タグマーカー行(spec §6.4: 先頭2個 + `+n` バッジ・ガター2px) ------ */
+
+.kf-cell__markers {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  line-height: 0;
+}
+
+.kf-cell__marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kf-cell__marker:last-child {
+  margin-right: 0 !important;
+}
+
+.kf-cell__marker-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.kf-cell__marker-overflow {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #24201c;
+  margin-left: 2px;
+}
+
+/* --- [M19] 常時過密警告バッジ(spec §6.4・非スケーリング) ------------------- */
+
+.kf-cell__overcrowd-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  transform-origin: top right;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #8a857d;
+  border-radius: 2px;
+  background: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+/* --- [M19] 配置プレビュー(GDD 6.5 MVP必須) --------------------------------- */
+
+.kf-cell--preview {
+  position: relative;
+}
+
+.kf-cell__preview-symbol {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #24201c;
+}
+
+.kf-cell__preview-value {
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #24201c;
+}
+
+.kf-cell--preview-add {
+  background-image: repeating-linear-gradient(
+    45deg,
+    #24201c 0,
+    #24201c 1.5px,
+    transparent 1.5px,
+    transparent 8px
+  );
+  background-blend-mode: normal;
+}
+
+.kf-cell--preview-sub {
+  background-image: radial-gradient(#24201c 1.2px, transparent 1.3px);
+  background-size: 8px 8px;
+}
+
+/* --- [M19] タグチップ(44×44px・4重符号化の完全形。凡例/内訳ビュー共通) ------ */
+
+.kf-tag-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-width: 1.5px;
+  border-style: solid;
+  border-radius: 6px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.kf-tag-chip__value {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  border-radius: 3px;
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+/* --- [M19] 凡例パネル(GDD 6.5 MVP要件) -------------------------------------- */
+
+.kf-legend {
+  color: #24201c;
+  background: #ffffff;
+}
+
+.kf-legend__title {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.kf-legend__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.kf-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.kf-legend__label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.kf-legend__note {
+  font-size: 12px;
+  font-weight: 400;
+  color: #5b534b;
+  margin: 0.4rem 0 0;
+}
+
+/* --- [M19] セル内訳ビュー(GDD 6.5 MVP要件) ---------------------------------- */
+
+.kf-breakdown {
+  color: #24201c;
+  background: #ffffff;
+}
+
+.kf-breakdown__title {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.kf-breakdown__summary {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.5rem;
+}
+
+.kf-breakdown__empty {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-breakdown__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.kf-breakdown__bucket-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.kf-breakdown__contributions {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding-left: 2.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.kf-breakdown__contribution {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #5b534b;
+}
+
+.kf-breakdown__contribution--excess {
+  color: #8c290b;
 }

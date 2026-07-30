@@ -56,7 +56,11 @@ import { GRID_WIDTH, type Tag } from "../../../engine/adjacency";
 import type { CommandResult, PlaceFacilityCommand } from "../../../engine/commands";
 import { toApproxNumber } from "../../../engine/fp";
 import type { EntityId } from "../../../engine/state/state";
-import type { CellViewModel } from "../../derived";
+import {
+  computePlacementPreview,
+  type CellViewModel,
+  type PlacementPreviewCell,
+} from "../../derived";
 import type { GameStore } from "../../store";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./gridBoard.css";
@@ -73,6 +77,19 @@ import {
   type Viewport,
   type ViewportBounds,
 } from "./gridGeometry";
+import { TagIconDefs, TagSymbol } from "./TagIcons";
+import {
+  MARKER_GUTTER_PX,
+  MAX_INLINE_MARKERS,
+  NON_SCALING_MIN_PX,
+  SURFACE_COLORS,
+  TAG_VISUALS,
+  computeDisplayMarkerPx,
+  computeLodTier,
+  computeRawMarkerPx,
+  formatBonusPercent,
+  formatOvercrowdCount,
+} from "./tagVisuals";
 
 // --- 1. 施設配置の待機(施設カタログは M30 の担当・ここは受け取るだけ) --------
 
@@ -82,28 +99,33 @@ export interface PendingPlacement {
   readonly defId: EntityId;
 }
 
-// --- 2. セル装飾の差し替え口(色/記号/パターンの本実装は M19) ---------------
+// --- 2. タグ 4 重符号化(色+記号+パターン+数値) + 配置プレビュー (M19) --------
+//
+// `docs/design/tags-spec.md` §7(LOD)・§6.4(セル内マーカー配置)・
+// GDD 6.5(配置プレビュー・常時過密警告バッジ)の実装。
+// M18 の `tagGlyph` 差し替え口(文字列を返すだけの仮実装)はここで本実装に
+// 置き換わる——4重符号化は色+記号(SVG)+パターン(SVG内蔵)+数値の4チャネルを
+// 要求するため、差し替え口の型を「文字列を返す関数」のままには維持できない
+// (置き換えの経緯は最終報告に記載)。
 
-/** タグ列から短い表示文字列を作る。既定は仮実装(タグ名の頭文字を連結するだけ)。 */
-export type TagGlyphRenderer = (tags: readonly Tag[]) => string;
-
-const TAG_INITIAL: { readonly [K in Tag]: string } = {
-  heat: "熱",
-  clean: "浄",
-  foul: "汚",
-  noise: "騒",
-  damp: "湿",
-  calm: "静",
-  lore: "芸",
-};
+/** 配置プレビュー(空きセルのみ)の表示種別。GDD 6.5 の「色+記号(+/−)+パターン+数値」。 */
+export interface CellPreviewView {
+  readonly kind: "add" | "sub";
+  readonly percentLabel: string;
+}
 
 /**
- * 既定のタグ表示(仮実装)。色/記号/パターンの4重符号化(GDD 6.5・ADR-003)は
- * M19 が `docs/design/tags-spec.md` の機械可読 JSON から実装する。ここでは
- * 「セルにタグが分かる文字が出る」以上のことをしない。
+ * `computePlacementPreview` の1セルぶんの結果を表示用に変換する。
+ * `fits=false`(盤外/衝突)のセルはプレビューを出さない(`null`)。
  */
-export const defaultTagGlyph: TagGlyphRenderer = (tags) =>
-  tags.length === 0 ? "" : tags.map((tag) => TAG_INITIAL[tag]).join("");
+export function buildPreviewView(preview: PlacementPreviewCell): CellPreviewView | null {
+  if (!preview.fits) return null;
+  const netApprox = toApproxNumber(preview.bonusFix) + toApproxNumber(preview.overcrowdPenaltyFix);
+  return {
+    kind: netApprox >= 0 ? "add" : "sub",
+    percentLabel: formatBonusPercent(netApprox),
+  };
+}
 
 // --- 3. セル 1 個のレンダリング(純関数・hooks を使わないので直接テスト可能) --
 
@@ -111,7 +133,10 @@ export interface GridCellProps {
   readonly cell: CellViewModel;
   /** このセルの施設が選択中か(アンカー正規化済みの selectedCellIndex との一致)。 */
   readonly selected: boolean;
-  readonly tagGlyph: TagGlyphRenderer;
+  /** 現在の表示倍率(viewport.scale)。LOD 判定(spec §7.1/§7.2)に使う。 */
+  readonly zoom: number;
+  /** [M19] 配置プレビュー(空きセルのみ有効。pendingPlacement 無し/対象外なら null)。 */
+  readonly preview?: CellPreviewView | null;
 }
 
 /**
@@ -129,18 +154,52 @@ function cellPositionStyle(cellIndex: number): string {
 }
 
 /**
+ * 常時過密警告バッジの色に使う代表タグ。
+ *
+ * **[M19 設計判断・★非ブロッキング]** engine の `overcrowdedNeighborCount` は
+ * 「近傍タグ側」の超過であって自施設のタグとは限らない(adjacencyBreakdown.ts
+ * 冒頭コメント参照)。厳密な代表タグを得るには内訳(内訳ビューが使う
+ * `computeAdjacencyBreakdown`)を全セルぶん計算する必要があり、それは
+ * `selectedCellBreakdown`(選択セル1個だけ)の設計と非対称な重い経路になる。
+ * 現状の content(hearth/forge/workbench)はすべて単一タグ施設のため実害が無く、
+ * ここでは**自施設の先頭タグ**で代用する(最終報告の ★ 項目)。
+ */
+function overcrowdBadgeTag(cell: CellViewModel): Tag | undefined {
+  return cell.tags[0];
+}
+
+/**
  * セル 1 個ぶんの vnode を作る(hooks 不使用・DOM 非依存)。
  *
- * 3 通りの描画(§1):
- *   - 空きセル: プレースホルダのみ(タップ可能領域は 44px を確保)
- *   - アンカーセル(占有 かつ `anchorCellIndex === cellIndex`): 枠・タグ・
- *     Lv/就労者バッジ・乗数の数値まで全部出す
+ * 3 通りの描画(§1)+ 配置プレビュー(空きセルの第4のケース・GDD 6.5):
+ *   - 空きセル: プレースホルダのみ(タップ可能領域は 44px を確保)。
+ *     `preview` があれば半透明オーバーレイ(色+記号+数値)を重ねる。
+ *   - アンカーセル(占有 かつ `anchorCellIndex === cellIndex`): 枠・タグ
+ *     マーカー(色+記号+パターン+数値の4重符号化・LOD 劣化あり)・
+ *     Lv/就労者バッジ・常時過密警告バッジまで全部出す
  *   - 連結セル(占有 かつ 非アンカー): タグ色の塗りのみ(枠・バッジ・数値なし)
  */
-export function GridCell({ cell, selected, tagGlyph }: GridCellProps) {
+export function GridCell({ cell, selected, zoom, preview = null }: GridCellProps) {
   const positionStyle = cellPositionStyle(cell.cellIndex);
 
   if (!cell.occupied) {
+    if (preview !== null) {
+      const previewBg =
+        preview.kind === "add" ? SURFACE_COLORS.previewAdd : SURFACE_COLORS.previewSub;
+      return (
+        <div
+          class={`kf-cell kf-cell--empty kf-cell--preview kf-cell--preview-${preview.kind}`}
+          style={`${positionStyle}background:${previewBg};`}
+          data-cell-id={cell.cellId}
+          data-cell-index={cell.cellIndex}
+        >
+          <span class="kf-cell__preview-symbol" aria-hidden="true">
+            {preview.kind === "add" ? "+" : "−"}
+          </span>
+          <span class="kf-cell__preview-value">{preview.percentLabel}</span>
+        </div>
+      );
+    }
     return (
       <div
         class="kf-cell kf-cell--empty"
@@ -158,10 +217,16 @@ export function GridCell({ cell, selected, tagGlyph }: GridCellProps) {
   const isAnchor = cell.anchorCellIndex === cell.cellIndex;
   if (!isAnchor) {
     // [M17] 連結表示: 枠/バッジ/数値を持たない(1 施設 1 回のみ装飾する規約)。
+    // タグ色の塗りのみ(M17 申し送り)。
+    const connectedTag = cell.tags[0];
+    const connectedStyle =
+      connectedTag === undefined
+        ? positionStyle
+        : `${positionStyle}background:${TAG_VISUALS[connectedTag].tint};`;
     return (
       <div
         class="kf-cell kf-cell--connected"
-        style={positionStyle}
+        style={connectedStyle}
         data-cell-id={cell.cellId}
         data-cell-index={cell.cellIndex}
         data-anchor-cell-index={cell.anchorCellIndex}
@@ -173,6 +238,15 @@ export function GridCell({ cell, selected, tagGlyph }: GridCellProps) {
   if (selected) classes.push("kf-cell--selected");
   if (cell.overcrowded) classes.push("kf-cell--overcrowded");
 
+  const rawMarkerPx = computeRawMarkerPx(zoom);
+  const lod = computeLodTier(rawMarkerPx);
+  const markerPx = computeDisplayMarkerPx(rawMarkerPx);
+  const counterScale = zoom > 0 ? 1 / zoom : 1;
+  const visibleTags = cell.tags.slice(0, MAX_INLINE_MARKERS);
+  const overflowCount = cell.tags.length - visibleTags.length;
+  const bonusApprox = toApproxNumber(cell.bonusFix);
+  const badgeTag = overcrowdBadgeTag(cell);
+
   return (
     <div
       class={classes.join(" ")}
@@ -180,12 +254,56 @@ export function GridCell({ cell, selected, tagGlyph }: GridCellProps) {
       data-cell-id={cell.cellId}
       data-cell-index={cell.cellIndex}
       data-facility-id={cell.facilityId ?? undefined}
+      data-lod={lod.id}
     >
-      <span class="kf-cell__tag">{tagGlyph(cell.tags)}</span>
-      <span class="kf-cell__value">×{toApproxNumber(cell.multiplierFix).toFixed(2)}</span>
+      <span class="kf-cell__markers">
+        {visibleTags.map((tag) => (
+          <span
+            key={tag}
+            class="kf-cell__marker"
+            style={`width:${String(markerPx)}px;height:${String(markerPx)}px;margin-right:${String(MARKER_GUTTER_PX)}px;`}
+          >
+            {lod.symbol === "none" ? (
+              <span
+                class="kf-cell__marker-dot"
+                style={`background:${TAG_VISUALS[tag].ink};`}
+                aria-hidden="true"
+              />
+            ) : (
+              <TagSymbol
+                tag={tag}
+                variant={lod.symbol}
+                sizePx={markerPx}
+                title={TAG_VISUALS[tag].ja}
+              />
+            )}
+          </span>
+        ))}
+        {overflowCount > 0 && (
+          <span class="kf-cell__marker-overflow" aria-hidden="true">
+            +{overflowCount}
+          </span>
+        )}
+      </span>
+      {lod.numeral && (
+        <span class="kf-cell__value">
+          {formatBonusPercent(bonusApprox)}
+          {cell.overcrowded ? ` ${formatOvercrowdCount(cell.overcrowdedNeighborCount)}` : ""}
+        </span>
+      )}
       <span class="kf-cell__badge">
         Lv{cell.level}/{cell.workerCount}人
       </span>
+      {cell.overcrowded && badgeTag !== undefined && (
+        <span
+          class="kf-cell__overcrowd-badge"
+          style={`width:${String(NON_SCALING_MIN_PX.overcrowdBadge)}px;height:${String(NON_SCALING_MIN_PX.overcrowdBadge)}px;transform:scale(${String(counterScale)});color:${TAG_VISUALS[badgeTag].ink};`}
+          title="過密警告(常時表示・GDD 6.5)"
+          aria-label="過密警告"
+        >
+          !
+        </span>
+      )}
     </div>
   );
 }
@@ -244,8 +362,12 @@ export interface GridBoardProps {
   readonly pendingPlacement?: PendingPlacement | null;
   /** `placeFacility` を dispatch した結果(拒否も含む)を親へ知らせる。 */
   readonly onPlacementResult?: (result: CommandResult) => void;
-  /** タグ表示の差し替え口(既定は仮実装・§2)。 */
-  readonly tagGlyph?: TagGlyphRenderer;
+  /**
+   * タグ記号 SVG スプライト(`TagIconDefs`)をこのコンポーネントが自前で
+   * マウントするか(既定 true)。凡例パネル/内訳ビューと同一画面に組む場合
+   * (M30)は、いずれか1つだけ true にして重複挿入を避けられる。
+   */
+  readonly includeIconDefs?: boolean;
 }
 
 /**
@@ -294,10 +416,28 @@ export function GridBoard({
   store,
   pendingPlacement = null,
   onPlacementResult,
-  tagGlyph = defaultTagGlyph,
+  includeIconDefs = true,
 }: GridBoardProps) {
   const cells = useGridCells(store);
   const selectedCellIndex = useSignalValue(store.sources.selectedCellIndex);
+
+  // [M19] 配置プレビュー(GDD 6.5 MVP必須)。pendingPlacement が変わるか盤面が
+  // 変わるたびに 48 セルぶんを再計算する(既存施設の判定と同じ
+  // computeCellAdjacency を呼ぶだけなので O(48×近傍) で軽い・derived.ts 末尾
+  // 参照)。architecture.md §6 の規律どおり、この重い計算自体は derived.ts に
+  // 置いてあり、ここは呼ぶだけ。
+  const previewByCellIndex = useMemo(() => {
+    if (pendingPlacement === null) return null;
+    const previews = computePlacementPreview(
+      store.sources,
+      store.peekContent(),
+      store.sources.worldSeedU32.peek(),
+      pendingPlacement.defId,
+    );
+    const map = new Map<number, CellPreviewView | null>();
+    for (const preview of previews) map.set(preview.cellIndex, buildPreviewView(preview));
+    return map;
+  }, [store, pendingPlacement, cells]);
 
   const [viewport, setViewport] = useState<Viewport>({
     scale: DEFAULT_SCALE,
@@ -399,13 +539,15 @@ export function GridBoard({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
+      {includeIconDefs && <TagIconDefs />}
       <div class="kf-grid-surface" style={surfaceStyleValue}>
         {cells.map((cell) => (
           <GridCell
             key={cell.cellId}
             cell={cell}
             selected={selectedCellIndex !== null && cell.cellIndex === selectedCellIndex}
-            tagGlyph={tagGlyph}
+            zoom={viewport.scale}
+            preview={previewByCellIndex?.get(cell.cellIndex) ?? null}
           />
         ))}
       </div>
