@@ -193,12 +193,12 @@ export function recordDeathMemoir(state: GameState, residentId: EntityId, tick: 
 /**
  * 「この人にしかない記憶」の一覧化(GDD 7.3)に使うハイライト抽出。
  *
- * **現時点で抽出できるのは bondMilestone のみ**(正直な開示): GDD 7.3 が挙げる
- * 他の例(成文化した技術・探索での保護)は、現在の engine に「どの住民が
- * 何を成文化/保護したか」を紐づけるデータが無い(rules/codify.ts の
- * CodifyState に作業者の紐付けが無い・探索系は state.ts §3 でスコープ外)ため
- * 対象外。それらの系が資格情報(住民 ↔ tech/イベント)を持つようになったら、
- * このリストへ追加すること(rules/codify.ts・将来の exploration 系の担当)。
+ * 抽出対象は 2 種(正直な開示):
+ *   bondMilestone     : 共働の絆の節目(M12)
+ *   explorationRescue : [M21] 探索での保護(GDD 7.3 の例「近郊探索で△を保護した」)
+ * GDD 7.3 が挙げる残りの例(成文化した技術)は、`rules/codify.ts` の
+ * `CodifyState` に**作業者の紐付けが無い**ため今も対象外である。成文化が
+ * 「誰が書き残したか」を持つようになったらこのリストへ追加すること。
  *
  * 戻り値は memoirLog の記録順(= 追記順・古い順)のまま末尾 `limit` 件。
  */
@@ -207,6 +207,8 @@ export function recentMemoirHighlights(
   limit: number = DEFAULT_MEMOIR_HIGHLIGHT_LIMIT,
 ): readonly MemoirEntry[] {
   if (log === undefined || limit <= 0) return [];
-  const highlightable = log.entries.filter((entry) => entry.kind === "bondMilestone");
+  const highlightable = log.entries.filter(
+    (entry) => entry.kind === "bondMilestone" || entry.kind === "explorationRescue",
+  );
   return limit >= highlightable.length ? highlightable : highlightable.slice(-limit);
 }

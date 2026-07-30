@@ -178,7 +178,8 @@ const PLACE_FREE: Command = {
 
 describe("コマンド語彙のレジストリ", () => {
   it("実装済みと予約が全語彙を過不足なく覆う(重複なし)", () => {
-    const reserved = ["beginResearch", "dispatchExpedition", "reclaimCell"] as const;
+    // [M21] dispatchExpedition は実装済みへ移った(予約は 2 種)。
+    const reserved = ["beginResearch", "reclaimCell"] as const;
     const all: CommandKind[] = [...IMPLEMENTED_COMMAND_KINDS, ...reserved];
     expect([...all].sort()).toEqual([...all].sort()); // 型の網羅は下の switch で担保
     for (const kind of reserved) {
@@ -189,7 +190,7 @@ describe("コマンド語彙のレジストリ", () => {
       expect(isImplementedCommandKind(kind)).toBe(true);
       expect(RESERVED_COMMAND_OWNER_TASK[kind]).toBeUndefined();
     }
-    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(7);
+    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(8);
   });
 
   it("実装済みの一覧は UTF-16 昇順(正準順)", () => {
@@ -200,11 +201,6 @@ describe("コマンド語彙のレジストリ", () => {
     const state = board();
     const cases: readonly Command[] = [
       { kind: "beginResearch", researchId: id("rNew"), techId: TECH_BRONZE.id },
-      {
-        kind: "dispatchExpedition",
-        destinationId: id("destNear"),
-        teamResidentIds: [id("bSora")],
-      },
       { kind: "reclaimCell", cellIndex: 30 },
     ];
     for (const command of cases) {

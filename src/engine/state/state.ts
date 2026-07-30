@@ -97,8 +97,8 @@ import type { Xoshiro128State } from "../rng/xoshiro128";
 // 型のみの参照(実行時依存は無い)。ステータス 5 種の正本 ID レジストリは
 // 生産式側(rules/stats.ts)が権威なので、state はその型を借りるだけにする。
 import type { ResidentStats } from "../rules/stats";
-// 同上(型のみ)。記録媒体 enum の権威は rules/types.ts。
-import type { RecordMedium } from "../rules/types";
+// 同上(型のみ)。記録媒体 enum / 距離帯 enum の権威は rules/types.ts。
+import type { DistanceBand, RecordMedium } from "../rules/types";
 
 // --- 1. ID -----------------------------------------------------------------
 
@@ -504,6 +504,7 @@ export const MEMOIR_ENTRY_KINDS = [
   "bioOrigin",
   "bondMilestone",
   "death",
+  "explorationRescue",
   "partnerLost",
 ] as const;
 
@@ -557,12 +558,29 @@ export interface MemoirDeathEntry {
   readonly tick: number;
 }
 
+/**
+ * [M21] 探索で人を保護した記録(GDD 7.3 の例「近郊探索で△を保護した」)。
+ *
+ * 記録されるのは**保護した側**(帰還した派遣メンバー)であり、`rescuedId` が
+ * 保護された住民 = GDD 7.7「探索での保護」で加入した本人を指す。晴天漂着
+ * (段65 の定期加入)とは別口の加入経路である(rules/exploration.ts §5)。
+ */
+export interface MemoirExplorationRescueEntry {
+  readonly kind: "explorationRescue";
+  readonly tick: number;
+  /** 保護されて加入した住民の ID。 */
+  readonly rescuedId: EntityId;
+  /** どの距離帯での出来事か(文言のレンダリングに使う)。 */
+  readonly band: DistanceBand;
+}
+
 /** memoirLog 1 件のエントリ(判別共用体)。 */
 export type MemoirEntry =
   | MemoirArrivalEntry
   | MemoirBioEntry
   | MemoirBondMilestoneEntry
   | MemoirDeathEntry
+  | MemoirExplorationRescueEntry
   | MemoirPartnerLostEntry;
 
 /**
@@ -585,6 +603,130 @@ export interface MemoirLogState {
   /** 上限超過で畳まれた(=詳細を失った)件数。0 以上。 */
   readonly foldedCount: number;
 }
+
+// ===========================================================================
+// [M21] 探索派遣のスナップショット(GDD 8.2 / 12.5-7)と帰還ログ(GDD 8.4)
+// ===========================================================================
+//   GDD 12.5-7 は「探索イベント列は派遣時点スナップショット固定(**再参照禁止**)、
+//   帰還ログはレンダリング済み完成文字列保存(再参照禁止)」と定める。よって
+//   この 2 つは state.ts §3 の「持たない」リストから外れ、GameState 直下の
+//   フィールドになる(独立 entity にしないのは MemoirLogState と同じ理由 =
+//   `src/ui/derived.ts` 等の既存の網羅 switch を壊さないため)。
+//
+//   **スナップショットは content を 1 度も再参照せずに再生できる**ことが要件で
+//   あり、そのため難度・roll・判定結果・報酬額・脱落者まで確定値で持つ。
+//   帰還 tick の処理は「保存された結果を state へ適用するだけ」になる。
+
+/**
+ * [M21] 派遣の方針(GDD 8.3「撤退 / 強行」の直前選択)。**派遣確定時に 1 度だけ
+ * 選ぶ**のが MVP の縮約であり、ノードごとのプレイヤー対話(GDD 8.3 の本来形)は
+ * event ランタイム(M22)+ 探索本部 UI(M32)の担当。
+ *
+ * 並びは UTF-16 昇順(集合演算の安定順序・GDD 11.7)。
+ *   cautious : 累積負傷が閾値へ達したノードで撤退(報酬は半分・以降打ち切り)
+ *   press    : 撤退しない。失敗時の負傷が ×1.5(GDD 8.3)
+ */
+export const DISPATCH_STANCES = ["cautious", "press"] as const;
+
+/** {@link DISPATCH_STANCES} のいずれか。 */
+export type DispatchStance = (typeof DISPATCH_STANCES)[number];
+
+/** 未知の文字列が派遣方針のいずれかか(型ガード)。 */
+export function isDispatchStance(value: string): value is DispatchStance {
+  for (const stance of DISPATCH_STANCES) {
+    if (stance === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M21] スナップショットされたイベントノード 1 件(GDD 8.2)。
+ * **確定済みの結果**であり、帰還時に再判定は行わない。
+ *
+ * `kind`/`id` を持たない値オブジェクトである(entity ではない)。
+ */
+export interface DispatchNode {
+  /** 判定難度(人間単位の Fix。combatPower と同じ 0〜100 スケール)。 */
+  readonly difficultyFix: Fix;
+  /** `seededRoll(0..R)` の確定値(GDD 8.2)。 */
+  readonly rollFix: Fix;
+  /** 判定結果 = `チーム総合力 + 装備補正 + roll >= difficulty`(GDD 8.2)。 */
+  readonly success: boolean;
+  /** このノードで得た報酬(失敗なら 0)。撤退による半減は適用**前**。 */
+  readonly rewardFix: Fix;
+  /** このノードを終えた時点の累積負傷(GDD 8.5)。 */
+  readonly injuryFix: Fix;
+  /** このノードで「探索での保護」が起きたか(GDD 7.7)。 */
+  readonly rescue: boolean;
+}
+
+/**
+ * [M21] 派遣 1 本ぶんのスナップショット(GDD 8.2 / 12.5-7)。
+ *
+ * `nodes` は**実際に踏んだノードだけ**(撤退で打ち切られた以降は入らない)。
+ * ADR-012(3) の上界「2 × maxNodes(8) = 16 ノード/派遣」に対し、撤退枝を
+ * 材料化せず歩いた道だけを持つので実測は高々 8 + 器 1 = 9 ノードであり、
+ * 上界には十分な余裕がある(`platform/persistence.ts` の
+ * `assertDispatchTreeBounds` が書込・インポートの両方で検算する)。
+ */
+export interface DispatchSnapshot {
+  /** 派遣の ID(entity ではないが ID 規則 ADR-011 に従う)。 */
+  readonly id: EntityId;
+  /** 目的地 content の ID(スナップショット。以後 content を再参照しない)。 */
+  readonly destinationId: EntityId;
+  /** 距離帯(裁定 B7)。 */
+  readonly band: DistanceBand;
+  /** 派遣方針(GDD 8.3)。 */
+  readonly stance: DispatchStance;
+  /** チーム(ID 昇順・1〜4 名・GDD 8.1)。 */
+  readonly memberIds: readonly EntityId[];
+  /** 派遣を確定した tick。 */
+  readonly dispatchTick: number;
+  /** 帰還して解決される tick(GDD 11.7 段60)。 */
+  readonly returnTick: number;
+  /** 判定に使った「チーム総合力 + 装備補正」(GDD 8.2)。 */
+  readonly teamPowerFix: Fix;
+  /** 踏んだイベントノード列(上記)。 */
+  readonly nodes: readonly DispatchNode[];
+  /** 撤退で打ち切ったか(GDD 8.3)。 */
+  readonly withdrawn: boolean;
+  /** 帰還時に受け取る総報酬(撤退の半減を適用**後**の確定値)。 */
+  readonly rewardFix: Fix;
+  /** 報酬を受け取る resource 定義 ID。 */
+  readonly rewardResourceId: EntityId;
+  /**
+   * 脱落した(= 帰還後に死亡処理へ回る)メンバー(ID 昇順・GDD 8.5)。
+   * `memberIds` と一致すれば全滅である。
+   */
+  readonly casualtyMemberIds: readonly EntityId[];
+}
+
+/**
+ * [M21] 帰還ログ 1 件(GDD 8.4 / 12.5-7)。**レンダリング済みの完成文字列**を
+ * 保存し、テンプレを再参照しない(後日のテンプレ修正・tombstone 化で過去ログが
+ * 壊れないため)。memoirLog が「テンプレ ID + パラメータ」なのと**意図的に
+ * 非対称**であり、根拠は GDD 12.5-7 が帰還ログについてだけ完成文字列を求めて
+ * いることにある。
+ */
+export interface RenderedLogEntry {
+  readonly tick: number;
+  /** レンダリング済みの本文。 */
+  readonly text: string;
+}
+
+/**
+ * [M21] 帰還ログの保持(GDD 8.4「ログ保持上限 50 件、超過分は要約統計に畳む」/
+ * 12.5-9)。`MemoirLogState` と同型(古い順・超過は先頭から落として件数だけ残す)。
+ */
+export interface RenderedLogState {
+  /** 記録(古い順)。上限は `rules/exploration.ts` の `MAX_RENDERED_LOGS`。 */
+  readonly entries: readonly RenderedLogEntry[];
+  /** 上限超過で畳まれた件数。0 以上。 */
+  readonly foldedCount: number;
+}
+
+/** 空の帰還ログ(正準形)。`GameState.renderedLogs` の既定値。 */
+export const EMPTY_RENDERED_LOGS: RenderedLogState = { entries: [], foldedCount: 0 };
 
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
 export type EntityState =
@@ -628,6 +770,9 @@ export interface GameStateMeta {
  *       (rules/bond.ts の `bondPairKeyOf` が課す正準形。(d) と同じ扱い)
  *   (f) [M13] `techMemoryByKey` の反復順はキーの UTF-16 コードユニット昇順
  *       (rules/techMemory.ts の `techMemoryKeyOf` が課す正準形。(e) と同じ扱い)
+ *   (g) [M21] `dispatchSnapshots` は派遣 ID の UTF-16 コードユニット昇順
+ *       (配列だが正準順は同じ規約。維持責務は update.ts の
+ *       createGameState / setDispatchSnapshots)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -669,6 +814,26 @@ export interface GameState extends GameStateMeta {
    * 分岐が 2^4 = 16 通りへ膨れるため(serialize.ts §7)。
    */
   readonly techMemoryByKey: ReadonlyMap<string, TechMemoryState>;
+  /**
+   * [M21] 未帰還の探索派遣(GDD 8.2 / 12.5-7)。**派遣 ID の UTF-16 昇順**
+   * (不変条件 (g))で、帰還解決が済んだものは取り除かれる = 長さは
+   * `CONCURRENT_DISPATCH_MAX`(2)以下(commands.ts §5)。
+   *
+   * Map ではなく配列なのは、セーブフォーマット(ADR「セーブフォーマット」)の
+   * `dispatchSnapshots` が配列であり、`platform/persistence.ts` の
+   * `assertDispatchTreeBounds` がその形で上界を検算しているためである。
+   * 要素数が高々 2 なので、キー引きの計算量も問題にならない。
+   *
+   * **空配列なら直列化形からキーごと省略される**(rngState と同じ規約・
+   * serialize.ts §9)= M21 以前のセーブ・golden vector のバイト列が 1 bit も
+   * 動かないことの根拠。
+   */
+  readonly dispatchSnapshots: readonly DispatchSnapshot[];
+  /**
+   * [M21] 帰還ログ(GDD 8.4)。**レンダリング済み文字列**であり、空
+   * (`entries` 空 かつ `foldedCount` 0)なら直列化形から省略される。
+   */
+  readonly renderedLogs: RenderedLogState;
 }
 
 /**
@@ -816,4 +981,28 @@ export function getTechMemory(state: GameState, key: string): TechMemoryState | 
  */
 export function techMemoryKeys(state: GameState): readonly string[] {
   return [...state.techMemoryByKey.keys()];
+}
+
+/**
+ * [M21] 未帰還の派遣を引く(無ければ undefined)。走査は正準順(ID 昇順・
+ * 不変条件 (g))で、要素数は高々 `CONCURRENT_DISPATCH_MAX`(2)。
+ */
+export function getDispatch(state: GameState, dispatchId: EntityId): DispatchSnapshot | undefined {
+  for (const snapshot of state.dispatchSnapshots) {
+    if (snapshot.id === dispatchId) return snapshot;
+  }
+  return undefined;
+}
+
+/**
+ * [M21] その住民が今どれかの派遣に載っているか。`ResidentState.dispatched`
+ * (GDD 11.2 の dispatchW の条件)と食い違うセーブを作らないための照合口。
+ */
+export function isResidentOnDispatch(state: GameState, residentId: EntityId): boolean {
+  for (const snapshot of state.dispatchSnapshots) {
+    for (const memberId of snapshot.memberIds) {
+      if (memberId === residentId) return true;
+    }
+  }
+  return false;
 }

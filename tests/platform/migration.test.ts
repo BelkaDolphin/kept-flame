@@ -351,21 +351,23 @@ describe("migrateSavePayload", () => {
 //   固定するのは「版が進むこと」と「移行後のバイト列が現行ビルドの出力と同一で
 //   あること」の 2 点である。
 
-describe("v1 → v2(saveSchemaVersion・M16)", () => {
-  /** v1 のセーブ(= 現行より 1 つ古いスキーマ版を名乗る payload)。 */
+describe("v1 → v2 → v3(saveSchemaVersion・M16 / M21)", () => {
+  /** v1 のセーブ(= 現行より 2 つ古いスキーマ版を名乗る payload)。 */
   const V1_STATE = stateOf([...STATE.entityStateById.values()], { saveSchemaVersion: 1 });
 
-  it("現行版は 2 で、連鎖は v1→v2 の 1 段だけ", () => {
-    expect(SAVE_SCHEMA_VERSION).toBe(2);
-    expect(PAYLOAD_MIGRATIONS).toHaveLength(1);
+  it("現行版は 3 で、連鎖は v1→v2→v3 の 2 段", () => {
+    expect(SAVE_SCHEMA_VERSION).toBe(3);
+    expect(PAYLOAD_MIGRATIONS).toHaveLength(2);
     expect(PAYLOAD_MIGRATIONS[0]?.from).toBe(1);
     expect(PAYLOAD_MIGRATIONS[0]?.to).toBe(2);
+    expect(PAYLOAD_MIGRATIONS[1]?.from).toBe(2);
+    expect(PAYLOAD_MIGRATIONS[1]?.to).toBe(3);
   });
 
-  it("v1 の payload は 1 段だけ適用されて v2 を名乗る", () => {
+  it("v1 の payload は 2 段適用されて現行版を名乗る", () => {
     const result = migrateSavePayload(plainSerialized(V1_STATE));
     expect(result.fromVersion).toBe(1);
-    expect(result.appliedSteps).toHaveLength(1);
+    expect(result.appliedSteps).toHaveLength(2);
     expect((result.value as Record<string, unknown>)["saveSchemaVersion"]).toBe(
       SAVE_SCHEMA_VERSION,
     );
@@ -386,7 +388,7 @@ describe("v1 → v2(saveSchemaVersion・M16)", () => {
     expect(migrated["entityStateById"]).toEqual(parsed["entityStateById"]);
   });
 
-  it("v1 セーブ → v2 の往復が現行ビルドの出力とバイト同一(検収条件)", () => {
+  it("v1 セーブ → 現行版の往復が現行ビルドの出力とバイト同一(検収条件)", () => {
     const migrated = migrateSavePayload(plainSerialized(V1_STATE)).value;
     const restored = fromSerializable(migrated);
     expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);

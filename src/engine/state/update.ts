@@ -67,16 +67,19 @@ import type { Fix } from "../fp";
 import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
+  EMPTY_RENDERED_LOGS,
   EntityLookupError,
   MAX_TRAITS_PER_RESIDENT,
   isEntityId,
   requireEntity,
+  type DispatchSnapshot,
   type EntityId,
   type EntityKind,
   type EntityOfKind,
   type EntityState,
   type GameState,
   type GameStateMeta,
+  type RenderedLogState,
   type TechMemoryState,
 } from "./state";
 
@@ -349,6 +352,8 @@ export function createGameState(
   rngState: readonly (readonly [DomainTag, Xoshiro128State])[] = [],
   bondByPairKey: readonly (readonly [string, Fix])[] = [],
   techMemoryByKey: readonly (readonly [string, TechMemoryState])[] = [],
+  dispatchSnapshots: readonly DispatchSnapshot[] = [],
+  renderedLogs: RenderedLogState = EMPTY_RENDERED_LOGS,
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -365,7 +370,52 @@ export function createGameState(
     rngState: buildRngStateMap(rngState),
     bondByPairKey: buildBondMap(bondByPairKey),
     techMemoryByKey: buildTechMemoryMap(techMemoryByKey),
+    dispatchSnapshots: sortedDispatchSnapshots(dispatchSnapshots),
+    renderedLogs,
   };
+}
+
+/**
+ * [M21] 派遣スナップショットを ID 昇順の正準順に並べる(§3 / state.ts 不変条件
+ * (g))。入力の並び順には依存しない。ID 重複はここで止める(1 派遣 1 ID)。
+ *
+ * @throws {StateUpdateError} ID 規則違反 / ID 重複がある場合
+ */
+function sortedDispatchSnapshots(
+  snapshots: readonly DispatchSnapshot[],
+): readonly DispatchSnapshot[] {
+  const sorted = [...snapshots].sort((a, b) => compareUtf16(a.id, b.id));
+  const seen = new Set<EntityId>();
+  for (const snapshot of sorted) {
+    if (!isEntityId(snapshot.id)) {
+      throw new StateUpdateError(
+        `派遣 ID "${snapshot.id}" が ID 規則に一致しない(ADR-011。EntityId を as で偽造していないか)`,
+      );
+    }
+    if (seen.has(snapshot.id)) {
+      throw new StateUpdateError(`派遣 ID "${snapshot.id}" が重複している`);
+    }
+    seen.add(snapshot.id);
+  }
+  return sorted;
+}
+
+/**
+ * [M21] 未帰還の派遣一覧を差し替える({@link setRngState} と同型)。並びは
+ * 常に ID 昇順の正準順へ直す(state.ts 不変条件 (g))。
+ *
+ * @throws {StateUpdateError} ID 規則違反 / ID 重複がある場合
+ */
+export function setDispatchSnapshots(
+  state: GameState,
+  snapshots: readonly DispatchSnapshot[],
+): GameState {
+  return setField(state, "dispatchSnapshots", sortedDispatchSnapshots(snapshots));
+}
+
+/** [M21] 帰還ログを差し替える(GDD 8.4)。 */
+export function setRenderedLogs(state: GameState, logs: RenderedLogState): GameState {
+  return setField(state, "renderedLogs", logs);
 }
 
 /**

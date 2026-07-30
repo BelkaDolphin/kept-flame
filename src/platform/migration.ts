@@ -295,7 +295,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 2([M16] facility の footprint 導入)。
+ * payload の中身の版(ADR 3軸(a))。現行 = 3([M21] 探索スナップショット導入)。
  *
  * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
  * (= 現行ビルドが書くセーブの形)。
@@ -306,7 +306,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
  * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
  * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 2;
+export const SAVE_SCHEMA_VERSION = 3;
 
 /**
  * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
@@ -346,12 +346,49 @@ const migratePayloadV1ToV2: SaveMigrationStep = {
 };
 
 /**
+ * [M21] v2 → v3: 探索(`dispatchSnapshots`)と帰還ログ(`renderedLogs`)の導入。
+ *
+ * v1→v2 と同じく**構造の変換は無く、版だけを進める**(v2 のセーブは派遣を 1 件も
+ * 持たず、v3 では空のとき両キーとも省略が正準形・serialize.ts §9)。
+ *
+ * それでも版を上げる理由は M16 と同じ **旧ビルドに新セーブを読ませない**ことで
+ * ある。`fromSerializable` はトップレベルの未知キーを読み飛ばすので、v2 ビルドが
+ * v3 のセーブを読むと:
+ *   (a) 未帰還の派遣が**黙って消える**(報酬も脱落も永久に来ない)
+ *   (b) 派遣中の住民は `dispatched: true` のまま**永久に帰ってこない**
+ *       (帰還イベントを積む材料が state から消えるため = 就労も再派遣も不可)
+ * という静かな破壊が起きる。「旧ビルドで読んだとき黙って壊れるか」という
+ * ADR-012 [2026-07-30追記] の線引きに照らして、これは版差で塞ぐ側である。
+ */
+const migratePayloadV2ToV3: SaveMigrationStep = {
+  from: 2,
+  to: 3,
+  summary:
+    "探索(dispatchSnapshots)と帰還ログ(renderedLogs)を導入。v2 のセーブは" +
+    "どちらも空 = v3 の既定値(キー省略)なので構造変換は無く、saveSchemaVersion のみ 3 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v2 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 3;
+    return next;
+  },
+};
+
+/**
  * セーブスキーマ版の連鎖(`from` 昇順)。
  *
  * 段を足すときは `{from: N, to: N+1, migrate}` を末尾へ追加し
  * {@link SAVE_SCHEMA_VERSION} を +1 するだけでよい(§1(b) の検査が自動で効く)。
  */
-export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [migratePayloadV1ToV2];
+export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [
+  migratePayloadV1ToV2,
+  migratePayloadV2ToV3,
+];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");
 

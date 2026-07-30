@@ -149,20 +149,52 @@
 //   「必須キーのリテラル + 省略可キーの entries 連結」へ改めた(生スプレッドは
 //   ADR-028(1) でこのファイルも禁止だが、`Object.entries`/`Object.fromEntries` は
 //   ADR-028(2) の単一正準実装としてこのファイルだけが免除されている)。
+//
+// ===========================================================================
+// 9. [M21] `dispatchSnapshots` / `renderedLogs` は §3 と同型(空なら省略)
+// ===========================================================================
+//   探索(GDD 8.2 / 12.5-7)と帰還ログ(GDD 8.4)は GameState 直下に載るが、
+//   **空なら書き出さない**規約は rngState / bondByPairKey / techMemoryByKey と
+//   同一である。既存セーブ・golden vector 56 本のバイト列が 1 bit も動かない
+//   ことの根拠がここにある(探索は既存シナリオに 1 件も存在しない)。
+//
+//   `dispatchSnapshots` だけは Map ではなく**配列**である。ADR のセーブ
+//   フォーマットが配列で定義され、`platform/persistence.ts` の
+//   `assertDispatchTreeBounds` がその形で ADR-012(3) の上界を検算するためで、
+//   正準順(派遣 ID 昇順)の維持責務は state/update.ts にある。ノード列を
+//   `resolvedTree.choices` に載せているのも同じ理由(検算側の `countTreeNodes`
+//   が `choices`/`children` を子ノードのキーとして歩く)。
+//
+//   帰還ログは memoirLog と違い**レンダリング済み文字列**を持つ。非対称なのは
+//   GDD 12.5-7 が帰還ログについてだけ「完成文字列保存(再参照禁止)」を
+//   求めているためである(理由は state.ts の RenderedLogEntry の doc)。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
 import { FOOTPRINT_DIM_MAX, isUnitFootprint, isValidFootprintDims } from "../footprint";
 import { fixFromRaw, toRaw, type Fix } from "../fp";
 import type { ResidentStats } from "../rules/stats";
-import { RECORD_MEDIA, isRecordMedium, type RecordMedium } from "../rules/types";
+import {
+  RECORD_MEDIA,
+  isDistanceBand,
+  isRecordMedium,
+  type DistanceBand,
+  type RecordMedium,
+} from "../rules/types";
 import { isDomainTag, type DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
+  EMPTY_RENDERED_LOGS,
   entityIdFromString,
+  isDispatchStance,
   isEntityId,
   isMemoirEntryKind,
   type CodifyState,
+  type DispatchNode,
+  type DispatchSnapshot,
+  type DispatchStance,
+  type RenderedLogEntry,
+  type RenderedLogState,
   type EntityId,
   type EntityState,
   type FacilityFootprint,
@@ -304,6 +336,12 @@ export type SerializedMemoirEntry =
       readonly tier: number;
     }
   | { readonly kind: "death"; readonly tick: number }
+  | {
+      readonly kind: "explorationRescue";
+      readonly tick: number;
+      readonly rescuedId: string;
+      readonly band: string;
+    }
   | { readonly kind: "partnerLost"; readonly tick: number; readonly partnerId: string };
 
 /**
@@ -346,6 +384,55 @@ export type SerializedGameState = {
    * 空なら `rngState` / `bondByPairKey` と同じ規約でキーごと省略される。
    */
   readonly techMemoryByKey?: { readonly [key: string]: SerializedTechMemory };
+  /**
+   * [M21] 未帰還の探索派遣(GDD 8.2 / 12.5-7・§9)。**配列**であり、空なら
+   * キーごと省略される。`platform/persistence.ts` の `assertDispatchTreeBounds`
+   * はこのキーを見て ADR-012(3) の上界を検算する。
+   */
+  readonly dispatchSnapshots?: readonly SerializedDispatchSnapshot[];
+  /** [M21] 帰還ログ(GDD 8.4)。空なら省略される。 */
+  readonly renderedLogs?: SerializedRenderedLogs;
+};
+
+/** [M21] スナップショットされたイベントノード(state.ts の {@link DispatchNode})。 */
+export type SerializedDispatchNode = {
+  readonly difficulty: number;
+  readonly roll: number;
+  readonly success: boolean;
+  readonly reward: number;
+  readonly injury: number;
+  readonly rescue: boolean;
+};
+
+/**
+ * [M21] 派遣スナップショット(state.ts の {@link DispatchSnapshot})。
+ *
+ * ノード列は `resolvedTree.choices` に載せる。ADR-012(3) の分岐木上界を検算する
+ * `platform/persistence.ts` の `countTreeNodes` が `choices` / `children` を
+ * 子ノードのキーとして歩くためであり(「木の形の唯一の仮定」と同ファイルが
+ * 明記している)、engine 側の表現(平坦な配列)と検算側の表現をこの 1 箇所で
+ * 突き合わせる。
+ */
+export type SerializedDispatchSnapshot = {
+  readonly id: string;
+  readonly destinationId: string;
+  readonly band: string;
+  readonly stance: string;
+  readonly memberIds: readonly string[];
+  readonly dispatchTick: number;
+  readonly returnTick: number;
+  readonly teamPower: number;
+  readonly withdrawn: boolean;
+  readonly reward: number;
+  readonly rewardResourceId: string;
+  readonly casualtyMemberIds: readonly string[];
+  readonly resolvedTree: { readonly choices: readonly SerializedDispatchNode[] };
+};
+
+/** [M21] 帰還ログ(state.ts の {@link RenderedLogState})。 */
+export type SerializedRenderedLogs = {
+  readonly entries: readonly { readonly tick: number; readonly text: string }[];
+  readonly foldedCount: number;
 };
 
 /** [M13] 住民 × 技術の記憶(state.ts の {@link TechMemoryState})。 */
@@ -596,6 +683,13 @@ function serializeMemoirEntry(entry: MemoirEntry): SerializedMemoirEntry {
       };
     case "death":
       return { kind: "death", tick: entry.tick };
+    case "explorationRescue":
+      return {
+        kind: "explorationRescue",
+        tick: entry.tick,
+        rescuedId: entry.rescuedId,
+        band: entry.band,
+      };
     case "partnerLost":
       return { kind: "partnerLost", tick: entry.tick, partnerId: entry.partnerId };
     default: {
@@ -668,6 +762,34 @@ function serializeEntity(entity: EntityState): SerializedEntity {
   }
 }
 
+/** [M21] 派遣スナップショットの直列化(§9)。ノード列は `resolvedTree.choices` へ。 */
+function serializeDispatchSnapshot(snapshot: DispatchSnapshot): SerializedDispatchSnapshot {
+  return {
+    id: snapshot.id,
+    destinationId: snapshot.destinationId,
+    band: snapshot.band,
+    stance: snapshot.stance,
+    memberIds: [...snapshot.memberIds],
+    dispatchTick: snapshot.dispatchTick,
+    returnTick: snapshot.returnTick,
+    teamPower: toRaw(snapshot.teamPowerFix),
+    withdrawn: snapshot.withdrawn,
+    reward: toRaw(snapshot.rewardFix),
+    rewardResourceId: snapshot.rewardResourceId,
+    casualtyMemberIds: [...snapshot.casualtyMemberIds],
+    resolvedTree: {
+      choices: snapshot.nodes.map((node) => ({
+        difficulty: toRaw(node.difficultyFix),
+        roll: toRaw(node.rollFix),
+        success: node.success,
+        reward: toRaw(node.rewardFix),
+        injury: toRaw(node.injuryFix),
+        rescue: node.rescue,
+      })),
+    },
+  };
+}
+
 /**
  * GameState を JSON 化できるプレーンな値へ変換する(Map → オブジェクト)。
  * 戻り値のキー順は正準化済みなので、同じ内容の state からは必ず同じバイト列の
@@ -721,6 +843,20 @@ export function toSerializable(state: GameState): SerializedGameState {
   if (bondEntries.length > 0) optional.push(["bondByPairKey", Object.fromEntries(bondEntries)]);
   if (techMemoryEntries.length > 0) {
     optional.push(["techMemoryByKey", Object.fromEntries(techMemoryEntries)]);
+  }
+  // [M21] 探索(§9)。どちらも空なら省略 = M21 以前のセーブとバイト同一。
+  if (state.dispatchSnapshots.length > 0) {
+    optional.push(["dispatchSnapshots", state.dispatchSnapshots.map(serializeDispatchSnapshot)]);
+  }
+  const logs = state.renderedLogs;
+  if (logs.entries.length > 0 || logs.foldedCount > 0) {
+    optional.push([
+      "renderedLogs",
+      {
+        entries: logs.entries.map((entry) => ({ tick: entry.tick, text: entry.text })),
+        foldedCount: logs.foldedCount,
+      },
+    ]);
   }
   const raw: SerializedGameState =
     optional.length === 0
@@ -1107,6 +1243,28 @@ function requireMemoirEntryKind(value: unknown, path: string): MemoirEntryKind {
   return raw;
 }
 
+/** [M21] 距離帯(裁定 B7)。レジストリ外の文字列は reject する。 */
+function requireDistanceBand(value: unknown, path: string): DistanceBand {
+  const raw = requireString(value, path);
+  if (!isDistanceBand(raw)) {
+    throw new SerializeError(
+      `${path}: "${raw}" は距離帯ではない(rules/types.ts の DISTANCE_BANDS 参照・裁定 B7)`,
+    );
+  }
+  return raw;
+}
+
+/** [M21] 派遣方針(GDD 8.3)。レジストリ外の文字列は reject する。 */
+function requireDispatchStance(value: unknown, path: string): DispatchStance {
+  const raw = requireString(value, path);
+  if (!isDispatchStance(raw)) {
+    throw new SerializeError(
+      `${path}: "${raw}" は派遣方針ではない(state.ts の DISPATCH_STANCES 参照)`,
+    );
+  }
+  return raw;
+}
+
 /** [M12] memoirLog エントリ 1 件の復元(state.ts の {@link MemoirEntry} 判別)。 */
 function deserializeMemoirEntry(value: unknown, path: string): MemoirEntry {
   const o = requireObject(value, path);
@@ -1132,6 +1290,13 @@ function deserializeMemoirEntry(value: unknown, path: string): MemoirEntry {
       };
     case "death":
       return { kind, tick };
+    case "explorationRescue":
+      return {
+        kind,
+        tick,
+        rescuedId: requireEntityId(o["rescuedId"], `${path}.rescuedId`),
+        band: requireDistanceBand(o["band"], `${path}.band`),
+      };
     case "partnerLost":
       return { kind, tick, partnerId: requireEntityId(o["partnerId"], `${path}.partnerId`) };
     default: {
@@ -1314,6 +1479,90 @@ function deserializeTechMemoryByKey(
 }
 
 /**
+ * [M21] `dispatchSnapshots`(§9)を読む。キーが無ければ空配列。
+ *
+ * ADR-012(3) の上界(同時派遣 2 / ノード 16)は**ここでは見ない** —— 上界の
+ * 強制は `platform/persistence.ts` の `assertDispatchTreeBounds` が書込側と
+ * インポート側で行う層分けであり(同ファイル §2)、engine 側の復元は
+ * 「JSON として型が合っているか」までに留める(§2 の方針)。
+ */
+function deserializeDispatchSnapshots(value: unknown): readonly DispatchSnapshot[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    throw new SerializeError(`$.dispatchSnapshots: 配列を期待したが ${describe(value)} だった`);
+  }
+  const source = value as readonly unknown[];
+  const result: DispatchSnapshot[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const path = `$.dispatchSnapshots[${String(i)}]`;
+    const o = requireObject(source[i], path);
+    const tree = requireObject(o["resolvedTree"], `${path}.resolvedTree`);
+    const rawNodes = tree["choices"];
+    if (!Array.isArray(rawNodes)) {
+      throw new SerializeError(
+        `${path}.resolvedTree.choices: 配列を期待したが ${describe(rawNodes)} だった`,
+      );
+    }
+    const nodes: DispatchNode[] = [];
+    const nodeSource = rawNodes as readonly unknown[];
+    for (let n = 0; n < nodeSource.length; n++) {
+      const nodePath = `${path}.resolvedTree.choices[${String(n)}]`;
+      const node = requireObject(nodeSource[n], nodePath);
+      nodes.push({
+        difficultyFix: requireFix(node["difficulty"], `${nodePath}.difficulty`),
+        rollFix: requireFix(node["roll"], `${nodePath}.roll`),
+        success: requireBoolean(node["success"], `${nodePath}.success`),
+        rewardFix: requireFix(node["reward"], `${nodePath}.reward`),
+        injuryFix: requireFix(node["injury"], `${nodePath}.injury`),
+        rescue: requireBoolean(node["rescue"], `${nodePath}.rescue`),
+      });
+    }
+    result.push({
+      id: requireEntityId(o["id"], `${path}.id`),
+      destinationId: requireEntityId(o["destinationId"], `${path}.destinationId`),
+      band: requireDistanceBand(o["band"], `${path}.band`),
+      stance: requireDispatchStance(o["stance"], `${path}.stance`),
+      memberIds: requireEntityIdArray(o["memberIds"], `${path}.memberIds`),
+      dispatchTick: requireNonNegativeInt(o["dispatchTick"], `${path}.dispatchTick`),
+      returnTick: requireNonNegativeInt(o["returnTick"], `${path}.returnTick`),
+      teamPowerFix: requireFix(o["teamPower"], `${path}.teamPower`),
+      nodes,
+      withdrawn: requireBoolean(o["withdrawn"], `${path}.withdrawn`),
+      rewardFix: requireFix(o["reward"], `${path}.reward`),
+      rewardResourceId: requireEntityId(o["rewardResourceId"], `${path}.rewardResourceId`),
+      casualtyMemberIds: requireEntityIdArray(o["casualtyMemberIds"], `${path}.casualtyMemberIds`),
+    });
+  }
+  return result;
+}
+
+/** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */
+function deserializeRenderedLogs(value: unknown): RenderedLogState {
+  if (value === undefined) return EMPTY_RENDERED_LOGS;
+  const o = requireObject(value, "$.renderedLogs");
+  const rawEntries = o["entries"];
+  if (!Array.isArray(rawEntries)) {
+    throw new SerializeError(
+      `$.renderedLogs.entries: 配列を期待したが ${describe(rawEntries)} だった`,
+    );
+  }
+  const source = rawEntries as readonly unknown[];
+  const entries: RenderedLogEntry[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const path = `$.renderedLogs.entries[${String(i)}]`;
+    const entry = requireObject(source[i], path);
+    entries.push({
+      tick: requireNonNegativeInt(entry["tick"], `${path}.tick`),
+      text: requireString(entry["text"], `${path}.text`),
+    });
+  }
+  return {
+    entries,
+    foldedCount: requireNonNegativeInt(o["foldedCount"], "$.renderedLogs.foldedCount"),
+  };
+}
+
+/**
  * 直列化形(JSON.parse の結果)から GameState を復元する。オブジェクト → Map。
  * 入力のキー順には依存しない(必要なキーを名指しで読み、Map は ID 昇順で
  * 作り直す)ので、整形ツールがキー順を変えたセーブでも同じ state になる。
@@ -1349,5 +1598,7 @@ export function fromSerializable(input: unknown): GameState {
     deserializeRngState(root["rngState"]),
     deserializeBondByPairKey(root["bondByPairKey"]),
     deserializeTechMemoryByKey(root["techMemoryByKey"]),
+    deserializeDispatchSnapshots(root["dispatchSnapshots"]),
+    deserializeRenderedLogs(root["renderedLogs"]),
   );
 }

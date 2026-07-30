@@ -103,6 +103,7 @@ import {
 } from "./state/state";
 import { setField } from "./state/update";
 import { applyBondProgress, applyPartnerLossEffects, computeBondRates } from "./rules/bond";
+import { resolveExpedition } from "./rules/exploration";
 import { deathTickOf } from "./rules/lifespan";
 import { recordDeathMemoir } from "./rules/memoir";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
@@ -172,7 +173,7 @@ export const PIPELINE_STAGE = {
   research: 40,
   /** 成文化完了(未実装)。 */
   codify: 50,
-  /** 探索解決(未実装)。 */
+  /** 探索解決([M21] 派遣の帰還・GDD 8.2 / 11.7 段60)。 */
   exploration: 60,
   /**
    * [M11] 晴天漂着による加入(GDD 7.7)。**GDD 11.7 の一覧に無い段**であり、
@@ -192,11 +193,17 @@ export const PIPELINE_STAGE = {
   dust: 90,
 } as const;
 
-/** 離散事象の種類(T5 の 3 種 + M11 の 2 種)。 */
+/** 離散事象の種類(T5 の 3 種 + M11 の 2 種 + M21 の 1 種)。 */
 export type SchedulerEventKind =
-  "recallRecover" | "residentArrival" | "residentDeath" | "stochasticStep" | "researchComplete";
+  | "expeditionReturn"
+  | "recallRecover"
+  | "residentArrival"
+  | "residentDeath"
+  | "stochasticStep"
+  | "researchComplete";
 
 const STAGE_BY_KIND: { readonly [K in SchedulerEventKind]: number } = {
+  expeditionReturn: PIPELINE_STAGE.exploration,
   recallRecover: PIPELINE_STAGE.recallRecover,
   residentArrival: PIPELINE_STAGE.arrival,
   residentDeath: PIPELINE_STAGE.death,
@@ -223,6 +230,9 @@ export function classifyEventBoundary(kind: SchedulerEventKind): BoundaryClass {
   switch (kind) {
     // [M11] `residentArrival` は就労可能な住民を増やし、`residentDeath` は減らす。
     // どちらも次の区間の生産レートを変える = (B) レート変化イベントである。
+    // [M21] `expeditionReturn` は派遣者を本拠へ戻し(dispatchW が外れ、就労可能に
+    // なる)報酬を在庫へ入れるので、同じく (B) レート変化イベントである。
+    case "expeditionReturn":
     case "recallRecover":
     case "researchComplete":
     case "residentArrival":
@@ -511,6 +521,18 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
     pushRecallRecover(queue, until, residentId);
   }
 
+  // [M21] 探索の帰還(GDD 11.7 段60)。**死亡と同じく「既に過ぎている」場合も積む**
+  // (`max(帰還tick, state.tick)`): 帰還は state を変える(報酬・派遣解除・脱落)ので
+  // 取りこぼすと分割不変性が壊れる。ちょうど帰還 tick で advance を区切った場合、
+  // 前半は `< toTick` に掛からず積まれず、後半は `state.tick == 帰還tick` で
+  // 積まれてその場で発火する = 一括で進めた場合と一致する。
+  for (const snapshot of state.dispatchSnapshots) {
+    const returnAt = Math.max(snapshot.returnTick, state.tick);
+    if (returnAt < toTick) {
+      queue.push({ tick: returnAt, kind: "expeditionReturn", entityId: snapshot.id });
+    }
+  }
+
   // [M11] 晴天漂着。加入機構が不活性(寝床上限 0 / townParams 不在)なら null。
   const arrivalTick = nextArrivalTick(state, ctx.content, state.tick);
   if (arrivalTick !== null && arrivalTick < toTick) {
@@ -638,6 +660,12 @@ export interface ScheduleReport {
   readonly techLossCount: number;
   /** [M13] うち (B) rareIrreversible = 永久喪失の件数。 */
   readonly irreversibleTechLossCount: number;
+  /** [M21] 帰還解決した派遣の本数(GDD 11.7 段60)。 */
+  readonly expeditionReturnCount: number;
+  /** [M21] 探索で脱落した人数(段70 の死亡ゲートへ渡した件数。延期されうる)。 */
+  readonly explorationCasualtyCount: number;
+  /** [M21] 探索での保護で加入した人数(GDD 7.7・晴天漂着とは別口)。 */
+  readonly explorationRescueCount: number;
   /** `collectSegments` を有効にしたときだけ非空。 */
   readonly segments: readonly SegmentRecord[];
 }
@@ -694,6 +722,9 @@ export function runSchedule(
   let deferredDeathCount = 0;
   let techLossCount = 0;
   let irreversibleTechLossCount = 0;
+  let expeditionReturnCount = 0;
+  let explorationCasualtyCount = 0;
+  let explorationRescueCount = 0;
 
   if (toTick === state.tick) {
     return {
@@ -708,6 +739,9 @@ export function runSchedule(
       deferredDeathCount,
       techLossCount,
       irreversibleTechLossCount,
+      expeditionReturnCount,
+      explorationCasualtyCount,
+      explorationRescueCount,
       segments,
     };
   }
@@ -830,6 +864,44 @@ export function runSchedule(
           }
           break;
         }
+        case "expeditionReturn": {
+          // [M21] 探索の帰還(GDD 8.2 / 11.7 段60)。**content を読まない**
+          // (結果は派遣確定時のスナップショットに焼き込み済み・
+          // rules/exploration.ts §1)。
+          const dispatchId = requireEventEntityId(event);
+          const resolution = resolveExpedition(next, ctx, dispatchId, cursor);
+          next = resolution.state;
+          rateChangeEventCount++;
+          expeditionReturnCount++;
+          explorationRescueCount += resolution.rescuedIds.length;
+          // 保護で加入した住民の死亡イベントを積む(晴天漂着と同じ理由:
+          // buildEventQueue は advance の入口で 1 回しか走らないため・§6)。
+          for (const rescuedId of resolution.rescuedIds) {
+            const rescued = requireEntity(next, rescuedId, "resident");
+            if (rescued.life === undefined) continue;
+            const dieAt = deathTickOf(rescued.life);
+            if (dieAt > cursor && dieAt < toTick) {
+              queue.pushAfter({ tick: dieAt, kind: "residentDeath", entityId: rescuedId }, cursor);
+            }
+          }
+          // **脱落者はここで殺さない。** 同 tick の段70(死亡/全滅判定)へ回すことで、
+          // 人口下限の絶対保証(GDD 7.6 の死亡ゲート)・memoirLog・bond 士気ペナ・
+          // 技術喪失(GDD 7.4)の既存経路をそのまま通す(rules/exploration.ts §4)。
+          // 段70 は段60 より後なので、同 tick への push で必ずこの周回に処理される。
+          for (const casualtyId of resolution.casualtyIds) {
+            const deathEvent: ScheduledEvent = {
+              tick: cursor,
+              kind: "residentDeath",
+              entityId: casualtyId,
+            };
+            explorationCasualtyCount++;
+            // 同じ住民の寿命死が既に同 tick で積まれていることがある(全順序が
+            // 崩れるので二重には積まない。死亡処理は冪等 = 先に死んでいれば
+            // `applyResidentDeath` が died:false を返す)。
+            if (!queue.hasEvent(deathEvent)) queue.push(deathEvent);
+          }
+          break;
+        }
         case "residentDeath": {
           // [M11] 寿命死(GDD 7.5)。人口下限を割る死は延期される(GDD 7.6 /
           // rules/population.ts §3)。延期は取り消しではないので、人口が増えうる
@@ -897,6 +969,9 @@ export function runSchedule(
     deferredDeathCount,
     techLossCount,
     irreversibleTechLossCount,
+    expeditionReturnCount,
+    explorationCasualtyCount,
+    explorationRescueCount,
     segments,
   };
 }

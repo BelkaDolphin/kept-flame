@@ -22,10 +22,11 @@
 // 1. 決定論(ADR-006/007/026)
 // ===========================================================================
 //   コマンドの解決に使ってよい入力は **state(tick を含む)・content・引数** だけ。
-//   実時刻(Date/performance)も乱数も読まない。RNG が要る操作(探索派遣の
-//   イベント列生成 = GDD 8.2)は `hash(worldSeed, domainTag, …)` 経由で domainTag
-//   レジストリに登録してから実装すること(M21)。現時点で実装済みのコマンドは
-//   **1 つも RNG を引かない**(引く必要が無い操作しか実装していない)。
+//   実時刻(Date/performance)は読まない。RNG を引くのは [M21] の探索派遣確定
+//   (`dispatchExpedition`)**だけ**であり、それも `hash(worldSeed, domainTag, …)`
+//   の hash アドレス方式(domainTag `exploration` はレジストリ登録済み)なので
+//   ストリーム状態を進めない = 同じ state・content・引数なら常に同じ結果になる。
+//   他のコマンドは 1 つも乱数を引かない(引く必要が無い操作しか無い)。
 //
 //   コマンドは `state.tick` を進めない。「今」は常に `state.tick` である。
 //
@@ -66,8 +67,8 @@
 // 4. スコープ(M49 が実装するもの / 型だけ予約するもの)
 // ===========================================================================
 //   実装 : 配置 / 解体 / 増築 / 住民割当 / 割当解除 / 成文化指示 /
-//          廃材→研究点変換(GDD 6.7 3出口(3))
-//   予約 : 探索派遣確定(M21)/ 瓦礫開墾(M18)/ 研究対象の選択(担当未割当)
+//          廃材→研究点変換(GDD 6.7 3出口(3))/ [M21] 探索派遣確定
+//   予約 : 瓦礫開墾(M18)/ 研究対象の選択(M50)
 //   予約分は語彙(型)と reject コード `notImplemented` + 担当タスク名だけを持ち、
 //   **それらしい名前で何もしないコマンドにはしない**(store.ts §1 と同じ規律)。
 //   {@link RESERVED_COMMAND_OWNER_TASK} が機械可読の正本である。
@@ -98,19 +99,35 @@ import {
   isPrintingUnlocked,
   planCodification,
 } from "./rules/codify";
+import {
+  DISPATCH_TEAM_MAX,
+  DISPATCH_TEAM_MIN,
+  bandParamsOf,
+  buildDispatchSnapshot,
+  rewardResourceEntityIdOf,
+} from "./rules/exploration";
 import { currentResearch } from "./rules/research";
 import { convertWasteToResearchPoints, wasteStockOf, wasteToResearchPoints } from "./rules/storage";
-import type { EngineContent, FacilityDef, RecordMedium } from "./rules/types";
+import type { DistanceBand, EngineContent, FacilityDef, RecordMedium } from "./rules/types";
 import {
   entitiesOfKind,
   getEntity,
   isAliveResident,
+  isResidentOnDispatch,
+  type DispatchStance,
   type EntityId,
   type FacilityState,
   type GameState,
   type ResidentState,
 } from "./state/state";
-import { putEntity, removeEntity, setField, updateEntity } from "./state/update";
+import {
+  putEntity,
+  removeEntity,
+  setDispatchSnapshots,
+  setField,
+  updateEntity,
+} from "./state/update";
+import { worldSeedToUint32 } from "./stochastic";
 
 // --- 1. コマンド語彙 --------------------------------------------------------
 
@@ -199,18 +216,24 @@ export interface ConvertWasteToResearchCommand {
 }
 
 /**
- * **型のみ予約**(担当 M21): 探索派遣の確定(GDD 8.1 / 8.2)。
+ * [M21] 探索派遣の確定(GDD 8.1 / 8.2)。
  *
  * 確定時に `seed = hash(worldSeed, "exploration", dispatchTick, teamIds, destId)` を
- * 固定してイベント列を丸ごとスナップショットする = 本コマンドが **RNG を引く
- * 唯一のコマンド**になる予定であり、domainTag `exploration` は登録済み。
- * 分岐木ノードの上界(§5)もここで効く。
+ * 固定してイベント列(と**その結果**)を丸ごとスナップショットする = 本コマンドが
+ * **RNG を引く唯一のコマンド**である(§1)。以後 content を再参照しない理由と
+ * 生成規則は `rules/exploration.ts` §1〜§3。分岐木ノードの上界(§5)もここで効く。
  */
 export interface DispatchExpeditionCommand {
   readonly kind: "dispatchExpedition";
+  /** 新しく作る派遣の ID(既存 entity / 既存派遣と衝突したら reject)。 */
+  readonly dispatchId: EntityId;
   /** 目的地 content の ID。 */
   readonly destinationId: EntityId;
-  /** チーム(1〜4 名・GDD 8.1)。 */
+  /** 距離帯(裁定 B7: `near`/`far`/`deep`)。 */
+  readonly band: DistanceBand;
+  /** 撤退 / 強行の方針(GDD 8.3・rules/exploration.ts §3)。 */
+  readonly stance: DispatchStance;
+  /** チーム(1〜4 名・GDD 8.1)。順不同で渡してよく、engine が ID 昇順へ正規化する。 */
   readonly teamResidentIds: readonly EntityId[];
 }
 
@@ -273,6 +296,7 @@ export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
   "beginCodification",
   "convertWasteToResearch",
   "demolishFacility",
+  "dispatchExpedition",
   "placeFacility",
   "unassignResident",
   "upgradeFacility",
@@ -283,8 +307,7 @@ export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
  * `apply` は `notImplemented` で reject し、この文字列を `ownerTask` に載せる。
  */
 export const RESERVED_COMMAND_OWNER_TASK: { readonly [K in CommandKind]?: string } = {
-  beginResearch: "未割当(研究の単一キュー縮約の解消が前提・research.ts §2)",
-  dispatchExpedition: "M21(探索エンジン・GDD 8.1/8.2)",
+  beginResearch: "M50(研究の単一キュー縮約の解消が前提・research.ts §2)",
   reclaimCell: "M18(瓦礫セルの state 化・GDD 9.1)",
 };
 
@@ -335,6 +358,8 @@ export const COMMAND_REJECTION_CODES = [
   "levelAtMax",
   /** 就労スロットが埋まっている(GDD 7.7)。 */
   "facilitySlotsFull",
+  /** [M21] 同時派遣枠(GDD 8.1「派遣枠上限＝同時2枠」)が埋まっている。 */
+  "dispatchSlotsFull",
   /** 住民がその操作を受けられない(死亡 / 探索派遣中)。 */
   "residentUnavailable",
   /** 既にその施設に就労している。 */
@@ -1001,6 +1026,139 @@ function applyConvertWasteToResearch(
   return { ok: true, state: next, changed: next !== state, commandCount: 1 };
 }
 
+/**
+ * [M21] 探索派遣の確定(GDD 8.1 / 8.2)。**RNG を引く唯一のコマンド**(§1)。
+ *
+ * 検査の順序は「content の有無 → 引数 → 派遣枠 → メンバー個々 → 報酬の受け皿」で、
+ * どれか 1 つでも落ちれば state は 1 bit も動かない(§3)。
+ *
+ * `life`(寿命モデル)を持たない住民を**拒否する**のが唯一の一風変わった検査で
+ * ある。理由は GDD 8.5 の全滅リスクが死亡として表現されるためで、寿命を持たない
+ * 住民を混ぜると「脱落したのに死ねない」= 全滅リスクが静かに消える経路になる
+ * (rules/population.ts の `applyResidentDeath` は life 無しを RulesError にする)。
+ */
+function applyDispatchExpedition(
+  state: GameState,
+  content: EngineContent,
+  command: DispatchExpeditionCommand,
+  index: number,
+): CommandResult {
+  if (content.exploration === undefined) {
+    return rejected("dispatchExpedition", index, {
+      code: "contentUnsupported",
+      message: "content に balance の exploration ブロックが無いので派遣できない(GDD 8.1〜8.6)",
+    });
+  }
+  const team = command.teamResidentIds;
+  if (team.length < DISPATCH_TEAM_MIN || team.length > DISPATCH_TEAM_MAX) {
+    return rejected("dispatchExpedition", index, {
+      code: "invalidArgument",
+      limit: DISPATCH_TEAM_MAX,
+      actual: team.length,
+      message: `チームは ${String(DISPATCH_TEAM_MIN)}〜${String(DISPATCH_TEAM_MAX)} 名(GDD 8.1。実際 ${String(team.length)} 名)`,
+    });
+  }
+  if (state.entityStateById.has(command.dispatchId) || activeDispatchIdInUse(state, command)) {
+    return rejected("dispatchExpedition", index, {
+      code: "entityIdInUse",
+      subjectId: command.dispatchId,
+      message: `ID "${command.dispatchId}" は既に使われている(entity または未帰還の派遣)`,
+    });
+  }
+  if (!dispatchSlotsAvailable(state)) {
+    return rejected("dispatchExpedition", index, {
+      code: "dispatchSlotsFull",
+      limit: CONCURRENT_DISPATCH_MAX,
+      actual: activeDispatchCount(state),
+      message: `派遣枠は同時 ${String(CONCURRENT_DISPATCH_MAX)} 本まで(GDD 8.1)`,
+    });
+  }
+
+  // ID 昇順・重複なしへ正規化する(GDD 11.7 の集合演算の安定順序 + seed 材料)。
+  const memberIds = [...team].sort(compareUtf16);
+  for (let i = 1; i < memberIds.length; i++) {
+    const current = memberIds[i];
+    if (current === undefined || current !== memberIds[i - 1]) continue;
+    return rejected("dispatchExpedition", index, {
+      code: "invalidArgument",
+      subjectId: current,
+      message: `住民 "${current}" がチームに重複している`,
+    });
+  }
+  for (const memberId of memberIds) {
+    const resident = residentOf(state, memberId);
+    if (resident === undefined) {
+      return rejected("dispatchExpedition", index, {
+        code: "entityNotFound",
+        subjectId: memberId,
+        message: `住民 "${memberId}" が state に無い`,
+      });
+    }
+    if (!isAliveResident(resident)) {
+      return rejected("dispatchExpedition", index, {
+        code: "residentUnavailable",
+        subjectId: memberId,
+        message: `住民 "${memberId}" は死亡している(GDD 7.5 の tombstone)`,
+      });
+    }
+    if (resident.dispatched || isResidentOnDispatch(state, memberId)) {
+      return rejected("dispatchExpedition", index, {
+        code: "residentUnavailable",
+        subjectId: memberId,
+        message: `住民 "${memberId}" は既に別の探索へ派遣されている(GDD 8.1)`,
+      });
+    }
+    if (resident.life === undefined) {
+      return rejected("dispatchExpedition", index, {
+        code: "residentUnavailable",
+        subjectId: memberId,
+        message:
+          `住民 "${memberId}" は寿命(life)を持たないので探索の全滅リスク(GDD 8.5)を` +
+          "表現できない。寿命モデル(GDD 7.5)を持つ住民だけが派遣できる",
+      });
+    }
+  }
+
+  // 報酬の受け皿(resource entity)が無いと帰還時に報酬が消える。ここで止める。
+  const rewardResourceId = bandParamsOf(content, command.band).rewardResourceId;
+  if (rewardResourceEntityIdOf(state, rewardResourceId) === undefined) {
+    return rejected("dispatchExpedition", index, {
+      code: "entityNotFound",
+      subjectId: rewardResourceId,
+      message: `距離帯 ${command.band} の報酬資源 "${rewardResourceId}" の在庫 entity が state に無い`,
+    });
+  }
+
+  const snapshot = buildDispatchSnapshot(state, content, worldSeedToUint32(state.worldSeed), {
+    dispatchId: command.dispatchId,
+    destinationId: command.destinationId,
+    band: command.band,
+    stance: command.stance,
+    memberIds,
+    dispatchTick: state.tick,
+  });
+
+  // 派遣中は本拠の就労スロットから外れ生産寄与ゼロ(GDD 8.1)。`dispatched` だけを
+  // 立てると席が空かないので、割当も外す(帰還後は無配属で戻る)。
+  let next = state;
+  for (const memberId of memberIds) {
+    next = detachWorkerFromAllFacilities(next, memberId);
+    next = updateEntity(next, memberId, "resident", (r) =>
+      setField(setField(r, "assignedFacilityId", null), "dispatched", true),
+    );
+  }
+  next = setDispatchSnapshots(next, [...next.dispatchSnapshots, snapshot]);
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
+/** その派遣 ID が未帰還一覧で既に使われているか。 */
+function activeDispatchIdInUse(state: GameState, command: DispatchExpeditionCommand): boolean {
+  for (const snapshot of state.dispatchSnapshots) {
+    if (snapshot.id === command.dispatchId) return true;
+  }
+  return false;
+}
+
 function rejectReserved(kind: CommandKind, index: number): CommandRejected {
   const ownerTask = RESERVED_COMMAND_OWNER_TASK[kind] ?? "未定";
   return rejected(kind, index, {
@@ -1043,21 +1201,14 @@ export const DISPATCH_TREE_NODES_MAX = DISPATCH_BRANCH_FACTOR * DISPATCH_EVENT_N
 export const DISPATCH_TREE_NODES_TOTAL_MAX = DISPATCH_TREE_NODES_MAX * CONCURRENT_DISPATCH_MAX;
 
 /**
- * いま state に載っている派遣の本数。
+ * いま state に載っている未帰還の派遣の本数([M21] で実データへ差し替え済み)。
  *
- * 探索の state 表現(`dispatchSnapshots`)は M21 の担当でまだ存在しないため、
- * **現時点では常に 0** である。0 を返すこと自体は嘘ではない(派遣は 1 件も
- * 存在し得ない)が、M21 が state を足したらここを実データに差し替えること。
- * 上界検査({@link dispatchSlotsAvailable})を先に用意してあるのは、派遣確定
- * コマンドの実装者が上界の存在に気づかず通り過ぎるのを防ぐため。
+ * 「探索派遣中の住民が居るか」ではなく**派遣そのものの本数**である
+ * (1 派遣 = 1〜4 名・GDD 8.1)。帰還解決(scheduler 段60)でスナップショットが
+ * 外れるので、この値は自動的に減る。
  */
 export function activeDispatchCount(state: GameState): number {
-  // 「探索派遣中の住民が居るか」は数えられるが、それは**派遣の本数ではない**
-  // (1 派遣 = 1〜4 名・GDD 8.1)ので枠判定には使えない。派遣そのものを表す
-  // state(`dispatchSnapshots`)が無い現状、0 を返す以外に正しい実装が無い。
-  // 引数に state を取ってあるのは M21 の差し替え点を型で固定するためである。
-  void state;
-  return 0;
+  return state.dispatchSnapshots.length;
 }
 
 /** 派遣枠(GDD 8.1 の同時 2 枠)に空きがあるか。 */
@@ -1088,8 +1239,9 @@ function applyOne(
       return applyBeginCodification(state, content, command, index);
     case "convertWasteToResearch":
       return applyConvertWasteToResearch(state, content, command, index);
-    case "beginResearch":
     case "dispatchExpedition":
+      return applyDispatchExpedition(state, content, command, index);
+    case "beginResearch":
     case "reclaimCell":
       return rejectReserved(command.kind, index);
     default: {

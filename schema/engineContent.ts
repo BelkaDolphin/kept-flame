@@ -114,9 +114,14 @@ import {
   type StatWeights,
   type TraitDef,
 } from "../src/engine/rules/stats";
+import { DISPATCH_EVENT_NODES_MAX } from "../src/engine/commands";
+import { DISTANCE_BANDS } from "../src/engine/rules/types";
 import type {
+  DistanceBand,
   EngineContent,
   EraDef,
+  ExplorationBandParams,
+  ExplorationParams,
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
@@ -137,6 +142,7 @@ import type { AdjacencyContent, AdjacencyRule } from "./adjacency";
 import type {
   BalanceContent,
   EraContent,
+  ExplorationContent,
   RecordMediaContent,
   RecordMediumContent,
   StorageParamsContent,
@@ -1265,6 +1271,152 @@ function toStorageParams(
   };
 }
 
+// --- 6c. exploration(GDD 8.1〜8.6・M21)-------------------------------------
+
+/**
+ * [M21] 探索パラメータを engine 内部表現へ写す。
+ *
+ * 難度・R・ノード数は**整数のまま**写す(Fix にしない)。理由は engine 側
+ * `rules/types.ts` の {@link ExplorationBandParams} の doc のとおりで、
+ * 一様抽選のレンジ幅上限(2,097,152 raw)に掛からないようにするため。
+ */
+function toExplorationParams(
+  content: ExplorationContent,
+  issues: IssueCollector,
+): ExplorationParams | undefined {
+  const path = "balance.exploration";
+  const withdrawRewardRatioFix = toFix(
+    content.withdrawRewardRatio,
+    `${path}.withdrawRewardRatio`,
+    issues,
+    "撤退時の報酬比率",
+  );
+  const pressInjuryMulFix = toFix(
+    content.pressInjuryMul,
+    `${path}.pressInjuryMul`,
+    issues,
+    "強行時の負傷倍率",
+  );
+  const withdrawInjuryThresholdFix = toFix(
+    content.withdrawInjuryThreshold,
+    `${path}.withdrawInjuryThreshold`,
+    issues,
+    "撤退に踏み切る負傷",
+  );
+  const equipmentBonusFix = toFix(
+    content.equipmentBonus,
+    `${path}.equipmentBonus`,
+    issues,
+    "装備補正",
+  );
+  const travelSpeedupMaxFix = toFix(
+    content.travelSpeedupMax,
+    `${path}.travelSpeedupMax`,
+    issues,
+    "移動短縮の上限",
+  );
+  const forgoneOutputPerWorkerTickFix = toFix(
+    content.forgoneOutputPerWorkerTick,
+    `${path}.forgoneOutputPerWorkerTick`,
+    issues,
+    "逸失生産の単価",
+  );
+  const rareAssetValueFix = toFix(
+    content.rareAssetValue,
+    `${path}.rareAssetValue`,
+    issues,
+    "(B)資産の価値換算",
+  );
+  const wipeMaxPFix = toFix(content.wipeMaxP, `${path}.wipeMaxP`, issues, "全滅確率の上限");
+
+  const bands: { [K in DistanceBand]?: ExplorationBandParams } = {};
+  for (const band of DISTANCE_BANDS) {
+    const raw = content.bands[band];
+    if (raw === undefined) {
+      // schema 側が 3 種必須を強制しているので通常は起きない(型の穴の保険)。
+      issues.add(`${path}.bands`, `距離帯 "${band}" が無い(裁定 B7)`);
+      continue;
+    }
+    const bandPath = `${path}.bands.${band}`;
+    const rewardPerNodeFix = toFix(raw.rewardPerNode, `${bandPath}.rewardPerNode`, issues, "報酬");
+    const injuryPerFailureFix = toFix(
+      raw.injuryPerFailure,
+      `${bandPath}.injuryPerFailure`,
+      issues,
+      "失敗時の負傷",
+    );
+    const casualtyInjuryThresholdFix = toFix(
+      raw.casualtyInjuryThreshold,
+      `${bandPath}.casualtyInjuryThreshold`,
+      issues,
+      "脱落閾値",
+    );
+    const rescueChanceFix = toFix(raw.rescueChance, `${bandPath}.rescueChance`, issues, "保護確率");
+    const wipeBasePFix = toFix(raw.wipeBaseP, `${bandPath}.wipeBaseP`, issues, "全滅確率の基準");
+    if (
+      rewardPerNodeFix === undefined ||
+      injuryPerFailureFix === undefined ||
+      casualtyInjuryThresholdFix === undefined ||
+      rescueChanceFix === undefined ||
+      wipeBasePFix === undefined
+    ) {
+      continue;
+    }
+    if (raw.nodeCountMax > DISPATCH_EVENT_NODES_MAX) {
+      issues.add(
+        `${bandPath}.nodeCountMax`,
+        `ノード数の上限 ${String(raw.nodeCountMax)} が engine の上界 ` +
+          `${String(DISPATCH_EVENT_NODES_MAX)} を超えている(GDD 8.2 / ADR-012(3))`,
+      );
+      continue;
+    }
+    bands[band] = {
+      baseTravelTicks: raw.baseTravelTicks,
+      nodeCountMin: raw.nodeCountMin,
+      nodeCountMax: raw.nodeCountMax,
+      difficultyMin: raw.difficultyMin,
+      difficultyMax: raw.difficultyMax,
+      rollRange: raw.rollRange,
+      rewardPerNodeFix,
+      rewardResourceId: entityIdFromString(raw.rewardResourceId),
+      injuryPerFailureFix,
+      casualtyInjuryThresholdFix,
+      rescueChanceFix,
+      wipeBasePFix,
+    };
+  }
+
+  const near = bands.near;
+  const far = bands.far;
+  const deep = bands.deep;
+  if (
+    withdrawRewardRatioFix === undefined ||
+    pressInjuryMulFix === undefined ||
+    withdrawInjuryThresholdFix === undefined ||
+    equipmentBonusFix === undefined ||
+    travelSpeedupMaxFix === undefined ||
+    forgoneOutputPerWorkerTickFix === undefined ||
+    rareAssetValueFix === undefined ||
+    wipeMaxPFix === undefined ||
+    near === undefined ||
+    far === undefined ||
+    deep === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    byBand: { near, far, deep },
+    withdrawRewardRatioFix,
+    pressInjuryMulFix,
+    withdrawInjuryThresholdFix,
+    equipmentBonusFix,
+    travelSpeedupMaxFix,
+    forgoneOutputPerWorkerTickFix,
+    rareAssetValueFix,
+    wipeMaxPFix,
+  };
+}
+
 // --- 7. 入口 ----------------------------------------------------------------
 
 /**
@@ -1323,6 +1475,11 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     bundle.balance.townParams === null
       ? null
       : (toTownParams(bundle.balance.townParams, issues) ?? undefined);
+  // [M21] 省略可。キー不在 = engine 側の「派遣そのものができない」既定。
+  const exploration =
+    bundle.balance.exploration === null
+      ? null
+      : (toExplorationParams(bundle.balance.exploration, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -1341,7 +1498,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     storage === undefined ||
     eraDefs === undefined ||
     recordMedia === undefined ||
-    town === undefined
+    town === undefined ||
+    exploration === undefined
   ) {
     return fail(issues.list());
   }
@@ -1360,7 +1518,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   const withStorage = storage === null ? base : { ...base, storage };
   const withEras = eraDefs === null ? withStorage : { ...withStorage, eraDefs };
   const withMedia = recordMedia === null ? withEras : { ...withEras, recordMedia };
-  return ok(town === null ? withMedia : { ...withMedia, town });
+  const withTown = town === null ? withMedia : { ...withMedia, town };
+  return ok(exploration === null ? withTown : { ...withTown, exploration });
 }
 
 /**

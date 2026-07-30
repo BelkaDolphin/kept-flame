@@ -460,6 +460,97 @@ export interface TownParams {
   readonly joinAgeMaxTicks: number;
 }
 
+// --- 3e. exploration(GDD 8.1〜8.6)— M21 ------------------------------------
+
+/**
+ * [M21] 距離帯の正本(**裁定 B7**: 近郊 = `near` / 遠隔 = `far` / 深部 = `deep`)。
+ * 並びは UTF-16 昇順 = 集合演算の安定順序(GDD 11.7)であり、宣言順に意味は無い。
+ */
+export const DISTANCE_BANDS = ["deep", "far", "near"] as const;
+
+/** {@link DISTANCE_BANDS} のいずれか。 */
+export type DistanceBand = (typeof DISTANCE_BANDS)[number];
+
+/** 未知の文字列が距離帯のいずれかか(型ガード)。セーブ復元の入口が使う。 */
+export function isDistanceBand(value: string): value is DistanceBand {
+  for (const band of DISTANCE_BANDS) {
+    if (band === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M21] 距離帯 1 本ぶんのパラメータ(GDD 8.1 / 8.2 / 8.5)。
+ *
+ * 難度・R は**人間単位の整数**で持つ(Fix ではない)。理由は 2 つ:
+ *   (a) 判定は `combatPower`(0〜100 スケール)との比較なので同じ尺度で読める
+ *   (b) 一様抽選 `uniformIntFromDraw` のレンジ幅上限
+ *       ({@link ../stochastic.UNIFORM_SPAN_MAX} = 2,097,152)は raw 幅に掛かる
+ *       ため、Fix のまま 0〜100 を一様に引くと上界を超える
+ */
+export interface ExplorationBandParams {
+  /** GDD 8.1 の `base_time`(往復の基礎 tick)。1 以上。 */
+  readonly baseTravelTicks: number;
+  /** イベント列のノード数の下限(GDD 8.2: 3〜8)。 */
+  readonly nodeCountMin: number;
+  /** 同上限。{@link ../commands.DISPATCH_EVENT_NODES_MAX} 以下。 */
+  readonly nodeCountMax: number;
+  /** ノード難度の下限(人間単位の整数)。 */
+  readonly difficultyMin: number;
+  /** 同上限。 */
+  readonly difficultyMax: number;
+  /** GDD 8.2 の `seededRoll(0..R)` の R(人間単位の整数)。 */
+  readonly rollRange: number;
+  /** 判定成功 1 ノードあたりの報酬量。 */
+  readonly rewardPerNodeFix: Fix;
+  /** 報酬を受け取る resource 定義 ID。 */
+  readonly rewardResourceId: EntityId;
+  /** 判定失敗 1 回あたりの負傷蓄積(0〜100 スケール・GDD 8.5)。 */
+  readonly injuryPerFailureFix: Fix;
+  /** 脱落(= 1 名が失われる)累積負傷の閾値(GDD 8.5)。 */
+  readonly casualtyInjuryThresholdFix: Fix;
+  /** 1 ノードあたり「探索での保護」が起きる確率(GDD 7.7)。 */
+  readonly rescueChanceFix: Fix;
+  /**
+   * 安全曲線の基準全滅確率(GDD 8.5 / 8.6)。**ROI(期待値)の解析モデル専用**で
+   * あり、実際の全滅は負傷の累積という決定論経路で起きる
+   * (`rules/exploration.ts` §4)。
+   */
+  readonly wipeBasePFix: Fix;
+}
+
+/**
+ * [M21] 探索全体のパラメータ(`balance.json` の `exploration` ブロック)。
+ *
+ * **このブロックが content に無ければ {@link EngineContent.exploration} は
+ * undefined** であり、派遣コマンドは `contentUnsupported` で拒否される
+ * (= M21 以前と完全に同一挙動)。
+ */
+export interface ExplorationParams {
+  /** 距離帯別のパラメータ(3 種とも必須)。 */
+  readonly byBand: { readonly [K in DistanceBand]: ExplorationBandParams };
+  /** GDD 8.3「撤退 = 資源半分確保で以降ノード打ち切り」の 0.5。 */
+  readonly withdrawRewardRatioFix: Fix;
+  /** GDD 8.3「強行 = 失敗時の負傷リスク ×1.5」の 1.5。 */
+  readonly pressInjuryMulFix: Fix;
+  /** 慎重(`cautious`)が撤退に踏み切る累積負傷(GDD 8.3 の「直前選択」の自動化)。 */
+  readonly withdrawInjuryThresholdFix: Fix;
+  /**
+   * GDD 8.2 判定式の「装備補正」。item(装備)は MVP 未実装なので**チーム一律の
+   * 1 段**であり、item が入る段で「装備ロードアウトの関数」へ差し替える。
+   * combatPower 側へ混ぜないのは二重計上を避けるため(GDD 8.2 裁定)。
+   */
+  readonly equipmentBonusFix: Fix;
+  /** GDD 8.1「チーム平均体力＋装備で最大 -30% 短縮」の 0.30。 */
+  readonly travelSpeedupMaxFix: Fix;
+  /** ROI の分母「逸失生産」= 派遣者 1 人 1 tick あたりの機会費用(GDD 8.6)。 */
+  readonly forgoneOutputPerWorkerTickFix: Fix;
+  /** ROI の分母「(B)喪失損失」= (B) 資産 1 件の金銭換算(GDD 8.6)。 */
+  readonly rareAssetValueFix: Fix;
+  /** 安全曲線の全滅確率の上限(GDD 8.5「理不尽全滅はしない曲線」)。 */
+  readonly wipeMaxPFix: Fix;
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -512,6 +603,11 @@ export interface EngineContent {
    * **省略時は寿命の抽選も晴天漂着も走らない**(rules/population.ts §1)。
    */
   readonly town?: TownParams;
+  /**
+   * [M21] 探索パラメータ(GDD 8.1〜8.6)。**省略時は派遣そのものができない**
+   * (`commands.ts` の `dispatchExpedition` が `contentUnsupported` で拒否)。
+   */
+  readonly exploration?: ExplorationParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------

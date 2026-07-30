@@ -95,5 +95,59 @@
     "scarcityArrivalFrequencyMul": 1.5,
     "joinAgeMinTicks": 86400,
     "joinAgeMaxTicks": 345600
+  },
+  "exploration": {
+    "withdrawRewardRatio": 0.5,
+    "pressInjuryMul": 1.5,
+    "withdrawInjuryThreshold": 30,
+    "equipmentBonus": 0,
+    "travelSpeedupMax": 0.3,
+    "forgoneOutputPerWorkerTick": 1,
+    "rareAssetValue": 20000,
+    "wipeMaxP": 0.35,
+    "bands": {
+      "near": {
+        "baseTravelTicks": 960,
+        "nodeCountMin": 3,
+        "nodeCountMax": 4,
+        "difficultyMin": 135,
+        "difficultyMax": 225,
+        "rollRange": 90,
+        "rewardPerNode": 1500,
+        "rewardResourceId": "firewood",
+        "injuryPerFailure": 8,
+        "casualtyInjuryThreshold": 60,
+        "rescueChance": 0.06,
+        "wipeBaseP": 0.1
+      },
+      "far": {
+        "baseTravelTicks": 2160,
+        "nodeCountMin": 4,
+        "nodeCountMax": 6,
+        "difficultyMin": 160,
+        "difficultyMax": 260,
+        "rollRange": 110,
+        "rewardPerNode": 3000,
+        "rewardResourceId": "firewood",
+        "injuryPerFailure": 12,
+        "casualtyInjuryThreshold": 55,
+        "rescueChance": 0.04,
+        "wipeBaseP": 0.2
+      },
+      "deep": {
+        "baseTravelTicks": 4320,
+        "nodeCountMin": 5,
+        "nodeCountMax": 8,
+        "difficultyMin": 200,
+        "difficultyMax": 268,
+        "rollRange": 140,
+        "rewardPerNode": 5500,
+        "rewardResourceId": "firewood",
+        "injuryPerFailure": 16,
+        "casualtyInjuryThreshold": 50,
+        "rescueChance": 0.03,
+        "wipeBaseP": 0.35
+      }
+    }
   }
 }

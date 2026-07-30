@@ -223,6 +223,43 @@ export interface TownParamsContent {
   readonly joinAgeMaxTicks: number;
 }
 
+/**
+ * [M21] 距離帯 1 本ぶんの探索パラメータ(GDD 8.1 / 8.2 / 8.5)。
+ * 難度・R・ノード数は**人間単位の整数**(engine 側 rules/types.ts の doc 参照)。
+ */
+export interface ExplorationBandContent {
+  readonly baseTravelTicks: number;
+  readonly nodeCountMin: number;
+  readonly nodeCountMax: number;
+  readonly difficultyMin: number;
+  readonly difficultyMax: number;
+  readonly rollRange: number;
+  readonly rewardPerNode: number;
+  readonly rewardResourceId: string;
+  readonly injuryPerFailure: number;
+  readonly casualtyInjuryThreshold: number;
+  readonly rescueChance: number;
+  readonly wipeBaseP: number;
+}
+
+/**
+ * [M21] 探索パラメータ(GDD 8.1〜8.6)。**ブロックごと省略可**(欠落は null)。
+ * 省略時は engine 側で派遣コマンドが `contentUnsupported` になる = M21 以前と
+ * 完全に同一挙動。
+ */
+export interface ExplorationContent {
+  readonly withdrawRewardRatio: number;
+  readonly pressInjuryMul: number;
+  readonly withdrawInjuryThreshold: number;
+  readonly equipmentBonus: number;
+  readonly travelSpeedupMax: number;
+  readonly forgoneOutputPerWorkerTick: number;
+  readonly rareAssetValue: number;
+  readonly wipeMaxP: number;
+  /** 距離帯別(裁定 B7 の `near`/`far`/`deep` が 3 つとも必須)。 */
+  readonly bands: { readonly [band: string]: ExplorationBandContent };
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -238,6 +275,8 @@ export interface BalanceContent {
   readonly recordMedia: RecordMediaContent | null;
   /** [M11] GDD 7.5〜7.7 の住民系パラメータ。JSON に無ければ null(寿命/漂着なし)。 */
   readonly townParams: TownParamsContent | null;
+  /** [M21] GDD 8.1〜8.6 の探索パラメータ。JSON に無ければ null(派遣不可)。 */
+  readonly exploration: ExplorationContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -916,6 +955,245 @@ function validateRecallRiskParams(
   };
 }
 
+// --- [M21] exploration(GDD 8.1〜8.6)-----------------------------------------
+
+/** 距離帯の正本(裁定 B7)。engine 側 `rules/types.ts` の DISTANCE_BANDS と同一。 */
+const EXPLORATION_BANDS = ["near", "far", "deep"] as const;
+
+const TRAVEL_TICKS_RANGE: NumericRange = { min: 1, max: 43_200 };
+
+/** GDD 8.2「イベント列 3〜8 ノード」。engine の DISPATCH_EVENT_NODES_MAX と一致。 */
+const NODE_COUNT_RANGE: NumericRange = { min: 1, max: 8 };
+
+/** 難度・R は combatPower(0〜100)× チーム人数の尺度。保守的に 1〜1000。 */
+const DIFFICULTY_RANGE: NumericRange = { min: 1, max: 1_000 };
+
+const REWARD_PER_NODE_RANGE: NumericRange = { min: 0, max: 1_000_000_000 };
+
+const INJURY_RANGE: NumericRange = { min: 0, max: 1_000 };
+
+/** GDD 8.1「最大 -30% 短縮」。上限側に余裕を持たせて 0〜0.5。 */
+const TRAVEL_SPEEDUP_RANGE: NumericRange = { min: 0, max: 0.5 };
+
+/** GDD 8.3「強行 = 負傷リスク ×1.5」。 */
+const PRESS_INJURY_MUL_RANGE: NumericRange = { min: 1, max: 5 };
+
+const FORGONE_OUTPUT_RANGE: NumericRange = { min: 0, max: 1_000 };
+
+const RARE_ASSET_VALUE_RANGE: NumericRange = { min: 0, max: 1_000_000_000 };
+
+function validateExplorationBand(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): ExplorationBandContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const baseTravelTicks = expectInteger(
+    obj["baseTravelTicks"],
+    `${path}.baseTravelTicks`,
+    issues,
+    TRAVEL_TICKS_RANGE,
+  );
+  const nodeCountMin = expectInteger(
+    obj["nodeCountMin"],
+    `${path}.nodeCountMin`,
+    issues,
+    NODE_COUNT_RANGE,
+  );
+  const nodeCountMax = expectInteger(
+    obj["nodeCountMax"],
+    `${path}.nodeCountMax`,
+    issues,
+    NODE_COUNT_RANGE,
+  );
+  const difficultyMin = expectInteger(
+    obj["difficultyMin"],
+    `${path}.difficultyMin`,
+    issues,
+    DIFFICULTY_RANGE,
+  );
+  const difficultyMax = expectInteger(
+    obj["difficultyMax"],
+    `${path}.difficultyMax`,
+    issues,
+    DIFFICULTY_RANGE,
+  );
+  const rollRange = expectInteger(obj["rollRange"], `${path}.rollRange`, issues, DIFFICULTY_RANGE);
+  const rewardPerNode = expectNumber(
+    obj["rewardPerNode"],
+    `${path}.rewardPerNode`,
+    issues,
+    REWARD_PER_NODE_RANGE,
+  );
+  const rewardResourceId = validateId(obj["rewardResourceId"], `${path}.rewardResourceId`, issues);
+  const injuryPerFailure = expectNumber(
+    obj["injuryPerFailure"],
+    `${path}.injuryPerFailure`,
+    issues,
+    INJURY_RANGE,
+  );
+  const casualtyInjuryThreshold = expectNumber(
+    obj["casualtyInjuryThreshold"],
+    `${path}.casualtyInjuryThreshold`,
+    issues,
+    INJURY_RANGE,
+  );
+  const rescueChance = expectNumber(
+    obj["rescueChance"],
+    `${path}.rescueChance`,
+    issues,
+    UNIT_RANGE,
+  );
+  const wipeBaseP = expectNumber(obj["wipeBaseP"], `${path}.wipeBaseP`, issues, UNIT_RANGE);
+
+  if (
+    baseTravelTicks === undefined ||
+    nodeCountMin === undefined ||
+    nodeCountMax === undefined ||
+    difficultyMin === undefined ||
+    difficultyMax === undefined ||
+    rollRange === undefined ||
+    rewardPerNode === undefined ||
+    rewardResourceId === undefined ||
+    injuryPerFailure === undefined ||
+    casualtyInjuryThreshold === undefined ||
+    rescueChance === undefined ||
+    wipeBaseP === undefined
+  ) {
+    return undefined;
+  }
+  if (nodeCountMax < nodeCountMin) {
+    issues.add(path, `nodeCountMax(${String(nodeCountMax)})は nodeCountMin 以上が必須`);
+    return undefined;
+  }
+  if (difficultyMax < difficultyMin) {
+    issues.add(path, `difficultyMax(${String(difficultyMax)})は difficultyMin 以上が必須`);
+    return undefined;
+  }
+  if (casualtyInjuryThreshold <= 0) {
+    issues.add(
+      `${path}.casualtyInjuryThreshold`,
+      "脱落閾値は正が必須(0 だと 1 度の失敗で全員脱落する)",
+    );
+    return undefined;
+  }
+  return {
+    baseTravelTicks,
+    nodeCountMin,
+    nodeCountMax,
+    difficultyMin,
+    difficultyMax,
+    rollRange,
+    rewardPerNode,
+    rewardResourceId,
+    injuryPerFailure,
+    casualtyInjuryThreshold,
+    rescueChance,
+    wipeBaseP,
+  };
+}
+
+function validateExploration(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): ExplorationContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const withdrawRewardRatio = expectNumber(
+    obj["withdrawRewardRatio"],
+    `${path}.withdrawRewardRatio`,
+    issues,
+    UNIT_RANGE,
+  );
+  const pressInjuryMul = expectNumber(
+    obj["pressInjuryMul"],
+    `${path}.pressInjuryMul`,
+    issues,
+    PRESS_INJURY_MUL_RANGE,
+  );
+  const withdrawInjuryThreshold = expectNumber(
+    obj["withdrawInjuryThreshold"],
+    `${path}.withdrawInjuryThreshold`,
+    issues,
+    INJURY_RANGE,
+  );
+  const equipmentBonus = expectNumber(
+    obj["equipmentBonus"],
+    `${path}.equipmentBonus`,
+    issues,
+    MORALE_SCALE_RANGE,
+  );
+  const travelSpeedupMax = expectNumber(
+    obj["travelSpeedupMax"],
+    `${path}.travelSpeedupMax`,
+    issues,
+    TRAVEL_SPEEDUP_RANGE,
+  );
+  const forgoneOutputPerWorkerTick = expectNumber(
+    obj["forgoneOutputPerWorkerTick"],
+    `${path}.forgoneOutputPerWorkerTick`,
+    issues,
+    FORGONE_OUTPUT_RANGE,
+  );
+  const rareAssetValue = expectNumber(
+    obj["rareAssetValue"],
+    `${path}.rareAssetValue`,
+    issues,
+    RARE_ASSET_VALUE_RANGE,
+  );
+  const wipeMaxP = expectNumber(obj["wipeMaxP"], `${path}.wipeMaxP`, issues, UNIT_RANGE);
+
+  const rawBands = expectRecord(obj["bands"], `${path}.bands`, issues);
+  let bands: { [band: string]: ExplorationBandContent } | undefined = {};
+  if (rawBands === undefined) {
+    bands = undefined;
+  } else {
+    for (const band of EXPLORATION_BANDS) {
+      const value = rawBands[band];
+      if (value === undefined) {
+        issues.add(`${path}.bands`, `距離帯 "${band}" が必須(裁定 B7: near/far/deep)`);
+        bands = undefined;
+        continue;
+      }
+      const parsed = validateExplorationBand(value, `${path}.bands.${band}`, issues);
+      if (parsed === undefined) {
+        bands = undefined;
+        continue;
+      }
+      if (bands !== undefined) bands[band] = parsed;
+    }
+  }
+
+  if (
+    withdrawRewardRatio === undefined ||
+    pressInjuryMul === undefined ||
+    withdrawInjuryThreshold === undefined ||
+    equipmentBonus === undefined ||
+    travelSpeedupMax === undefined ||
+    forgoneOutputPerWorkerTick === undefined ||
+    rareAssetValue === undefined ||
+    wipeMaxP === undefined ||
+    bands === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    withdrawRewardRatio,
+    pressInjuryMul,
+    withdrawInjuryThreshold,
+    equipmentBonus,
+    travelSpeedupMax,
+    forgoneOutputPerWorkerTick,
+    rareAssetValue,
+    wipeMaxP,
+    bands,
+  };
+}
+
 export function validateBalance(raw: unknown): ValidationResult<BalanceContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -964,6 +1242,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawTownParams === undefined
       ? null
       : (validateTownParams(rawTownParams, "$.townParams", issues) ?? undefined);
+  const rawExploration = obj["exploration"];
+  const exploration =
+    rawExploration === undefined
+      ? null
+      : (validateExploration(rawExploration, "$.exploration", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -975,7 +1258,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     storage === undefined ||
     eras === undefined ||
     recordMedia === undefined ||
-    townParams === undefined
+    townParams === undefined ||
+    exploration === undefined
   ) {
     return fail(issues.list());
   }
@@ -991,5 +1275,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     eras,
     recordMedia,
     townParams,
+    exploration,
   });
 }
