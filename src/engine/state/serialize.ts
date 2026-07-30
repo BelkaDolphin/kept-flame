@@ -205,6 +205,7 @@ import {
   type MemoirEntry,
   type MemoirEntryKind,
   type MemoirLogState,
+  type OutpostState,
   type ResearchState,
   type ResidentLife,
   type ResidentState,
@@ -394,6 +395,11 @@ export type SerializedGameState = {
   readonly dispatchSnapshots?: readonly SerializedDispatchSnapshot[];
   /** [M21] 帰還ログ(GDD 8.4)。空なら省略される。 */
   readonly renderedLogs?: SerializedRenderedLogs;
+  /**
+   * [M24] 衛星拠点(GDD 9.2・§9 と同型)。キーは拠点 ID。
+   * 空なら `rngState` 等と同じ規約でキーごと省略される。
+   */
+  readonly outpostsById?: { readonly [id: string]: SerializedOutpost };
 };
 
 /**
@@ -466,6 +472,16 @@ export type SerializedTechMemory = {
   readonly mastery: number;
   /** 想起困難が解ける tick(素の整数)。 */
   readonly impairedUntilTick: number;
+};
+
+/** [M24] 衛星拠点(state.ts の {@link OutpostState})。省略可フィールドは無い。 */
+export type SerializedOutpost = {
+  readonly id: string;
+  readonly outpostTypeId: string;
+  readonly level: number;
+  readonly band: string;
+  readonly residentIds: readonly string[];
+  readonly establishedTick: number;
 };
 
 // --- 2. state → JSON -------------------------------------------------------
@@ -766,6 +782,18 @@ function serializeResearch(entity: ResearchState): SerializedResearch {
   };
 }
 
+/** [M24] 拠点の直列化(state.ts の {@link OutpostState})。省略可フィールドは無い。 */
+function serializeOutpost(outpost: OutpostState): SerializedOutpost {
+  return {
+    id: outpost.id,
+    outpostTypeId: outpost.outpostTypeId,
+    level: outpost.level,
+    band: outpost.band,
+    residentIds: [...outpost.residentIds],
+    establishedTick: outpost.establishedTick,
+  };
+}
+
 function serializeEntity(entity: EntityState): SerializedEntity {
   switch (entity.kind) {
     case "codify":
@@ -925,6 +953,14 @@ export function toSerializable(state: GameState): SerializedGameState {
         foldedCount: logs.foldedCount,
       },
     ]);
+  }
+  // [M24] 拠点(GDD 9.2)。空なら省略 = M24 以前のセーブとバイト同一(state.ts §h)。
+  if (state.outpostsById.size > 0) {
+    const outpostEntries: [string, SerializedOutpost][] = [];
+    for (const [outpostId, outpost] of state.outpostsById) {
+      outpostEntries.push([outpostId, serializeOutpost(outpost)]);
+    }
+    optional.push(["outpostsById", Object.fromEntries(outpostEntries)]);
   }
   const raw: SerializedGameState =
     optional.length === 0
@@ -1552,6 +1588,45 @@ function deserializeTechMemoryByKey(
 }
 
 /**
+ * [M24] 拠点 1 件の復元。省略可フィールドは無い(state.ts の {@link OutpostState})。
+ */
+function deserializeOutpost(id: EntityId, o: Record<string, unknown>, p: string): OutpostState {
+  return {
+    id,
+    outpostTypeId: requireEntityId(o["outpostTypeId"], `${p}.outpostTypeId`),
+    level: requireNonNegativeInt(o["level"], `${p}.level`),
+    band: requireDistanceBand(o["band"], `${p}.band`),
+    residentIds: requireEntityIdArray(o["residentIds"], `${p}.residentIds`),
+    establishedTick: requireNonNegativeInt(o["establishedTick"], `${p}.establishedTick`),
+  };
+}
+
+/**
+ * [M24] `outpostsById`(§h)を読む。キーが無ければ空配列。キーは拠点 ID
+ * (entity ではないが ID 規則 ADR-011 に従う・state.ts の OutpostState の doc)、
+ * 値と自身の `id` の食い違いは `deserializeEntity` と同じ層で止める。
+ */
+function deserializeOutpostsById(value: unknown): readonly OutpostState[] {
+  if (value === undefined) return [];
+  const o = requireObject(value, "$.outpostsById");
+  const result: OutpostState[] = [];
+  for (const key of Object.keys(o)) {
+    const path = `$.outpostsById.${key}`;
+    if (!isEntityId(key)) {
+      throw new SerializeError(`${path}: キー "${key}" は ID 規則に一致しない(ADR-011)`);
+    }
+    const id = entityIdFromString(key);
+    const entryObj = requireObject(o[key], path);
+    const declaredId = requireEntityId(entryObj["id"], `${path}.id`);
+    if (declaredId !== id) {
+      throw new SerializeError(`${path}: キー "${id}" と id フィールド "${declaredId}" が食い違う`);
+    }
+    result.push(deserializeOutpost(id, entryObj, path));
+  }
+  return result;
+}
+
+/**
  * [M21] `dispatchSnapshots`(§9)を読む。キーが無ければ空配列。
  *
  * ADR-012(3) の上界(同時派遣 2 / ノード 16)は**ここでは見ない** —— 上界の
@@ -1724,5 +1799,6 @@ export function fromSerializable(input: unknown): GameState {
     deserializeTechMemoryByKey(root["techMemoryByKey"]),
     deserializeDispatchSnapshots(root["dispatchSnapshots"]),
     deserializeRenderedLogs(root["renderedLogs"]),
+    deserializeOutpostsById(root["outpostsById"]),
   );
 }

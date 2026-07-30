@@ -780,6 +780,41 @@ export interface RenderedLogState {
 /** 空の帰還ログ(正準形)。`GameState.renderedLogs` の既定値。 */
 export const EMPTY_RENDERED_LOGS: RenderedLogState = { entries: [], foldedCount: 0 };
 
+// ===========================================================================
+// [M24] 衛星拠点(GDD 9.2 / 12.1)
+// ===========================================================================
+//   `EntityKind` へは足さない(M12 の memoir と同じ判断: 新種別を足すと
+//   `src/ui/derived.ts` 等の既存の網羅 switch(`default: never`)が壊れる。
+//   UI 層はこのタスクの担当外)。`DispatchSnapshot` と同じく、ID 規則
+//   (ADR-011)には従うが entity ではない値オブジェクトとして GameState 直下の
+//   Map(`outpostsById`)に持つ。
+
+/**
+ * [M24] 衛星拠点 1 基(GDD 9.2「探索確保地点に住民1〜4名常駐」)。
+ *
+ * 供給/維持費/hazard の決定論 rules は `src/engine/rules/outpost.ts` が持つ
+ * (state はここに持たない。facility が Lv/産出先を content 側に持つのと同じ
+ * 正規化)。
+ */
+export interface OutpostState {
+  readonly id: EntityId;
+  /** content の outpostType 定義 ID。 */
+  readonly outpostTypeId: EntityId;
+  /** 拠点 Lv(1 以上)。 */
+  readonly level: number;
+  /** 確保した距離帯(裁定 B7)。維持費の距離帯係数(GDD 9.2)に使う。 */
+  readonly band: DistanceBand;
+  /**
+   * 常駐する住民 ID(ID 昇順・重複なし・1〜4 名・GDD 9.2)。**この配列に載る
+   * 住民は本拠のどの facility.workerIds にも同時に載ってはならない**
+   * (二重計上の防止・rules/outpost.ts の `computeOutpostSupplyRates` が計算の
+   * たびに検査する)。
+   */
+  readonly residentIds: readonly EntityId[];
+  /** 設置 tick。hazard の経過日数の起点(rules/outpost.ts)。 */
+  readonly establishedTick: number;
+}
+
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
 export type EntityState =
   CodifyState | FacilityState | ResearchState | ResidentState | ResourceState;
@@ -825,6 +860,10 @@ export interface GameStateMeta {
  *   (g) [M21] `dispatchSnapshots` は派遣 ID の UTF-16 コードユニット昇順
  *       (配列だが正準順は同じ規約。維持責務は update.ts の
  *       createGameState / setDispatchSnapshots)
+ *   (h) [M24] `outpostsById` の反復順は ID の UTF-16 コードユニット昇順
+ *       (entityStateById と同じ扱い。維持責務は update.ts の
+ *       createGameState / setOutpost / setOutposts)。各 OutpostState の
+ *       `residentIds` も ID 昇順・重複なし・1〜4 件(GDD 9.2)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -886,6 +925,13 @@ export interface GameState extends GameStateMeta {
    * (`entries` 空 かつ `foldedCount` 0)なら直列化形から省略される。
    */
   readonly renderedLogs: RenderedLogState;
+  /**
+   * [M24] 衛星拠点(GDD 9.2)。キーは拠点 ID(不変条件 (h))。
+   * **空なら直列化形からキーごと省略される**(rngState と同じ規約)
+   * = M24 以前のセーブ・既存 golden vector のバイト列が 1 bit も動かない
+   * ことの根拠(既存シナリオは 1 件も拠点を持たない)。
+   */
+  readonly outpostsById: ReadonlyMap<EntityId, OutpostState>;
 }
 
 /**
@@ -1057,4 +1103,17 @@ export function isResidentOnDispatch(state: GameState, residentId: EntityId): bo
     }
   }
   return false;
+}
+
+/** [M24] 衛星拠点を引く(無ければ undefined)。 */
+export function getOutpost(state: GameState, outpostId: EntityId): OutpostState | undefined {
+  return state.outpostsById.get(outpostId);
+}
+
+/**
+ * [M24] 全拠点を正準順(ID 昇順・不変条件 (h))で返す。`entitiesOfKind` と同じく
+ * Map の反復順をそのまま使う(防御的な再ソートはしない)。
+ */
+export function allOutposts(state: GameState): readonly OutpostState[] {
+  return [...state.outpostsById.values()];
 }

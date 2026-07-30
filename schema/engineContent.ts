@@ -147,6 +147,10 @@ import type {
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
+  OutpostHazardParams,
+  OutpostParams,
+  OutpostTypeDef,
+  OutpostUpkeepParams,
   OverflowPolicy,
   RecallRiskParams,
   RecordMediaParams,
@@ -166,6 +170,7 @@ import type {
   BalanceContent,
   EraContent,
   ExplorationContent,
+  OutpostBalanceContent,
   RecordMediaContent,
   RecordMediumContent,
   RewardOverflowContent,
@@ -176,6 +181,7 @@ import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
 import type { CondAst, EventChoice, EventContent, EventResultContent } from "./event";
 import type { FacilityContent, FacilityStatWeights } from "./facility";
+import type { OutpostTypeContent } from "./outpostType";
 import type { TechContent } from "./tech";
 import type { TraitContent } from "./trait";
 
@@ -1787,6 +1793,134 @@ function toEventDef(content: EventContent, issues: IssueCollector): EventDef | u
   return { id: entityIdFromString(content.id), destTags, nodes };
 }
 
+// --- 6f. outpostType / outpost(GDD 9.2 / 12.1)— M24 -------------------------
+
+/**
+ * [M24] `capacityCurve` → engine の {@link OutpostTypeDef.supplyPerResidentTickByLevel}。
+ * schema 側で「長さ 5・狭義単調増加・[0] = baseSupply」まで検証済み
+ * (`schema/outpostType.ts`)なので、ここは 1e6 化するだけである。
+ */
+function toOutpostSupplyByLevel(
+  content: OutpostTypeContent,
+  path: string,
+  issues: IssueCollector,
+): readonly Fix[] | undefined {
+  const values: Fix[] = [];
+  for (let level = 0; level < content.capacityCurve.length; level++) {
+    const raw = content.capacityCurve[level];
+    if (raw === undefined) continue;
+    const fix = toFix(raw, `${path}.capacityCurve[${String(level)}]`, issues, "Lv 別供給量");
+    if (fix !== undefined) values.push(fix);
+  }
+  return values.length === content.capacityCurve.length ? values : undefined;
+}
+
+function toOutpostUpkeepParams(
+  content: OutpostTypeContent,
+  path: string,
+  issues: IssueCollector,
+): OutpostUpkeepParams | undefined {
+  const baseFoodFix = toFix(
+    content.upkeepFormula.baseFood,
+    `${path}.upkeepFormula.baseFood`,
+    issues,
+    "食料維持費",
+  );
+  const baseMoraleCareFix = toFix(
+    content.upkeepFormula.baseMoraleCare,
+    `${path}.upkeepFormula.baseMoraleCare`,
+    issues,
+    "士気ケア維持費",
+  );
+  if (baseFoodFix === undefined || baseMoraleCareFix === undefined) return undefined;
+  return { baseFoodFix, baseMoraleCareFix };
+}
+
+function toOutpostHazardParams(
+  content: OutpostTypeContent,
+  path: string,
+  issues: IssueCollector,
+): OutpostHazardParams | undefined {
+  const intensityFix = toFix(
+    content.hazard.intensity,
+    `${path}.hazard.intensity`,
+    issues,
+    "脅威強度",
+  );
+  const growthPerDayFix = toFix(content.hazard.growth, `${path}.hazard.growth`, issues, "脅威増分");
+  const minFix = toFix(content.hazard.min, `${path}.hazard.min`, issues, "脅威下限");
+  const maxFix = toFix(content.hazard.max, `${path}.hazard.max`, issues, "脅威上限");
+  if (
+    intensityFix === undefined ||
+    growthPerDayFix === undefined ||
+    minFix === undefined ||
+    maxFix === undefined
+  ) {
+    return undefined;
+  }
+  return { intensityFix, growthPerDayFix, minFix, maxFix };
+}
+
+function toOutpostTypeDef(
+  content: OutpostTypeContent,
+  issues: IssueCollector,
+): OutpostTypeDef | undefined {
+  const path = `outpostType.${content.id}`;
+  const supplyPerResidentTickByLevel = toOutpostSupplyByLevel(content, path, issues);
+  const upkeep = toOutpostUpkeepParams(content, path, issues);
+  const hazard = toOutpostHazardParams(content, path, issues);
+  const shadeSensitivityFix = toFix(
+    content.shadeSensitivity,
+    `${path}.shadeSensitivity`,
+    issues,
+    "翳り感度",
+  );
+  if (
+    supplyPerResidentTickByLevel === undefined ||
+    upkeep === undefined ||
+    hazard === undefined ||
+    shadeSensitivityFix === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    id: entityIdFromString(content.id),
+    // resource カテゴリ未実装のため実在確認はしない(facility.output.resourceId と
+    // 同じ扱い・schema/outpostType.ts 冒頭)。本拠側と同じ ID 空間を指すことが
+    // 二重計上しない構造の根拠(src/engine/rules/outpost.ts §2)。
+    resourceId: entityIdFromString(content.resource),
+    supplyPerResidentTickByLevel,
+    upkeep,
+    hazard,
+    shadeSensitivityFix,
+  };
+}
+
+/**
+ * [M24] `balance.outpost` → engine の {@link OutpostParams}(GDD 9.2「距離帯係数」)。
+ */
+function toOutpostParams(
+  content: OutpostBalanceContent,
+  issues: IssueCollector,
+): OutpostParams | undefined {
+  const path = "balance.outpost";
+  const bands: { [K in DistanceBand]?: Fix } = {};
+  for (const band of DISTANCE_BANDS) {
+    const raw = content.distanceBandUpkeepMul[band];
+    if (raw === undefined) {
+      issues.add(`${path}.distanceBandUpkeepMul`, `距離帯 "${band}" が無い(裁定 B7)`);
+      continue;
+    }
+    const fix = toFix(raw, `${path}.distanceBandUpkeepMul.${band}`, issues, "距離帯維持費係数");
+    if (fix !== undefined) bands[band] = fix;
+  }
+  const near = bands.near;
+  const far = bands.far;
+  const deep = bands.deep;
+  if (near === undefined || far === undefined || deep === undefined) return undefined;
+  return { distanceBandUpkeepMulFix: { near, far, deep } };
+}
+
 // --- 7. 入口 ----------------------------------------------------------------
 
 /**
@@ -1859,6 +1993,19 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     if (def !== undefined) eventDefs.set(def.id, def);
   }
 
+  // [M24] outpostType(GDD 9.2 / 12.1)。**空なら EngineContent へキーを足さない**
+  //   (= M24 以前と 1 bit も違わない = 拠点系 rules は呼ばれると RulesError で止まる)。
+  const outpostTypeDefs = new Map<EntityId, OutpostTypeDef>();
+  for (const content of [...bundle.outpostType].sort((l, r) => compareUtf16(l.id, r.id))) {
+    const def = toOutpostTypeDef(content, issues);
+    if (def !== undefined) outpostTypeDefs.set(def.id, def);
+  }
+  // [M24] 省略可。キー不在 = engine 側の「拠点の維持費が求まらない」既定。
+  const outpost =
+    bundle.balance.outpost === null
+      ? null
+      : (toOutpostParams(bundle.balance.outpost, issues) ?? undefined);
+
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
     // engine の stochastic.ts が 1〜1440 を要求する(1 = ADR-014(3) の Fallback)。
@@ -1877,7 +2024,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     eraDefs === undefined ||
     recordMedia === undefined ||
     town === undefined ||
-    exploration === undefined
+    exploration === undefined ||
+    outpost === undefined
   ) {
     return fail(issues.list());
   }
@@ -1898,7 +2046,13 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   const withMedia = recordMedia === null ? withEras : { ...withEras, recordMedia };
   const withTown = town === null ? withMedia : { ...withMedia, town };
   const withExploration = exploration === null ? withTown : { ...withTown, exploration };
-  return ok(eventDefs.size === 0 ? withExploration : { ...withExploration, eventDefs });
+  const withEvents = eventDefs.size === 0 ? withExploration : { ...withExploration, eventDefs };
+  // [M24] outpostTypeDefs は空でもキーを持たせない(空 Map は「拠点タイプが
+  // 1 つも無い」に相当し、requireOutpostTypeDef が常に RulesError で止まる形で
+  // 十分表現できるため、event の「1 件以上あるときだけキーを持つ」規約と揃える)。
+  const withOutpostTypes =
+    outpostTypeDefs.size === 0 ? withEvents : { ...withEvents, outpostTypeDefs };
+  return ok(outpost === null ? withOutpostTypes : { ...withOutpostTypes, outpost });
 }
 
 /**

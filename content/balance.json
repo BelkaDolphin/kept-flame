@@ -149,5 +149,12 @@
         "wipeBaseP": 0.35
       }
     }
+  },
+  "outpost": {
+    "distanceBandUpkeepMul": {
+      "near": 1.0,
+      "far": 1.4,
+      "deep": 1.8
+    }
   }
 }

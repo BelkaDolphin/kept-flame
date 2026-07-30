@@ -79,6 +79,7 @@ import {
   type EntityState,
   type GameState,
   type GameStateMeta,
+  type OutpostState,
   type RenderedLogState,
   type TechMemoryState,
 } from "./state";
@@ -283,6 +284,60 @@ function sortedById(entities: readonly EntityState[]): EntityState[] {
 }
 
 /**
+ * [M24] 拠点の局所的な不変条件を強制する(GDD 9.2)。
+ *
+ * ここで見るのは**その拠点単体で閉じる**性質だけ(Lv・常駐人数レンジ・
+ * residentIds の ID 昇順/重複なし)。「常駐者が本拠の facility.workerIds と
+ * 重複していないか」という**拠点を跨ぐ**検査は、trait と違い他 entity 全体を
+ * 走査する必要があるため、ここ(1 entity ぶんの検査を積み上げる場所)ではなく
+ * rules/outpost.ts の計算経路(buildCellOccupancy の重複検出と同じ層)で行う。
+ */
+function requireValidOutpost(outpost: OutpostState): void {
+  if (!Number.isInteger(outpost.level) || outpost.level < 1) {
+    throw new StateUpdateError(
+      `拠点 "${outpost.id}" の Lv ${String(outpost.level)} が 1 以上の整数でない`,
+    );
+  }
+  const residentIds = outpost.residentIds;
+  if (residentIds.length < 1 || residentIds.length > 4) {
+    throw new StateUpdateError(
+      `拠点 "${outpost.id}" の常駐人数 ${String(residentIds.length)} が 1〜4 名の範囲外(GDD 9.2)`,
+    );
+  }
+  for (let i = 1; i < residentIds.length; i++) {
+    const previous = residentIds[i - 1] ?? "";
+    const current = residentIds[i] ?? "";
+    if (compareUtf16(previous, current) >= 0) {
+      throw new StateUpdateError(
+        `拠点 "${outpost.id}" の residentIds が ID 昇順・重複なしでない` +
+          `("${previous}" → "${current}")`,
+      );
+    }
+  }
+}
+
+/**
+ * [M24] 拠点の Map を ID 昇順の正準順で作る(§3 / state.ts 不変条件 (h)。
+ * {@link buildBondMap} と同型)。
+ */
+function buildOutpostMap(outposts: readonly OutpostState[]): ReadonlyMap<EntityId, OutpostState> {
+  const map = new Map<EntityId, OutpostState>();
+  for (const outpost of [...outposts].sort((a, b) => compareUtf16(a.id, b.id))) {
+    if (!isEntityId(outpost.id)) {
+      throw new StateUpdateError(
+        `拠点 ID "${outpost.id}" が ID 規則に一致しない(ADR-011。EntityId を as で偽造していないか)`,
+      );
+    }
+    if (map.has(outpost.id)) {
+      throw new StateUpdateError(`拠点 ID "${outpost.id}" が重複している`);
+    }
+    requireValidOutpost(outpost);
+    map.set(outpost.id, outpost);
+  }
+  return map;
+}
+
+/**
  * RNG ストリーム状態の Map を domainTag 昇順の正準順で作る(§3 / state.ts §4)。
  * 入力の並び順には依存しない。
  */
@@ -340,11 +395,13 @@ function buildTechMemoryMap(
  * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
  * `bondByPairKey`([M12])・`techMemoryByKey`([M13])も同じ規約(省略時は空)。
+ * [M24] `outposts` も同じ規約(省略時は空 = 拠点なし)。
  *
  * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
  *   bond ペアキー重複 / [M13] techMemory キー重複 /
  *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)/
- *   [M16] 施設 footprint の値域違反・盤外はみ出し がある場合
+ *   [M16] 施設 footprint の値域違反・盤外はみ出し /
+ *   [M24] 拠点 ID 重複・Lv/常駐人数レンジ違反・residentIds 不変条件違反 がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
@@ -354,6 +411,7 @@ export function createGameState(
   techMemoryByKey: readonly (readonly [string, TechMemoryState])[] = [],
   dispatchSnapshots: readonly DispatchSnapshot[] = [],
   renderedLogs: RenderedLogState = EMPTY_RENDERED_LOGS,
+  outposts: readonly OutpostState[] = [],
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -372,6 +430,7 @@ export function createGameState(
     techMemoryByKey: buildTechMemoryMap(techMemoryByKey),
     dispatchSnapshots: sortedDispatchSnapshots(dispatchSnapshots),
     renderedLogs,
+    outpostsById: buildOutpostMap(outposts),
   };
 }
 
@@ -535,6 +594,44 @@ export function setTechMemories(
   // なら Map.set が挿入位置を変えないので順序は不変(§3)。
   if (!hasNewKey) return setField(state, "techMemoryByKey", next);
   return setField(state, "techMemoryByKey", buildTechMemoryMap([...next.entries()]));
+}
+
+/**
+ * [M24] 拠点を追加または差し替える(新規拠点なら追加する)。`outpostsById` の
+ * 反復順を ID 昇順に保つ責務を持つ({@link setTechMemory} と同型)。
+ *
+ * @throws {StateUpdateError} 拠点の不変条件違反(Lv/常駐人数レンジ・
+ *   residentIds の ID 昇順/重複なし)がある場合
+ */
+export function setOutpost(state: GameState, outpost: OutpostState): GameState {
+  const previous = state.outpostsById.get(outpost.id);
+  if (previous !== undefined && Object.is(previous, outpost)) return state;
+  requireValidOutpost(outpost);
+  if (previous !== undefined) {
+    const next = new Map(state.outpostsById);
+    next.set(outpost.id, outpost);
+    return setField(state, "outpostsById", next);
+  }
+  const merged: (readonly [EntityId, OutpostState])[] = [
+    ...state.outpostsById.entries(),
+    [outpost.id, outpost],
+  ];
+  return setField(state, "outpostsById", buildOutpostMap(merged.map(([, value]) => value)));
+}
+
+/**
+ * [M24] 拠点を取り除く。不在での呼び出しは黙って無視せず例外にする
+ * ({@link removeEntity} と同じ流儀)。
+ *
+ * @throws {EntityLookupError} 対象 ID が存在しない場合
+ */
+export function removeOutpost(state: GameState, outpostId: EntityId): GameState {
+  if (!state.outpostsById.has(outpostId)) {
+    throw new EntityLookupError(`removeOutpost: 拠点 "${outpostId}" が存在しない`);
+  }
+  const next = new Map(state.outpostsById);
+  next.delete(outpostId);
+  return setField(state, "outpostsById", next);
 }
 
 /**

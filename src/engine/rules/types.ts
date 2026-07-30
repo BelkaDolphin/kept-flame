@@ -760,6 +760,77 @@ export interface EventDef {
   readonly nodes: readonly EventNodeDef[];
 }
 
+// --- 3g. outpost(GDD 9.2 / 12.1)— M24 ---------------------------------------
+//
+//   GDD 9.2「供給 supply = baseSupply(type) × 常駐人数 × 拠点Lv × (1 − 翳り率)」
+//   の「baseSupply(type) × 拠点Lv」を、facility.outputPerTickByLevel と同じ
+//   オーサリング時展開(GDD 11.7「非整数べき乗は実行時計算禁止」)で
+//   {@link OutpostTypeDef.supplyPerResidentTickByLevel} 1 本にまとめる。
+//   「翳り率 = clamp(0, 幕塵後退度 × shadeSensitivity, 1)」の幕塵後退度は
+//   幕塵メーター(GDD 11.7 段90)が未実装(scheduler.ts の PIPELINE_STAGE.dust
+//   参照)のため、本モジュールは呼び出し側から**引数で受け取る**(state には
+//   持たせない)。既定は常に 0(= 翳りなし)として渡すこと。幕塵メーター実装後は
+//   その値をそのままここへ渡せば式が完成する形にしてある。
+
+/** [M24] 拠点の維持コスト式パラメータ(GDD 9.2 upkeepFormula)。 */
+export interface OutpostUpkeepParams {
+  /** 常駐 1 人あたりの食料維持費(GDD 9.2「食料baseFood × 常駐人数」)。 */
+  readonly baseFoodFix: Fix;
+  /** 士気ケアの基礎費用(GDD 9.2「士気ケアbaseMorale × 距離帯係数」の baseMorale)。 */
+  readonly baseMoraleCareFix: Fix;
+}
+
+/**
+ * [M24] 拠点の脅威パラメータ(GDD 12.1 `hazard{intensity,growth,min,max}`)。
+ * 0〜1 スケールの「脅威強度」であり、設置からの経過日数に応じて線形に育つ
+ * (GDD 11.7 の非整数べき乗禁止に従い、増加は乗算でなく加算のみ)。
+ */
+export interface OutpostHazardParams {
+  /** 設置直後(経過0日)の脅威強度。 */
+  readonly intensityFix: Fix;
+  /** 1 ゲーム日(1440 tick)あたりの脅威増分。 */
+  readonly growthPerDayFix: Fix;
+  /** 脅威強度の下限(intensity 未満には下がらない)。 */
+  readonly minFix: Fix;
+  /** 脅威強度の上限。 */
+  readonly maxFix: Fix;
+}
+
+/**
+ * [M24] 衛星拠点タイプ 1 種ぶんの定義(GDD 9.2 / 12.1
+ * `outpostType(id, resource, baseSupply, capacityCurve, upkeepFormula,
+ * hazard{intensity,growth,min/max}, shadeSensitivity)`)。
+ */
+export interface OutpostTypeDef {
+  readonly id: EntityId;
+  /** 供給する資源の定義 ID(GDD 9.2「タイプ別供給」)。本拠側と**同じ ID 空間**を
+   * 共有する(= 供給は本拠在庫の同じ resource entity へ入る。二重計上を防ぐ
+   * 構造上の根拠)。 */
+  readonly resourceId: EntityId;
+  /**
+   * Lv 別・常駐 1 人あたりの 1 tick 供給量(index 0 = Lv1)。
+   * `baseSupply × capacityCurve[Lv-1]` をオーサリング時に個別 FP 展開したもの
+   * (facility.outputPerTickByLevel と同型・GDD 11.7)。
+   */
+  readonly supplyPerResidentTickByLevel: readonly Fix[];
+  readonly upkeep: OutpostUpkeepParams;
+  readonly hazard: OutpostHazardParams;
+  /** 翳り率への感度(GDD 9.2「拠点固有shadeSensitivity」)。 */
+  readonly shadeSensitivityFix: Fix;
+}
+
+/**
+ * [M24] 拠点網全体のパラメータ(`balance.json` の `outpost` ブロック)。
+ * **ブロックごと省略可**(欠落は undefined)。省略時は engine 側で維持費の
+ * 距離帯係数が求まらないため、rules/outpost.ts の維持費計算が RulesError で
+ * 止まる(= 拠点システムが不活性。storage/exploration 等の既存ブロックと同じ
+ * 「省略時は当該システム不活性」の形)。
+ */
+export interface OutpostParams {
+  /** 距離帯別の維持費係数(GDD 9.2「士気ケア...×距離帯係数」・裁定 B7)。 */
+  readonly distanceBandUpkeepMulFix: { readonly [K in DistanceBand]: Fix };
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -823,6 +894,18 @@ export interface EngineContent {
    * `content/event.json` はまだ無く、投入は M23 の担当。
    */
   readonly eventDefs?: ReadonlyMap<EntityId, EventDef>;
+  /**
+   * [M24] 衛星拠点タイプ定義(GDD 9.2 / 12.1)。**省略時 / 空のとき、拠点系の
+   * rules(rules/outpost.ts)は呼び出されると RulesError で止まる**(= 拠点機構
+   * そのものが無いことの明示。facility 同様「定義が無い ID を使おうとしたら止まる」
+   * 既存方針を踏襲)。
+   */
+  readonly outpostTypeDefs?: ReadonlyMap<EntityId, OutpostTypeDef>;
+  /**
+   * [M24] 拠点網全体のパラメータ(GDD 9.2)。**省略時は維持費の距離帯係数が
+   * 求まらない**(rules/outpost.ts の維持費計算が RulesError)。
+   */
+  readonly outpost?: OutpostParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------
@@ -902,3 +985,31 @@ export function prereqsOfTech(content: EngineContent, techId: EntityId): readonl
 
 /** 共有の空配列(エラ起点テックでアロケーションしないため)。 */
 const EMPTY_PREREQS: readonly EntityId[] = [];
+
+/**
+ * [M24] outpostType 定義を引く。
+ *
+ * @throws {RulesError} 定義が無い場合(content に outpostTypeDefs ブロックが
+ *   無い場合を含む)
+ */
+export function requireOutpostTypeDef(content: EngineContent, defId: EntityId): OutpostTypeDef {
+  const def = content.outpostTypeDefs?.get(defId);
+  if (def === undefined) {
+    throw new RulesError(`outpostType 定義 "${defId}" が content に無い(GDD 9.2 / 12.1)`);
+  }
+  return def;
+}
+
+/**
+ * [M24] 拠点網パラメータを引く。
+ *
+ * @throws {RulesError} content に outpost ブロックが無い場合
+ */
+export function requireOutpostParams(content: EngineContent): OutpostParams {
+  if (content.outpost === undefined) {
+    throw new RulesError(
+      "content に balance の outpost ブロックが無いので拠点の維持費が求まらない(GDD 9.2)",
+    );
+  }
+  return content.outpost;
+}

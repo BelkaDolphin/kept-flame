@@ -283,6 +283,16 @@ export interface ExplorationContent {
   readonly rewardOverflow: RewardOverflowContent | null;
 }
 
+/**
+ * [M24] 拠点網全体のパラメータ(GDD 9.2)。**ブロックごと省略可**(欠落は null)。
+ * 省略時は engine 側で拠点の維持費(距離帯係数)が求まらない
+ * (rules/outpost.ts の維持費計算が RulesError で止まる = 拠点システム不活性)。
+ */
+export interface OutpostBalanceContent {
+  /** 距離帯別(裁定 B7 の `near`/`far`/`deep` が 3 つとも必須)。維持費の係数。 */
+  readonly distanceBandUpkeepMul: { readonly [band: string]: number };
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -300,6 +310,8 @@ export interface BalanceContent {
   readonly townParams: TownParamsContent | null;
   /** [M21] GDD 8.1〜8.6 の探索パラメータ。JSON に無ければ null(派遣不可)。 */
   readonly exploration: ExplorationContent | null;
+  /** [M24] GDD 9.2 の拠点網パラメータ。JSON に無ければ null(拠点の維持費が求まらない)。 */
+  readonly outpost: OutpostBalanceContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -1258,6 +1270,45 @@ function validateExploration(
   };
 }
 
+// --- [M24] outpost(GDD 9.2)---------------------------------------------------
+
+/** 維持費の距離帯係数の保守境界(GDD 9.2「距離帯係数」。近郊を基準に遠隔ほど高い想定)。 */
+const DISTANCE_BAND_UPKEEP_MUL_RANGE: NumericRange = { min: 0, max: 10 };
+
+function validateOutpostBalance(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): OutpostBalanceContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const rawBands = expectRecord(
+    obj["distanceBandUpkeepMul"],
+    `${path}.distanceBandUpkeepMul`,
+    issues,
+  );
+  if (rawBands === undefined) return undefined;
+
+  const distanceBandUpkeepMul: { [band: string]: number } = {};
+  let ok_ = true;
+  for (const band of EXPLORATION_BANDS) {
+    const value = expectNumber(
+      rawBands[band],
+      `${path}.distanceBandUpkeepMul.${band}`,
+      issues,
+      DISTANCE_BAND_UPKEEP_MUL_RANGE,
+    );
+    if (value === undefined) {
+      ok_ = false;
+      continue;
+    }
+    distanceBandUpkeepMul[band] = value;
+  }
+  if (!ok_) return undefined;
+  return { distanceBandUpkeepMul };
+}
+
 export function validateBalance(raw: unknown): ValidationResult<BalanceContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -1311,6 +1362,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawExploration === undefined
       ? null
       : (validateExploration(rawExploration, "$.exploration", issues) ?? undefined);
+  const rawOutpost = obj["outpost"];
+  const outpost =
+    rawOutpost === undefined
+      ? null
+      : (validateOutpostBalance(rawOutpost, "$.outpost", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -1323,7 +1379,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     eras === undefined ||
     recordMedia === undefined ||
     townParams === undefined ||
-    exploration === undefined
+    exploration === undefined ||
+    outpost === undefined
   ) {
     return fail(issues.list());
   }
@@ -1340,5 +1397,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     recordMedia,
     townParams,
     exploration,
+    outpost,
   });
 }

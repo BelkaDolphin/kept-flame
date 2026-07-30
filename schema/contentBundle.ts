@@ -30,6 +30,7 @@ import type { ValidationIssue, ValidationResult } from "./common";
 import { type EventContent, validateEvent } from "./event";
 import { type FacilityContent, validateFacility } from "./facility";
 import { checkGlobalIdUniqueness } from "./idRegistry";
+import { type OutpostTypeContent, validateOutpostType } from "./outpostType";
 import { type TechContent, validateTech } from "./tech";
 import { type TraitContent, validateTrait } from "./trait";
 
@@ -46,6 +47,12 @@ export interface RawContentBundle {
    * テスト)はキーを足さなくてよい。
    */
   readonly event?: readonly unknown[];
+  /**
+   * [M24] outpostType カテゴリ(GDD 9.2 / 12.1)。**省略可**であり、省略 = 空配列
+   * (= 衛星拠点タイプが無い content)。既存の呼び出し側はキーを足さなくてよい
+   * (event と同じ additive 方針)。
+   */
+  readonly outpostType?: readonly unknown[];
 }
 
 export interface ContentBundle {
@@ -56,6 +63,8 @@ export interface ContentBundle {
   readonly balance: BalanceContent;
   /** [M22] event カテゴリ(省略された raw では空配列)。 */
   readonly event: readonly EventContent[];
+  /** [M24] outpostType カテゴリ(省略された raw では空配列)。 */
+  readonly outpostType: readonly OutpostTypeContent[];
 }
 
 /**
@@ -206,6 +215,7 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
     "event",
     issues,
   );
+  const outpostType = collect(raw.outpostType ?? [], validateOutpostType, "outpostType", issues);
 
   const adjacencyCanonical = canonicalizeJson(raw.adjacency);
   const adjacencyResult = validateAdjacency(adjacencyCanonical);
@@ -237,6 +247,8 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
     trait: trait.map((t) => t.id),
     // [M22] event も ID グローバル一意性(ADR-024(1))の対象へ入る。
     event: event.map((e) => e.id),
+    // [M24] outpostType も同じ対象。
+    outpostType: outpostType.map((o) => o.id),
   });
   if (idIssues.length > 0) return { ok: false, issues: idIssues };
 
@@ -252,6 +264,7 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
       adjacency: adjacencyResult.value,
       balance: balanceResult.value,
       event,
+      outpostType,
     },
   };
 }

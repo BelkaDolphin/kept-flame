@@ -189,6 +189,9 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     techMemoryByKey: state.techMemoryByKey,
     dispatchSnapshots: state.dispatchSnapshots,
     renderedLogs: state.renderedLogs,
+    // [M24] 新規必須フィールド。既存の合成テストが直接 GameState リテラルを
+    // 組み立てているため typecheck 上不可避の追随(state.ts 不変条件 (h))。
+    outpostsById: state.outpostsById,
   };
 }
 
@@ -221,6 +224,8 @@ describe("assertCanonicalSnapshot", () => {
       techMemoryByKey: BOARD.techMemoryByKey,
       dispatchSnapshots: BOARD.dispatchSnapshots,
       renderedLogs: BOARD.renderedLogs,
+      // [M24] 新規必須フィールド(state.ts 不変条件 (h))。理由は上記 withEntityOrder と同じ。
+      outpostsById: BOARD.outpostsById,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);
