@@ -233,4 +233,108 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     ["sto-capacity-split-invariant"],
     { splitTicks: [500] },
   ),
+
+  // --- sc19-tech-field-stop(M15: tech 別停止が実地要件施設の産出を止める) --------------
+  // RNG を一切引かない(techMemoryByKey を直接構築)ので seed 変化は不要
+  // (sc17/sc18 と同じ理由・scenarios.ts のコメント参照)。
+  plan("sc19-tech-field-stop-alpha", "sc19-tech-field-stop", SEEDS.alpha, 2000, [
+    "c-tech-field-stop-production",
+  ]),
+  plan(
+    "sc19-tech-field-stop-split-alpha",
+    "sc19-tech-field-stop",
+    SEEDS.alpha,
+    2000,
+    ["split-at-tech-recall-recovery-tick"],
+    { splitTicks: [1000] },
+  ),
+
+  // --- sc20-tech-loss(M15: (B) 一回性喪失・保持者ゼロの判定) --------------------------
+  plan("sc20-tech-loss-alpha", "sc20-tech-loss", SEEDS.alpha, 150, [
+    "c-tech-loss-recoverable",
+    "c-tech-loss-irreversible",
+    "c-tech-loss-holder-survives-no-loss",
+  ]),
+  plan(
+    "sc20-tech-loss-split-alpha",
+    "sc20-tech-loss",
+    SEEDS.alpha,
+    150,
+    ["split-at-tech-loss-tick"],
+    { splitTicks: [100] },
+  ),
+
+  // --- sc21-tech-mastery-cap(M15: 実地稼働の定着度蓄積 + 上限 0.20 clamp) --------------
+  plan("sc21-tech-mastery-cap-alpha", "sc21-tech-mastery-cap", SEEDS.alpha, 1000, [
+    "c-tech-mastery-accumulate",
+    "c-tech-mastery-cap",
+  ]),
+  plan(
+    "sc21-tech-mastery-cap-split-alpha",
+    "sc21-tech-mastery-cap",
+    SEEDS.alpha,
+    1000,
+    ["split-at-tech-mastery-progress"],
+    { splitTicks: [400] },
+  ),
+
+  // --- sc22/sc23-pop-floor(M15: 死亡ゲート・下限ちょうど vs 下限+1) -------------------
+  plan("sc22-pop-floor-deferred-alpha", "sc22-pop-floor-deferred", SEEDS.alpha, 100, [
+    "life-population-floor-death-gate",
+  ]),
+  plan("sc23-pop-floor-active-alpha", "sc23-pop-floor-active", SEEDS.alpha, 100, [
+    "life-population-floor-death-gate",
+  ]),
+  plan(
+    "sc23-pop-floor-active-split-alpha",
+    "sc23-pop-floor-active",
+    SEEDS.alpha,
+    100,
+    ["split-at-death-tick"],
+    { splitTicks: [47] },
+  ),
+
+  // --- sc24-pop-floor-resolved(M15: 死亡延期 → 晴天漂着で解消) ----------------------
+  // createResidentLife が lifespan/joinAge ドメインを新規に引く(base content の
+  // 40 本はどれも晴天漂着を発火させていない)ので、C7 に従い alpha/beta を用意する。
+  plan("sc24-pop-floor-resolved-alpha", "sc24-pop-floor-resolved", SEEDS.alpha, 250, [
+    "life-population-floor-death-gate",
+    "life-sunny-drift-arrival",
+    "tie-arrival-before-death",
+  ]),
+  plan("sc24-pop-floor-resolved-beta", "sc24-pop-floor-resolved", SEEDS.beta, 250, [
+    "rng-worldseed-variation",
+  ]),
+  plan(
+    "sc24-pop-floor-resolved-split-alpha",
+    "sc24-pop-floor-resolved",
+    SEEDS.alpha,
+    250,
+    ["split-at-arrival-retry-tick"],
+    { splitTicks: [200] },
+  ),
+
+  // --- sc25-life-opt-in(M15: life は住民ごとの opt-in・population floor 不活性) --------
+  plan("sc25-life-opt-in-alpha", "sc25-life-opt-in", SEEDS.alpha, 100, ["life-death-basic-opt-in"]),
+
+  // --- sc26-bond-milestone(M15: 節目の全段記録 + 分割不変性) --------------------------
+  // research entity なし = (C) 抽選 0 試行(sc16-overcrowd-fine と同じ理由)なので
+  // worldSeed に依存しない。
+  plan("sc26-bond-milestone-alpha", "sc26-bond-milestone", SEEDS.alpha, 75_000, [
+    "mem-bond-milestone-all-tiers",
+  ]),
+  plan(
+    "sc26-bond-milestone-split-alpha",
+    "sc26-bond-milestone",
+    SEEDS.alpha,
+    75_000,
+    ["split-at-bond-milestone-tick"],
+    { splitTicks: [14_410, 36_024, 72_047] },
+  ),
+
+  // --- sc27-partner-loss(M15: 相方喪失の士気ペナ + 死亡時 3処理固定順) ----------------
+  plan("sc27-partner-loss-alpha", "sc27-partner-loss", SEEDS.alpha, 1050, [
+    "mem-partner-loss-morale-penalty",
+    "mem-death-consequence-order",
+  ]),
 ];

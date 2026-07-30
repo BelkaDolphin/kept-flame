@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1279,
+    "counters": {
+      "rateChangeEventCount": 1,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 105,
+      "stochasticStepCount": 105,
+      "stochasticTrialCount": 206
+    },
+    "probe": {
+      "entityCount": 5,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 205000000000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 1050
+    },
+    "stateDigest": "53ebc1661b0939620da4efa4ff7fe516"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["mem-partner-loss-morale-penalty", "mem-death-consequence-order"],
+  "scenarioId": "sc27-partner-loss",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 1050,
+  "vectorId": "sc27-partner-loss-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

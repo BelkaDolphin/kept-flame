@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1332,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 7500,
+      "stochasticStepCount": 7500,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 4,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 15000000000000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 75000
+    },
+    "stateDigest": "ce1b29fa8212872e433766d0bfe89eca"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["mem-bond-milestone-all-tiers"],
+  "scenarioId": "sc26-bond-milestone",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 75000,
+  "vectorId": "sc26-bond-milestone-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

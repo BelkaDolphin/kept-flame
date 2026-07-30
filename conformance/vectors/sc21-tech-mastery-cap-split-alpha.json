@@ -1,0 +1,42 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 788,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 100,
+      "stochasticStepCount": 100,
+      "stochasticTrialCount": 100
+    },
+    "probe": {
+      "entityCount": 4,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 1,
+      "researchProgressSumRaw": 30000000,
+      "resourceStockSumRaw": 100000000000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 1000
+    },
+    "stateDigest": "1528b1d383f053b75de8ebedf7a5d9e3"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["split-at-tech-mastery-progress"],
+  "scenarioId": "sc21-tech-mastery-cap",
+  "splitCounters": {
+    "rateChangeEventCount": 0,
+    "recallOccurrenceCount": 0,
+    "segmentCount": 100,
+    "stochasticStepCount": 100,
+    "stochasticTrialCount": 100
+  },
+  "splitTicks": [400],
+  "toTick": 1000,
+  "vectorId": "sc21-tech-mastery-cap-split-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

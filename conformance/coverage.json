@@ -481,7 +481,7 @@
       "title": "combatPower の重み付き和(vigor0.35/dexterity0.20/intellect0/fortitude0.30/will0.15)の算出式",
       "refs": ["GDD 8.2 [2026-07-29裁定]", "src/engine/rules/stats.ts §5 COMBAT_POWER_WEIGHTS"],
       "observedBy": ["unit-test"],
-      "note": "[M7 提案・M10 登録] combatPower は探索解決(M21)未実装のため advance()/scheduler に一切結線されておらず golden vector では観測不能(src/engine/advance.ts / scheduler.ts に combatPower 参照が無いことを grep で確認済み)。tests/engine/rulesCombat.test.ts の「算出式」節が担保"
+      "note": "[M7 提案・M10 登録] combatPower は探索解決(M21)未実装のため advance()/scheduler に一切結線されておらず golden vector では観測不能(src/engine/advance.ts / scheduler.ts に combatPower 参照が無いことを grep で確認済み)。tests/engine/rulesCombat.test.ts の「算出式」節が担保。[M15再確認] M13/M15 でも combatPower の advance()/scheduler.ts 結線は増えていない(grep 再確認済み)。降格ではなく現状維持"
     },
     {
       "id": "stat-combat-power-derived-trait",
@@ -492,7 +492,7 @@
         "src/engine/rules/stats.ts §5(3) applyTraitsToDerived"
       ],
       "observedBy": ["unit-test"],
-      "note": "[M7 提案・M10 登録] combatPower 自体が advance() に未結線(stat-combat-power-weights と同じ理由)。tests/engine/rulesCombat.test.ts の「trait の 2 経路」節が担保"
+      "note": "[M7 提案・M10 登録] combatPower 自体が advance() に未結線(stat-combat-power-weights と同じ理由)。tests/engine/rulesCombat.test.ts の「trait の 2 経路」節が担保。[M15再確認] 現状維持(stat-combat-power-weights と同じ再確認結果)"
     },
     {
       "id": "stat-namespace-separation",
@@ -517,7 +517,7 @@
       "title": "成文化キューは研究と同型の単一キュー(未完了の ID 昇順先頭 1 件だけが進む)",
       "refs": ["GDD 11.8(B)", "src/engine/rules/codify.ts currentCodification"],
       "observedBy": ["unit-test"],
-      "note": "[M10] M6 は成文化を tick ループへ結線していない(scheduler/advance が codify entity を一切進めない設計・rules/codify.ts 冒頭 §1)ため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「成文化キュー」節が担保"
+      "note": "[M10] M6 は成文化を tick ループへ結線していない(scheduler/advance が codify entity を一切進めない設計・rules/codify.ts 冒頭 §1)ため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「成文化キュー」節が担保。[M15再確認] scheduler.ts/advance.ts に codify 参照なし(grep 再確認済み)。降格ではなく現状維持"
     },
     {
       "id": "codex-record-media-cost-duration",
@@ -528,21 +528,209 @@
         "src/engine/rules/codify.ts planCodification"
       ],
       "observedBy": ["unit-test"],
-      "note": "[M10] codex-single-queue-advance と同じ理由(tick ループ未結線)で golden vector では観測不能。tests/engine/rulesCodify.test.ts の「媒体別コスト/時間」節が担保"
+      "note": "[M10] codex-single-queue-advance と同じ理由(tick ループ未結線)で golden vector では観測不能。tests/engine/rulesCodify.test.ts の「媒体別コスト/時間」節が担保。[M15再確認] 現状維持"
     },
     {
       "id": "codex-multi-medium-coexist",
       "title": "同一 tech の別媒体(紙/石板)の記録が並存できる(副本動線)",
       "refs": ["GDD 11.1 [2026-07-27追補]", "src/engine/rules/codify.ts beginCodification"],
       "observedBy": ["unit-test"],
-      "note": "[M10] tick ループ未結線のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「同一 tech の別媒体は並存できる」が担保"
+      "note": "[M10] tick ループ未結線のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「同一 tech の別媒体は並存できる」が担保。[M15再確認] 現状維持"
     },
     {
       "id": "codex-waste-substitution-stone-only",
       "title": "成文化の粘土コスト廃材代替は石板のみに適用され、紙では代替しない",
       "refs": ["GDD 11.1 [2026-07-27追補]", "src/engine/rules/codify.ts codifyWasteSubstitution"],
       "observedBy": ["unit-test"],
-      "note": "[M10] コマンド適用時の純関数(tick 流量ではない)であり、コマンド層(M49)未実装のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「粘土コストの廃材代替は石板のみ」が担保"
+      "note": "[M10] コマンド適用時の純関数(tick 流量ではない)であり、コマンド層(M49)未実装のため golden vector では観測不能。tests/engine/rulesCodify.test.ts の「粘土コストの廃材代替は石板のみ」が担保。[M15再確認] M49(コマンド層)は完了したが `beginCodification` は tick ループへ結線されておらず(scheduler.ts/advance.ts に codify 参照なし・PIPELINE_STAGE.codify=50 は番号予約のみ)、golden vector では引き続き観測不能。降格ではなく現状維持"
+    },
+    {
+      "id": "c-tech-field-stop-production",
+      "title": "想起困難の tech 別停止が実地要件施設(fieldFacilityId)の産出を実際に 0 へ止める",
+      "refs": [
+        "GDD 11.2",
+        "src/engine/rules/techMemory.ts isWorkerActiveAtFacility",
+        "src/engine/rules/production.ts activeLaborFix"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] M13 検収時の持ち越し(MEMORY.md 2026-07-30: sc06 が本式化後にこの経路を観測しなくなった)への対応。sc19-tech-field-stop-alpha が固定。反証: 2 基とも impairedUntilTick を 0 に変えると resourceStockSumRaw が 100,000,000,000 raw から 400,000,000,000 raw へ動くことを実際に生成して確認済み(engine 無変更・一時的なシナリオ改変のみ)"
+    },
+    {
+      "id": "split-at-tech-recall-recovery-tick",
+      "title": "分割不変性: (住民,技術) 別の想起困難回復 tick ちょうどで advance を区切る",
+      "refs": ["src/engine/scheduler.ts buildEventQueue", "src/engine/rules/techMemory.ts"],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc19-tech-field-stop-split-alpha(splitTicks=[1000])。T5/M13 で実際にバグが出た区切り位置(split-at-recovery-tick)の tech 別版"
+    },
+    {
+      "id": "c-tech-loss-recoverable",
+      "title": "(A) criticalRecoverable の唯一保持者が死亡すると tech が喪失し停滞のみ(再研究可能)になる",
+      "refs": ["GDD 7.4", "src/engine/rules/techMemory.ts applyTechLossOnDeath"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc20-tech-loss-alpha が固定(techFireStarting・residentSoleFire)。反証は c-tech-loss-holder-survives-no-loss と対で `probe.researchCompletedCount` の差(3→1)として出る"
+    },
+    {
+      "id": "c-tech-loss-irreversible",
+      "title": "(B) rareIrreversible の唯一保持者が死亡すると tech が永久に喪失する(loss.irreversible=true)",
+      "refs": ["GDD 7.4", "src/engine/rules/techMemory.ts applyTechLossOnDeath"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc20-tech-loss-alpha が固定(techLens・residentSoleLens)。irreversible フラグの有無は (B) と (A) の分岐そのものであり c-tech-loss-recoverable と同一 vector 内で対比できる"
+    },
+    {
+      "id": "c-tech-loss-holder-survives-no-loss",
+      "title": "生存保持者が 1 人でも残っていれば、他の保持者が死亡しても tech は喪失しない",
+      "refs": ["GDD 7.4", "src/engine/rules/techMemory.ts techHoldersOf"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc20-tech-loss-alpha が固定(techPottery・residentPairPotteryB が死亡・residentPairPotteryC が生存)。反証: 生存保持者ゼロの条件を無視して無条件喪失にすると researchPottery も reset され `probe.researchCompletedCount` が 1 ではなく 0 になるはずである(手検算・実装は techHoldersOf の走査どおりで確認済み)"
+    },
+    {
+      "id": "split-at-tech-loss-tick",
+      "title": "分割不変性: (B) 一回性喪失(死亡)tick ちょうどで advance を区切る",
+      "refs": [
+        "src/engine/scheduler.ts residentDeath 処理",
+        "src/engine/rules/techMemory.ts applyTechLossOnDeath"
+      ],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc20-tech-loss-split-alpha(splitTicks=[100])。同一 tick で 3 件の死亡 + tech 喪失判定が同時に走る区切り"
+    },
+    {
+      "id": "c-tech-mastery-accumulate",
+      "title": "実地要件施設での稼働に応じて (住民,技術) 別の定着度が (A) 区間の閉形式で蓄積する",
+      "refs": [
+        "GDD 11.2",
+        "GDD 4",
+        "src/engine/rules/techMemory.ts computeMasteryGains/applyMasteryProgress"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M15] sc21-tech-mastery-cap-alpha が固定(masteryGainPerFieldWorkDay を patch で 0.72 に上げ、1 tick あたり 500 raw に揃えた閉形式)。研究点算出と同型のレート×区間長"
+    },
+    {
+      "id": "c-tech-mastery-cap",
+      "title": "(住民,技術) 別の定着度は上限 0.20 で頭打ちになる(N12 裁定の tech 別版)",
+      "refs": [
+        "GDD 11.2",
+        "src/engine/rules/techMemory.ts applyMasteryProgress masteryResistMaxFix"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M15] sc21-tech-mastery-cap-alpha が固定。反証: 500 raw/tick × 1000 tick は clamp が無ければ 500,000 raw になるはずだが、実際は 400 tick で 200,000 raw に到達したのち頭打ちになることを golden:write 後の JSON で確認済み"
+    },
+    {
+      "id": "split-at-tech-mastery-progress",
+      "title": "分割不変性: 定着度が上限へ到達する tick ちょうどで advance を区切る",
+      "refs": [
+        "src/engine/rules/techMemory.ts applyMasteryProgress",
+        "src/engine/rules/bond.ts crossingsInInterval のコメント(min 合成則)"
+      ],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc21-tech-mastery-cap-split-alpha(splitTicks=[400])。上側クランプのみの min 合成則 min(min(a+rΔ1,C)+rΔ2,C)=min(a+r(Δ1+Δ2),C) が実際の scheduler 実行経路でも成り立つことの確認"
+    },
+    {
+      "id": "life-population-floor-death-gate",
+      "title": "人口が下限 min(寝床×0.5,6) を割る死亡は起こさず延期する(GDD 7.6 の絶対保証)",
+      "refs": ["GDD 7.6", "src/engine/rules/population.ts applyResidentDeath"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc22(生存 5 人=下限ちょうど→延期)/sc23(生存 6 人=下限+1→即時死亡)/sc24(延期後に晴天漂着で解消)の 3 vector が申告する。反証はsc22 と sc23 の `resourceStockSumRaw` の差(10,000,000,000 raw vs 4,700,000,000 raw)そのもの — 生存人口が 1 人多いだけで死亡ゲートの成立/延期が切り替わることを数値で示す"
+    },
+    {
+      "id": "life-sunny-drift-arrival",
+      "title": "晴天漂着は tick の絶対グリッド上で判定され、寝床に空きがあれば住民が 1 人加入する",
+      "refs": ["GDD 7.7", "src/engine/rules/population.ts applyArrival/nextArrivalTick"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc24-pop-floor-resolved-alpha/beta が固定(patch で arrivalIntervalTicks=200 に短縮)。probe.entityCount が加入前後で +1 になることが直接の反証(加入が起きなければ entityCount は不変のまま)"
+    },
+    {
+      "id": "tie-arrival-before-death",
+      "title": "同一 tick では晴天漂着(段65)が死亡判定(段70)より先に処理される(GDD 11.7 に無い順序の裁定)",
+      "refs": ["src/engine/scheduler.ts PIPELINE_STAGE のコメント(a)(b)", "GDD 7.6"],
+      "observedBy": ["digest"],
+      "note": "[M15] sc24-pop-floor-resolved-alpha が固定。反証: 順序が逆(死亡→漂着)なら tick 200 時点でまだ生存 5 人のままの判定になり `residentFrail` の死亡は tick 200 で成立せず次の加入 tick(400)まで延期され続けるはずである。実際の vector は tick 200 で死亡が成立している(`life.diedTick = 200`)ことでこの順序を直接反証する"
+    },
+    {
+      "id": "split-at-death-tick",
+      "title": "分割不変性: 寿命死(即時成立)の tick ちょうどで advance を区切る",
+      "refs": ["src/engine/advance.ts §3", "src/engine/rules/population.ts applyResidentDeath"],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc23-pop-floor-active-split-alpha(splitTicks=[47])"
+    },
+    {
+      "id": "split-at-arrival-retry-tick",
+      "title": "分割不変性: 晴天漂着 + 延期された死亡の再判定が同時に来る tick ちょうどで区切る",
+      "refs": [
+        "src/engine/scheduler.ts residentArrival/residentDeath 処理",
+        "src/engine/rules/population.ts"
+      ],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc24-pop-floor-resolved-split-alpha(splitTicks=[200])"
+    },
+    {
+      "id": "life-death-basic-opt-in",
+      "title": "寿命死は resident.life を持つ住民だけに opt-in で効き、population floor 系の patch が無くても単独で動く",
+      "refs": [
+        "GDD 7.5",
+        "src/engine/state/state.ts ResidentState.life",
+        "src/engine/rules/population.ts §1"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc25-life-opt-in-alpha が固定。反証: `residentMortalBen` の死亡(tick 53・粗粒度グリッド外)前後で稼働就労者が 1 人減るため `resourceStockSumRaw` が「死ななかった場合」の 15,300,000,000 raw ではなく実測値になることを golden:write 後に確認"
+    },
+    {
+      "id": "mem-bond-milestone-all-tiers",
+      "title": "bond 節目(10/25/50)を全段、解析的な到達 tick で memoirLog へ記録する",
+      "refs": [
+        "GDD 7.3 [2026-07-30裁定]",
+        "src/engine/rules/bond.ts crossingsInInterval/applyBondProgress"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M15] sc26-bond-milestone-alpha(0→75000)が 3 段(tick 14410/36024/72047)全てを固定する。M13 が「最高位 1 件・区間終端記録」から「全段記録・解析的到達 tick」へ直した実装の golden 側の初固定"
+    },
+    {
+      "id": "split-at-bond-milestone-tick",
+      "title": "分割不変性: bond 節目の到達 tick ちょうど(複数箇所)で advance を区切る",
+      "refs": [
+        "src/engine/rules/bond.ts crossingsInInterval のコメント(1)(2)",
+        "src/engine/advance.ts §3"
+      ],
+      "observedBy": ["split-digest"],
+      "note": "[M15] sc26-bond-milestone-split-alpha(splitTicks=[14410,36024,72047])。M12 初版が「区間終端 tick」「最高位 1 件」だと壊れていた分割不変性(rules/bond.ts のコメント参照)の直接の再発検出器"
+    },
+    {
+      "id": "mem-partner-loss-morale-penalty",
+      "title": "bond 相手の死亡で、蓄積 bond 値に応じた一時的士気ペナが科される",
+      "refs": [
+        "GDD 7.3",
+        "src/engine/rules/bond.ts applyPartnerLossEffects/moralePenaltyOnPartnerLoss"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc27-partner-loss-alpha が固定(bond 0.694 × 0.5 = 0.347 の士気減)。反証: ペナが無ければ `residentBondY` の morale は死亡前後で不変のはずだが、実際は減少する"
+    },
+    {
+      "id": "mem-death-consequence-order",
+      "title": "死亡時の 3 処理は①本人の死亡記録 ②相方の記録+士気ペナ ③技術喪失 の固定順で適用される",
+      "refs": [
+        "src/engine/scheduler.ts residentDeath 処理のコメント(1)(2)(3)",
+        "GDD 7.3",
+        "GDD 7.4"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M15] sc27-partner-loss-alpha が固定。3 帰結(death memoir・partnerLost+士気ペナ・techPottery の喪失)が同一死亡イベントから同時に観測でき、`probe.researchCompletedCount` の変化(1→0)が③の直接証拠になる"
+    },
+    {
+      "id": "life-population-floor-absolute-cap",
+      "title": "人口下限 min(寝床×0.5,6) の絶対上限(6)側の分岐",
+      "refs": ["GDD 7.6", "src/engine/rules/population.ts populationFloorOf"],
+      "observedBy": ["unit-test"],
+      "note": "[M15] tests/engine/population.test.ts が整数演算のみで ratio 分岐(4件)と絶対上限分岐(2件)の両方を数値固定済み。golden vector 側(sc22〜sc24)は ratio 分岐(floor=5<6)のみを使う設計にした — 絶対上限は state/tick と無関係な純粋算術のクランプであり、full pipeline(advance/scheduler)を通しても unit test 以上の情報が増えないため、意図的に golden 側は 1 分岐のみに絞った(spec §9.2(4) の「診断可能性はプローブでなくシナリオを小さく保つ」に整合)"
+    },
+    {
+      "id": "mem-bio-arrival-unwired",
+      "title": "GDD 7.3 の加入時 bio 3 件(出自/口癖/恐れ)は晴天漂着へまだ結線されていない",
+      "refs": [
+        "GDD 7.3",
+        "src/engine/rules/memoir.ts initializeResidentMemoir",
+        "src/engine/rules/population.ts applyArrival"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M15 発見] `rules/population.ts` の `applyArrival` は resident をリテラル構築するだけで `initializeResidentMemoir`/`generateResidentBioEntries` を一切呼ばない(grep で確認: scheduler.ts/population.ts に memoir.ts への参照が無い)。M12 報告の「tick ループへの結線は後続タスク」がbond/死亡側(M13 で結線済み)に限られ、bio 生成側は未結線のまま残っている。tests/engine/memoir.test.ts が純関数としては担保。golden vector(sc24 の晴天漂着)には bio エントリが一切現れない — 結線タスクは未割当のため次セッションへの申し送り事項として報告する"
     }
   ]
 }

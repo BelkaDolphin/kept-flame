@@ -12,7 +12,8 @@
 |---|---|---|
 | #3 / #4(実 runner) | `docs/measurements/actions-calibrate-2026-07-26.json` | `.github/workflows/calibrate.yml`(workflow_dispatch) |
 | #3 / #4(ローカル参考) | `sim/output/calibrate-report.json` | `npm run sim:calibrate` |
-| #5 | `docs/measurements/actions-recall-frequency-2026-07-26.json`(= `sim/output/recall-frequency-report.json` と**バイト同一**を diff で確認) | `npm run sim:recall-freq` |
+| #5(縮約予備値・T9 2026-07-26) | `docs/measurements/actions-recall-frequency-2026-07-26.json`(= `sim/output/recall-frequency-report.json` と**バイト同一**を diff で確認) | `npm run sim:recall-freq` |
+| #5(**本判定・M14 2026-07-30**) | `docs/measurements/recall-frequency-final-2026-07-30.json`(住民系 M13 本実装の上で計測。3プロセス実行 sha256 一致・判定ペア縮約再評価つき) | `npm run sim:recall-freq` |
 | #7(3エンジン) | `conformance/results/summary.json`(gitignored・再生成可) | `npm run conformance:e2e` |
 | #9a | 本書 §1 の表(ツールは stdout 出力のみ・**JSON 永続化なし** → 付録 A-4) | `npm run measure:contrast` |
 | #12 | `docs/measurements/authoring-times.md` + **[2026-07-27再測定] `docs/measurements/authoring-times-retest-2026-07-27.md`** + `docs/measurements/authoring-samples/*.json` | `npx vitest run tests/measurements/authoringSamples.test.ts` |
@@ -39,7 +40,7 @@
 |---|---|---|---|---|---|---|---|
 | 3 | 夜間 sim の sec/run 校正 | ① | 実 ubuntu-latest runner: `measuredSecPerRun` = **0.048705 s**(中央値・5 seed)。週次 11000 runs → **shards=1・535.75 秒 = 8.93 分**。夜間 2200 runs → shards=1・107.15 秒 = 1.79 分 | 同時実行 20 上限内で週次 11000 runs が 360 分キャップに余裕(**目標 <30 分**) | **合格** | 不要 | `docs/measurements/actions-calibrate-2026-07-26.json` `baseline` |
 | 4 | Fallback(1分tick)発動時の再校正 | ① | 実 runner: `measuredSecPerRun` = **0.408271 s**(ベースラインの 8.38 倍)。週次 11000 runs → **shards=3・1497.13 秒 = 24.95 分**。夜間 2200 runs → shards=1・898.20 秒 = 14.97 分 | 再導出後も 20 上限内で 360 分キャップ余裕 | **合格** | 不要 | 同上 `fallback` |
-| 5 | 粗粒度10分tickの体感両立(想起困難頻度) | ①(縮約) | **1.875 回/住民/週**(300 発生 / 160 住民週 / 8 seed)。パターン別レンジ **0 〜 2.875**。`withinExpectedRange: true` | GDD §11.4-8「週 1〜3 回/住民」レンジ内かつ夜間 batch 枠内 | **予備合格**(§2.2 の限定あり) | 不要 | `docs/measurements/actions-recall-frequency-2026-07-26.json` |
+| 5 | 粗粒度10分tickの体感両立(想起困難頻度) | ①(縮約) | ~~1.875 回/住民/週(300発生/160住民週/8 seed・T9 縮約予備値)~~ **[2026-07-30 M14本判定で更新] 2.825 回/住民/週**(452 発生 / 160 住民週 / 8 seed・住民系 M13 本実装(tech別停止/mastery蓄積/実地要件フォールバック)の上での計測)。パターン別レンジ **0 〜 4.9375**。`withinExpectedRange: true` | GDD §11.4-8「週 1〜3 回/住民」レンジ内(**判定単位=盤面平均・裁定B9**)かつ夜間 batch 枠内 | **合格(本判定)** | 不要 | `docs/measurements/recall-frequency-final-2026-07-30.json`(旧: `docs/measurements/actions-recall-frequency-2026-07-26.json`) |
 | 7 | クロスブラウザ golden vector 一致(3エンジン) | ①(3エンジン) | Chromium **37/37 match** / Firefox **37/37 match** / WebKit **37/37 match**(mismatch 0・error 0)。`allMatch: true` | 3エンジン完全 bit 一致 | **合格**(3エンジン範囲) | 不要 | `conformance/results/summary.json` |
 | 9a | タグ7種 4重符号化のコントラスト比 | ① | **68 行中 68 行 PASS**。spec 不一致 0 件 / WCAG 閾値不合格 0 件。最小値は tag-ink vs 面で **4.62**(lore vs rubble)、線系の最小は **3.14**(lineGrid vs rubble) | 非テキスト ≥3:1 / テキスト ≥4.5:1(WCAG 1.4.11) | **合格** | 不要 | `npm run measure:contrast` 出力・`docs/design/tags-spec.md` |
 | 12 | 1エンティティ制作素工数 | ①(縮約) | **[2026-07-27再測定で更新]** reject **0 回 / 3 カテゴリ**(手順書のみを渡された別セッション=順序効果なしで再現)。正味 wall-clock(参照読了→pass確定): tech **56.162s** / facility **33.715s** / event **56.769s**。セッション全体(参照読解・報告書・テスト込み)約 11.2 分・実消費約 180k トークン。相対複雑度(初回計測): tech 8 決定・10 行 / facility 8 決定 + lvCurve / event 約 28 決定・84 行 | 56〜150h レンジのどこに収まるか。event は 1.5→2〜4h の想定と突合 | **合格**(§2.5) | 不要(§3.1) | `docs/measurements/authoring-times-retest-2026-07-27.md`(初回: `authoring-times.md`) |
@@ -100,6 +101,10 @@
 GDD §11.4-8 は「1住民あたり週1〜3回」としか書いておらず、**これを盤面平均で見るのかパターン単位で見るのかの定義が無い**。パターン単位で適用すると 10 中 2 が不合格になる。本書は「盤面平均で判定する」と解釈して予備合格としたが、**この解釈自体が要ユーザー判断**である(§6.1-B9)。
 
 **(b) 定着度(mastery)上限 0.20 が過酷業務の base_p を完全に相殺し、発生確率が clamp で 0 になる。** これは計測で確認された挙動である(`harsh-high-mastery` パターンの発生 0 件)。含意として、**熟練住民が増える後半ほど「想起困難」という日常危機フックが機能しなくなる**方向の設計になっている。バランス上の発見であり不具合ではないが、GDD 3 章が「日常危機化」を中核フックに置いていることとの整合はユーザーに確認いただきたい(非ブロッキング・§6.3-N12)。
+
+**[2026-07-30 M14・本判定へ更新]** 住民系(M11 寿命モデル・M12 memoir/bond・M13 tech別停止/mastery蓄積/実地要件フォールバック/(B)一回性喪失)の実装完了を受け、GDD 13.1「住民系 1.5週」完了時点の再計測義務(本節冒頭)を履行した。結果は **2.825 回/住民/週**(452発生/160住民週/8 seed)で引き続き盤面平均でレンジ内。判定単位=盤面平均(裁定B9)を GDD 11.4-8 へ明記済みのため、**本判定として合格**へ更新する(出典 `docs/measurements/recall-frequency-final-2026-07-30.json`)。1.875→2.825 の変化は mastery 蓄積式ではなく抑制粒度の変更(住民単位スカラ→(住民,tech)単位)が主因(同ファイル `verdict.changeFromPreliminary` に詳細)。パターン別下限割れは今回も2件(`normal-morale-high`=0.4375・`harsh-high-mastery`=0、いずれも上表と同一の力学)で、**引き続き不合格でなくバランス知見**として扱う。(a)(b) の指摘・§6.1-B9/§6.3-N12 の裁定内容自体は変更なし。
+
+**判定ペア縮約(全生存住民×全research techId)の再評価(M14)**: 「保持者に絞る」場合の判定数・sim実行時間への影響を試算した結果、現時点では変更を推奨しない(性能上の緊急性なし・変更はengine挙動を変えるためalgoVersion bump相当・真のtriggerは施設14種content投入後の校正盤面更新)。試算の詳細は `docs/measurements/recall-frequency-final-2026-07-30.json` の `reductionPairReassessment` を参照。
 
 ### 2.3 #7 — 合格(3エンジン範囲に限定)
 
@@ -363,7 +368,7 @@ MVP 残り 16.1〜17.5週 を先行フェーズ 0.5週 の消費実績から単�
 
 | # | 完了条件 | 評価 | 根拠 |
 |---|---|---|---|
-| 1 | ①6項目すべてに実測値と合否判定があり `summary.md` に記録されている | **達成** | 本書 §1.1。~~#12 は部分達成~~ **[2026-07-27 再測定で #12 合格 → 6 項目すべてに確定判定]**(内訳: 合格 5 + 予備合格 1 = #5 は住民系実装後に本判定) |
+| 1 | ①6項目すべてに実測値と合否判定があり `summary.md` に記録されている | **達成** | 本書 §1.1。~~#12 は部分達成~~ **[2026-07-27 再測定で #12 合格]**。~~#5 は予備合格(住民系実装後に本判定)~~ **[2026-07-30 M14 で #5 本判定完了・合格]**(§1.1・§2.2 末尾。出典 `docs/measurements/recall-frequency-final-2026-07-30.json`)→ **6 項目すべて合格の確定判定**(内訳: 合格 6・予備合格 0) |
 | 2 | ②5項目のデスクトップ予備値 + K 測定手順 + 実機手順書が揃い、実機さえあれば即計測できる状態 | ~~**部分達成**~~ → **[2026-07-27裁定・D7] 達成** | デスクトップ予備値: #1 ✓ / #8 ✓ / #2 の GCポーズ ✓・**ヒープ ✗(unmeasured)** / #9b ✗(実機のみ)/ #7-iOS ✗(実機のみ)。実機手順書 ✓(device-testing-guide 27KB + `dist/device/` 4 ファイル)。**K 測定手順(校正カーネル `bench/kernel.html`)は実装されていない** — T14 が「実機で直接測るので K 不要」の方針を採ったため。**[2026-07-27裁定]** D7 で「カーネルは実装せず実機で B1〜B4 を直接計測する方式で代替」が承認され、計画 §5.1 / §9-2 を改訂。**唯一の未達だった本条は達成へ更新**(#2 ヒープの unmeasured は実機のみが取得機会であることに変わりなく、条件 2 の「即計測できる状態」は満たしている) |
 | 3 | ③3項目の実施条件が明文化されている | **達成** | 本書 §1.3・§5.2 |
 | 4 | 不合格項目の Fallback 発動提案がユーザーへ提示され判断が得られている | **達成** | 本書 §3。**不合格項目ゼロ・全項目で発動不要**([2026-07-27 再測定により #12 の保留も解消]) |

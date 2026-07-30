@@ -26,6 +26,7 @@ import type { TechContent } from "../schema/tech";
 
 import { fixFromInt, fixFromRaw, type Fix } from "../src/engine/fp";
 import type { ResidentStats } from "../src/engine/rules/stats";
+import { techMemoryKeyOf } from "../src/engine/rules/techMemory";
 import type { EngineContent } from "../src/engine/rules/types";
 import {
   entityIdFromString,
@@ -34,8 +35,10 @@ import {
   type GameState,
   type GameStateMeta,
   type ResearchState,
+  type ResidentLife,
   type ResidentState,
   type ResourceState,
+  type TechMemoryState,
 } from "../src/engine/state/state";
 import { createGameState } from "../src/engine/state/update";
 
@@ -305,6 +308,87 @@ function patchStorageCapacity(
   };
 }
 
+/**
+ * [M15] 寝床のみを提供する施設(GDD 7.7)を追加する。産出は持たない
+ * (`lvCurve` を全 Lv 0 にする)ので、人口下限/晴天漂着だけを起動し、
+ * 隣接効果・生産式へ余計な項を持ち込まない。`content/balance.json` の
+ * `townParams` は base content に既に存在する(M11)ため、この patch を
+ * 単独で足すだけで晴天漂着/人口下限が起動する(rules/population.ts §1)。
+ */
+function patchAddBunkhouse(bedCapacityLv1: number): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const bunkhouse = {
+      id: "bunkhouse",
+      tags: ["calm"],
+      slots: { lv1: 0, lv2: 0, lv3: 0, lv4: 0, lv5: 0 },
+      // lvCurve は schema 上「正の値・狭義単調増加」が必須(0 は不可)なので
+      // 表現できる最小値を刻む。workerSlotsByLevel が全 Lv 0(就労不可)なので
+      // activeLaborFix は常に 0 になり、この値自体は産出に一切効かない。
+      lvCurve: [0.000001, 0.000002, 0.000003, 0.000004, 0.000005],
+      overflowCapPolicy: "discardExcess",
+      footprint: { width: 1, height: 1 },
+      harshWork: false,
+      output: { kind: "resource", resourceId: "firewood" },
+      bedCapacityCurve: [
+        bedCapacityLv1,
+        bedCapacityLv1,
+        bedCapacityLv1,
+        bedCapacityLv1,
+        bedCapacityLv1,
+      ],
+    };
+    return { ...raw, facility: [...(clone(raw.facility) as unknown[]), bunkhouse] };
+  };
+}
+
+/**
+ * [M15] `balance.townParams.arrivalIntervalTicks` を差し替える(晴天漂着の
+ * 判定 tick を短縮し、golden vector の run 長を短く保つため)。
+ * `scarcityArrivalFrequencyMul` は base content のまま(ローダーが
+ * `scarcityArrivalIntervalTicks = floor(arrivalIntervalTicks / 頻度倍率)` を導出する)。
+ */
+function patchArrivalIntervalTicks(
+  arrivalIntervalTicks: number,
+): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    const townParams = clone(balance["townParams"]) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: { ...balance, townParams: { ...townParams, arrivalIntervalTicks } },
+    };
+  };
+}
+
+/**
+ * [M15] `balance.recallRiskParams.masteryGainPerFieldWorkDay`(GDD 11.2 の
+ * 実地稼働定着蓄積速度・M13)を差し替える。base content の値(0.00288/日)は
+ * 上限 0.20 へ届くまで約 69 日(約 10 万 tick)を要し golden vector の run が
+ * 長くなりすぎるため、蓄積速度を上げて短い run で上限クランプへ届かせる。
+ */
+function patchMasteryGainRate(
+  masteryGainPerFieldWorkDay: number,
+): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    const recallRiskParams = clone(balance["recallRiskParams"]) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: {
+        ...balance,
+        recallRiskParams: { ...recallRiskParams, masteryGainPerFieldWorkDay },
+      },
+    };
+  };
+}
+
+/** [M15] 複数の content patch を左から順に適用する合成ヘルパ。 */
+function composePatches(
+  ...patches: readonly ((raw: RawContentBundle) => RawContentBundle)[]
+): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => patches.reduce((acc, patch) => patch(acc), raw);
+}
+
 // ===========================================================================
 // 4. state 構築ヘルパ(spec §4.2: entity ID は ADR-011、fromTick は 0)
 // ===========================================================================
@@ -328,6 +412,14 @@ interface ResidentOverrides {
    * `NEUTRAL_RESIDENT_STATS` 既定(全て基準 50)が使われる。
    */
   readonly stats?: ResidentStats;
+  /**
+   * [M15] 生涯(GDD 7.5・M11)を直接指定する。**RNG(lifespan/joinAge ドメイン)を
+   * 一切引かずに**「tick T ちょうどに死ぬ住民」を組み立てるための口 —
+   * `rules/lifespan.ts` の抽選を経由しないので、死亡そのものの検証シナリオは
+   * worldSeed に依存しない(C7 の対象外・sc10 の morale 直接指定と同じ考え方)。
+   * 省略時は {@link ResidentState.life} が undefined のまま(= 寿命で死なない)。
+   */
+  readonly life?: ResidentLife;
 }
 
 function mkResident(name: string, overrides: ResidentOverrides = {}): ResidentState {
@@ -345,7 +437,17 @@ function mkResident(name: string, overrides: ResidentOverrides = {}): ResidentSt
     traitIds: (overrides.traitIds ?? []).map(eid),
     recallImpairedUntilTick: overrides.recallImpairedUntilTick ?? 0,
     ...(overrides.stats === undefined ? {} : { stats: overrides.stats }),
+    ...(overrides.life === undefined ? {} : { life: overrides.life }),
   };
+}
+
+/**
+ * [M15] `residentDyingAt` と同じ考え方(`tests/engine/lifespanFixtures.ts` の
+ * 前例)を conformance 側へ持ち込む: 「tick T ちょうどに死ぬ」`ResidentLife` を
+ * `deathTick` から逆算する(`bornTick = deathTick - lifespanTick`)。
+ */
+function lifeDyingAt(deathTick: number, lifespanTick = 500): ResidentLife {
+  return { bornTick: deathTick - lifespanTick, lifespanTick, diedTick: null };
 }
 
 function mkFacility(
@@ -365,14 +467,37 @@ function mkFacility(
   };
 }
 
-function mkResearch(name: string, techId: string, progressHuman = 0): ResearchState {
+function mkResearch(
+  name: string,
+  techId: string,
+  progressHuman = 0,
+  completedTick: number | null = null,
+): ResearchState {
   return {
     kind: "research",
     id: eid(name),
     techId: eid(techId),
     progress: fixFromInt(progressHuman),
-    completedTick: null,
+    completedTick,
   };
+}
+
+/**
+ * [M15] `GameState.techMemoryByKey` の 1 エントリを直接組み立てる
+ * (`src/engine/rules/techMemory.ts` の `techMemoryKeyOf` を通す)。
+ * RNG を一切引かず「実地稼働で定着済み」「想起困難で停止中」の (住民, 技術) 対を
+ * 直接構築するための口(sc08 が `resident.mastery` を直接置くのと同じ考え方)。
+ */
+function mkTechMemory(
+  residentName: string,
+  techId: string,
+  masteryHuman = 0,
+  impairedUntilTick = 0,
+): readonly [string, TechMemoryState] {
+  return [
+    techMemoryKeyOf(eid(residentName), eid(techId)),
+    { masteryFix: fixFromInt(masteryHuman), impairedUntilTick },
+  ];
 }
 
 function mkResource(name: string, resourceId: string, stockHuman = 0): ResourceState {
@@ -643,6 +768,276 @@ function sc18BuildState(worldSeed: string): GameState {
   ]);
 }
 
+// --- sc19-tech-field-stop(M13→M15: tech別停止の実地要件施設のみへの適用) -----
+
+/**
+ * [M15] M13 検収の持ち越し(sc06 が「想起困難で生産が止まる」経路を観測しなく
+ * なった件・MEMORY.md 2026-07-30)への対応。想起困難の tech 別停止
+ * (GDD 11.2「当該住民の当該 tech 関連生産のみ停止」)が**実際に生産を 0 へ
+ * 止める**ことを、実地要件施設(hearth = techFireStarting の fieldFacilityId)
+ * に就労者を置いた盤面で固定する。`techMemoryByKey` を直接構築するので RNG は
+ * 一切引かない(sc08 が `resident.mastery` を直接置くのと同じ考え方。
+ * worldSeed に依存しないので C7 の対象外)。
+ *
+ * 2 人を**別々の hearth**(8 近傍が重ならない cell 0 / cell 10)に置くことで、
+ *   - `residentPermanent` は run 全体(0→2000)で想起困難が解けない(停止のまま。
+ *     `impairedUntilTick = toTick` は「回復 tick が地平線に届かない」ことの
+ *     慣用表現・buildEventQueue の `until < toTick` 判定と整合)
+ *   - `residentRecovering` は tick 1000 で回復し、以後は稼働へ戻る
+ * という「停止したまま」と「停止 → 復帰」の両方を、**同一 vector・同一資源
+ * (firewood)の合計**として観測する。
+ *
+ * **反証(spec §9.2(3)・実施記録は報告書参照)**: 2 基とも Lv1 出力
+ * 100 human/tick。停止が無ければ 2000 tick 分 × 2 基 = 400,000,000,000 raw に
+ * なるはずだが、実際の期待値は `residentRecovering` が tick 1000〜2000 の
+ * 1000 tick だけ稼働する 100,000,000 raw/tick × 1000 = 100,000,000,000 raw
+ * (`residentPermanent` は 0 のまま)。両方の `impairedUntilTick` を 0 に変えて
+ * 生成し直すと `resourceStockSumRaw` が実際に 400,000,000,000 raw へ動くことを
+ * 確認した(engine 無変更・一時的なシナリオ改変のみ)。
+ */
+function sc19BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentPermanent", { assignedFacilityId: "facilityHearthA" }),
+      mkFacility("facilityHearthA", "hearth", 0, ["residentPermanent"], 1),
+      mkResident("residentRecovering", { assignedFacilityId: "facilityHearthB" }),
+      mkFacility("facilityHearthB", "hearth", 10, ["residentRecovering"], 1),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [
+      mkTechMemory("residentPermanent", "techFireStarting", 0, 2000),
+      mkTechMemory("residentRecovering", "techFireStarting", 0, 1000),
+    ],
+  );
+}
+
+// --- sc20-tech-loss(M13→M15: (B) 一回性喪失・保持者ゼロの判定) ----------------
+
+/**
+ * [M15] GDD 7.4 の (B) 一回性喪失(生存保持者ゼロ かつ 記録ゼロ で喪失)を、
+ * 3 つの対比が同一 tick(=100)で同時に起きる盤面で固定する:
+ *   - `residentSoleFire` は techFireStarting(criticalRecoverable)の唯一の保持者
+ *     → 死亡で喪失し (A) 側(`loss.irreversible = false` = 再研究可能)として
+ *     reset される
+ *   - `residentSoleLens` は techLens(rareIrreversible)の唯一の保持者
+ *     → 死亡で喪失し (B) 側(`loss.irreversible = true`)として reset される
+ *   - `residentPairPotteryB` は techPottery の保持者だが `residentPairPotteryC`
+ *     も同じ tech を保持したまま生存し続ける → **喪失しない**
+ *     (反証: `researchPottery` だけ `completedTick`/`progress` が変わらず残る
+ *     ことが `probe.researchCompletedCount`(3→1)の差として直接出る。
+ *     生存保持者ゼロの条件が壊れて無条件喪失になれば 3→0 になるはずの数値)
+ * 3 人とも配属なし(loadW=0)なので (C) 抽選は確率 0 のまま試行だけ引く
+ * (sc02 と同型・RNG の結果に依存しないので seed 変化は不要)。
+ */
+function sc20BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentSoleFire", { life: lifeDyingAt(100, 50) }),
+      mkResident("residentSoleLens", { life: lifeDyingAt(100, 50) }),
+      mkResident("residentPairPotteryB", { life: lifeDyingAt(100, 50) }),
+      mkResident("residentPairPotteryC"),
+      mkResearch("researchFire", "techFireStarting", 30, 0),
+      mkResearch("researchLens", "techLens", 214, 0),
+      mkResearch("researchPottery", "techPottery", 36, 0),
+    ],
+    [],
+    [],
+    [
+      mkTechMemory("residentSoleFire", "techFireStarting", 1),
+      mkTechMemory("residentSoleLens", "techLens", 1),
+      mkTechMemory("residentPairPotteryB", "techPottery", 1),
+      mkTechMemory("residentPairPotteryC", "techPottery", 1),
+    ],
+  );
+}
+
+// --- sc21-tech-mastery-cap(M13→M15: 実地稼働の定着度蓄積 + 上限 0.20 clamp) ---
+
+/**
+ * [M15] GDD 11.2 の `masteryResist(u,t)` の実地稼働蓄積(GDD 4「解禁 → 実地稼働で
+ * 記憶定着」)と上限 0.20 clamp を固定する。`masteryGainPerFieldWorkDay` を
+ * 0.72(patch)へ上げ、1 tick あたりの蓄積を floor(720,000/1440) = **正確に
+ * 500 raw**(1440 の約数)にすることで、上限 200,000 raw へ**ちょうど tick 400**
+ * で到達する閉形式の値を作る(base content の 0.00288/日だと上限到達に
+ * 約 10 万 tick 要り run が長すぎる)。
+ *
+ * **反証**: 400 tick 分の蓄積(500 raw/tick)で 200,000 raw(= GDD 上限)に届くが、
+ * clamp が無ければ tick 1000 到達時点で 500,000 raw(0.5)になっているはずである。
+ * `golden:write` 後の `techMemoryByKey` の値が 200,000 raw で頭打ちになって
+ * いることを実際の JSON で確認した(報告書参照)。
+ */
+function sc21BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentMasteryWorker", { assignedFacilityId: "facilityHearthA" }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentMasteryWorker"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+    mkResearch("researchFire", "techFireStarting", 30, 0),
+  ]);
+}
+
+// --- sc22/sc23/sc24-population-floor(M11→M15: 死亡ゲート + 晴天漂着) ---------
+
+/**
+ * [M15] GDD 7.6 の人口下限保証(下限割れの死亡は延期)を、寝床上限 10
+ * (floor = min(ceil(10×0.5),6) = 5)の盤面で固定する。sc22(生存 5 人 = 下限
+ * ちょうど)と sc23(生存 6 人 = 下限+1)は `residentFrail`(tick 47 に死ぬ・
+ * 粗粒度グリッド外)以外は完全に同一の盤面であり、**「あと 1 人多いだけ」の差で
+ * 死亡が即座に成立するか延期されるかが変わる**ことを反証として直接示す
+ * (spec §9.2(3))。
+ *
+ * `residentFrail` は hearth に配属して産出させておくので、死亡が成立した瞬間
+ * (sc23)と延期され続ける間(sc22)の `resourceStockSumRaw` が数値で変わる:
+ *   - sc22(延期): tick 100 まで稼働し続ける → 100,000,000 raw/tick × 100 tick
+ *     = 10,000,000,000 raw
+ *   - sc23(即時死亡): 稼働は tick 47 分のみ → 100,000,000 raw/tick × 47 tick
+ *     = 4,700,000,000 raw
+ * townParams.arrivalIntervalTicks は base content のまま(4320)なので、
+ * run(0→100)の中で晴天漂着は一切発火しない(死亡ゲート単体を見るため)。
+ * 晴天漂着との組合せは sc24(同じ盤面 + arrivalIntervalTicks を短縮する patch)
+ * が担当する。
+ */
+/** [M15] sc22〜sc24 共通の寝床上限(Lv1)。floor = min(ceil(10×0.5),6) = 5。 */
+const POPULATION_FLOOR_BED_CAPACITY = 10;
+
+function sc22PopulationFloorDeferredBuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentFiller1"),
+    mkResident("residentFiller2"),
+    mkResident("residentFiller3"),
+    mkResident("residentFiller4"),
+    mkResident("residentFrail", {
+      assignedFacilityId: "facilityHearthA",
+      life: lifeDyingAt(47, 47),
+    }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentFrail"], 1),
+    // [M15] 寝床上限は「content 定義」だけでなく「実際に置かれた施設 entity」の
+    // Lv 別値を合計する(rules/population.ts の bedCapacityOf は
+    // entitiesOfKind(state,"facility") を走査する)。定義を patch するだけでは
+    // 不活性のまま(bedCapacity=0)なので、必ず 1 基置く。
+    mkFacility("facilityBunkhouseA", "bunkhouse", 20, [], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+function sc23PopulationFloorActiveBuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentFiller1"),
+    mkResident("residentFiller2"),
+    mkResident("residentFiller3"),
+    mkResident("residentFiller4"),
+    mkResident("residentFiller5"),
+    mkResident("residentFrail", {
+      assignedFacilityId: "facilityHearthA",
+      life: lifeDyingAt(47, 47),
+    }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentFrail"], 1),
+    mkFacility("facilityBunkhouseA", "bunkhouse", 20, [], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+/**
+ * [M15] sc22 と同じ盤面(生存 5 人 = 下限ちょうど・`residentFrail` が tick 47 に
+ * 死亡延期)に、`townParams.arrivalIntervalTicks` を 200 へ短縮する patch を
+ * 重ねたもの。tick 200(粗粒度グリッド上)で
+ *   (1) 晴天漂着(段65)が先に走り、寝床(上限 10)に空きがあるので 1 人加入
+ *       (生存 5→6)
+ *   (2) 直後に死亡(段70)の再判定が走り、6−1=5 ≥ floor(5) で**今度こそ成立**
+ * という「延期された死亡が晴天漂着で解消される」全体像と、GDD 11.7 に無い
+ * 加入(段65)/死亡(段70)の並び(scheduler.ts §3 の裁定)を同一 tick の実挙動として
+ * 固定する。`createResidentLife` が `lifespan`/`joinAge` ドメインを新規に引く
+ * ため(base content の 40 本はどの vector も晴天漂着を発火させていない)、
+ * C7 に従い alpha/beta の 2 本を用意する。
+ */
+function sc24PopulationFloorResolvedBuildState(worldSeed: string): GameState {
+  return sc22PopulationFloorDeferredBuildState(worldSeed);
+}
+
+// --- sc25-life-opt-in(M11→M15: life は住民ごとの opt-in・population floor 不活性) ---
+
+/**
+ * [M15] townParams は base content に既に存在するが、**寝床施設が無い盤面では
+ * 人口下限/晴天漂着が完全に不活性**であること(rules/population.ts §1)を保ち
+ * ながら、`resident.life` を持つ住民だけが寿命で死ぬ(住民ごとの opt-in)ことを
+ * 最小盤面で固定する。`residentImmortalAnn`(life 省略)は run 全体で稼働し
+ * 続け、`residentMortalBen`(tick 53 に死ぬ・粗粒度グリッド外)は死亡後に稼働
+ * から外れる。M11 が「population floor 系の patch を一切足さなくても単独で
+ * 動く」ことの最小証明。
+ */
+function sc25BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentImmortalAnn", { assignedFacilityId: "facilityHearthA" }),
+    mkResident("residentMortalBen", {
+      assignedFacilityId: "facilityHearthB",
+      life: lifeDyingAt(53, 53),
+    }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentImmortalAnn"], 1),
+    mkFacility("facilityHearthB", "hearth", 10, ["residentMortalBen"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// --- sc26-bond-milestone(M12→M15: 節目の全段記録 + 分割不変性) ----------------
+
+/**
+ * [M15] 2 人が同一施設で run 全体(0→75000)を共働し続け、bond 節目
+ * (10/25/50・`BOND_MILESTONE_TIER_FIXES`)を**全段**踏む。蓄積レートは
+ * engine 定数(694 raw/tick = floor(1e6/1440)・content 非依存)なので、
+ * 到達 tick は解析的に **14410 / 36024 / 72047** で固定できる
+ * (`rules/bond.ts` の `crossingsInInterval` と同じ式
+ * `tick = ceil(threshold/rate)` で手検算済み)。research entity を置かないので
+ * (C) 抽選は 0 試行(sc16-overcrowd-fine と同じ理由)= worldSeed に依存しない。
+ */
+function sc26BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentBondA", { assignedFacilityId: "facilityHearthA" }),
+    mkResident("residentBondB", { assignedFacilityId: "facilityHearthA" }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentBondA", "residentBondB"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+  ]);
+}
+
+// --- sc27-partner-loss(M12/M13→M15: 相方喪失の士気ペナ + 死亡時 3処理固定順) ---
+
+/**
+ * [M15] GDD 7.3「相方の喪失で bond 相手に一時的士気ペナ」と、死亡時の 3 処理
+ * 固定順(①本人の死亡記録 ②相方の記録+士気ペナ ③技術喪失・scheduler.ts §6)を
+ * 同一の死亡イベントで同時に固定する。`residentBondX` は techPottery の唯一の
+ * 保持者でもあるので、死亡(tick 1000)の瞬間に 3 つの帰結(死亡 memoir /
+ * partnerLost + 士気ペナ / 技術喪失)が全て観測できる。bond 値は節目(10)に
+ * 届く前(0.694・694 raw/tick × 1000 tick)にしてあり、sc26 の節目テストとは
+ * 独立に切り分けてある。
+ *
+ * **techPottery を選んだ理由(実装時に発見した罠)**: 2 人とも hearth に配属して
+ * いるため、hearth の実地要件を持つ tech(techFireStarting 等)を解禁してしまうと
+ * `computeMasteryGains` が「その施設で稼働している**全員**」へ定着度を蓄積し、
+ * `residentBondY` まで意図せず「保持者」(mastery > 0)になって喪失が起きなく
+ * なる(techHoldersOf は生存保持者が 1 人でも残れば対象から外す)。techPottery
+ * (fieldFacilityId = workbench)は hearth 勤務と無関係なので、この汚染を避けられる。
+ */
+function sc27BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentBondX", {
+        assignedFacilityId: "facilityHearthA",
+        life: lifeDyingAt(1000, 1000),
+      }),
+      mkResident("residentBondY", { assignedFacilityId: "facilityHearthA" }),
+      mkFacility("facilityHearthA", "hearth", 0, ["residentBondX", "residentBondY"], 1),
+      mkResource("resourceFirewood", "firewood", 0),
+      mkResearch("researchPottery", "techPottery", 36, 0),
+    ],
+    [],
+    [],
+    [mkTechMemory("residentBondX", "techPottery", 1)],
+  );
+}
+
 // ===========================================================================
 // 6. SCENARIOS(spec §4.3 の表)
 // ===========================================================================
@@ -704,6 +1099,34 @@ export const SCENARIOS: readonly Scenario[] = [
     contentPatch: patchStorageCapacity({ firewood: 500, iron: 2000 }),
     buildState: sc18BuildState,
   },
+  { id: "sc19-tech-field-stop", contentPatch: null, buildState: sc19BuildState },
+  { id: "sc20-tech-loss", contentPatch: null, buildState: sc20BuildState },
+  {
+    id: "sc21-tech-mastery-cap",
+    contentPatch: patchMasteryGainRate(0.72),
+    buildState: sc21BuildState,
+  },
+  {
+    id: "sc22-pop-floor-deferred",
+    contentPatch: patchAddBunkhouse(POPULATION_FLOOR_BED_CAPACITY),
+    buildState: sc22PopulationFloorDeferredBuildState,
+  },
+  {
+    id: "sc23-pop-floor-active",
+    contentPatch: patchAddBunkhouse(POPULATION_FLOOR_BED_CAPACITY),
+    buildState: sc23PopulationFloorActiveBuildState,
+  },
+  {
+    id: "sc24-pop-floor-resolved",
+    contentPatch: composePatches(
+      patchAddBunkhouse(POPULATION_FLOOR_BED_CAPACITY),
+      patchArrivalIntervalTicks(200),
+    ),
+    buildState: sc24PopulationFloorResolvedBuildState,
+  },
+  { id: "sc25-life-opt-in", contentPatch: null, buildState: sc25BuildState },
+  { id: "sc26-bond-milestone", contentPatch: null, buildState: sc26BuildState },
+  { id: "sc27-partner-loss", contentPatch: null, buildState: sc27BuildState },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

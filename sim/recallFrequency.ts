@@ -37,9 +37,16 @@
 // ---------------------------------------------------------------------------
 
 import { advanceWithReport, createAdvanceContext } from "../src/engine/advance";
+import { toRaw } from "../src/engine/fp";
 import type { AdvanceContext, EngineContent } from "../src/engine/rules/types";
 import { evaluateRecallCoarseStep, type RecallOccurrence } from "../src/engine/rules/recall";
-import { entitiesOfKind, requireEntity, type GameState } from "../src/engine/state/state";
+import {
+  entitiesOfKind,
+  getTechMemory,
+  requireEntity,
+  techMemoryKeys,
+  type GameState,
+} from "../src/engine/state/state";
 import { GAME_DAY_TICKS, nextCoarseStepTickAtOrAfter } from "../src/engine/stochastic";
 
 import {
@@ -95,7 +102,15 @@ function stepwiseRecallOccurrences(
   return { finalState: state, occurrences };
 }
 
-/** scheduler 経由(runSchedule 全体)の結果と (C) 単独評価の結果が一致するかを検証する(§1)。 */
+/**
+ * scheduler 経由(runSchedule 全体)の結果と (C) 単独評価の結果が一致するかを検証する(§1)。
+ *
+ * [M14] `techMemoryByKey`(M13 で追加された (住民,技術) 別の記憶・想起困難記録)の
+ * 全キーも突合する。旧来は住民単位スカラ `recallImpairedUntilTick` だけを見ていたが、
+ * M13 以降の抽選はそのスカラへ書かなくなった(rules/recall.ts §3 末尾)ため、
+ * 住民単位スカラの一致だけでは (C) 単独評価が tech 別の記憶を正しく再現しているかを
+ * 検出できない。テック別の想起困難記録・定着度蓄積の両方が本チェックの対象。
+ */
 function crossCheckAgainstScheduler(
   ctx: AdvanceContext,
   initialState: GameState,
@@ -117,6 +132,35 @@ function crossCheckAgainstScheduler(
       throw new RecallFrequencyError(
         `seed "${seed}": resident "${resident.id}" の recallImpairedUntilTick が ` +
           "scheduler 経路と (C) 単独評価で食い違う",
+      );
+    }
+  }
+
+  // [M14] techMemoryByKey(住民×tech別の想起困難記録・定着度)の全キーを突合する。
+  const techMemoryKeySet = new Set<string>([
+    ...techMemoryKeys(stepwise.finalState),
+    ...techMemoryKeys(fullReport.state),
+  ]);
+  for (const key of techMemoryKeySet) {
+    const viaStepwise = getTechMemory(stepwise.finalState, key);
+    const viaScheduler = getTechMemory(fullReport.state, key);
+    const stepwiseSnapshot =
+      viaStepwise === undefined
+        ? null
+        : ([toRaw(viaStepwise.masteryFix), viaStepwise.impairedUntilTick] as const);
+    const schedulerSnapshot =
+      viaScheduler === undefined
+        ? null
+        : ([toRaw(viaScheduler.masteryFix), viaScheduler.impairedUntilTick] as const);
+    if (
+      stepwiseSnapshot === null || schedulerSnapshot === null
+        ? stepwiseSnapshot !== schedulerSnapshot
+        : stepwiseSnapshot[0] !== schedulerSnapshot[0] ||
+          stepwiseSnapshot[1] !== schedulerSnapshot[1]
+    ) {
+      throw new RecallFrequencyError(
+        `seed "${seed}": techMemory("${key}") が scheduler 経路と (C) 単独評価で食い違う` +
+          "(mastery 蓄積または (住民,技術) 別の想起困難記録が (C) 単独評価に漏れている可能性)",
       );
     }
   }

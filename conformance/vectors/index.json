@@ -24,7 +24,15 @@
     "sc07-clamp-p-alpha",
     "sc08-mastery-alpha",
     "sc10-morale-edge-alpha",
-    "sc17-prod-full-alpha"
+    "sc17-prod-full-alpha",
+    "sc19-tech-field-stop-alpha",
+    "sc19-tech-field-stop-split-alpha",
+    "sc20-tech-loss-alpha",
+    "sc20-tech-loss-split-alpha",
+    "sc25-life-opt-in-alpha",
+    "sc26-bond-milestone-alpha",
+    "sc26-bond-milestone-split-alpha",
+    "sc27-partner-loss-alpha"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -67,6 +75,37 @@
     { "file": "sc16-overcrowd-fine-alpha.json", "vectorId": "sc16-overcrowd-fine-alpha" },
     { "file": "sc17-prod-full-alpha.json", "vectorId": "sc17-prod-full-alpha" },
     { "file": "sc18-sto-overflow-alpha.json", "vectorId": "sc18-sto-overflow-alpha" },
-    { "file": "sc18-sto-overflow-split-alpha.json", "vectorId": "sc18-sto-overflow-split-alpha" }
+    { "file": "sc18-sto-overflow-split-alpha.json", "vectorId": "sc18-sto-overflow-split-alpha" },
+    { "file": "sc19-tech-field-stop-alpha.json", "vectorId": "sc19-tech-field-stop-alpha" },
+    {
+      "file": "sc19-tech-field-stop-split-alpha.json",
+      "vectorId": "sc19-tech-field-stop-split-alpha"
+    },
+    { "file": "sc20-tech-loss-alpha.json", "vectorId": "sc20-tech-loss-alpha" },
+    { "file": "sc20-tech-loss-split-alpha.json", "vectorId": "sc20-tech-loss-split-alpha" },
+    { "file": "sc21-tech-mastery-cap-alpha.json", "vectorId": "sc21-tech-mastery-cap-alpha" },
+    {
+      "file": "sc21-tech-mastery-cap-split-alpha.json",
+      "vectorId": "sc21-tech-mastery-cap-split-alpha"
+    },
+    { "file": "sc22-pop-floor-deferred-alpha.json", "vectorId": "sc22-pop-floor-deferred-alpha" },
+    { "file": "sc23-pop-floor-active-alpha.json", "vectorId": "sc23-pop-floor-active-alpha" },
+    {
+      "file": "sc23-pop-floor-active-split-alpha.json",
+      "vectorId": "sc23-pop-floor-active-split-alpha"
+    },
+    { "file": "sc24-pop-floor-resolved-alpha.json", "vectorId": "sc24-pop-floor-resolved-alpha" },
+    { "file": "sc24-pop-floor-resolved-beta.json", "vectorId": "sc24-pop-floor-resolved-beta" },
+    {
+      "file": "sc24-pop-floor-resolved-split-alpha.json",
+      "vectorId": "sc24-pop-floor-resolved-split-alpha"
+    },
+    { "file": "sc25-life-opt-in-alpha.json", "vectorId": "sc25-life-opt-in-alpha" },
+    { "file": "sc26-bond-milestone-alpha.json", "vectorId": "sc26-bond-milestone-alpha" },
+    {
+      "file": "sc26-bond-milestone-split-alpha.json",
+      "vectorId": "sc26-bond-milestone-split-alpha"
+    },
+    { "file": "sc27-partner-loss-alpha.json", "vectorId": "sc27-partner-loss-alpha" }
   ]
 }

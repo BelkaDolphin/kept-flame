@@ -1,0 +1,264 @@
+{
+  "measurement": {
+    "taskId": "M14",
+    "title": "想起困難発生頻度(#5)本判定 — 盤面平均(裁定B9)",
+    "date": "2026-07-30",
+    "engineCommitHash": "7cc4ee5",
+    "engineCommitHashFull": "7cc4ee55fb1efba5e07b39a30bece9aaedea2630",
+    "engineCommitMessage": "docs: record M13/M16 completion and apply 13 star-item rulings",
+    "underlyingImplementationCommit": "661f890 (feat: per-tech recall memory + facility footprint state (M13+M16))",
+    "conformanceAlgoVersion": 2,
+    "workingTreeNote": "測定時点でリポジトリはクリーン(HEAD=7cc4ee5)。本タスクで sim/recallFrequency.ts に測定専用の強化(下記 harnessChange)を加えたが未コミット(統率者検分後にコミット予定)。engine/schema/content は無変更。",
+    "harnessChange": {
+      "file": "sim/recallFrequency.ts",
+      "description": "crossCheckAgainstScheduler に GameState.techMemoryByKey(M13 で追加された (住民,技術) 別の想起困難記録・定着度)の全キー突合を追加。従来は住民単位スカラ recallImpairedUntilTick だけを比較していたが、M13 以降の抽選はそのスカラへ書かなくなったため単体では tech 別記憶の再現性を検出できなかった。(C) 単独評価が scheduler 経由と一致するという本ハーネスの前提を、M13 の本式実装に対しても機械的に再検証する目的。",
+      "verifiedNoOutputChange": true,
+      "verifiedNoOutputChangeNote": "強化前後で sim/output/recall-frequency-report.json の sha256 が完全一致(0c2f9e32399c25791b46110b798b707abd5b21856b7511c7dd739e88c4ea8e77)。検証専用の追加であり測定値に影響しないことを実測で確認済み。"
+    },
+    "command": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs sim/recallFrequency.ts (= npm run sim:recall-freq)",
+    "sourceReportPath": "sim/output/recall-frequency-report.json (gitignored・再生成可・本ファイルはその永続化コピー+打刻+判定+縮約再評価を付加したもの)",
+    "precedingPreliminaryValue": {
+      "value": 2.825,
+      "source": "MEMORY.md 2026-07-30 M13完了ログ「#5 予備再計測(参考値・本判定はM14)」",
+      "relationToThisRun": "本ファイルの本判定はこの予備値を追認する(同一値・別プロセス実行で再現)。"
+    }
+  },
+
+  "result": {
+    "byPattern": [
+      {
+        "occurrenceCount": 7,
+        "occurrencesPerResidentPerWeek": 0.4375,
+        "patternId": "normal-morale-high",
+        "residentCount": 2,
+        "title": "通常業務/士気高(50)/非派遣"
+      },
+      {
+        "occurrenceCount": 29,
+        "occurrencesPerResidentPerWeek": 1.8125,
+        "patternId": "normal-morale-mid",
+        "residentCount": 2,
+        "title": "通常業務/士気中閾値未満(29)/非派遣"
+      },
+      {
+        "occurrenceCount": 69,
+        "occurrencesPerResidentPerWeek": 4.3125,
+        "patternId": "normal-morale-low",
+        "residentCount": 2,
+        "title": "通常業務/士気低閾値未満(14)/非派遣"
+      },
+      {
+        "occurrenceCount": 33,
+        "occurrencesPerResidentPerWeek": 2.0625,
+        "patternId": "harsh-morale-high",
+        "residentCount": 2,
+        "title": "過酷業務/士気高(50)/非派遣"
+      },
+      {
+        "occurrenceCount": 53,
+        "occurrencesPerResidentPerWeek": 3.3125,
+        "patternId": "harsh-morale-mid",
+        "residentCount": 2,
+        "title": "過酷業務/士気中閾値未満(29)/非派遣"
+      },
+      {
+        "occurrenceCount": 78,
+        "occurrencesPerResidentPerWeek": 4.875,
+        "patternId": "harsh-morale-low",
+        "residentCount": 2,
+        "title": "過酷業務/士気低閾値未満(14)/非派遣"
+      },
+      {
+        "occurrenceCount": 46,
+        "occurrencesPerResidentPerWeek": 2.875,
+        "patternId": "normal-dispatched",
+        "residentCount": 2,
+        "title": "通常業務/士気高(50)/派遣中"
+      },
+      {
+        "occurrenceCount": 58,
+        "occurrencesPerResidentPerWeek": 3.625,
+        "patternId": "harsh-dispatched",
+        "residentCount": 2,
+        "title": "過酷業務/士気高(50)/派遣中"
+      },
+      {
+        "occurrenceCount": 0,
+        "occurrencesPerResidentPerWeek": 0,
+        "patternId": "harsh-high-mastery",
+        "residentCount": 2,
+        "title": "過酷業務/士気高(50)/定着度上限(0.20)/非派遣"
+      },
+      {
+        "occurrenceCount": 79,
+        "occurrencesPerResidentPerWeek": 4.9375,
+        "patternId": "worst-case",
+        "residentCount": 2,
+        "title": "過酷業務/士気低閾値未満(14)/派遣中(最悪ケース)"
+      }
+    ],
+    "overallOccurrencesPerResidentPerWeek": 2.825,
+    "seeds": [
+      "recall-freq-0",
+      "recall-freq-1",
+      "recall-freq-2",
+      "recall-freq-3",
+      "recall-freq-4",
+      "recall-freq-5",
+      "recall-freq-6",
+      "recall-freq-7"
+    ],
+    "totalOccurrences": 452,
+    "totalResidentWeeks": 160,
+    "weekTicks": 10080,
+    "withinExpectedRange": true
+  },
+
+  "determinism": {
+    "requirement": "8 seed で決定論一致(別プロセス2回でバイト同一)",
+    "processRuns": 3,
+    "note": "node --experimental-strip-types を3回、別プロセスとして起動(要求の2回を上回る回数で実施)。sim/output/recall-frequency-report.json の sha256 を比較。",
+    "sha256PerRun": [
+      "0c2f9e32399c25791b46110b798b707abd5b21856b7511c7dd739e88c4ea8e77",
+      "0c2f9e32399c25791b46110b798b707abd5b21856b7511c7dd739e88c4ea8e77",
+      "0c2f9e32399c25791b46110b798b707abd5b21856b7511c7dd739e88c4ea8e77"
+    ],
+    "allIdentical": true
+  },
+
+  "verdict": {
+    "judgmentUnit": "boardAverage",
+    "judgmentUnitBasis": "GDD 11.4-8 条8 [2026-07-27裁定] / summary.md 裁定B9: 判定単位は代表盤面の全住民週の平均値(パターン単位では判定しない)",
+    "range": { "minPerWeek": 1, "maxPerWeek": 3 },
+    "overallOccurrencesPerResidentPerWeek": 2.825,
+    "officialVerdict": "pass",
+    "verdictLabel": "合格(本判定)",
+    "supersedesPreliminaryVerdict": {
+      "previousLabel": "予備合格(縮約盤面)",
+      "previousValue": 1.875,
+      "previousSource": "docs/measurements/actions-recall-frequency-2026-07-26.json / summary.md §1.1・§2.2(T9・2026-07-26)",
+      "reasonForUpgrade": "M13(コミット661f890)で GDD 11.2 [2026-07-30裁定] の3点(tech別停止・mastery蓄積・実地要件フォールバック)が本式実装された。M14 はその実装の上で #5 を再計測し、盤面平均が引き続き1〜3回/住民/週レンジ内であることを確認した。判定ペア(全生存住民×全research techId)と回復条件(持続満了のみ)は GDD 11.2 [2026-07-30裁定]により意図的に縮約のまま維持することが正本で承認済みであり、本判定の対象(=盤面平均頻度がレンジ内か)には含まれない。"
+    },
+    "changeFromPreliminary": {
+      "delta": 0.95,
+      "cause": "mastery 蓄積式ではなく抑制粒度の変更(住民単位スカラ→(住民,tech)単位)が主因。本計測ハーネス(sim/board.ts)は研究が一度も完了しない(completedTick が常に null)ため mastery 蓄積(applyMasteryProgress)は本計測では発火せず、resident.mastery の静的スカラのみが効く(harsh-high-mastery パターンが実測0件であることがその直接証拠)。したがって 1.875→2.825 の上昇は M13 ログの記載どおり「抑制の粒度が変わったこと」に起因し、mastery 蓄積路の効果はこの特定の代表盤面では測定されていない(正直な開示)。"
+    },
+    "patternLevelFindings": {
+      "note": "GDD 11.4-8[2026-07-27裁定]/summary.md B9により、パターン単位の下限割れは不合格でなくバランス知見として扱う。",
+      "belowLowerBound": [
+        {
+          "patternId": "normal-morale-high",
+          "title": "通常業務/士気高(50)/非派遣",
+          "occurrencesPerResidentPerWeek": 0.4375,
+          "classification": "balanceFinding-notFailure",
+          "explanation": "通常業務(loadW×0.5)かつ士気高(閾値ペナルティ無し)かつ非派遣は base_p×loadW=0.025 のみが効く最も穏やかなケース。1回/週の下限をやや割るのは式の設計上自然。"
+        },
+        {
+          "patternId": "harsh-high-mastery",
+          "title": "過酷業務/士気高(50)/定着度上限(0.20)/非派遣",
+          "occurrencesPerResidentPerWeek": 0,
+          "classification": "balanceFinding-notFailure",
+          "explanation": "masteryResist上限0.20が過酷業務のbase_p×loadW(=0.10)を完全に相殺しclampで発生確率が0になる(裁定N12として既に文書化済みの既知挙動)。GDD 11.2[2026-07-27裁定]によりMVPでは現状維持、M39〜M41のバランス調整段で再評価予定。"
+        }
+      ]
+    }
+  },
+
+  "reductionPairReassessment": {
+    "question": "判定ペア「全生存住民×全research techId」(現行・縮約のまま維持)を「保持者(記憶を持つ住民)に絞る」に変更した場合の判定数・sim実行時間への影響試算。実装変更はしない(techMemory.ts §2(a) / GDD 11.2[2026-07-30裁定]の既存決定の再評価)。",
+
+    "currentModel": {
+      "formula": "livingResidents × techIds.length (per 粗粒度ステップ)",
+      "rationale": "rules/techMemory.ts §2(a): ADR-014 の性能校正入力(20人×3tech×2,304step=138,240判定/run)を保つため、および保持していない tech の想起困難は上界として安全側であるため、意図的に維持されている縮約。",
+      "measuredInThisHarness": {
+        "livingResidents": 20,
+        "techCount": 3,
+        "stepsPerWeek": 1008,
+        "pairsPerStep": 60,
+        "pairsPerWeekPerSeed": 60480,
+        "pairsAcross8Seeds": 483840,
+        "note": "実際に sim/board.ts + evaluateRecallCoarseStep を1週間ぶん動かして得た実測値(推測ではない)。"
+      },
+      "adr014CalibrationAnchor": {
+        "residents": 20,
+        "techCount": 3,
+        "stepsPerRun": 2304,
+        "pairsPerRun": 138240,
+        "matchesAdr014Text": true,
+        "note": "sim/board.ts の SIM_BOARD_TECH_IDS は content/tech.json が24本に増えた後も意図的に3本に固定されている(この校正不変量を保つため)。よって現行の #3/#4/#5 計測はいずれも「content 全量」ではなく縮約盤面のスケールで走っている。"
+      },
+      "fullContentProjection": {
+        "totalTechCountInContent": 24,
+        "note": "content/tech.json は E1〜E3 の24本全てに fieldRequirement.facility が設定済み(hearth:4 / workbench:14 / forge:6)。仮に校正盤面の tech 数を3→24(content実数)へ切替え、判定ペアを縮約のまま(=保持者に絞らず)にした場合:",
+        "pairsPerStepAt20Residents": 480,
+        "pairsPerAdr014RunAt20Residents": 1105920,
+        "scaleFactorVsCurrentCalibration": 8
+      }
+    },
+
+    "holderRestrictedModel": {
+      "formula": "Σ_住民 heldTechIdsOf(住民) (= mastery>0 の tech 数。techMemory.ts の heldTechIdsOf/techHoldersOf と同義)",
+      "structuralBound": "computeMasteryGains は「現在配属されている1施設に紐づく tech」だけに mastery を加算する(1住民は同時に1施設にしか配属されない)ため、ある住民が保持しうる tech 数は其の住民の配属先施設に紐づく tech 数が上限になる(全 tech 数ではない)。",
+      "perFacilityTechCounts": {
+        "hearth": 4,
+        "workbench": 14,
+        "forge": 6,
+        "totalAcrossThese3": 24
+      },
+      "currentContentCaveat": "content/facility.json は現時点で hearth/forge/workbench の3施設のみ実装済み(GDD 14施設のうちの3。M5ログ「施設14種contentは未実施」)。GDD 完成版では残り11施設(貯水槽/菜園/寝床/炭焼き窯/研究机/写字室/保管庫/見張り台/探索本部/療養所等)の多くは tech の実地要件先ではないと見込まれ、その施設に配属された住民は保持者にならない(pairsが0になる)。この点は現時点では未確定(残り11施設のcontent未投入のため)。",
+      "estimate": {
+        "earlyGame": {
+          "pairs": 0,
+          "basis": "本計測ハーネス自体で実証済み: research.completedTick が常に null(解禁前)のため heldTechIdsOf は全住民で空集合になる。現行モデルは同条件で 60 pairs/step(=20×3)を評価しており、この差はそのまま解禁前の縮約分。"
+        },
+        "matureGameIllustrative": {
+          "assumption": "N=20人(GDD「常時8〜20人規模」の上限)を hearth/workbench/forge の3施設へ均等按分(1/3ずつ)し、対応する全 tech が解禁済みと仮定した場合の上限見積り(実測ではなく試算)。",
+          "calculation": "(20/3)×4 + (20/3)×14 + (20/3)×6 = (20/3)×24 ≈ 160 pairs/step",
+          "equivalentPerResidentAverage": "N×8 (=N×24/3。1住民は3施設のうち自分の配属先1つの tech しか保持し得ないため、全tech数24でなく「担当施設の tech数」だけが効く構造的な理由による)",
+          "vsFullContentProjectionOfCurrentModel": {
+            "current": 480,
+            "holderRestricted": 160,
+            "reductionRatio": "3分の1(66.7%減)",
+            "vsTodaysCalibrationBoard(60pairs)": "今日の校正盤面(tech固定3本=60 pairs/step)と比べると保持者制限版(160 pairs/step、24tech前提)の方がむしろ多い。理由: 今日の校正盤面は「tech本数を3に固定する」という別の縮約で既にコストを抑えているため、保持者制限の恩恵はcontentが24tech規模に切替わって初めて顕在化する。"
+          }
+        }
+      },
+      "runtimeImpactEstimate": {
+        "costModel": "(C) 評価1ペアあたり hashedDrawUint32 1回(発生判定)+ 発生時のみ drawFromStream 1回(持続日数)。ハッシュアドレス方式のため状態に依存しないO(1)コストで、判定数にほぼ線形にスケールする。",
+        "measuredBaseline": {
+          "source": "docs/measurements/actions-calibrate-2026-07-26.json",
+          "measuredSecPerRunAt138240Pairs": 0.048705,
+          "weeklyRuns": 11000,
+          "weeklyShards": 1,
+          "weeklyWallClockMin": 8.93,
+          "weeklyTargetMin": 30,
+          "headroomPct": 70.2
+        },
+        "ifCalibrationBoardSwitchedTo24TechWithoutHolderRestriction": {
+          "scaleFactor": 8,
+          "projectedSecPerRun": "≈0.39 (線形外挿・(C)評価が測定時間を支配すると仮定した上限側の見積り)",
+          "projectedWeeklyShards1WallClockMin": "≈71.5 (30分目標を超過するが360分キャップ内)",
+          "projectedShardsNeeded": 3,
+          "projectedWeeklyWallClockMinWithShards3": "≈23.8 (30分目標内に復帰)",
+          "caveat": "線形外挿であり実測ではない。(C)以外(生産・研究・adjacency等)の評価コストは pairs 数に依存しないため、実際の増加率は8倍よりは緩やかになる可能性が高い(保守的な上限側の見積り)。"
+        },
+        "ifHolderRestrictionAdoptedAtSameFullContentScale": {
+          "projectedPairs": 160,
+          "vsCurrentModelAt24Tech": "3分の1",
+          "expectedEffect": "校正盤面を24tech規模へ切替えても shards=1 のまま30分目標内に収まる可能性が高い(pairs数が現行3tech校正の60に対し160=2.67倍に留まるため、線形外挿でも secPerRun≈0.13、weekly≈23.8分)。"
+        }
+      }
+    },
+
+    "recommendation": {
+      "verdict": "現時点では変更を推奨しない(実装は行わない・据え置き)",
+      "reasons": [
+        "性能上の緊急性がない: 現行校正盤面はtech数を3本に固定する形で既にコストを抑えており、#3(8.93分/30分目標)・#4(24.95分/30分目標)とも大きな余裕(29.8%/83.2%使用)がある。",
+        "判定ペアの絞り込みは (C) の観測可能な挙動を変える(誰がどのtechで想起困難を引くかの集合が変わる)ため、golden vector 差分 + algoVersion bump を伴うengine変更になる(ADR-016)。本タスクはengine非変更の計測タスクであり、そのような変更はスコープ外。",
+        "真の trigger は「本タスク(#5判定)」ではなく「施設14種content投入 + 校正盤面のtech数をcontent実数(24本)へ切替える」時点である。今回の校正盤面は意図的にtech数を3本へ固定しており(sim/board.ts コメント)、この固定を外さない限り判定ペア数の問題は顕在化しない。",
+        "N12(mastery上限0.20の相殺挙動)も同様にM39〜M41のバランス調整段への持ち越しが既に裁定済みであり、判定ペアの絞り込みもengine挙動変更を伴う以上、同じタイミングでバッチ化するのがgolden再生成コストの観点で合理的。"
+      ],
+      "revisitTrigger": "施設14種contentの投入(M50以降)+ 校正盤面のtech数をcontent実数へ切替える判断がなされた時点、またはM39〜M41のバランス調整段。その際はN12の再評価と同時にengine変更(recall.ts/techMemory.tsの判定ペア構築ロジック)としてまとめて実施し、algoVersion bumpとgolden再生成を1回にまとめることを推奨。"
+    }
+  }
+}

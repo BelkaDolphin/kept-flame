@@ -1,0 +1,42 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 2037,
+    "counters": {
+      "rateChangeEventCount": 3,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 15,
+      "stochasticStepCount": 15,
+      "stochasticTrialCount": 144
+    },
+    "probe": {
+      "entityCount": 7,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 1,
+      "researchProgressSumRaw": 36000000,
+      "resourceStockSumRaw": 0,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 150
+    },
+    "stateDigest": "0569301b83681bcf0384630df9f320cb"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["split-at-tech-loss-tick"],
+  "scenarioId": "sc20-tech-loss",
+  "splitCounters": {
+    "rateChangeEventCount": 3,
+    "recallOccurrenceCount": 0,
+    "segmentCount": 15,
+    "stochasticStepCount": 15,
+    "stochasticTrialCount": 144
+  },
+  "splitTicks": [100],
+  "toTick": 150,
+  "vectorId": "sc20-tech-loss-split-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}
