@@ -644,6 +644,15 @@ E5『通信塔』完成＝他隷との交信成功＝**初回本編クリア**�
 
 **[2026-07-27追補]** balance 系パラメータに `recordMedia{stoneTablet|paper: costMul, timeMul, caravanWeight, flammable}`（min/max 制約付き・§11.1 追補）を追加。event の `choices[].effect` / `branches[].result` 語彙に `destroyRecords{medium, scope}` を**予約**する（MVP では content 側から未使用のまま出荷。§11.1 追補）。
 
+**[2026-07-31裁定] event 語彙の確定（M22 実装の正本化。M23 以降のオーサリング規律）**:
+
+- `branches[].result` はオブジェクト形 `{kind: continue|withdraw|destroyRecords}` が正本。文字列は短縮記法 `continue/success/failure/withdraw` の4語のみ許可（`success/failure` は**状態を動かさない説明ラベル**。状態を動かすのは kind 付きオブジェクト形だけ、という線引きで事故を構造的に防ぐ。#12 計測サンプル互換）。
+- **最後の branch は無条件成立（cond リテラル `true`）をローダーで強制**。「どの分岐も成立しない」イベントを構造的に禁止（engine は実行時フォールバック経路を持たない）。
+- `destroyRecords` の語彙 = `medium: any|paper|stoneTablet` × `scope: all|flammable|oldest`。火災は `{any, flammable}` で表現（MVP では content 側未使用のまま conformance sc33 で挙動固定済み）。
+- `branches[].logTemplate` のプレースホルダは `band/difficulty/event/injuryCount/members/node/roll/teamPower` の8種に語彙化。未知プレースホルダは**ロード時 reject**（置換されない `{名前}` が本番の帰還ログへ出る経路を塞ぐ）。
+- 検証の2段構え: 単体 `validateEvent` は緩く、`ContentBundle` 経由は `strict: true` で正本語彙（statWeights は裁定 B8 の5ステータス）を強制（裁定 B8 の計測サンプル保護と既存テスト非改変の両立。裁定 N5 と同型）。
+- item の `overflow{policy,convertTo,ratio}` は item カテゴリが MVP に無いため、方策の置き場を **`balance.exploration.rewardOverflow`（暫定）** とする。engine 側プリミティブ `applyOverflowPolicy` は保管会計（cumulativeProduced/Overflow）を通さない純関数で、item カテゴリ導入時に「方策の出所」だけを item 側へ移設する（本行の移設は content/ローダーのみの作業）。
+
 **[2026-07-30裁定] 建設/増築コストの置き場（M49 完了時に判明した欠落への裁定）**: 本節の facility 行にはコスト項が無く、配置/増築コマンドが資源を払わない状態だった。コスト項は **facility スキーマ側**に置く（施設ごとの値であり `lvCurve` と同居が自然。`buildCost` と増築コストカーブを追加）。既存 content/テストを壊さないため「schema では省略可・ローダーでは必須」の二段構え（T7 方式）とし、支払いの実装（コマンド結線・廃材 3 出口(1) 建設代替 20% の呼び出し元接続）は **M50** が担当する。
 
 **[2026-07-29追補] `tech.unlocks[]` の暫定解釈（M9・要素の型が本節で未定義だったことへの穴埋め）**: 要素は tech ID を基本とし、facility カテゴリの ID に解決できる要素は「その施設の建設解禁」と解釈する（静的グラフ解析 `src/engine/graph.ts` がこの解釈で施設ゲートを辿る）。現 content の `unlocks[]` は全て tech ID のため現時点の判定結果に影響なし。施設14種の content 化の段で正式確定する。
@@ -651,6 +660,13 @@ E5『通信塔』完成＝他隷との交信成功＝**初回本編クリア**�
 ### 12.2 event cond DSL（確定）
 
 `branches[].cond` で参照可能な変数（`teamPower, difficulty, statWeights, hasTrait, maxStatHolder, injuryCount, equipType`）と許可演算子（`==, !=, <, <=, >, >=, &&, ||`）を JSON Schema でホワイトリスト化し、パーサ対応範囲を固定してから LLM 運営開始。未対応構文・未知変数参照はスキーマ検証で reject。
+
+**[2026-07-31裁定] 変数の意味と効果係数の合成式（M22 実装の正本化。本節は変数名しか定めていなかった）**:
+
+- `statWeights`（裸の識別子）= そのノードの statWeights の値の**総和**（DSL は MemberExpression 不許可のためオブジェクトはスカラ縮約のみ）。`maxStatHolder(stat)` = チーム内のその stat の**最大値**（1e6 固定小数点。ID を返しても content 側が比較を書けないため値を返す）。`injuryCount` = **自ノードを含む**判定失敗回数（負傷有無の文面分岐が自ノードの結果を語れる必要）。`equipType` = item/ロードアウト実装まで常に `"none"`（語彙のみ先行確定）。
+- 効果係数: `successMod` は判定の左辺へ `successMod×R` を**加算**（roll が 0..R 一様のため「成功確率を p 上げる」と厳密同値。距離帯で R が違っても意味不変）。`difficultyMod`/`rewardMod` は `×(1+mod)`、`injuryRiskMul` は乗算。適用順は **choice → stance** に固定（floor 丸めの非可換性への決定論対策）。
+- choice の自動選択（MVP は非対話）: 方針 `cautious` = successMod 最大 / `press` = rewardMod 最大（同値は添字小）。engine は選択肢ラベルを解釈しない。対話 UI（M32）は `selectChoiceIndex` の戻り値をプレイヤー回答で置換する差し替え点。
+- 評価器の実装形: **パース = schema 側（jsep）・評価 = engine 側**（ロード時に型検査済み `CondExpr` へコンパイル、実行時の文字列パースゼロ・1e6 固定小数点の整数比較のみ）。
 
 ### 12.3 researchCost 目安レンジの基準点（動的n問題への回答）
 
