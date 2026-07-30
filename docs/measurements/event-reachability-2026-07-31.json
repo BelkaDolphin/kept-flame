@@ -1,0 +1,897 @@
+{
+  "allCovered": true,
+  "eventCount": 10,
+  "events": [
+    {
+      "band": "deep",
+      "id": "eventDeepAshenSpire",
+      "nodeCount": 5,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "deep",
+      "id": "eventDeepEmberVault",
+      "nodeCount": 6,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["frail2/press"],
+            "1": [
+              "weak3/press",
+              "mid3/press",
+              "strong3/press",
+              "scholar2/press",
+              "strong3/cautious"
+            ]
+          },
+          "nodeIndex": 5,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "deep",
+      "id": "eventDeepFrostboundMine",
+      "nodeCount": 6,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 3,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["mid3/press"],
+            "2": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 5,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "deep",
+      "id": "eventDeepSunkenArchive",
+      "nodeCount": 6,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 3,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["mid3/press"],
+            "2": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 5,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "far",
+      "id": "eventFarSaltMarsh",
+      "nodeCount": 5,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 3,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["mid3/press"],
+            "2": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "far",
+      "id": "eventFarSignalRuins",
+      "nodeCount": 5,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "far",
+      "id": "eventFarWindworksMill",
+      "nodeCount": 5,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 4,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "near",
+      "id": "eventNearAshOrchard",
+      "nodeCount": 4,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "scholar2/press", "strong3/cautious"],
+            "1": ["weak3/press", "frail2/press"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "near",
+      "id": "eventNearDrainageTunnel",
+      "nodeCount": 4,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "frail2/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    },
+    {
+      "band": "near",
+      "id": "eventNearRubbleSweep",
+      "nodeCount": 4,
+      "nodes": [
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["mid3/press", "strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 0,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["strong3/press", "strong3/cautious"],
+            "1": ["weak3/press", "mid3/press", "scholar2/press", "frail2/press"]
+          },
+          "nodeIndex": 1,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": [
+              "mid3/press",
+              "strong3/press",
+              "scholar2/press",
+              "frail2/press",
+              "strong3/cautious"
+            ],
+            "1": ["weak3/press"]
+          },
+          "nodeIndex": 2,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        },
+        {
+          "branchCount": 2,
+          "branchHitBy": {
+            "0": ["scholar2/press"],
+            "1": ["weak3/press", "mid3/press", "strong3/press", "frail2/press", "strong3/cautious"]
+          },
+          "nodeIndex": 3,
+          "reachedBy": [
+            "weak3/press",
+            "mid3/press",
+            "strong3/press",
+            "scholar2/press",
+            "frail2/press",
+            "strong3/cautious"
+          ]
+        }
+      ]
+    }
+  ],
+  "gaps": [],
+  "generatedAtNote": "wall-clock 未取得(決定論 sim・タイムスタンプは §9 の4点打刻を参照)",
+  "rostersUsed": ["weak3", "mid3", "strong3", "scholar2", "frail2"],
+  "runsPerEvent": 6,
+  "totalBranches": 103,
+  "totalNodes": 50
+}

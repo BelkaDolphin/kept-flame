@@ -1,0 +1,1048 @@
+[
+  {
+    "id": "eventNearRubbleSweep",
+    "destTags": ["near"],
+    "nodes": [
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          {
+            "label": "瓦礫を慎重に踏み分ける",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          {
+            "label": "がむしゃらに乗り越える",
+            "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 }
+          },
+          { "label": "隊列を崩して強行する", "effect": { "injuryRiskMul": 1.5 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "崩れた壁の隙間を縫い、{members}名で瓦礫原の奥へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "瓦礫の山に阻まれ、{node}番目で足止めを食らった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 55",
+            "result": "success",
+            "logTemplate": "崩落した床板の隙間を、器用な一人が見切って抜けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "床が抜け、{injuryCount}件の負傷を出しながら這い上がった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "隊列を整えて進む", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "誰も傷付くことなく、瓦礫原の核心部に達した。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "手傷を負った仲間を庇いながら進んだ。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が瓦礫の下の設計図片を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "文字の刻まれた欠片を見つけたが、誰も読み解けなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventNearAshOrchard",
+    "destTags": ["near"],
+    "nodes": [
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          {
+            "label": "物音を立てず様子を見る",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          { "label": "一気に追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "灰をかぶった獣の群れを退け、果樹園跡の奥へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "獣の群れに手を焼き、{node}番目で押し返された。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が枯れた台帳の写しから交配種の記録を読み取った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "焼け残った台帳は文字が滲み、誰も読み解けなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 55",
+            "result": "success",
+            "logTemplate": "崩れた灌漑路の縁を、器用な一人が渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "灌漑路に踏み外し、水を浴びて負傷者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "休憩を挟んで進む", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "無傷のまま果樹園跡の一番奥、灰に埋もれた井戸に達した。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "傷を負った仲間を支えながら井戸まで辿り着いた。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventNearDrainageTunnel",
+    "destTags": ["near"],
+    "nodes": [
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "vigor": 0.6, "fortitude": 0.4 },
+        "choices": [
+          { "label": "低い姿勢で慎重に進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "一気に奥まで踏み込む", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "半ば埋もれた排水路を{members}名で踏破し、奥の合流部に達した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "狭い水路に阻まれ、{node}番目で引き返した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 100,
+        "R": 35,
+        "statWeights": { "fortitude": 0.5, "will": 0.5 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "足場の悪い水路も、誰一人怪我なく渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "滑って転び、擦り傷を負った者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 55",
+            "result": "success",
+            "logTemplate": "錆びた鉄格子の隙間を、器用な一人がすり抜けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "鉄格子に引っかかり、時間と怪我を費やした。"
+          }
+        ]
+      },
+      {
+        "difficulty": 90,
+        "R": 30,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が排水路の刻印から旧い水利図を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "壁面の刻印は摩耗し、誰も読み解けなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventFarSignalRuins",
+    "destTags": ["far"],
+    "nodes": [
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          { "label": "風下から回り込む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "最短路を強行突破する", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "傾いた鉄塔の足場を{members}名で登り、廃墟の中腹に達した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "崩れかけの足場に阻まれ、{node}番目で撤退した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          { "label": "物陰から様子を伺う", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "一気に蹴散らす", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "塔に巣くう野犬の群れを退け、信号室への道を確保した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "野犬の群れに阻まれ、隊列を立て直す羽目になった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 120,
+        "R": 35,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 65",
+            "result": "success",
+            "logTemplate": "軋む階段の踏み抜きを、器用な一人が事前に見切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "階段が抜け、{injuryCount}件の負傷を出した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 110,
+        "R": 35,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が信号室に残る手順書の写しを読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "手順書は判読できず、装置の使い方は謎のままだった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "交代しながら進む", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "無傷のまま塔の最上部、信号灯の残骸に達した(隊{members}名)。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "傷ついた仲間を担ぎながら、それでも最上部に達した。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventFarSaltMarsh",
+    "destTags": ["far"],
+    "nodes": [
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          { "label": "迂回して刺激しない", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "一気に押し通る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "塩沼に潜む影を退け、渡渉路の先へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "沼の影に行く手を阻まれ、迂回を強いられた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 120,
+        "R": 35,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 65",
+            "result": "success",
+            "logTemplate": "沈み込む泥濘の道を、器用な一人が見極めて渡った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "泥濘に足を取られ、装備ごと沈みかけた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "隊列を詰めて進む", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "塩気を含んだ風にも負けず、誰も傷付かず渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "塩害で肌を傷めた者を庇いながら渡った。"
+          }
+        ]
+      },
+      {
+        "difficulty": 110,
+        "R": 35,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が沼地の中州に残る旧い水位標を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "水位標の刻みは読めず、潮の満ち引きは謎のままだった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "teamPower >= 210",
+            "result": "success",
+            "logTemplate": "最も屈強な隊が、沼の最奥にある澄んだ湧き水まで一気に踏破した(力{teamPower})。"
+          },
+          {
+            "cond": "teamPower >= 110",
+            "result": "continue",
+            "logTemplate": "隊は苦労しながらも湧き水の手前まで進んだ(力{teamPower})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "沼の深みに阻まれ、湧き水には届かなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventFarWindworksMill",
+    "destTags": ["far"],
+    "nodes": [
+      {
+        "difficulty": 120,
+        "R": 35,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 65",
+            "result": "success",
+            "logTemplate": "軋む風車の羽根の下を、器用な一人がくぐり抜けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "落ちてきた羽根の破片で、負傷者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 110,
+        "R": 35,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が製粉機の銘板から歯車比の記録を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "銘板は錆びつき、歯車比は読み取れなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          { "label": "瓦礫を避けて進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "瓦礫を乗り越えて急ぐ", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "倒壊した支柱の間を{members}名で抜け、製粉室に達した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "倒壊した支柱に阻まれ、{node}番目で足止めされた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "崩れやすい床にも関わらず、誰も傷付かなかった。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "床が抜け落ち、怪我人を支えながら進んだ。"
+          }
+        ]
+      },
+      {
+        "difficulty": 140,
+        "R": 45,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          {
+            "label": "物陰に隠れてやり過ごす",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          { "label": "正面から追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "巣くう害獣の群れを退け、製粉場の奥、種籾の貯蔵庫に達した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "害獣の群れに阻まれ、貯蔵庫には届かなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventDeepEmberVault",
+    "destTags": ["deep"],
+    "nodes": [
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          {
+            "label": "熱気を避けて慎重に進む",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          { "label": "熱気を突っ切る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } },
+          { "label": "隊列を崩して強行する", "effect": { "injuryRiskMul": 1.5 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "燠火の熱気渦巻く坑道を{members}名で踏破した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "灼けた岩肌に阻まれ、{node}番目で退いた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          { "label": "闇に紛れてやり過ごす", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "松明で照らし追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "熱を求めて巣くう獣を退け、火庫の奥へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "獣の群れに阻まれ、松明の油を無駄に消費した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 70",
+            "result": "success",
+            "logTemplate": "崩れかけた棚の下を、器用な一人が瞬時に見切って抜けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "棚が崩れ、火傷を負う者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 130,
+        "R": 40,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が炉壁に刻まれた古い温度管理の記録を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "炉壁の刻印は煤で覆われ、誰も読み解けなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "交代で先頭に立つ", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "灼熱の坑道でも、誰一人傷付かず進み続けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "火傷を負った仲間を庇いながら、それでも進んだ。"
+          }
+        ]
+      },
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitFrail') == true",
+            "result": "withdraw",
+            "logTemplate": "病弱な仲間の様子を見て、隊は火庫の最奥を目前に撤退を決めた。"
+          },
+          {
+            "cond": "true",
+            "result": "success",
+            "logTemplate": "隊は火庫の最奥、燠火の宿る石棺にたどり着いた(隊{members}名)。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventDeepSunkenArchive",
+    "destTags": ["deep"],
+    "nodes": [
+      {
+        "difficulty": 130,
+        "R": 40,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が水没した書架の背表紙をかろうじて読み取った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "水に滲んだ背表紙は判読できなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          { "label": "水位の低い縁を進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "最短の水路を泳ぎ切る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "腰まで浸かる水路を{members}名で踏破し、書庫の奥へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "深みにはまり、{node}番目で引き返した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          {
+            "label": "水音を立てず様子を見る",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          { "label": "一気に払いのける", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "水路に潜む影を退け、文書庫の中枢へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "水中の影に阻まれ、隊列が乱れた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 70",
+            "result": "success",
+            "logTemplate": "崩れかけた桟橋を、器用な一人が渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "桟橋が崩れ、水に落ちて負傷する者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "冷たい水にも耐え、誰も傷付かず文書庫の最深部へ達した。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "冷えと怪我に耐えながら、それでも最深部へ達した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "teamPower >= 210",
+            "result": "success",
+            "logTemplate": "最も屈強な隊が、水没した書庫最奥の封印書架を開け放った(力{teamPower})。"
+          },
+          {
+            "cond": "teamPower >= 110",
+            "result": "continue",
+            "logTemplate": "隊は封印書架の手前まで進んだが、開けるには至らなかった(力{teamPower})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "水深に阻まれ、封印書架には近づけなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventDeepFrostboundMine",
+    "destTags": ["deep"],
+    "nodes": [
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 70",
+            "result": "success",
+            "logTemplate": "凍りついた岩棚を、器用な一人が慎重に渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "氷に足を滑らせ、負傷者が出た。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          { "label": "氷を避けて慎重に進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "氷を割って一気に進む", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "凍てついた坑道を{members}名で踏破し、氷結した奥室に達した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "氷の壁に阻まれ、{node}番目で退いた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          { "label": "物陰から様子を伺う", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "松明で追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "氷穴に潜む獣を退け、坑道の最深部へ進んだ(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "氷穴の獣に阻まれ、松明の火が消えかけた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [{ "label": "体を温めながら進む", "effect": { "successMod": 0.1 } }],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "凍える寒さの中でも、誰一人傷付かず進み続けた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "凍傷を負った仲間を庇いながら、それでも進んだ。"
+          }
+        ]
+      },
+      {
+        "difficulty": 130,
+        "R": 40,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が氷に閉ざされた坑道図の写しを読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "坑道図は氷に覆われ、誰も読み解けなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "teamPower >= 210",
+            "result": "success",
+            "logTemplate": "最も屈強な隊が、坑道最奥の氷結した鉱脈まで一気に達した(力{teamPower})。"
+          },
+          {
+            "cond": "teamPower >= 110",
+            "result": "continue",
+            "logTemplate": "隊は鉱脈の手前まで進んだが、氷を割るには至らなかった(力{teamPower})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "氷結した坑道に阻まれ、鉱脈には届かなかった。"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eventDeepAshenSpire",
+    "destTags": ["deep"],
+    "nodes": [
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "choices": [
+          {
+            "label": "灰塵を避けて慎重に登る",
+            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+          },
+          { "label": "灰塵の中を一気に登る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "降り積もる灰塵の中、{members}名で尖塔の中腹まで登った(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "灰塵に視界を奪われ、{node}番目で引き返した。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "combatPower": 1.0 },
+        "choices": [
+          { "label": "息を潜めてやり過ごす", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
+          { "label": "一気に追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+        ],
+        "branches": [
+          {
+            "cond": "teamPower >= difficulty",
+            "result": "success",
+            "logTemplate": "尖塔に棲みつく影を退け、頂上への階段を確保した(力{teamPower}/難度{difficulty})。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "影の群れに阻まれ、階段には近づけなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 130,
+        "R": 40,
+        "statWeights": { "intellect": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "hasTrait('traitScholar') == true",
+            "result": "success",
+            "logTemplate": "学者が尖塔の壁面に刻まれた旧い測候記録を読み解いた。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "灰に埋もれた刻印は判読できなかった。"
+          }
+        ]
+      },
+      {
+        "difficulty": 150,
+        "R": 45,
+        "statWeights": { "dexterity": 1.0 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "maxStatHolder('dexterity') >= 70",
+            "result": "success",
+            "logTemplate": "崩れかけた螺旋階段を、器用な一人が渡り切った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "階段が崩れ、負傷者を出しながら登り続けた。"
+          }
+        ]
+      },
+      {
+        "difficulty": 170,
+        "R": 55,
+        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "choices": [],
+        "branches": [
+          {
+            "cond": "injuryCount == 0",
+            "result": "success",
+            "logTemplate": "降り積もる灰の中でも、誰も傷付かず尖塔の頂に立った。"
+          },
+          {
+            "cond": "true",
+            "result": "failure",
+            "logTemplate": "傷ついた仲間を支えながら、それでも尖塔の頂に立った。"
+          }
+        ]
+      }
+    ]
+  }
+]
