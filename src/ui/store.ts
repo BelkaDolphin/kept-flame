@@ -14,7 +14,7 @@
 //   | `ticked`          | フォアグラウンド tick 駆動(M29)   | engine advance で toTick まで進める |
 //   | `catchUpApplied`  | Worker catch-up 完了(platform/workerClient) | スナップショットを据える |
 //   | `commandApplied`  | プレイヤー操作(画面)             | engine の `apply(Command)` の結果を据える |
-//   | `cellSelected`    | ②格子ビューのタップ(M18/M30)     | 選択セルの変更(UI 状態) |
+//   | `cellSelected`    | ②格子ビューのタップ(M18/M30)     | 選択セルの変更(UI 状態)。**[M18] 占有セルはアンカーへ正規化**(§1 末尾/`CellSelectedEvent`) |
 //   | `screenOpened`    | 自前ハッシュルータ(M29・ADR-027) | 現在画面の写しを更新 |
 //
 //   **[M49] `stateApplied`(コマンド適用の暫定口)は撤去した。** 世界の中の
@@ -135,7 +135,19 @@ export interface CommandAppliedEvent {
   readonly command: CommandInput;
 }
 
-/** 選択セルの変更(GDD 6.6 の 2 ステップ配置)。null は選択解除。 */
+/**
+ * 選択セルの変更(GDD 6.6 の 2 ステップ配置)。null は選択解除。
+ *
+ * **[M18・★裁定] 占有セルを選択すると常にアンカーへ正規化される**(`applyEvent`
+ * の `cellSelected` 分岐を参照)。大型施設(GDD 6.1 の 2×1/1×2/2×2)は
+ * `anchorCellIndex === cellIndex` のセルにしか選択枠を描かない設計(M17 申し
+ * 送り・derived.ts の `CellViewModel` コメント)なので、非アンカーをタップして
+ * 生の cellIndex をそのまま選択に据えると「タップしたのに枠が出ない」矛盾が
+ * 起きる。代替案(非正規化のまま画面側で都度アンカーへ解決)も検討したが、
+ * `selectedCell` 派生値・将来の全画面が同じ解決を書く羽目になるため、ストアの
+ * 単一箇所(ここ)で正規化する方を採った。空きセルの選択はそのまま(アンカーの
+ * 概念が無い)。
+ */
 export interface CellSelectedEvent {
   readonly type: "cellSelected";
   readonly cellIndex: number | null;
@@ -435,8 +447,15 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       case "catchUpApplied":
         return applyCatchUp(event);
       case "cellSelected": {
-        if (event.cellIndex !== null) requireCellIndex(event.cellIndex);
-        sources.selectedCellIndex.set(event.cellIndex);
+        let normalizedCellIndex = event.cellIndex;
+        if (normalizedCellIndex !== null) {
+          requireCellIndex(normalizedCellIndex);
+          // [M18・★裁定] 占有セルはアンカーへ正規化する(CellSelectedEvent の
+          // コメント参照)。空きセル(placement === null)はそのまま。
+          const placement = sources.cellPlacement[normalizedCellIndex]?.peek() ?? null;
+          if (placement !== null) normalizedCellIndex = placement.anchorCellIndex;
+        }
+        sources.selectedCellIndex.set(normalizedCellIndex);
         return {
           type: "cellSelected",
           stateChanged: false,

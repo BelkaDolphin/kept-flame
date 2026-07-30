@@ -24,6 +24,7 @@ import {
   CELL_FAR,
   CELL_SOUTHEAST,
   HEARTH,
+  SMELTER,
   at,
   boardContent,
   boardState,
@@ -318,6 +319,24 @@ describe("worldLoaded / UI 状態のイベント", () => {
     expect(() => store.dispatch({ type: "cellSelected", cellIndex: -1 })).toThrow(StoreError);
     store.dispatch({ type: "cellSelected", cellIndex: 47 });
     expect(store.sources.selectedCellIndex.peek()).toBe(47);
+  });
+
+  it("[M18・★裁定] 大型施設の非アンカーセルを選択するとアンカーへ正規化される", () => {
+    // セル 30(x0,y5)にアンカーを置いた 2×1(横長)の製錬炉。占有は 30 と 31。
+    const { store } = createTestStore([
+      facility("fBig", SMELTER.id, 30, [], 1, { width: 2, height: 1 }),
+    ]);
+
+    store.dispatch({ type: "cellSelected", cellIndex: 31 });
+    expect(store.sources.selectedCellIndex.peek()).toBe(30);
+
+    // アンカー自身を選択しても当然そのまま。
+    store.dispatch({ type: "cellSelected", cellIndex: 30 });
+    expect(store.sources.selectedCellIndex.peek()).toBe(30);
+
+    // 空きセルの選択は正規化されず、そのまま。
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_FAR });
+    expect(store.sources.selectedCellIndex.peek()).toBe(CELL_FAR);
   });
 
   it("画面遷移イベントは現在画面の写しを更新する(権威はルータ・ADR-027)", () => {

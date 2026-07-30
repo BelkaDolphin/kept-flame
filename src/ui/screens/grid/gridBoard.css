@@ -1,0 +1,92 @@
+/*
+ * 継ぐ火 -Kept Flame- 格子UI(M18)スタイル。
+ *
+ * ライトテーマ固定(ユーザーのグローバルルール: ダークモード/ダークテーマ禁止)。
+ * `prefers-color-scheme` の分岐は書かない。色/記号/パターンの4重符号化
+ * (GDD 6.5・ADR-003)は M19 の担当なので、ここでは構造(枠・タップ領域の
+ * 確保・パン/ピンチのためのブラウザ既定ジェスチャ抑止)だけを持つ。
+ *
+ * セルの実寸(CELL_SIZE_PX)は gridConstants.ts が単一の出典であり、ここでは
+ * ハードコードしない——GridBoard.tsx が `width`/`height` をインラインスタイル
+ * として都度渡す(このファイルはそれ以外の見た目だけを持つ)。
+ */
+
+.kf-grid-viewport {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  /* 6×8 のアスペクト比(幅:高さ = 6:8)をコンテナの高さの既定値にしておく。
+     実際の表示サイズは呼び出し側(M30)がコンテナへ CSS で与える。 */
+  aspect-ratio: 6 / 8;
+  background: #f4f2ee;
+  border: 1px solid #8a857d;
+  /* ブラウザ既定のスクロール/ピンチズームと自前ジェスチャが競合しないように
+     touch-action を殺す(GDD 6.6 のピンチズーム/パンは JS 側で自前実装する)。 */
+  touch-action: none;
+  color-scheme: light;
+}
+
+.kf-grid-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.kf-cell {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* GDD 6.6: 最小タップ領域 44px 角。実寸はインラインスタイルで上書きされるが、
+     読み込み中の一瞬でも縮退しないよう下限として残す。 */
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #c9c3b8;
+  font-size: 0.7rem;
+  overflow: hidden;
+  color: #24201c;
+}
+
+.kf-cell--empty {
+  background: #ffffff;
+  color: #8a857d;
+}
+
+.kf-cell--connected {
+  background: #efe9df;
+  border-style: dashed;
+}
+
+.kf-cell--occupied {
+  background: #efe9df;
+}
+
+.kf-cell--selected {
+  border-color: #24201c;
+  border-width: 2px;
+  box-shadow: inset 0 0 0 1px #24201c;
+}
+
+.kf-cell--overcrowded {
+  border-color: #8c290b;
+}
+
+.kf-cell__placeholder {
+  font-size: 0.75rem;
+}
+
+.kf-cell__tag {
+  font-weight: 600;
+}
+
+.kf-cell__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-cell__badge {
+  font-size: 0.62rem;
+  color: #5b534b;
+}
