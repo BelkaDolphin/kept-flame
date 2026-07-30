@@ -35,7 +35,10 @@
 // 3. 隣接乗数は engine と同じ 1 実装(単一正準実装の維持)
 // ===========================================================================
 //   cellAdjacency は engine の {@link computeCellAdjacency} をそのまま呼ぶ。
-//   UI 用に式を書き直さない。よって UI 表示の乗数と、生産式が使う
+//   UI 用に式を書き直さない。**[M17] 大型施設の判定基準セル集合も engine と同じ
+//   footprint.ts の `adjacencyBasisCells` を呼ぶ**(GDD 6.3 が「`adjacency.json`
+//   スキーマと UI プレビュー共通ロジック」と定めている部分)。よって UI 表示の
+//   乗数と、生産式が使う
 //   `AdvanceContext.multiplierByFacilityId`(engine が同じ関数で precompute
 //   したもの)は常に一致する。この一致は tests/ui/derived.test.ts が直接
 //   assert している(乖離したら即落ちる)。
@@ -49,8 +52,10 @@ import {
   neighborCellIndices,
   type AdjacencyMatrix,
   type CellAdjacencyResult,
+  type CellOccupant,
   type Tag,
 } from "../engine/adjacency";
+import { adjacencyBasisCells, isUnitFootprint, occupiedCells } from "../engine/footprint";
 import { FIX_ONE, FIX_ZERO, toApproxNumber, toRaw, type Fix } from "../engine/fp";
 import type { RecordMedium } from "../engine/rules/types";
 import {
@@ -60,7 +65,7 @@ import {
   type GameState,
 } from "../engine/state/state";
 import { computed, type ReadonlyComputed } from "./reactive";
-import type { StoreSources } from "./sources";
+import type { CellPlacement, StoreSources } from "./sources";
 
 /** 8 近傍の一覧は盤面形状だけで決まる静的値なので、モジュール読込時に 1 回作る。 */
 const NEIGHBOR_CELLS: readonly (readonly number[])[] = (() => {
@@ -79,6 +84,20 @@ function neighborsOf(cellIndex: number): readonly number[] {
   return neighbors;
 }
 
+/**
+ * [M17] その施設の判定基準セル集合(GDD 6.3)。**engine と同じ 1 実装**を呼ぶ
+ * (§3 の規律。UI 用に「大型施設の近傍」を書き直さない)。
+ *
+ * 1×1 はモジュール読込時に作った {@link NEIGHBOR_CELLS} を返す近道を通る。
+ * `adjacencyBasisCells([cell])` と**同じ集合**であり(順序だけ違い、順序は
+ * `computeCellAdjacency` の中で辞書順へ再ソートされるので結果に残らない・
+ * footprint.ts §3)、評価ごとの配列生成を避けるためだけの分岐である。
+ */
+function basisCellsOfPlacement(placement: CellPlacement): readonly number[] {
+  if (isUnitFootprint(placement.footprint)) return neighborsOf(placement.anchorCellIndex);
+  return adjacencyBasisCells(occupiedCells(placement.anchorCellIndex, placement.footprint));
+}
+
 // --- 1. セル局所の派生値 ---------------------------------------------------
 
 /** セル 1 個の表示モデル。②格子ビュー / ③施設詳細が読む単位。 */
@@ -89,6 +108,13 @@ export interface CellViewModel {
   readonly occupied: boolean;
   readonly facilityId: EntityId | null;
   readonly defId: EntityId | null;
+  /**
+   * [M17] 占有矩形のアンカーセル(空きセルは null)。大型施設(GDD 6.1)は
+   * 全占有セルが同じ施設・同じ乗数を返すので、格子UI(M18)は
+   * `anchorCellIndex === cellIndex` のセルにだけ枠/バッジ/数値を描き、
+   * 残りの占有セルは連結表示に使う。
+   */
+  readonly anchorCellIndex: number | null;
   /** 施設タグ(4重符号化の記号/色/パターンの引き当て元・ADR-003)。 */
   readonly tags: readonly Tag[];
   readonly level: number;
@@ -124,6 +150,7 @@ function cellViewEquals(a: CellViewModel, b: CellViewModel): boolean {
     a.occupied === b.occupied &&
     a.facilityId === b.facilityId &&
     a.defId === b.defId &&
+    a.anchorCellIndex === b.anchorCellIndex &&
     a.tags === b.tags &&
     a.level === b.level &&
     a.workerCount === b.workerCount &&
@@ -138,11 +165,15 @@ function cellViewEquals(a: CellViewModel, b: CellViewModel): boolean {
 
 /** 格子全体の集計。②の凡例/総数と⑫帰還ダイジェスト専用。 */
 export interface GridSummary {
+  /** 施設が占有しているセルの数。[M17] 大型施設は占有セル数ぶん数える。 */
   readonly occupiedCellCount: number;
   readonly emptyCellCount: number;
-  /** 過密ペナルティが実際に掛かっているセルの数。 */
+  /**
+   * 過密ペナルティが実際に掛かっている**施設**の数。
+   * [M17] 大型施設はアンカーセルでのみ数える(1 施設 1 回・GDD 6.3)。
+   */
   readonly overcrowdedCellCount: number;
-  /** 無効化された近傍の総数(タグ横断)。 */
+  /** 無効化された近傍の総数(タグ横断)。[M17] 同じく施設単位の合計。 */
   readonly overcrowdedNeighborTotal: number;
 }
 
@@ -270,6 +301,7 @@ function buildCellView(
       occupied: false,
       facilityId: null,
       defId: null,
+      anchorCellIndex: null,
       tags: EMPTY_TAGS,
       level: 0,
       workerCount: 0,
@@ -288,6 +320,7 @@ function buildCellView(
     occupied: true,
     facilityId: facility.id,
     defId: facility.defId,
+    anchorCellIndex: placement.anchorCellIndex,
     tags: placement.tags,
     level: facility.level,
     workerCount: facility.workerIds.length,
@@ -321,15 +354,24 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
           // 空きセルは近傍を 1 つも読まない = 近傍が変わっても再計算されない。
           if (self === null) return null;
 
-          const occupancy = new Map<number, readonly Tag[]>();
-          for (const neighborIndex of neighborsOf(cellIndex)) {
-            const neighbor = sources.cellPlacement[neighborIndex]?.value ?? null;
-            if (neighbor !== null) occupancy.set(neighborIndex, neighbor.tags);
+          // [M17] 大型施設は自セルの 8 近傍ではなく**占有矩形の外周**が基準
+          // (GDD 6.3)。非アンカーセルからも同じ集合になるので、同じ施設の
+          // どのセルを読んでも同じ結果が出る(= ボーナスは 1 施設 1 回)。
+          const basisCells = basisCellsOfPlacement(self);
+          const occupancy = new Map<number, CellOccupant>();
+          for (const basisCell of basisCells) {
+            const neighbor = sources.cellPlacement[basisCell]?.value ?? null;
+            if (neighbor === null) continue;
+            occupancy.set(basisCell, {
+              anchorCellIndex: neighbor.anchorCellIndex,
+              tags: neighbor.tags,
+            });
           }
           return computeCellAdjacency(adjacencyMatrix.value, occupancy, {
-            cellIndex,
+            cellIndex: self.anchorCellIndex,
             defId: self.defId,
             tags: self.tags,
+            basisCells,
           });
         },
         { equals: cellAdjacencyEquals, name: `cellAdjacency[${String(i)}]` },
@@ -359,10 +401,16 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
       let occupiedCellCount = 0;
       let overcrowdedCellCount = 0;
       let overcrowdedNeighborTotal = 0;
-      for (const node of cellAdjacency) {
-        const result = node.value;
+      for (let cellIndex = 0; cellIndex < GRID_CELL_COUNT; cellIndex++) {
+        const node = cellAdjacency[cellIndex];
+        const result = node === undefined ? null : node.value;
         if (result === null) continue;
         occupiedCellCount++;
+        // [M17] 過密は**施設**の性質なので、大型施設が占有セル数ぶん重複計上
+        // されないようアンカーセルでだけ数える(GDD 6.3「1 施設 1 回」)。
+        // 占有セル数そのものは上の occupiedCellCount がセル単位で数える。
+        const placement = sources.cellPlacement[cellIndex]?.value ?? null;
+        if (placement !== null && placement.anchorCellIndex !== cellIndex) continue;
         if (result.overcrowdedNeighborCount > 0) {
           overcrowdedCellCount++;
           overcrowdedNeighborTotal += result.overcrowdedNeighborCount;

@@ -357,3 +357,125 @@ describe("12画面が同一状態をリアルタイム共有する", () => {
     detailMount.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// [M17] 大型施設(GDD 6.1 の 2×1 / 1×2 / 2×2)を UI 派生値が正しく扱えること。
+//
+// 盤面は fixtures の 3 基(cell 14 / 15 / 40 のかまど)に、**2×1 のかまど**を
+// アンカー cell 12(cell 12 と 13 を占有)へ足したもの。
+//   - cell 13 は cell 14(熱源)の西隣なので、2×1 として見たときだけ熱源が効く
+//     (アンカー cell 12 の 8 近傍に cell 14 は入らない)
+//   - cell 12 / 13 のどちらのセルからも同じ施設・同じ乗数が引ける(1 施設 1 回)
+//
+// footprint は **state 側**に持たせる(content の HEARTH は 1×1 定義のままで、
+// state が権威であることがそのままテストになっている・GDD 6.1 [2026-07-30裁定])。
+// ---------------------------------------------------------------------------
+
+const BIG_ANCHOR = 12;
+const BIG_TAIL = 13;
+const WIDE_2X1 = { width: 2, height: 1 } as const;
+
+function bigHearth(name = "fBig", anchor = BIG_ANCHOR) {
+  return facility(name, HEARTH.id, anchor, [], 1, WIDE_2X1);
+}
+
+describe("[M17] 大型施設の隣接判定(GDD 6.3 の判定基準セル)", () => {
+  it("アンカーの 8 近傍に無い基準セルの熱源が効く(占有矩形の外周が基準)", () => {
+    // アンカー cell 12 の 8 近傍に cell 14 は含まれない = 1×1 なら効かない。
+    expect(neighborhoodOf(BIG_ANCHOR)).not.toContain(CELL_CENTER);
+
+    const unit = createTestStore([facility("fUnit", HEARTH.id, BIG_ANCHOR)]);
+    expect(toRaw(at(unit.store.derived.cellView, BIG_ANCHOR).value.multiplierFix)).toBe(1_000_000);
+
+    const large = createTestStore([bigHearth()]);
+    expect(toRaw(at(large.store.derived.cellView, BIG_ANCHOR).value.multiplierFix)).toBe(1_200_000);
+  });
+
+  it("全占有セルが同じ施設・同じ乗数を返し、アンカーが分かる", () => {
+    const { store } = createTestStore([bigHearth()]);
+    const anchorView = at(store.derived.cellView, BIG_ANCHOR).value;
+    const tailView = at(store.derived.cellView, BIG_TAIL).value;
+
+    for (const view of [anchorView, tailView]) {
+      expect(view.occupied).toBe(true);
+      expect(view.facilityId).toBe(id("fBig"));
+      expect(view.anchorCellIndex).toBe(BIG_ANCHOR);
+      expect(toRaw(view.multiplierFix)).toBe(1_200_000);
+    }
+    // 空きセルはアンカーを持たない。
+    expect(at(store.derived.cellView, 0).value.anchorCellIndex).toBeNull();
+  });
+
+  it("UI の乗数と engine の multiplierByFacilityId が大型施設でも一致する", () => {
+    const { store } = createTestStore([bigHearth()]);
+    const engineMultiplier = store.peekAdvanceContext().multiplierByFacilityId.get(id("fBig"));
+    expect(engineMultiplier).toBeDefined();
+    if (engineMultiplier === undefined) return;
+    for (const cellIndex of [BIG_ANCHOR, BIG_TAIL]) {
+      expect(toRaw(at(store.derived.cellView, cellIndex).value.multiplierFix)).toBe(
+        toRaw(engineMultiplier),
+      );
+    }
+  });
+
+  it("大型施設の近傍は 1 施設 1 回しか数えない(過密の重複計上がない)", () => {
+    // 2×1(cell 12,13)+ かまど cell 6 / cell 7 を足す。
+    const { store } = createTestStore([
+      bigHearth(),
+      facility("fH6", HEARTH.id, 6),
+      facility("fH7", HEARTH.id, 7),
+    ]);
+
+    // cell 6 から見ると近傍の熱源は「cell 7 の 1 基」と「2×1(cell 12+13)の 1 基」の
+    // 2 施設。セル単位で数えると 3 件 = 過密になってしまう。
+    const view6 = at(store.derived.cellView, 6).value;
+    expect(view6.overcrowded).toBe(false);
+    expect(toRaw(view6.multiplierFix)).toBe(1_400_000);
+
+    // cell 7 から見ると 3 施設(cell 14 / 2×1 / cell 6)= 超過 1 件。
+    const view7 = at(store.derived.cellView, 7).value;
+    expect(view7.overcrowdedNeighborCount).toBe(1);
+    expect(toRaw(view7.multiplierFix)).toBe(1_300_000);
+  });
+
+  it("gridSummary は占有セル数はセル単位・過密は施設単位(アンカー)で数える", () => {
+    const { store } = createTestStore([
+      bigHearth(),
+      facility("fH6", HEARTH.id, 6),
+      facility("fH7", HEARTH.id, 7),
+    ]);
+    const summary = store.derived.gridSummary.value;
+    // 3(fixtures)+ 2(2×1)+ 2(cell 6/7)= 7 セル。
+    expect(summary.occupiedCellCount).toBe(7);
+    expect(summary.emptyCellCount).toBe(GRID_CELL_COUNT - 7);
+    // 過密は 2×1(アンカー 12)/ cell 7 / cell 14 の 3 施設。アンカー限定でなければ
+    // 2×1 が cell 12 と 13 で二重に数えられて 4 になる。
+    expect(summary.overcrowdedCellCount).toBe(3);
+    expect(summary.overcrowdedNeighborTotal).toBe(3);
+  });
+
+  it("大型施設でも fan-in は近傍に限られる(依存は自セル + 基準セル + 行列)", () => {
+    const { store } = createTestStore([bigHearth()]);
+    primeAllCells(store);
+    // 2×1 の基準セルは 7 個(cell 6,7,8,14,18,19,20)+ 自セル + 隣接行列 = 9。
+    expect(at(store.derived.cellAdjacency, BIG_ANCHOR).dependencyCount).toBe(9);
+    expect(at(store.derived.cellAdjacency, BIG_TAIL).dependencyCount).toBe(9);
+
+    const before = recomputeCounts(store.derived.cellAdjacency);
+    // 遠方セル(どの基準セルでもない cell 41)へ 1 基置く。
+    store.dispatch({ type: "commandApplied", command: placeHearth("fFarEast", 41) });
+    primeAllCells(store);
+    const recomputed = changedCells(before, recomputeCounts(store.derived.cellAdjacency));
+    expect(recomputed).not.toContain(BIG_ANCHOR);
+    expect(recomputed).not.toContain(BIG_TAIL);
+  });
+
+  it("占有セルが重なる state は 1 セル = 1 施設として reject する", () => {
+    // ストア生成は engine の precompute(createAdvanceContext → buildCellOccupancy)を
+    // 先に通るので RulesError が先着する。UI の根 signal 側(syncSourcesFromState)にも
+    // 同じ検査があり、engine を経由しない経路でも黙って通らない(二重防御)。
+    expect(() => createTestStore([bigHearth(), facility("fClash", HEARTH.id, BIG_TAIL)])).toThrow(
+      /1 セル = 1 施設/,
+    );
+  });
+});

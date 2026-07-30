@@ -60,8 +60,9 @@ import {
   type AdjacencyMatrix,
   type AdjacencySubject,
   type CellOccupancy,
-  type Tag,
+  type CellOccupant,
 } from "../adjacency";
+import { adjacencyBasisCellsOfFacility, occupiedCellsOfFacility } from "../footprint";
 import { FIX_ONE, FIX_ZERO, addFix, mulFix, mulFixInt, toRaw, type Fix } from "../fp";
 import {
   entitiesOfKind,
@@ -104,28 +105,53 @@ import {
 // --- 1. 配置(occupancy)の組み立て ---------------------------------------
 
 /**
- * state + content から {@link CellOccupancy}(セル番号 → タグ列)を作る。
+ * state + content から {@link CellOccupancy}(セル番号 → 占有者)を作る。
  * adjacency.ts は state を知らないので、その橋渡しがここになる。
  *
- * 同じセルに 2 施設が建っている state は配置バグなので reject する
+ * **[M17] 占有形状の権威は state の `FacilityState.footprint`** である
+ * (GDD 6.1 [2026-07-30裁定])。content の `FacilityDef.footprint` は**見ない**
+ * —— 見てしまうと content 側の footprint 変更が既存盤面の占有形状を遡って
+ * 書き換え、同じセーブから別の隣接乗数が出る(= 決定論バンドルの外で観測挙動が
+ * 変わる)。content → state への焼き込みは配置時に 1 度だけ行われ、その単一経路は
+ * commands.ts の `placeFacility` である(footprint.ts §1)。
+ *
+ * 大型施設は**全占有セル**に同一の {@link CellOccupant} を載せる。同じセルを
+ * 2 施設が占有している state は配置バグなので reject する
  * (1 セル = 1 施設・GDD 6.1)。
  *
- * @throws {RulesError} セルが重複している場合 / facility 定義が無い場合
+ * @throws {RulesError} 占有セルが重複している場合 / facility 定義が無い場合
+ * @throws {FootprintError} footprint が盤外へはみ出す場合(state 不変条件違反・
+ *   通常は update.ts が配置時に止めている)
  */
 export function buildCellOccupancy(state: GameState, content: EngineContent): CellOccupancy {
-  const occupancy = new Map<number, readonly Tag[]>();
+  const occupancy = new Map<number, CellOccupant>();
   for (const facility of entitiesOfKind(state, "facility")) {
-    if (occupancy.has(facility.cellIndex)) {
-      throw new RulesError(
-        `セル ${String(facility.cellIndex)} に複数の施設が建っている(1 セル = 1 施設・GDD 6.1)`,
-      );
+    const occupant: CellOccupant = {
+      anchorCellIndex: facility.cellIndex,
+      tags: requireFacilityDef(content, facility.defId).tags,
+    };
+    for (const cellIndex of occupiedCellsOfFacility(facility)) {
+      const existing = occupancy.get(cellIndex);
+      if (existing !== undefined) {
+        throw new RulesError(
+          `セル ${String(cellIndex)} に複数の施設が建っている(1 セル = 1 施設・GDD 6.1)。` +
+            `アンカー ${String(existing.anchorCellIndex)} の施設と ` +
+            `アンカー ${String(facility.cellIndex)} の施設が占有を取り合っている`,
+        );
+      }
+      occupancy.set(cellIndex, occupant);
     }
-    occupancy.set(facility.cellIndex, requireFacilityDef(content, facility.defId).tags);
   }
   return occupancy;
 }
 
-/** state + content から隣接計算の subject(施設 entity ID → 素性)を作る。 */
+/**
+ * state + content から隣接計算の subject(施設 entity ID → 素性)を作る。
+ *
+ * **[M17] `basisCells`(GDD 6.3 の判定基準セル集合)を必ず埋める**。1×1 でも
+ * 埋めるのは分岐を作らないためであり、1×1 では `neighborCellIndices` と同じ集合
+ * (順序だけ違う)になるので結果は変わらない(adjacency.ts §3(a)(e))。
+ */
 export function buildAdjacencySubjects(
   state: GameState,
   content: EngineContent,
@@ -137,6 +163,7 @@ export function buildAdjacencySubjects(
       cellIndex: facility.cellIndex,
       defId: def.id,
       tags: def.tags,
+      basisCells: adjacencyBasisCellsOfFacility(facility),
     });
   }
   return subjects;

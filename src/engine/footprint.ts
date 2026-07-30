@@ -58,8 +58,15 @@
 //   `computeCellAdjacency` の結果は変わらない —— 過密集計はタグ別バケットを
 //   cellId 辞書順へ**再ソート**してから使い(adjacency.ts §3(c))、cellId は
 //   一意なのでソートは全順序である = バケットへ積む順序は結果に影響しない。
-//   **本モジュールを adjacency.ts へ結線するのは M17 の担当**であり、M16 は
-//   state 表現と導出関数までを実装する(ロードマップ M16 / M17 の境界)。
+//
+//   **[M17 完了] 結線先は 2 箇所**(いずれも本モジュールを呼ぶだけで、基準セルの
+//   導出を自前で書かない):
+//     - engine: `rules/production.ts` の `buildAdjacencySubjects` が
+//       {@link adjacencyBasisCellsOfFacility} を `AdjacencySubject.basisCells` へ、
+//       `buildCellOccupancy` が {@link occupiedCellsOfFacility} を占有展開へ
+//     - UI:     `src/ui/sources.ts` が占有セル全部へ配置素性を載せ、
+//       `src/ui/derived.ts` が同じ基準セル集合で `computeCellAdjacency` を呼ぶ
+//       (GDD 6.3 の「`adjacency.json` スキーマと UI プレビュー共通ロジック」)
 // ---------------------------------------------------------------------------
 
 import { GRID_CELL_COUNT, GRID_HEIGHT, GRID_WIDTH, NEIGHBOR_OFFSETS } from "./adjacency";

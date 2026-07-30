@@ -11,16 +11,24 @@
 // ===========================================================================
 //   ここは「セル配置(タグの分布)から乗数を出す」純粋な幾何 + 行列演算だけを
 //   持ち、GameState も content の施設定義も知らない。入力は
-//   {@link CellOccupancy}(セル番号 → そのセルのタグ列)であり、これを state と
+//   {@link CellOccupancy}(セル番号 → そのセルの占有者)であり、これを state と
 //   content から組み立てるのは rules/production.ts の責務である。
 //   こうしておくと、UI の配置プレビュー(GDD 6.5)が「仮に置いたらどうなるか」を
 //   同じ関数で計算できる(state を作らずに occupancy だけ差し替えればよい)。
 //
+//   **[M17] footprint(占有形状)もここには持たない。** 大型施設の判定基準セル
+//   集合は footprint.ts の `adjacencyBasisCells` が導出し、呼び出し側が
+//   {@link AdjacencySubject.basisCells} として渡す(§3(e))。占有形状の権威は
+//   **state の `FacilityState.footprint`** であって content ではない
+//   (GDD 6.1 [2026-07-30裁定]・理由は footprint.ts §1)。
+//
 // ===========================================================================
 // 2. O(近傍) の上界(ADR-002(2) / ADR-029(2))
 // ===========================================================================
-//   過密判定はセル局所であり、あるセルの乗数は「自セル + 8 近傍」のタグにしか
-//   依存しない。よって 1 セル編集時の再計算上界は O(8) で、48 セル全走査は不要。
+//   過密判定はセル局所であり、ある施設の乗数は「自施設の占有セル群 + その外周」
+//   のタグにしか依存しない。よって 1 セル編集時の再計算上界は O(近傍) で、
+//   48 セル全走査は不要。1×1 なら外周は 8 近傍、[M17] 大型施設でも判定基準セルは
+//   2×1 で最大 10 個・2×2 で最大 12 個(盤内なら定数上界)。
 //   {@link computeFacilityMultipliers} が全施設分をまとめて計算するのは
 //   「1 回の advance の開始時に一度だけ」であり(配置は advance 中に変わらない)、
 //   毎 tick / 毎セグメントの再計算ではない。
@@ -28,20 +36,36 @@
 // ===========================================================================
 // 3. 判定規則(GDD 6.3 の確定事項をそのまま実装)
 // ===========================================================================
-//   (a) 近傍の列挙順は方向順 N, NE, E, SE, S, SW, W, NW に固定。
+//   (a) 近傍の列挙順は方向順 N, NE, E, SE, S, SW, W, NW に固定
+//       ({@link neighborCellIndices})。大型施設では基準セル集合の**昇順**に
+//       なる(footprint.ts の `adjacencyBasisCells`)が、(c) の辞書順再ソートを
+//       必ず通るので**列挙順の違いは結果に残らない**(footprint.ts §3)。
 //   (b) 過密はタグ単位で独立集計する。1 施設が複数タグを持つ場合、各タグの
 //       過密カウントに同時参加する(熱源かつ騒音の施設は両タグに別々に数える)。
-//   (c) 「3 つ目」判定は、方向順で列挙した後に**安定文字列(セルID)辞書順へ
-//       再ソート**し、先頭 (threshold-1) 件のみ通常ボーナス、それ以降を
-//       ボーナス無効化 + 超過 1 件につきペナルティ。
+//   (c) 「3 つ目」判定は、列挙した後に**安定文字列(セルID)辞書順へ再ソート**し、
+//       先頭 (threshold-1) 件のみ通常ボーナス、それ以降をボーナス無効化 +
+//       超過 1 件につきペナルティ。数えるのは**施設**であり(GDD 6.3
+//       「超過 1 施設につき」)、代表するセル ID は占有矩形のアンカーセル
+//       ({@link CellOccupant.anchorCellIndex})。**どの個体が有効になるかは
+//       現行の効果モデルでは観測不能**(裁定 N10・golden-vector-spec §8-9)だが、
+//       決定論のため常に辞書順で選ぶ。
 //   (d) 全ボーナスは加算 → 単一係数 ±60% クランプ。過密ペナはクランプ外で
-//       別途 ±clampFP でクランプしてから減算する。
-//   (e) 大型施設(2×1 / 2×2)は「全占有セルの外周 8 近傍の和集合から自セル群を
-//       除外」した集合を基準とし、ボーナスは 1 施設 1 回のみ計上する。T5 の
-//       縮約 state は施設を基準セル 1 個で表す(FacilityState.cellIndex)ため、
-//       占有セルの和集合は表現できない = **T5 では全施設を 1×1 として扱う**。
-//       footprint を state に入れる段階で (e) を実装すること(GDD 6.3 は
-//       `adjacency.json` スキーマと UI プレビュー共通ロジックとして規定)。
+//       別途 ±clampFP でクランプしてから減算する。ペナのクランプは**タグ横断の
+//       合計に 1 回**(1 施設 1 回)であり、タグごとではない — 複数タグ施設では
+//       各タグの超過が合算されてから切られる(sc16 の中心 smelter が
+//       6 × −0.15 = −0.90 → −0.60 になる挙動が golden で固定されている)。
+//   (e) **[M17 実装済み]** 大型施設(2×1 / 1×2 / 2×2)は「全占有セルの外周
+//       8 近傍の和集合から自セル群を除外」した集合を基準とし、ボーナスは
+//       1 施設 1 回のみ計上する。この集合の導出は footprint.ts の
+//       `adjacencyBasisCells`(M16)が持ち、本モジュールは
+//       {@link AdjacencySubject.basisCells} として受け取るだけ(§1)。
+//       省略時は 1×1 として `cellIndex` の 8 近傍を使う —— 1×1 では両者が
+//       同じ集合なので、**省略しても大型でない限り結果は同一**である
+//       (等価性は tests/engine/adjacencyFootprint.test.ts が固定)。
+//   (f) **[M17] 近傍側の大型施設も 1 施設 1 回**。2×1 の施設が自分の基準セル
+//       2 個に顔を出しても、過密カウントもボーナス項も 1 件しか積まない
+//       ((e) の「占有面積に依らず 1 施設 1 回」の近傍側の対応物)。同一性は
+//       アンカーセル番号で判定する(1 セル = 1 施設ゆえアンカー一致 ⇔ 同一施設)。
 //
 // ===========================================================================
 // 4. シード揺らぎ(GDD 6.4-2)
@@ -241,8 +265,31 @@ export interface AdjacencyMatrix {
   readonly seedOffset: SeedOffsetRange | null;
 }
 
-/** セル番号 → そのセルに建っている施設のタグ列(タグは宣言順)。 */
-export type CellOccupancy = ReadonlyMap<number, readonly Tag[]>;
+/**
+ * セル 1 個の占有者。**大型施設は占有セルの数だけ同じ占有者が現れる**ので、
+ * 施設単位の重複除去に使える同一性キーを併せて持つ(§3(f))。
+ *
+ * 同一性キーに占有矩形の**アンカーセル番号**(= 占有セルの最小番号・footprint.ts §3)
+ * を使うのは、次の 3 つが同時に成り立つため:
+ *   (a) entity ID を持ち込まずに済む(このモジュールは state を知らない・§1)
+ *   (b) それ自身がセル番号なので GDD 6.3(c) の「セルID 辞書順」の基準に流用できる
+ *   (c) 1 セル = 1 施設(GDD 6.1)ゆえ **アンカー一致 ⇔ 同一施設**
+ */
+export interface CellOccupant {
+  /** 占有矩形のアンカーセル番号(= `FacilityState.cellIndex`)。 */
+  readonly anchorCellIndex: number;
+  /** その施設のタグ列(タグは宣言順)。 */
+  readonly tags: readonly Tag[];
+}
+
+/**
+ * セル番号 → そのセルを占有している施設(GDD 6.1: 1 セル = 1 施設)。
+ *
+ * **[M17] 大型施設は全占有セルに同一の {@link CellOccupant} を載せる**
+ * (アンカーセルだけではない)。組み立ては rules/production.ts の
+ * `buildCellOccupancy` であり、そこが state の footprint を権威として展開する。
+ */
+export type CellOccupancy = ReadonlyMap<number, CellOccupant>;
 
 /**
  * GDD 6.3(d): 全ボーナス加算後の単一係数クランプ幅 ±60%。
@@ -359,9 +406,19 @@ export function applySeedOffsets(matrix: AdjacencyMatrix, worldSeedU32: number):
 
 /** 乗数の計算対象になる施設の素性(rules 側から渡す最小の情報)。 */
 export interface AdjacencySubject {
+  /** 占有矩形のアンカーセル(= `FacilityState.cellIndex`)。 */
   readonly cellIndex: number;
   readonly defId: string;
   readonly tags: readonly Tag[];
+  /**
+   * [M17] GDD 6.3 の**判定基準セル集合**。省略時は 1×1 として `cellIndex` の
+   * 8 近傍({@link neighborCellIndices})を使う(§3(e))。
+   *
+   * 大型施設ではここに footprint.ts の `adjacencyBasisCellsOfFacility` の戻り値
+   * (盤内・昇順・自セル群を除外済み・重複なし)を渡す。値域の検証はそちらが
+   * 済ませている契約であり、本モジュールは再検証しない。
+   */
+  readonly basisCells?: readonly number[];
 }
 
 /** {@link computeCellAdjacency} の結果。内訳ビュー(GDD 6.5)にそのまま使える。 */
@@ -372,7 +429,12 @@ export interface CellAdjacencyResult {
   readonly overcrowdPenaltyFix: Fix;
   /** 産出に掛ける乗数 = max(0, 1 + bonus + penalty)。 */
   readonly multiplierFix: Fix;
-  /** 過密でボーナスが無効化された近傍の件数(タグ横断の合計・可視化用)。 */
+  /**
+   * 過密でボーナスが無効化された近傍**施設**の件数(タグ横断の合計・可視化用)。
+   * [M17] 大型施設の近傍は 1 件として数える(§3(f))。複数タグ施設は参加した
+   * タグの数だけ加算される(タグ単位の独立集計の帰結・§3(b))ので、
+   * 「異なる施設の数」ではなく「(タグ, 施設) の超過ペアの数」である。
+   */
   readonly overcrowdedNeighborCount: number;
 }
 
@@ -392,35 +454,53 @@ function effectApplies(target: AdjacencyTarget, subject: AdjacencySubject): bool
 }
 
 /**
- * 1 施設(= 1 セル)の隣接ボーナス・過密ペナルティ・最終乗数を計算する。
- * 依存は自セルと 8 近傍のみ(§2 の O(8) 上界)。
+ * 1 施設の隣接ボーナス・過密ペナルティ・最終乗数を計算する。
+ * 依存は自施設の占有セル群と判定基準セルのみ(§2 の O(近傍) 上界)。
  *
  * 手順は GDD 6.3 のとおり:
- *   1. 8 近傍を方向順で列挙し、タグ単位に「そのタグを持つ近傍セル」を集める
- *   2. 各タグについてセルID 辞書順へ再ソートし、先頭 (threshold-1) 件のみ
- *      ボーナス有効、残りは無効化して超過数 × penaltyPerExcess を積む
- *   3. 有効な近傍 × 自セルのタグの全組合せでタグペア効果を引き、
+ *   1. 判定基準セル(1×1 なら 8 近傍・大型なら占有矩形の外周)を列挙し、
+ *      **施設単位に重複除去**した近傍占有者を集める(§3(f))
+ *   2. タグ単位に「そのタグを持つ近傍施設」を集める(§3(b))
+ *   3. 各タグについてセルID(アンカー)辞書順へ再ソートし、先頭 (threshold-1)
+ *      件のみボーナス有効、残りは無効化して超過数 × penaltyPerExcess を積む
+ *   4. 有効な近傍 × 自施設のタグの全組合せでタグペア効果を引き、
  *      target が自施設に当たるものだけ加算する
- *   4. ボーナス合計を ±60% にクランプ、ペナは別途 ±clampFP にクランプして加算
+ *   5. ボーナス合計を ±60% にクランプ、ペナは別途 ±clampFP にクランプして加算
  */
 export function computeCellAdjacency(
   matrix: AdjacencyMatrix,
   occupancy: CellOccupancy,
   subject: AdjacencySubject,
 ): CellAdjacencyResult {
-  const neighbors = neighborCellIndices(subject.cellIndex);
+  // basisCells を渡す経路でも自施設のアンカーの値域は必ず検査する
+  // (下の cellIdOf は近傍のアンカーしか見ないため)。
+  requireCellIndex(subject.cellIndex);
+  const basisCells = subject.basisCells ?? neighborCellIndices(subject.cellIndex);
 
-  // 1. タグ単位の独立集計(GDD 6.3(b))。方向順のまま積む。
-  const cellsByTag = new Map<Tag, number[]>();
-  for (const neighborIndex of neighbors) {
-    const tags = occupancy.get(neighborIndex);
-    if (tags === undefined) continue;
-    for (const tag of tags) {
-      const bucket = cellsByTag.get(tag);
+  // 1. 判定基準セルを走査し、施設単位に重複除去した近傍占有者を集める(§3(f))。
+  const neighbors: CellOccupant[] = [];
+  const seenAnchor: boolean[] = [];
+  for (const basisCell of basisCells) {
+    const occupant = occupancy.get(basisCell);
+    if (occupant === undefined) continue;
+    // 自施設は近傍ではない。基準セル集合は自セル群を除いてあるので
+    // (footprint.ts §3)通常は不発だが、占有展開と基準セル導出が別経路で
+    // 来た場合に自分自身とのタグペアを積まないための二重防御。
+    if (occupant.anchorCellIndex === subject.cellIndex) continue;
+    if (seenAnchor[occupant.anchorCellIndex] === true) continue;
+    seenAnchor[occupant.anchorCellIndex] = true;
+    neighbors.push(occupant);
+  }
+
+  // 2. タグ単位の独立集計(GDD 6.3(b))。走査順のまま積む。
+  const anchorsByTag = new Map<Tag, number[]>();
+  for (const occupant of neighbors) {
+    for (const tag of occupant.tags) {
+      const bucket = anchorsByTag.get(tag);
       if (bucket === undefined) {
-        cellsByTag.set(tag, [neighborIndex]);
+        anchorsByTag.set(tag, [occupant.anchorCellIndex]);
       } else {
-        bucket.push(neighborIndex);
+        bucket.push(occupant.anchorCellIndex);
       }
     }
   }
@@ -433,10 +513,11 @@ export function computeCellAdjacency(
   // ADJACENCY_TAGS の宣言順に走ることで、加算順序が occupancy の反復順に
   // 依存しない(GDD 11.7)。
   for (const tag of ADJACENCY_TAGS) {
-    const bucket = cellsByTag.get(tag);
+    const bucket = anchorsByTag.get(tag);
     if (bucket === undefined) continue;
 
-    // GDD 6.3(c): 方向順に列挙した後、セルID 辞書順へ再ソートして先頭のみ有効。
+    // GDD 6.3(c): 列挙した後、セルID 辞書順へ再ソートして先頭のみ有効。
+    // アンカーは施設ごとに一意なのでこのソートは全順序 = 走査順に依存しない。
     const ordered = [...bucket].sort((l, r) => compareUtf16(cellIdOf(l), cellIdOf(r)));
     const effectiveCount = ordered.length < effectiveLimit ? ordered.length : effectiveLimit;
     const excess = ordered.length - effectiveCount;
@@ -468,6 +549,7 @@ export function computeCellAdjacency(
 /**
  * 複数施設分の乗数をまとめて計算する(1 回の advance の開始時に一度だけ・§2)。
  * 戻り値のキーは呼び出し側が渡した識別子(施設 entity の ID)。
+ * **[M17] 大型施設も 1 施設 1 エントリ**(占有セルごとに増えない・§3(e))。
  *
  * 配置(occupancy)が変わったら作り直すこと。advance の途中で配置は変わらない
  * (配置変更は Command 経路であり T5 のスコープ外)という前提に立っている。

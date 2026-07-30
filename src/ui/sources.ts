@@ -15,7 +15,12 @@
 //   そこで根を**セル単位に割る**:
 //
 //     cellPlacement[i] : セル i の「隣接計算に効く素性」= 施設 ID / 定義 ID / タグ列
+//                        + [M17] アンカーセル / footprint(大型施設のため)
 //     cellFacility[i]  : セル i の施設 entity そのもの(Lv・就労者を表示するため)
+//
+//   [M17] **大型施設は全占有セルに載る**(2×1 なら 2 セル)。1 施設 1 セルだった
+//   M16 以前との差は「載るセル数」だけで、fan-in の上界の形は変わらない
+//   (依存は自セル + 判定基準セル = 定数上界・adjacency.ts §2)。
 //
 //   隣接 computed が読むのは cellPlacement だけなので、
 //     - Lv 変更・就労者変更 → cellFacility[i] だけが変わる → 近傍の隣接は再計算されない
@@ -46,10 +51,12 @@
 // ---------------------------------------------------------------------------
 
 import { GRID_CELL_COUNT, type Tag } from "../engine/adjacency";
+import { footprintOfFacility, occupiedCellsOfFacility } from "../engine/footprint";
 import { requireFacilityDef, type AdvanceContext, type EngineContent } from "../engine/rules/types";
 import {
   entitiesOfKind,
   type EntityId,
+  type FacilityFootprint,
   type FacilityState,
   type GameState,
 } from "../engine/state/state";
@@ -67,12 +74,28 @@ export class StoreSourceError extends Error {
 /**
  * セル 1 個の「隣接計算に効く素性」。**Lv と就労者を含めない**のが要点で、
  * これらは近傍の隣接ボーナスに影響しないから(§1)。
+ *
+ * **[M17] 大型施設(GDD 6.1 の 2×1 / 1×2 / 2×2)は全占有セルに同じ素性が載る**。
+ * どのセルからでも「この施設は何か」が引けるので、格子UI(M18)のセルタップ解決と
+ * 隣接プレビューが同じ根 signal を読める。非アンカーセルと区別したいときは
+ * `anchorCellIndex === cellIndex` を見る。
  */
 export interface CellPlacement {
   readonly facilityId: EntityId;
   readonly defId: EntityId;
   /** content の facility 定義から引いたタグ列(宣言順・engine 側と同一参照)。 */
   readonly tags: readonly Tag[];
+  /**
+   * [M17] 占有矩形のアンカーセル(= `FacilityState.cellIndex`)。
+   * 隣接計算の同一性キー(adjacency.ts の `CellOccupant.anchorCellIndex`)。
+   */
+  readonly anchorCellIndex: number;
+  /**
+   * [M17] **state から**解決した占有形状(省略 = 1×1 は解決済みなので常に非 undefined)。
+   * content の `FacilityDef.footprint` ではない —— 権威は state
+   * (GDD 6.1 [2026-07-30裁定]・engine 側と同じ規律)。
+   */
+  readonly footprint: FacilityFootprint;
 }
 
 /** タグ列の等価判定。content 由来の同一配列なら参照比較で即決する。 */
@@ -89,7 +112,14 @@ function tagsEqual(a: readonly Tag[], b: readonly Tag[]): boolean {
 export function cellPlacementEquals(a: CellPlacement | null, b: CellPlacement | null): boolean {
   if (a === b) return true;
   if (a === null || b === null) return false;
-  return a.facilityId === b.facilityId && a.defId === b.defId && tagsEqual(a.tags, b.tags);
+  return (
+    a.facilityId === b.facilityId &&
+    a.defId === b.defId &&
+    tagsEqual(a.tags, b.tags) &&
+    a.anchorCellIndex === b.anchorCellIndex &&
+    a.footprint.width === b.footprint.width &&
+    a.footprint.height === b.footprint.height
+  );
 }
 
 /**
@@ -214,12 +244,21 @@ export function syncSourcesFromState(
         `施設 "${facility.id}" のセル番号 ${String(facility.cellIndex)} が格子の範囲(0〜${String(GRID_CELL_COUNT - 1)})を外れている`,
       );
     }
-    if (facilityByCell[facility.cellIndex] !== null) {
-      throw new StoreSourceError(
-        `セル ${String(facility.cellIndex)} に複数の施設が建っている(1 セル = 1 施設・GDD 6.1)`,
-      );
+    // [M17] 大型施設は全占有セルへ載せる(GDD 6.1・footprint.ts §1)。1×1 では
+    // `occupiedCellsOfFacility` が `[cellIndex]` を返すので M16 以前と同一。
+    for (const cellIndex of occupiedCellsOfFacility(facility)) {
+      if (!cellIndexInRange(cellIndex)) {
+        throw new StoreSourceError(
+          `施設 "${facility.id}" の占有セル ${String(cellIndex)} が格子の範囲(0〜${String(GRID_CELL_COUNT - 1)})を外れている`,
+        );
+      }
+      if (facilityByCell[cellIndex] !== null) {
+        throw new StoreSourceError(
+          `セル ${String(cellIndex)} に複数の施設が建っている(1 セル = 1 施設・GDD 6.1)`,
+        );
+      }
+      facilityByCell[cellIndex] = facility;
     }
-    facilityByCell[facility.cellIndex] = facility;
   }
 
   const changedPlacementCells: number[] = [];
@@ -250,6 +289,8 @@ export function syncSourcesFromState(
               facilityId: facility.id,
               defId: facility.defId,
               tags: requireFacilityDef(content, facility.defId).tags,
+              anchorCellIndex: facility.cellIndex,
+              footprint: footprintOfFacility(facility),
             };
 
       if (placementSignal.set(placement)) changedPlacementCells.push(i);

@@ -13,9 +13,11 @@ import {
   createAdjacencyMatrix,
   type AdjacencyMatrix,
   type AdjacencyPairEntry,
+  type CellOccupant,
   type SeedOffsetRange,
   type Tag,
 } from "../../src/engine/adjacency";
+import { occupiedCells } from "../../src/engine/footprint";
 import { fixFromInt, fixFromRaw, type Fix } from "../../src/engine/fp";
 import type {
   EngineContent,
@@ -241,9 +243,42 @@ export function stateOf(
   );
 }
 
-/** タグ列を持つセル配置を直接作る(adjacency 単体テスト用)。 */
+/**
+ * タグ列を持つセル配置を直接作る(adjacency 単体テスト用)。
+ *
+ * [M17] `CellOccupancy` の値は「占有者(アンカー + タグ列)」になったので、
+ * `[cellIndex, tags]` の組は **1×1 施設**(アンカー = そのセル)として展開する。
+ * 大型施設を含む配置は {@link largeOccupancyOf} を使う。
+ */
 export function occupancyOf(
   entries: readonly (readonly [number, readonly Tag[]])[],
-): Map<number, readonly Tag[]> {
-  return new Map(entries);
+): Map<number, CellOccupant> {
+  const occupancy = new Map<number, CellOccupant>();
+  for (const [cellIndex, tags] of entries) {
+    occupancy.set(cellIndex, { anchorCellIndex: cellIndex, tags });
+  }
+  return occupancy;
+}
+
+/**
+ * [M17] 大型施設を含むセル配置を作る。1 エントリ = 1 施設で、占有セル集合は
+ * engine と同じ `occupiedCells`(footprint.ts)で展開する
+ * (テスト側で占有形状の計算を書き直さない)。
+ *
+ * @throws {Error} 占有セルが重複した場合(1 セル = 1 施設・GDD 6.1)
+ */
+export function largeOccupancyOf(
+  entries: readonly (readonly [number, FacilityFootprint, readonly Tag[]])[],
+): Map<number, CellOccupant> {
+  const occupancy = new Map<number, CellOccupant>();
+  for (const [anchorCellIndex, footprint, tags] of entries) {
+    const occupant: CellOccupant = { anchorCellIndex, tags };
+    for (const cellIndex of occupiedCells(anchorCellIndex, footprint)) {
+      if (occupancy.has(cellIndex)) {
+        throw new Error(`フィクスチャの占有セル ${String(cellIndex)} が重複している`);
+      }
+      occupancy.set(cellIndex, occupant);
+    }
+  }
+  return occupancy;
 }
