@@ -37,7 +37,9 @@
     "sc28-foot-basis-2x1-split-alpha",
     "sc29-foot-basis-2x2-alpha",
     "sc30-foot-neighbor-dedup-alpha",
-    "sc32-foot-board-edge-alpha"
+    "sc32-foot-board-edge-alpha",
+    "sc33-ev-destroy-records-alpha",
+    "sc33-ev-destroy-records-split"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -123,6 +125,8 @@
       "file": "sc31-foot-overcrowd-clamp-alpha.json",
       "vectorId": "sc31-foot-overcrowd-clamp-alpha"
     },
-    { "file": "sc32-foot-board-edge-alpha.json", "vectorId": "sc32-foot-board-edge-alpha" }
+    { "file": "sc32-foot-board-edge-alpha.json", "vectorId": "sc32-foot-board-edge-alpha" },
+    { "file": "sc33-ev-destroy-records-alpha.json", "vectorId": "sc33-ev-destroy-records-alpha" },
+    { "file": "sc33-ev-destroy-records-split.json", "vectorId": "sc33-ev-destroy-records-split" }
   ]
 }

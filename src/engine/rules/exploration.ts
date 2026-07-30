@@ -41,11 +41,16 @@
 //     cautious : 累積負傷が閾値へ達した時点のノードで撤退(報酬は
 //                `withdrawRewardRatio` = 半分・以降のノードは踏まない)
 //     press    : 撤退しない。失敗時の負傷が `pressInjuryMul`(×1.5)
-//   ノードごとの対話は event ランタイム(M22)+ 探索本部 UI(M32)の担当で
-//   あり、そのとき本モジュールのノード生成が content のイベントテーブル
-//   (`schema/event.ts` の `nodes[].choices/branches`)由来へ差し替わる。
+//   **[M22] ノード生成を content のイベントテーブル由来へ差し替えた。**
+//   目的地 ID が `EngineContent.eventDefs` の event を指していれば、難度 / R /
+//   statWeights / choices / branches はすべて content から来る({@link
+//   buildDispatchSnapshot} の中の 1 分岐 = 指示された「差し替え点 1 箇所」)。
+//   指していなければ M21 の手続き生成のままで、**1 bit も挙動が変わらない**。
+//   choices の選択そのものは引き続き `stance` から機械的に決める(GDD 8.1
+//   [2026-07-30裁定]①)—— プレイヤーへ問い返す口は探索本部 UI(M32)が要るため。
+//   差し替え点は `rules/event.ts` の `selectChoiceIndex` 1 関数に閉じてある。
 //   ADR-012(3) の分岐木上界(16 ノード/派遣)は、歩いた道だけを保存する現在の
-//   形では高々 8 ノードで、両枝を材料化する M22 まで余裕がある。
+//   形では高々 8 ノードで、両枝を材料化する段まで余裕がある。
 //
 // ===========================================================================
 // 4. 全滅リスクと安全曲線(GDD 8.5)と人口下限(GDD 7.6 / 11.4-9)
@@ -102,6 +107,7 @@ import {
   isAliveResident,
   livingResidents,
   requireEntity,
+  type DispatchEffect,
   type DispatchNode,
   type DispatchSnapshot,
   type DispatchStance,
@@ -120,10 +126,25 @@ import {
 import { compareUtf16 } from "../canonicalize";
 import { isCodified } from "./codify";
 import { residentCombatPower } from "./combat";
+import {
+  applyDispatchEffect,
+  buildCondContext,
+  choiceAt,
+  effectiveDifficultyFix,
+  effectiveTeamPowerFix,
+  eventDefForDestination,
+  nodeInjuryGainFix,
+  nodeRewardFix,
+  relatedTeamPowerFix,
+  renderLogTemplate,
+  selectBranchIndex,
+  selectChoiceIndex,
+} from "./event";
 import { createResidentLife } from "./lifespan";
 import { appendMemoirEntry, initializeResidentMemoir } from "./memoir";
 import { ARRIVAL_INITIAL_MORALE_FIX } from "./population";
 import { NEUTRAL_RESIDENT_STATS } from "./stats";
+import { applyOverflowPolicy } from "./storage";
 import { heldTechIdsOf, techHoldersOf } from "./techMemory";
 import {
   RulesError,
@@ -131,6 +152,7 @@ import {
   type AdvanceContext,
   type DistanceBand,
   type EngineContent,
+  type EventNodeDef,
   type ExplorationBandParams,
   type ExplorationParams,
 } from "./types";
@@ -283,16 +305,27 @@ export interface DispatchPlanInput {
 }
 
 /**
- * hash アドレス方式の draw(§2)。同じ (worldSeed, 派遣, 用途, ノード) なら
- * 常に同じ値で、ストリーム状態を持たない。
+ * hash アドレス方式の draw(§2)。同じ (worldSeed, 派遣, 用途, ノード, choiceKey)
+ * なら常に同じ値で、ストリーム状態を持たない。
+ *
+ * **[M22] `choiceKey` を salt へ足した**(ADR-007「salt=(dispatchId, nodeIndex,
+ * branchId, choiceKey)」)。選択肢が違えば同じノードでも独立な乱数列になり、
+ * 「慎重を選んだ場合と大胆を選んだ場合の roll が相関する」欠陥を構造的に消す。
+ *
+ * `choiceKey` を渡さない(= 選択肢の無い手続き生成)経路では salt 列の長さが
+ * M21 と同一になるので、**既存の探索テストの数値は 1 bit も動かない**。
+ * ADR-007 が併記する `branchId` は M22 では salt に入らない —— 分岐は判定の
+ * **後**に cond で決まり、分岐が決まった後に引く乱数が 1 つも無いためである
+ * (分岐ごとの追加抽選が入る段で足すこと。★要ユーザー判断として報告)。
  */
 function drawFor(
   worldSeedU32: number,
   input: DispatchPlanInput,
   purpose: number,
   nodeIndex: number,
+  choiceKey?: number,
 ): number {
-  return hashedDrawUint32(worldSeedU32, DOMAIN_TAGS.exploration, [
+  const salt: number[] = [
     saltFromId(input.destinationId),
     // GDD 8.2 の seed 材料 `teamIds`。ID 規則(ADR-011)は `|` を含まないので
     // 連結は曖昧にならず、並びは ID 昇順(呼び出し側が正規化済み)。
@@ -300,7 +333,9 @@ function drawFor(
     input.dispatchTick,
     purpose,
     nodeIndex,
-  ]);
+  ];
+  if (choiceKey !== undefined) salt.push(choiceKey);
+  return hashedDrawUint32(worldSeedU32, DOMAIN_TAGS.exploration, salt);
 }
 
 /**
@@ -341,16 +376,24 @@ export function buildDispatchSnapshot(
   requireBandParams(band, input.band);
 
   const teamPowerFix = teamPowerWithEquipment(state, content, input.memberIds);
-  const nodeCount = uniformIntFromDraw(
-    drawFor(worldSeedU32, input, SALT_PURPOSE.nodeCount, 0),
-    band.nodeCountMin,
-    band.nodeCountMax,
-  );
+  // [M22] 目的地 ID が event content を指していれば、ノード列はそこから来る
+  // (§3 の差し替え点はこの 1 行)。無ければ M21 の手続き生成のまま。
+  const eventDef = eventDefForDestination(content, input.destinationId, input.band);
+  const nodeCount =
+    eventDef === undefined
+      ? uniformIntFromDraw(
+          drawFor(worldSeedU32, input, SALT_PURPOSE.nodeCount, 0),
+          band.nodeCountMin,
+          band.nodeCountMax,
+        )
+      : eventDef.nodes.length;
+  const stanceInjuryMulFix = input.stance === "press" ? params.pressInjuryMulFix : FIX_ONE;
 
   const nodes: DispatchNode[] = [];
   let injuryFix = FIX_ZERO;
   let grossRewardFix = FIX_ZERO;
   let withdrawn = false;
+  let failureCount = 0;
 
   for (let i = 0; i < nodeCount; i++) {
     // GDD 8.3 の「直前選択」。cautious は負傷が閾値へ達した時点で以降を打ち切る。
@@ -361,31 +404,79 @@ export function buildDispatchSnapshot(
       withdrawn = true;
       break;
     }
-    const difficultyFix = fixFromInt(
+    const nodeDef = eventDef?.nodes[i];
+    // [M22] choice は判定の**前**に決まる(event.ts §2(a))。salt の choiceKey にも使う。
+    const choiceIndex =
+      nodeDef === undefined ? undefined : selectChoiceIndex(nodeDef, input.stance);
+    const choice = nodeDef === undefined ? undefined : choiceAt(nodeDef, choiceIndex);
+
+    const difficultyFix =
+      nodeDef === undefined
+        ? fixFromInt(
+            uniformIntFromDraw(
+              drawFor(worldSeedU32, input, SALT_PURPOSE.difficulty, i),
+              band.difficultyMin,
+              band.difficultyMax,
+            ),
+          )
+        : effectiveDifficultyFix(nodeDef, choice);
+    const rollRange = nodeDef === undefined ? band.rollRange : nodeDef.rollRange;
+    const rollFix = fixFromInt(
       uniformIntFromDraw(
-        drawFor(worldSeedU32, input, SALT_PURPOSE.difficulty, i),
-        band.difficultyMin,
-        band.difficultyMax,
+        drawFor(worldSeedU32, input, SALT_PURPOSE.roll, i, choiceIndex),
+        0,
+        rollRange,
       ),
     );
-    const rollFix = fixFromInt(
-      uniformIntFromDraw(drawFor(worldSeedU32, input, SALT_PURPOSE.roll, i), 0, band.rollRange),
-    );
     // GDD 8.2: 成否 = (関連チーム総合力 + 装備補正 + seededRoll(0..R)) >= difficulty
-    const success = toRaw(addFix(teamPowerFix, rollFix)) >= toRaw(difficultyFix);
-    const rewardFix = success ? band.rewardPerNodeFix : FIX_ZERO;
+    // event 経路の「関連チーム総合力」はノードの statWeights で重み付けした値
+    // (GDD 8.2「関連ステータスはイベント種別で変わる」)。
+    const nodeTeamPowerFix =
+      nodeDef === undefined
+        ? teamPowerFix
+        : effectiveTeamPowerFix(
+            relatedTeamPowerFix(state, content, input.memberIds, nodeDef),
+            params.equipmentBonusFix,
+            nodeDef,
+            choice,
+          );
+    const success = toRaw(addFix(nodeTeamPowerFix, rollFix)) >= toRaw(difficultyFix);
+    const rewardFix = success ? nodeRewardFix(band.rewardPerNodeFix, choice) : FIX_ZERO;
     if (!success) {
-      const injuryGain =
-        input.stance === "press"
-          ? mulFix(band.injuryPerFailureFix, params.pressInjuryMulFix)
-          : band.injuryPerFailureFix;
-      injuryFix = addFix(injuryFix, injuryGain);
+      failureCount++;
+      injuryFix = addFix(
+        injuryFix,
+        nodeInjuryGainFix(band.injuryPerFailureFix, choice, stanceInjuryMulFix),
+      );
     }
     const rescue =
       success &&
-      bernoulliHit(band.rescueChanceFix, drawFor(worldSeedU32, input, SALT_PURPOSE.rescue, i));
+      bernoulliHit(
+        band.rescueChanceFix,
+        drawFor(worldSeedU32, input, SALT_PURPOSE.rescue, i, choiceIndex),
+      );
     grossRewardFix = addFix(grossRewardFix, rewardFix);
-    nodes.push({ difficultyFix, rollFix, success, rewardFix, injuryFix, rescue });
+
+    const base: DispatchNode = { difficultyFix, rollFix, success, rewardFix, injuryFix, rescue };
+    if (nodeDef === undefined || eventDef === undefined) {
+      nodes.push(base);
+      continue;
+    }
+    // [M22] 判定の**後**に cond を評価して分岐・ログ・効果を確定する(event.ts §2(c))。
+    const outcome = resolveEventBranch(state, content, input, {
+      eventId: eventDef.id,
+      nodeDef,
+      nodeIndex: i,
+      teamPowerFix: nodeTeamPowerFix,
+      difficultyFix,
+      rollFix,
+      failureCount,
+    });
+    nodes.push(withBranchOutcome(base, choiceIndex, outcome));
+    if (outcome.withdraw) {
+      withdrawn = true;
+      break;
+    }
   }
 
   // GDD 8.3「撤退 = 資源半分確保」。
@@ -401,7 +492,7 @@ export function buildDispatchSnapshot(
   const order = casualtyOrderOf(state, content, input.memberIds);
   const casualtyMemberIds = [...order.slice(0, casualtyCount)].sort(compareUtf16);
 
-  return {
+  const snapshot: DispatchSnapshot = {
     id: input.dispatchId,
     destinationId: input.destinationId,
     band: input.band,
@@ -416,6 +507,84 @@ export function buildDispatchSnapshot(
     rewardResourceId: band.rewardResourceId,
     casualtyMemberIds,
   };
+  return eventDef === undefined ? snapshot : setField(snapshot, "eventId", eventDef.id);
+}
+
+/** {@link resolveEventBranch} の結果(そのノードの分岐で確定したもの)。 */
+interface EventBranchOutcome {
+  readonly branchIndex: number;
+  readonly logText: string;
+  readonly effects: readonly DispatchEffect[];
+  /** GDD 8.3 の撤退(以降のノードを踏まない)。 */
+  readonly withdraw: boolean;
+}
+
+/**
+ * [M22] 判定後の分岐を解決する(cond 評価 → result → logTemplate のレンダリング)。
+ *
+ * ここが「content を再参照しない」の境界である —— **この関数の中で content から
+ * 読んだものはすべて確定値としてスナップショットへ焼かれ**、帰還時には
+ * `DispatchNode.effects` / `logText` しか見ない(§1)。
+ */
+function resolveEventBranch(
+  state: GameState,
+  content: EngineContent,
+  input: DispatchPlanInput,
+  args: {
+    readonly eventId: EntityId;
+    readonly nodeDef: EventNodeDef;
+    readonly nodeIndex: number;
+    readonly teamPowerFix: Fix;
+    readonly difficultyFix: Fix;
+    readonly rollFix: Fix;
+    readonly failureCount: number;
+  },
+): EventBranchOutcome {
+  const ctx = buildCondContext(state, content, input.memberIds, args.nodeDef, {
+    teamPowerFix: args.teamPowerFix,
+    difficultyFix: args.difficultyFix,
+    injuryCount: args.failureCount,
+  });
+  const branchIndex = selectBranchIndex(args.nodeDef, ctx);
+  const branch = args.nodeDef.branches[branchIndex];
+  if (branch === undefined) {
+    throw new RulesError(
+      `event "${args.eventId}" のノード ${String(args.nodeIndex)} の分岐 ${String(branchIndex)} が無い(実装バグ)`,
+    );
+  }
+  const logText = renderLogTemplate(branch.logTemplate, {
+    band: BAND_LABEL[input.band],
+    event: args.eventId,
+    node: args.nodeIndex + 1,
+    members: input.memberIds.length,
+    teamPowerFix: args.teamPowerFix,
+    difficultyFix: args.difficultyFix,
+    rollFix: args.rollFix,
+    injuryCount: args.failureCount,
+  });
+  const result = branch.result;
+  const effects: DispatchEffect[] =
+    result.kind === "destroyRecords"
+      ? [{ kind: "destroyRecords", medium: result.medium, scope: result.scope }]
+      : [];
+  return { branchIndex, logText, effects, withdraw: result.kind === "withdraw" };
+}
+
+/**
+ * 分岐の結果をノードへ載せる。省略可フィールドの追加は生スプレッド禁止
+ * (ADR-028(1))なので `setField`(update.ts の単一コピー経路)を通す。
+ */
+function withBranchOutcome(
+  base: DispatchNode,
+  choiceIndex: number | undefined,
+  outcome: EventBranchOutcome,
+): DispatchNode {
+  let node = base;
+  if (choiceIndex !== undefined) node = setField(node, "choiceIndex", choiceIndex);
+  node = setField(node, "branchIndex", outcome.branchIndex);
+  node = setField(node, "logText", outcome.logText);
+  if (outcome.effects.length > 0) node = setField(node, "effects", outcome.effects);
+  return node;
 }
 
 /**
@@ -524,21 +693,25 @@ export function resolveExpedition(
     next = updateEntity(next, memberId, "resident", (r) => setField(r, "dispatched", false));
   }
 
-  // (2) 報酬。GDD 6.7 の保管上限/オーバーフローは通さない —— 帰還時の一括入荷を
-  //     連続生産と同じ会計へ入れると `cumulativeProduced`(損失率 GDD 11.4-7 の
-  //     分母)が探索ぶんで膨らみ、生産側の指標の意味が変わる。item(装備)の
-  //     overflow も含め、探索側の在庫処理は M22 の担当である。
+  // (2) 報酬。**生産側の会計(`cumulativeProduced` / `cumulativeOverflow`)は
+  //     通さない**(GDD 8.1 [2026-07-30裁定]⑥)。連続生産と同じ会計へ入れると
+  //     損失率(GDD 11.4-7)の分母が探索ぶんで膨らみ、生産側の指標の意味が
+  //     変わるためである。
+  //     [M22] 上限とあふれ処理(GDD 12.1 の `item.overflow{policy,convertTo,ratio}`)
+  //     だけは `balance.exploration.rewardOverflow` があるときに掛かる
+  //     (rules/storage.ts §2b)。ブロックが無ければ M21 と同一挙動。
   if (toRaw(snapshot.rewardFix) > 0) {
-    const resourceEntityId = rewardResourceEntityIdOf(next, snapshot.rewardResourceId);
-    if (resourceEntityId === undefined) {
-      throw new RulesError(
-        `探索報酬の資源 "${snapshot.rewardResourceId}" の在庫 entity が state に無い` +
-          "(派遣確定時に検査済みのはず = 実装バグ)",
-      );
+    next = applyExpeditionReward(next, ctx.content, snapshot.rewardResourceId, snapshot.rewardFix);
+  }
+
+  // (2b) [M22] スナップショットへ焼かれた効果(`destroyRecords` 等)。
+  //      ノード順 → 効果順の固定順で適用する(state のバイト列を決めるため)。
+  for (const node of snapshot.nodes) {
+    const effects = node.effects;
+    if (effects === undefined) continue;
+    for (const effect of effects) {
+      next = applyDispatchEffect(next, ctx.content, effect, tick);
     }
-    next = updateEntity(next, resourceEntityId, "resource", (r) =>
-      setField(r, "stock", addFix(r.stock, snapshot.rewardFix)),
-    );
   }
 
   // (3) 保護加入(GDD 7.7)+ 保護した側の memoirLog(GDD 7.3)。
@@ -574,6 +747,53 @@ export function resolveExpedition(
   next = appendRenderedLog(next, { tick, text: renderReturnLog(snapshot, rescuedIds.length) });
 
   return { state: next, casualtyIds: snapshot.casualtyMemberIds, rescuedIds, snapshot };
+}
+
+/**
+ * [M22] 探索報酬を在庫へ入れる(GDD 8.4 / 12.1 の item overflow)。
+ *
+ * `balance.exploration.rewardOverflow` が無ければ**素直に全量を足す**
+ * (= M21 と 1 bit も違わない)。あれば上限までを在庫へ入れ、あふれた分は
+ * 方策どおり破棄 or 変換する。生産側の会計は一切触らない(§(2) の doc)。
+ *
+ * @throws {RulesError} 報酬資源 / 変換先資源の受け皿 entity が state に無い場合
+ */
+function applyExpeditionReward(
+  state: GameState,
+  content: EngineContent,
+  rewardResourceId: EntityId,
+  rewardFix: Fix,
+): GameState {
+  const resourceEntityId = rewardResourceEntityIdOf(state, rewardResourceId);
+  if (resourceEntityId === undefined) {
+    throw new RulesError(
+      `探索報酬の資源 "${rewardResourceId}" の在庫 entity が state に無い` +
+        "(派遣確定時に検査済みのはず = 実装バグ)",
+    );
+  }
+  const policy = content.exploration?.rewardOverflow;
+  if (policy === undefined) {
+    return updateEntity(state, resourceEntityId, "resource", (r) =>
+      setField(r, "stock", addFix(r.stock, rewardFix)),
+    );
+  }
+  const current = requireEntity(state, resourceEntityId, "resource");
+  const outcome = applyOverflowPolicy(current.stock, rewardFix, policy);
+  let next = updateEntity(state, resourceEntityId, "resource", (r) =>
+    setField(r, "stock", addFix(r.stock, outcome.acceptedFix)),
+  );
+  if (outcome.convertToResourceId === null || toRaw(outcome.convertedFix) <= 0) return next;
+  const convertEntityId = rewardResourceEntityIdOf(next, outcome.convertToResourceId);
+  if (convertEntityId === undefined) {
+    throw new RulesError(
+      `探索報酬のオーバーフロー変換先 "${outcome.convertToResourceId}" の在庫 entity が state に無い` +
+        "(balance.exploration.rewardOverflow.convertTo の受け皿不在)",
+    );
+  }
+  next = updateEntity(next, convertEntityId, "resource", (r) =>
+    setField(r, "stock", addFix(r.stock, outcome.convertedFix)),
+  );
+  return next;
 }
 
 /**
@@ -617,17 +837,24 @@ function formatFixInt(value: Fix): string {
 
 /**
  * 帰還ログの本文を作る純関数(GDD 8.4)。**スナップショットだけから決まる**ので、
- * 同じセーブからは常に同じ文字列になる。
+ * 同じセーブからは常に同じ文字列になる(content を 1 度も読まない)。
  *
- * content 側の `logTemplate`(GDD 12.1 の `branches[].logTemplate`)は event
- * ランタイム(M22)が接続する。M21 は engine 内の最小テンプレで文字列化し、
- * 「保存されるのは完成文字列であってテンプレ参照ではない」(GDD 12.5-7)という
- * 形の方を先に確定させる。
+ * **[M22] content 側の `logTemplate`(GDD 12.1 の `branches[].logTemplate`)を
+ * 結線した。** ただし結線先は「テンプレを帰還時に展開する」ではなく
+ * 「**派遣確定時にレンダリング済みにした完成文字列**(`DispatchNode.logText`)を
+ * ここで連結する」である —— GDD 12.5-7 が帰還ログについて「レンダリング済み
+ * 完成文字列保存(再参照禁止)」と定めているため、テンプレ参照を帰還側に残すと
+ * 後日のテンプレ修正・tombstone 化で過去ログが壊れる。
+ *
+ * ノードに `logText` が 1 つも無い(= M21 の手続き生成)場合、出力は M21 と
+ * 完全に同一の文字列になる。
  */
 export function renderReturnLog(snapshot: DispatchSnapshot, rescuedCount: number): string {
   let successCount = 0;
+  const nodeTexts: string[] = [];
   for (const node of snapshot.nodes) {
     if (node.success) successCount++;
+    if (node.logText !== undefined && node.logText.length > 0) nodeTexts.push(node.logText);
   }
   const parts: string[] = [
     `${BAND_LABEL[snapshot.band]}探索「${snapshot.destinationId}」より${String(snapshot.memberIds.length)}名が帰還`,
@@ -643,7 +870,10 @@ export function renderReturnLog(snapshot: DispatchSnapshot, rescuedCount: number
         : `${String(snapshot.casualtyMemberIds.length)}名が還らなかった`,
     );
   }
-  return `${parts.join("。")}。`;
+  const summary = `${parts.join("。")}。`;
+  // content 由来の分岐ログはノード順に summary の後ろへ足す(既存の 1 行目の
+  // バイト列を動かさないため、前置きではなく後置きにする)。
+  return nodeTexts.length === 0 ? summary : `${summary}${nodeTexts.join("")}`;
 }
 
 /**

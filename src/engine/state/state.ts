@@ -403,8 +403,15 @@ export interface TechLossState {
    * (B) のみ、(A) には使わない」)。
    */
   readonly irreversible: boolean;
-  /** 最後の保持者(この住民の死亡で保持者ゼロになった)の ID。 */
-  readonly lastHolderId: EntityId;
+  /**
+   * 最後の保持者(この住民の死亡で保持者ゼロになった)の ID。
+   *
+   * **[M22] 省略可になった。** 記録の焼失(`destroyRecords`・GDD 11.1 追補)で
+   * 「生存保持者ゼロ かつ 記録ゼロ」に達した場合、喪失の引き金は**死亡ではなく
+   * 記録の消滅**なので名指しできる保持者が居ない。そのときだけキーごと省略する
+   * (= 従来の死亡起因の喪失は必ずキーを持つ = 既存セーブのバイト列は不変)。
+   */
+  readonly lastHolderId?: EntityId;
 }
 
 /**
@@ -658,7 +665,43 @@ export interface DispatchNode {
   readonly injuryFix: Fix;
   /** このノードで「探索での保護」が起きたか(GDD 7.7)。 */
   readonly rescue: boolean;
+  /**
+   * [M22] 選ばれた choice の添字(GDD 8.3・`EventNodeDef.choices` の添字)。
+   * **省略時は「選択肢が無かった」**(M21 の手続き生成ノードは常に省略)。
+   */
+  readonly choiceIndex?: number;
+  /**
+   * [M22] 成立した branch の添字(`EventNodeDef.branches` の添字)。
+   * **省略時は「分岐を持たないノード」**(同上)。
+   */
+  readonly branchIndex?: number;
+  /**
+   * [M22] 成立した branch の `logTemplate` を**レンダリングし終えた完成文字列**
+   * (GDD 8.4 / 12.5-7「帰還ログはレンダリング済み完成文字列保存(再参照禁止)」)。
+   * **省略時は分岐ログ無し**。
+   */
+  readonly logText?: string;
+  /**
+   * [M22] 帰還 tick に適用する効果(GDD 12.1 追補の `destroyRecords` 等)。
+   * **省略時は効果なし**。派遣確定時に確定済みの値だけを持つので、帰還処理は
+   * content を読まずに適用できる(rules/exploration.ts §1)。
+   */
+  readonly effects?: readonly DispatchEffect[];
 }
+
+/**
+ * [M22] スナップショットへ焼き込まれた効果 1 件。**確定値のみ**(content を
+ * 指すのは resource / medium のような engine 既知の語彙だけ)。
+ *
+ * `kind`/`id` を持たない値オブジェクトである(entity ではない)。
+ */
+export type DispatchEffect = {
+  readonly kind: "destroyRecords";
+  /** 対象媒体(`rules/types.ts` の `DestroyRecordsMedium`)。 */
+  readonly medium: string;
+  /** 対象範囲(同 `DestroyRecordsScope`)。 */
+  readonly scope: string;
+};
 
 /**
  * [M21] 派遣 1 本ぶんのスナップショット(GDD 8.2 / 12.5-7)。
@@ -699,6 +742,15 @@ export interface DispatchSnapshot {
    * `memberIds` と一致すれば全滅である。
    */
   readonly casualtyMemberIds: readonly EntityId[];
+  /**
+   * [M22] このイベント列の出所になった event content の ID(GDD 12.1)。
+   * **省略時は M21 の手続き生成**(content に event が無い / 目的地に対応する
+   * event が無い場合)であり、既存セーブのバイト列は 1 bit も動かない。
+   *
+   * スナップショットに焼くのは「どの event だったか」を後から示すためだけで
+   * あり、帰還処理はこの ID で content を引き直さない(GDD 12.5-7)。
+   */
+  readonly eventId?: EntityId;
 }
 
 /**

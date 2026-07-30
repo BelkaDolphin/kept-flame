@@ -799,6 +799,46 @@
       ],
       "observedBy": ["digest", "probe"],
       "note": "[M20] sc28-foot-basis-2x1-alpha が固定(rng-state-nonempty-roundtripと同じ往復検証ロジックをfootprint付きstateへ適用・tools/goldenVectorBuilder.ts)。反証: footprintキーの読み書き(serialize.ts §7 の「1×1は省略が正準形・明示はreject」)が壊れると往復後のdigestが一括実行と食い違い、golden:writeがGeneratorErrorで停止する。canonicalJsonLengthもfootprintキー分だけ1×1省略シナリオ(既存56本)より長くなることで構造差を検出する"
+    },
+    {
+      "id": "ev-destroy-records-flammable",
+      "title": "destroyRecords{medium:any, scope:flammable} は可燃(紙)の完成済み記録だけを消し、不燃(石板)は残す",
+      "refs": [
+        "GDD 11.1 [2026-07-27追補]",
+        "src/engine/rules/event.ts destroyRecords",
+        "src/engine/rules/codify.ts flammableRecords"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M22] sc33-ev-destroy-records-alpha が固定。盤面は記録3枚(techFireStarting の紙+石板、techPottery の紙)。tick 100 の帰還で紙2枚だけが消え entity は 7→5 になる。反証(2026-07-31 実測): destroyRecords を no-op にすると entityCount 7 / canonicalJsonLength 1330 / digest fcb4fad13641b1dd76b11267cd5bbee1、可燃フィルタを常に true にすると entityCount 4 / length 869 / digest cb2df60ea9de10fa38bdea7ceca8577e(正: 5 / 1042 / 94af1ac51d0d853185e4da232481dad5)。どちらも entityCount と stateDigest の両方が動く。**MVP の content は火災イベントを1本も持たない**(GDD 11.1 追補)ので、この経路を踏むのは conformance シナリオが手で置いた派遣スナップショットだけである(engine 側プリミティブの挙動固定が目的・ロードマップ M22 行)"
+    },
+    {
+      "id": "ev-destroy-records-tech-loss",
+      "title": "記録ゼロ かつ 生存保持者ゼロ になった tech だけが周回内喪失し、記録が1枚でも残る tech は成文化済みのまま",
+      "refs": [
+        "GDD 11.1 [2026-07-27追補] 焼失セマンティクス",
+        "GDD 7.4",
+        "src/engine/rules/techMemory.ts applyTechLossIfOrphaned"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M22] sc33-ev-destroy-records-alpha が固定。techPottery は紙1枚のみ+保持者ゼロ+research完了済みなので、焼失で research が completedTick:null / progress:0 / loss{tick:100, irreversible:false} へ戻る(lastHolderId は記録焼失起因ゆえキーごと省略)。techFireStarting は石板が残るので何も起きない。反証(2026-07-31 実測): applyTechLossIfOrphaned の呼び出しを外すと researchCompletedCount 1 / canonicalJsonLength 999 / digest f63565ad7488a961663ec52f39147d3d(正: 0 / 1042 / 94af1ac51d0d853185e4da232481dad5)。entityCount は 5 のままなのでダイジェストと researchCompletedCount が反証になる。喪失判定が死亡起因と別実装になれば 2 経路の食い違いとしてここに出る"
+    },
+    {
+      "id": "ev-effect-snapshot-applied",
+      "title": "派遣スナップショットへ焼かれた効果(DispatchNode.effects)が帰還tick(段60)で content 再参照なしに適用される",
+      "refs": [
+        "GDD 12.5-7",
+        "src/engine/rules/exploration.ts resolveExpedition",
+        "src/engine/state/serialize.ts §9"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M22] sc33-ev-destroy-records-alpha が固定。シナリオの content には event が1本も無い(content/event.json 自体が未投入)が、スナップショットに焼かれた effects だけで記録の破壊が起きる = 帰還処理が content を読んでいないことの直接の証拠。反証(2026-07-31 実測): 効果適用を外すと entityCount 7 / digest fcb4fad13641b1dd76b11267cd5bbee1 へ動く。帰還処理が content から効果を引き直す実装になっていても、event 定義の無いこのシナリオでは同じく効果が発火せず entityCount 7 になる"
+    },
+    {
+      "id": "ev-split-at-return-tick",
+      "title": "分割不変性: 効果を持つ派遣の帰還tickちょうどでadvanceを区切っても最終状態が一括実行と一致する",
+      "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts expeditionReturn"],
+      "observedBy": ["split-digest"],
+      "note": "[M22] sc33-ev-destroy-records-split(splitTicks=[100])が固定。C6(分割不変性)を帰還+効果適用の境界イベントに対して踏む。反証: 効果の適用が区間境界で二重に走る/落ちると split 側の最終ダイジェストが一括実行と食い違い、golden:write が GeneratorError で停止する"
     }
   ]
 }

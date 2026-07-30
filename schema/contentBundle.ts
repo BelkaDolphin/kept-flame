@@ -27,6 +27,7 @@ import { canonicalizeJson } from "../src/engine/canonicalize";
 import { type AdjacencyContent, validateAdjacency } from "./adjacency";
 import { type BalanceContent, validateBalance } from "./balance";
 import type { ValidationIssue, ValidationResult } from "./common";
+import { type EventContent, validateEvent } from "./event";
 import { type FacilityContent, validateFacility } from "./facility";
 import { checkGlobalIdUniqueness } from "./idRegistry";
 import { type TechContent, validateTech } from "./tech";
@@ -38,6 +39,13 @@ export interface RawContentBundle {
   readonly trait: readonly unknown[];
   readonly adjacency: unknown;
   readonly balance: unknown;
+  /**
+   * [M22] event カテゴリ(GDD 12.1)。**省略可**であり、省略 = 空配列
+   * (= event という概念が無い content)。`content/event.json` はまだ無く、
+   * 投入は M23 の担当なので、既存の呼び出し側(sim / bench / conformance /
+   * テスト)はキーを足さなくてよい。
+   */
+  readonly event?: readonly unknown[];
 }
 
 export interface ContentBundle {
@@ -46,6 +54,8 @@ export interface ContentBundle {
   readonly trait: readonly TraitContent[];
   readonly adjacency: AdjacencyContent;
   readonly balance: BalanceContent;
+  /** [M22] event カテゴリ(省略された raw では空配列)。 */
+  readonly event: readonly EventContent[];
 }
 
 /**
@@ -186,6 +196,16 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
   const tech = collect(raw.tech, validateTech, "tech", issues);
   const facility = collect(raw.facility, validateFacility, "facility", issues);
   const trait = collect(raw.trait, validateTrait, "trait", issues);
+  // [M22] event は **strict: true** で検証する(statWeights = 裁定 B8 の正本語彙 /
+  //   result = 短縮記法の語彙)。engine へ到達する経路はここだけなので、緩い既定
+  //   (= #12 計測サンプル互換)を使ってよいのは `validateEvent()` の単体呼び出しに
+  //   限られる(schema/event.ts の ValidateEventOptions の doc)。
+  const event = collect(
+    raw.event ?? [],
+    (value) => validateEvent(value, { strict: true }),
+    "event",
+    issues,
+  );
 
   const adjacencyCanonical = canonicalizeJson(raw.adjacency);
   const adjacencyResult = validateAdjacency(adjacencyCanonical);
@@ -215,6 +235,8 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
     tech: tech.map((t) => t.id),
     facility: facility.map((f) => f.id),
     trait: trait.map((t) => t.id),
+    // [M22] event も ID グローバル一意性(ADR-024(1))の対象へ入る。
+    event: event.map((e) => e.id),
   });
   if (idIssues.length > 0) return { ok: false, issues: idIssues };
 
@@ -229,6 +251,7 @@ export function validateContentBundle(raw: RawContentBundle): ValidationResult<C
       trait,
       adjacency: adjacencyResult.value,
       balance: balanceResult.value,
+      event,
     },
   };
 }

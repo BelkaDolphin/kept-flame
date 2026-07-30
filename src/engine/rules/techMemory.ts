@@ -532,25 +532,54 @@ export function applyTechLossOnDeath(
   let next = state;
   const lost: TechLossOutcome[] = [];
   for (const techId of heldTechIdsOf(state, deceasedId)) {
-    // 記録が 1 枚でも残っていれば知識は失われない(GDD 11.1 追補の焼失セマンティクス)。
-    if (isCodified(next, techId)) continue;
-    // 生存保持者が 1 人でも残っていれば失われない。
-    if (techHoldersOf(next, techId).length > 0) continue;
-    const research = researchEntityOfTech(next, techId);
-    // 解禁されていない(research entity が無い / 未完了)技術は失うものが無い。
-    if (research === undefined || research.completedTick === null) continue;
-
-    const irreversible = lossClassOfTech(content, techId) === "rareIrreversible";
-    next = updateEntity(next, research.id, "research", (r) =>
-      setField(setField(setField(r, "completedTick", null), "progress", FIX_ZERO), "loss", {
-        tick,
-        irreversible,
-        lastHolderId: deceasedId,
-      }),
-    );
-    lost.push({ techId, irreversible });
+    const applied = applyTechLossIfOrphaned(next, content, techId, tick, deceasedId);
+    next = applied.state;
+    if (applied.outcome !== undefined) lost.push(applied.outcome);
   }
   return { state: next, lost };
+}
+
+/**
+ * [M22] 「生存保持者ゼロ かつ 記録ゼロ」に達した 1 技術へ喪失を適用する
+ * (GDD 7.4 / GDD 11.1 [2026-07-27追補] の焼失セマンティクス)。
+ *
+ * {@link applyTechLossOnDeath}(死亡起因)と `rules/event.ts` の
+ * `destroyRecords`(記録の焼失起因)の**共通の 1 箇所**であり、判定の順序も
+ * 書き込む内容も両者で完全に同じになる(喪失判定が二重の真実にならない)。
+ *
+ * `lastHolderId` が null なのは記録の焼失で喪失した場合であり、そのときは
+ * `research.loss.lastHolderId` をキーごと省略する(名指しできる保持者が
+ * 居ないため・state.ts の {@link ../state/state.TechLossState})。
+ *
+ * 喪失しない(= 何もしない)条件は 3 つ:
+ *   (a) 記録が 1 枚でも残っている
+ *   (b) 生存保持者が 1 人でも残っている
+ *   (c) その技術がそもそも解禁されていない(research entity が無い / 未完了)
+ */
+export function applyTechLossIfOrphaned(
+  state: GameState,
+  content: EngineContent,
+  techId: EntityId,
+  tick: number,
+  lastHolderId: EntityId | null,
+): { readonly state: GameState; readonly outcome: TechLossOutcome | undefined } {
+  // 記録が 1 枚でも残っていれば知識は失われない(GDD 11.1 追補の焼失セマンティクス)。
+  if (isCodified(state, techId)) return { state, outcome: undefined };
+  // 生存保持者が 1 人でも残っていれば失われない。
+  if (techHoldersOf(state, techId).length > 0) return { state, outcome: undefined };
+  const research = researchEntityOfTech(state, techId);
+  // 解禁されていない(research entity が無い / 未完了)技術は失うものが無い。
+  if (research === undefined || research.completedTick === null) {
+    return { state, outcome: undefined };
+  }
+
+  const irreversible = lossClassOfTech(content, techId) === "rareIrreversible";
+  const loss =
+    lastHolderId === null ? { tick, irreversible } : { tick, irreversible, lastHolderId };
+  const next = updateEntity(state, research.id, "research", (r) =>
+    setField(setField(setField(r, "completedTick", null), "progress", FIX_ZERO), "loss", loss),
+  );
+  return { state: next, outcome: { techId, irreversible } };
 }
 
 /** その research entity が (B) 一回性喪失で永久に失われているか(GDD 7.4)。 */

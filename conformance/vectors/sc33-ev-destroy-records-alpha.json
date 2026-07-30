@@ -1,0 +1,40 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1042,
+    "counters": {
+      "rateChangeEventCount": 1,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 20,
+      "stochasticStepCount": 20,
+      "stochasticTrialCount": 40
+    },
+    "probe": {
+      "entityCount": 5,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 0,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 200
+    },
+    "stateDigest": "94af1ac51d0d853185e4da232481dad5"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": [
+    "ev-destroy-records-flammable",
+    "ev-destroy-records-tech-loss",
+    "ev-effect-snapshot-applied"
+  ],
+  "scenarioId": "sc33-ev-destroy-records",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 200,
+  "vectorId": "sc33-ev-destroy-records-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

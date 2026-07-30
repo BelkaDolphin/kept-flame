@@ -190,6 +190,7 @@ import {
   isEntityId,
   isMemoirEntryKind,
   type CodifyState,
+  type DispatchEffect,
   type DispatchNode,
   type DispatchSnapshot,
   type DispatchStance,
@@ -211,7 +212,7 @@ import {
   type TechLossState,
   type TechMemoryState,
 } from "./state";
-import { createGameState } from "./update";
+import { createGameState, setField } from "./update";
 
 /** 直列化形が壊れている(型違い・未知種別・ID 規則違反など)。 */
 export class SerializeError extends Error {
@@ -280,7 +281,8 @@ export type SerializedFacility = {
 export type SerializedTechLoss = {
   readonly tick: number;
   readonly irreversible: boolean;
-  readonly lastHolderId: string;
+  /** [M22] 記録の焼失による喪失には最後の保持者が居ないので**省略可**。 */
+  readonly lastHolderId?: string;
 };
 
 export type SerializedResearch = {
@@ -394,7 +396,13 @@ export type SerializedGameState = {
   readonly renderedLogs?: SerializedRenderedLogs;
 };
 
-/** [M21] スナップショットされたイベントノード(state.ts の {@link DispatchNode})。 */
+/**
+ * [M21] スナップショットされたイベントノード(state.ts の {@link DispatchNode})。
+ *
+ * **[M22] 末尾 4 つは省略可**(event content 由来のノードだけが持つ)。省略時は
+ * M21 の手続き生成ノードそのものであり、既存セーブ・既存 golden vector の
+ * バイト列は 1 bit も動かない(§9 の「無ければキーごと出さない」規約)。
+ */
 export type SerializedDispatchNode = {
   readonly difficulty: number;
   readonly roll: number;
@@ -402,6 +410,21 @@ export type SerializedDispatchNode = {
   readonly reward: number;
   readonly injury: number;
   readonly rescue: boolean;
+  /** [M22] 選ばれた choice の添字(GDD 8.3)。 */
+  readonly choiceIndex?: number;
+  /** [M22] 成立した branch の添字。 */
+  readonly branchIndex?: number;
+  /** [M22] 分岐ログのレンダリング済み完成文字列(GDD 8.4)。 */
+  readonly logText?: string;
+  /** [M22] 帰還時に適用する効果(`destroyRecords` 等)。 */
+  readonly effects?: readonly SerializedDispatchEffect[];
+};
+
+/** [M22] 焼き込まれた効果(state.ts の {@link DispatchEffect})。 */
+export type SerializedDispatchEffect = {
+  readonly kind: string;
+  readonly medium: string;
+  readonly scope: string;
 };
 
 /**
@@ -427,6 +450,8 @@ export type SerializedDispatchSnapshot = {
   readonly rewardResourceId: string;
   readonly casualtyMemberIds: readonly string[];
   readonly resolvedTree: { readonly choices: readonly SerializedDispatchNode[] };
+  /** [M22] 出所になった event content の ID。手続き生成なら**キーごと省略**。 */
+  readonly eventId?: string;
 };
 
 /** [M21] 帰還ログ(state.ts の {@link RenderedLogState})。 */
@@ -717,17 +742,27 @@ function serializeResearch(entity: ResearchState): SerializedResearch {
       completedTick: entity.completedTick,
     };
   }
+  // [M22] `lastHolderId` は省略可(記録の焼失による喪失には最後の保持者が
+  //       居ない・state.ts の TechLossState)。死亡起因の従来の喪失は必ず持つ
+  //       ので、既存セーブのバイト列は動かない。
+  const lastHolderId = rawLoss.lastHolderId;
+  if (lastHolderId === undefined) {
+    return {
+      kind: "research",
+      id: entity.id,
+      techId: entity.techId,
+      progress: toRaw(entity.progress),
+      completedTick: entity.completedTick,
+      loss: { tick: rawLoss.tick, irreversible: rawLoss.irreversible },
+    };
+  }
   return {
     kind: "research",
     id: entity.id,
     techId: entity.techId,
     progress: toRaw(entity.progress),
     completedTick: entity.completedTick,
-    loss: {
-      tick: rawLoss.tick,
-      irreversible: rawLoss.irreversible,
-      lastHolderId: rawLoss.lastHolderId,
-    },
+    loss: { tick: rawLoss.tick, irreversible: rawLoss.irreversible, lastHolderId },
   };
 }
 
@@ -762,9 +797,46 @@ function serializeEntity(entity: EntityState): SerializedEntity {
   }
 }
 
+/**
+ * [M21] 派遣ノード 1 件の直列化(§9)。
+ *
+ * **[M22] 省略可 4 キーは「値があるときだけ足す」**。生スプレッド禁止
+ * (ADR-028(1)・このファイルは免除対象外)なので、必須キーのリテラルへ
+ * `Object.entries` 連結で足す形にする(`toSerializable` の optional と同型)。
+ */
+function serializeDispatchNode(node: DispatchNode): SerializedDispatchNode {
+  const required = {
+    difficulty: toRaw(node.difficultyFix),
+    roll: toRaw(node.rollFix),
+    success: node.success,
+    reward: toRaw(node.rewardFix),
+    injury: toRaw(node.injuryFix),
+    rescue: node.rescue,
+  };
+  const optional: [string, unknown][] = [];
+  if (node.choiceIndex !== undefined) optional.push(["choiceIndex", node.choiceIndex]);
+  if (node.branchIndex !== undefined) optional.push(["branchIndex", node.branchIndex]);
+  if (node.logText !== undefined) optional.push(["logText", node.logText]);
+  if (node.effects !== undefined && node.effects.length > 0) {
+    optional.push([
+      "effects",
+      node.effects.map((effect) => ({
+        kind: effect.kind,
+        medium: effect.medium,
+        scope: effect.scope,
+      })),
+    ]);
+  }
+  if (optional.length === 0) return required;
+  return Object.fromEntries([
+    ...Object.entries(required),
+    ...optional,
+  ]) as unknown as SerializedDispatchNode;
+}
+
 /** [M21] 派遣スナップショットの直列化(§9)。ノード列は `resolvedTree.choices` へ。 */
 function serializeDispatchSnapshot(snapshot: DispatchSnapshot): SerializedDispatchSnapshot {
-  return {
+  const required = {
     id: snapshot.id,
     destinationId: snapshot.destinationId,
     band: snapshot.band,
@@ -777,17 +849,13 @@ function serializeDispatchSnapshot(snapshot: DispatchSnapshot): SerializedDispat
     reward: toRaw(snapshot.rewardFix),
     rewardResourceId: snapshot.rewardResourceId,
     casualtyMemberIds: [...snapshot.casualtyMemberIds],
-    resolvedTree: {
-      choices: snapshot.nodes.map((node) => ({
-        difficulty: toRaw(node.difficultyFix),
-        roll: toRaw(node.rollFix),
-        success: node.success,
-        reward: toRaw(node.rewardFix),
-        injury: toRaw(node.injuryFix),
-        rescue: node.rescue,
-      })),
-    },
+    resolvedTree: { choices: snapshot.nodes.map(serializeDispatchNode) },
   };
+  if (snapshot.eventId === undefined) return required;
+  return Object.fromEntries([
+    ...Object.entries(required),
+    ["eventId", snapshot.eventId],
+  ]) as unknown as SerializedDispatchSnapshot;
 }
 
 /**
@@ -1167,10 +1235,15 @@ function deserializeFacility(id: EntityId, o: Record<string, unknown>, p: string
 function requireTechLossOrUndefined(value: unknown, path: string): TechLossState | undefined {
   if (value === undefined) return undefined;
   const o = requireObject(value, path);
+  const tick = requireInt(o["tick"], `${path}.tick`);
+  const irreversible = requireBoolean(o["irreversible"], `${path}.irreversible`);
+  const rawHolder = o["lastHolderId"];
+  // [M22] キー不在 = 記録の焼失による喪失(最後の保持者が居ない)。
+  if (rawHolder === undefined) return { tick, irreversible };
   return {
-    tick: requireInt(o["tick"], `${path}.tick`),
-    irreversible: requireBoolean(o["irreversible"], `${path}.irreversible`),
-    lastHolderId: requireEntityId(o["lastHolderId"], `${path}.lastHolderId`),
+    tick,
+    irreversible,
+    lastHolderId: requireEntityId(rawHolder, `${path}.lastHolderId`),
   };
 }
 
@@ -1507,17 +1580,9 @@ function deserializeDispatchSnapshots(value: unknown): readonly DispatchSnapshot
     const nodeSource = rawNodes as readonly unknown[];
     for (let n = 0; n < nodeSource.length; n++) {
       const nodePath = `${path}.resolvedTree.choices[${String(n)}]`;
-      const node = requireObject(nodeSource[n], nodePath);
-      nodes.push({
-        difficultyFix: requireFix(node["difficulty"], `${nodePath}.difficulty`),
-        rollFix: requireFix(node["roll"], `${nodePath}.roll`),
-        success: requireBoolean(node["success"], `${nodePath}.success`),
-        rewardFix: requireFix(node["reward"], `${nodePath}.reward`),
-        injuryFix: requireFix(node["injury"], `${nodePath}.injury`),
-        rescue: requireBoolean(node["rescue"], `${nodePath}.rescue`),
-      });
+      nodes.push(deserializeDispatchNode(requireObject(nodeSource[n], nodePath), nodePath));
     }
-    result.push({
+    const base: DispatchSnapshot = {
       id: requireEntityId(o["id"], `${path}.id`),
       destinationId: requireEntityId(o["destinationId"], `${path}.destinationId`),
       band: requireDistanceBand(o["band"], `${path}.band`),
@@ -1531,9 +1596,68 @@ function deserializeDispatchSnapshots(value: unknown): readonly DispatchSnapshot
       rewardFix: requireFix(o["reward"], `${path}.reward`),
       rewardResourceId: requireEntityId(o["rewardResourceId"], `${path}.rewardResourceId`),
       casualtyMemberIds: requireEntityIdArray(o["casualtyMemberIds"], `${path}.casualtyMemberIds`),
-    });
+    };
+    const rawEventId = o["eventId"];
+    // 生スプレッドは ADR-028(1) で禁止(このファイルは免除対象外)なので、
+    // 省略可キーの追加は update.ts の単一コピー経路 `setField` を通す。
+    result.push(
+      rawEventId === undefined
+        ? base
+        : setField(base, "eventId", requireEntityId(rawEventId, `${path}.eventId`)),
+    );
   }
   return result;
+}
+
+/**
+ * [M22] 派遣ノード 1 件の復元(§9)。省略可 4 キーは**キーが無ければ持たせない**
+ * (往復でバイト同一を保つため、`undefined` を明示的に入れない)。
+ */
+function deserializeDispatchNode(node: Record<string, unknown>, p: string): DispatchNode {
+  let result: DispatchNode = {
+    difficultyFix: requireFix(node["difficulty"], `${p}.difficulty`),
+    rollFix: requireFix(node["roll"], `${p}.roll`),
+    success: requireBoolean(node["success"], `${p}.success`),
+    rewardFix: requireFix(node["reward"], `${p}.reward`),
+    injuryFix: requireFix(node["injury"], `${p}.injury`),
+    rescue: requireBoolean(node["rescue"], `${p}.rescue`),
+  };
+  const rawChoice = node["choiceIndex"];
+  if (rawChoice !== undefined) {
+    result = setField(result, "choiceIndex", requireNonNegativeInt(rawChoice, `${p}.choiceIndex`));
+  }
+  const rawBranch = node["branchIndex"];
+  if (rawBranch !== undefined) {
+    result = setField(result, "branchIndex", requireNonNegativeInt(rawBranch, `${p}.branchIndex`));
+  }
+  const rawLogText = node["logText"];
+  if (rawLogText !== undefined) {
+    result = setField(result, "logText", requireString(rawLogText, `${p}.logText`));
+  }
+  const rawEffects = node["effects"];
+  if (rawEffects === undefined) return result;
+  if (!Array.isArray(rawEffects)) {
+    throw new SerializeError(`${p}.effects: 配列を期待したが ${describe(rawEffects)} だった`);
+  }
+  const source = rawEffects as readonly unknown[];
+  const effects: DispatchEffect[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const effectPath = `${p}.effects[${String(i)}]`;
+    const effect = requireObject(source[i], effectPath);
+    const kind = requireString(effect["kind"], `${effectPath}.kind`);
+    if (kind !== "destroyRecords") {
+      throw new SerializeError(
+        `${effectPath}.kind: 未知の効果種別 "${kind}"(既知: destroyRecords)`,
+      );
+    }
+    effects.push({
+      kind,
+      medium: requireString(effect["medium"], `${effectPath}.medium`),
+      scope: requireString(effect["scope"], `${effectPath}.scope`),
+    });
+  }
+  // 空配列は正準形として持たない(直列化側も長さ 0 ならキーを出さない)。
+  return effects.length === 0 ? result : setField(result, "effects", effects);
 }
 
 /** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */

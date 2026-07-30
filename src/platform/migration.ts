@@ -295,7 +295,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 3([M21] 探索スナップショット導入)。
+ * payload の中身の版(ADR 3軸(a))。現行 = 4([M22] event 効果の焼き込み導入)。
  *
  * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
  * (= 現行ビルドが書くセーブの形)。
@@ -306,7 +306,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
  * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
  * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 3;
+export const SAVE_SCHEMA_VERSION = 4;
 
 /**
  * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
@@ -380,6 +380,42 @@ const migratePayloadV2ToV3: SaveMigrationStep = {
 };
 
 /**
+ * [M22] v3 → v4: event ランタイム(`dispatchSnapshots[].resolvedTree.choices[]` の
+ * `effects` / `choiceIndex` / `branchIndex` / `logText` と `eventId`)の導入。
+ *
+ * v1→v2 / v2→v3 と同じく**構造の変換は無く、版だけを進める**(v3 のセーブは
+ * event content 由来のノードを 1 つも持たず、v4 では全キーとも省略が正準形・
+ * serialize.ts §9)。
+ *
+ * それでも版を上げる理由は同じ **旧ビルドに新セーブを読ませない**ことである。
+ * `fromSerializable` はノードの未知フィールドを読み飛ばすので、v3 ビルドが v4 の
+ * セーブを読むと **`effects`(`destroyRecords` 等)が黙って消える** ——
+ * 帰還時に燃えるはずの記録が燃えず、成文化状態と (B) 喪失が静かに食い違う。
+ * `logText` の脱落も帰還ログの本文が変わる(GDD 8.4 の完成文字列保存の破れ)。
+ * ADR-012 [2026-07-30追記] の線引き(「旧ビルドで読んだとき黙って壊れるか」)に
+ * 照らして版差で塞ぐ側である。
+ */
+const migratePayloadV3ToV4: SaveMigrationStep = {
+  from: 3,
+  to: 4,
+  summary:
+    "event ランタイム(派遣ノードの effects / choiceIndex / branchIndex / logText と eventId)を" +
+    "導入。v3 のセーブは event 由来ノードを持たず = v4 の既定値(キー省略)なので構造変換は無く、" +
+    "saveSchemaVersion のみ 4 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v3 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 4;
+    return next;
+  },
+};
+
+/**
  * セーブスキーマ版の連鎖(`from` 昇順)。
  *
  * 段を足すときは `{from: N, to: N+1, migrate}` を末尾へ追加し
@@ -388,6 +424,7 @@ const migratePayloadV2ToV3: SaveMigrationStep = {
 export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [
   migratePayloadV1ToV2,
   migratePayloadV2ToV3,
+  migratePayloadV3ToV4,
 ];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");

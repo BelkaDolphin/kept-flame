@@ -365,4 +365,21 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     "foot-overcrowd-cross-tag-clamp",
   ]),
   plan("sc32-foot-board-edge-alpha", "sc32-foot-board-edge", SEEDS.alpha, 300, ["foot-board-edge"]),
+
+  // --- sc33: event 効果プリミティブ(M22: destroyRecords・GDD 11.1 [2026-07-27追補]) ----
+  // 乱数を 1 度も引かない(派遣スナップショットは確定値で置いてある・記録の破壊も
+  // 決定論)ので worldSeed に依存しない = C7 対象外。alpha 1 本で足りる。
+  plan("sc33-ev-destroy-records-alpha", "sc33-ev-destroy-records", SEEDS.alpha, 200, [
+    "ev-destroy-records-flammable",
+    "ev-destroy-records-tech-loss",
+    "ev-effect-snapshot-applied",
+  ]),
+  plan(
+    "sc33-ev-destroy-records-split",
+    "sc33-ev-destroy-records",
+    SEEDS.alpha,
+    200,
+    ["ev-split-at-return-tick"],
+    { splitTicks: [100] },
+  ),
 ];

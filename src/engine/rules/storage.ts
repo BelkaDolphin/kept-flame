@@ -63,12 +63,12 @@
 //   **純関数 + コマンド適用**として置き、離散事象を増やさない。
 // ---------------------------------------------------------------------------
 
-import { FIX_ZERO, addFix, floorDivFix, mulFix, subFix, toRaw, type Fix } from "../fp";
+import { FIX_ZERO, addFix, fixFromRaw, floorDivFix, mulFix, subFix, toRaw, type Fix } from "../fp";
 import { compareUtf16 } from "../canonicalize";
 import { entitiesOfKind, type EntityId, type GameState, type ResourceState } from "../state/state";
 import { setField, updateEntity } from "../state/update";
 import { currentResearch } from "./research";
-import { RulesError, requireFacilityDef, type EngineContent } from "./types";
+import { RulesError, requireFacilityDef, type EngineContent, type OverflowPolicy } from "./types";
 
 // --- 1. 容量の解決 ---------------------------------------------------------
 
@@ -206,6 +206,74 @@ export function writeCapacityOutcome(
     const withProduced = setField(withStock, "cumulativeProduced", outcome.cumulativeProduced);
     return setField(withProduced, "cumulativeOverflow", outcome.cumulativeOverflow);
   });
+}
+
+// --- 2b. 方策つきオーバーフロー(GDD 12.1 `item.overflow`)— M22 -------------
+//
+//   §2 の {@link applyGainWithCapacity} は「毎 tick の連続生産」用であり、
+//   `cumulativeProduced` / `cumulativeOverflow`(GDD 11.4-7 の損失率会計)を
+//   必ず動かす。一方 GDD 12.1 の `item(… overflow{policy, convertTo, ratio})` は
+//   **一括入荷(探索報酬・イベント報酬)にだけ掛かる方策**であり、
+//   GDD 8.1 の [2026-07-30裁定]⑥「探索報酬は保管上限/オーバーフロー会計を
+//   通さない(`cumulativeProduced` を膨らませない)」と両立させる必要がある。
+//
+//   そこで本節は **会計を一切触らない純関数**として上限とあふれ処理だけを行う。
+//   「上限を掛ける」ことと「損失率の分母を増やす」ことを別の関数に分けたのが
+//   ⑥ への回答である(⑥ が禁じているのは後者)。
+
+/** [M22] 方策つきオーバーフローの結果({@link applyOverflowPolicy})。 */
+export interface OverflowOutcome {
+  /** 実際に在庫へ入る量(上限までのぶん)。 */
+  readonly acceptedFix: Fix;
+  /** 入りきらなかった量。 */
+  readonly excessFix: Fix;
+  /** 変換で得られた量(`discard` なら 0)。 */
+  readonly convertedFix: Fix;
+  /** 変換先の resource 定義 ID(変換が起きなければ null)。 */
+  readonly convertToResourceId: EntityId | null;
+}
+
+/**
+ * [M22] 一括入荷に方策つきオーバーフローを適用する(GDD 12.1 / 6.7)。
+ *
+ * 会計(`cumulativeProduced` / `cumulativeOverflow`)は**動かさない**(§2b)。
+ * 減少(gain <= 0)は上限判定を通さない —— §2(a) と同じ理由で、
+ * クランプを非負のときだけ掛けることで加算の結合性を壊さないため。
+ *
+ * 値域: `excess × ratio` は content 由来の上限が緩い経路なので
+ * {@link mulFix}(自動 BigInt フォールバック)を使う(fp.ts §4 の線引き)。
+ */
+export function applyOverflowPolicy(
+  currentStockFix: Fix,
+  gainFix: Fix,
+  policy: OverflowPolicy,
+): OverflowOutcome {
+  if (toRaw(gainFix) <= 0) {
+    return {
+      acceptedFix: gainFix,
+      excessFix: FIX_ZERO,
+      convertedFix: FIX_ZERO,
+      convertToResourceId: null,
+    };
+  }
+  const roomRaw = toRaw(policy.capacityFix) - toRaw(currentStockFix);
+  const gainRaw = toRaw(gainFix);
+  const acceptedRaw = roomRaw <= 0 ? 0 : roomRaw < gainRaw ? roomRaw : gainRaw;
+  const acceptedFix = fixFromRaw(acceptedRaw);
+  const excessFix = fixFromRaw(gainRaw - acceptedRaw);
+  if (
+    policy.policy !== "convert" ||
+    policy.convertToResourceId === null ||
+    toRaw(excessFix) === 0
+  ) {
+    return { acceptedFix, excessFix, convertedFix: FIX_ZERO, convertToResourceId: null };
+  }
+  return {
+    acceptedFix,
+    excessFix,
+    convertedFix: mulFix(excessFix, policy.ratioFix),
+    convertToResourceId: policy.convertToResourceId,
+  };
 }
 
 // --- 3. オーバーフロー損失率(GDD 11.4-7) ---------------------------------

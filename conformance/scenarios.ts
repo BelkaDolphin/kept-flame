@@ -30,6 +30,9 @@ import { techMemoryKeyOf } from "../src/engine/rules/techMemory";
 import type { EngineContent } from "../src/engine/rules/types";
 import {
   entityIdFromString,
+  type CodifyState,
+  type DispatchNode,
+  type DispatchSnapshot,
   type EntityState,
   type FacilityFootprint,
   type FacilityState,
@@ -519,6 +522,61 @@ function mkResource(name: string, resourceId: string, stockHuman = 0): ResourceS
     resourceId: eid(resourceId),
     stock: fixFromInt(stockHuman),
   };
+}
+
+/**
+ * [M22] 記録(完成済み codify entity)を直接組み立てる。RNG も成文化コマンドも
+ * 通さずに「記録が n 枚ある盤面」を作るための口(mkTechMemory と同じ考え方)。
+ */
+function mkCodify(
+  name: string,
+  techId: string,
+  medium: "paper" | "stoneTablet",
+  completedTick: number,
+): CodifyState {
+  return {
+    kind: "codify",
+    id: eid(name),
+    techId: eid(techId),
+    medium,
+    requiredWork: fixFromInt(1),
+    progress: fixFromInt(1),
+    completedTick,
+  };
+}
+
+/**
+ * [M22] 未帰還の派遣スナップショットを直接組み立てる。
+ *
+ * `buildDispatchSnapshot`(= 派遣確定コマンド)を通さないのは、golden シナリオが
+ * コマンドを持たない(= `advance` だけを回す)形だからである。**スナップショットは
+ * 帰還時に content を再参照しない確定値の塊**(GDD 12.5-7)なので、確定値を直接
+ * 置くことは「派遣確定コマンドが作ったのと同じもの」を置くことに等しい。
+ */
+function mkDispatchSnapshot(args: {
+  readonly id: string;
+  readonly destinationId: string;
+  readonly memberIds: readonly string[];
+  readonly returnTick: number;
+  readonly nodes: readonly DispatchNode[];
+  readonly eventId?: string;
+}): DispatchSnapshot {
+  const base: DispatchSnapshot = {
+    id: eid(args.id),
+    destinationId: eid(args.destinationId),
+    band: "near",
+    stance: "cautious",
+    memberIds: args.memberIds.map(eid),
+    dispatchTick: 0,
+    returnTick: args.returnTick,
+    teamPowerFix: fixFromInt(150),
+    nodes: args.nodes,
+    withdrawn: false,
+    rewardFix: fixFromInt(0),
+    rewardResourceId: eid("firewood"),
+    casualtyMemberIds: [],
+  };
+  return args.eventId === undefined ? base : { ...base, eventId: eid(args.eventId) };
 }
 
 // ===========================================================================
@@ -1196,6 +1254,71 @@ function sc32BuildState(worldSeed: string): GameState {
 
 const sc06BoardDefault = sc06Board();
 
+// --- sc33-ev-destroy-records(M22: event 効果プリミティブ destroyRecords) --------
+
+/**
+ * [M22] `destroyRecords{medium:"any", scope:"flammable"}` の挙動を固定する
+ * (GDD 11.1 [2026-07-27追補] の焼失セマンティクス)。
+ *
+ * 盤面(entity 7 件 + 未帰還派遣 1 本):
+ *   - 記録 3 枚: `techFireStarting` の紙 + 石板、`techPottery` の紙
+ *   - `techPottery` は research 完了済み・**保持者ゼロ**(techMemoryByKey が空)
+ *   - 派遣 1 本(tick 100 帰還)。1 ノードだけを踏み、その分岐の result が
+ *     `destroyRecords{any, flammable}`
+ *
+ * tick 100 の帰還で紙 2 枚だけが焼け、
+ *   - `techFireStarting` : 石板が残るので**成文化済みのまま**(喪失しない)
+ *   - `techPottery`      : 記録ゼロ かつ 保持者ゼロ → **周回内喪失**
+ *     (research が `completedTick: null` / `progress: 0` / `loss` 付きへ戻る)
+ * となる。
+ *
+ * **反証(spec §9.2(3)):**
+ *   - destroyRecords が何もしなければ `probe.entityCount` は 7 のまま(期待 5)
+ *   - 可燃フィルタが壊れて石板も燃えれば 4 になる
+ *   - 喪失判定が走らなければ research が完了のままで `stateDigest` が動く
+ *     (`entityCount` は同じなのでダイジェスト側だけが反証になる)
+ *   - 効果がスナップショットから読まれなければ帰還ログの本文も変わる
+ */
+function sc33BuildState(worldSeed: string): GameState {
+  const node: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(10),
+    success: true,
+    rewardFix: fixFromInt(0),
+    injuryFix: fixFromInt(0),
+    rescue: false,
+    choiceIndex: 0,
+    branchIndex: 0,
+    logText: "火は書架を舐め、紙の記録だけが灰になった。",
+    effects: [{ kind: "destroyRecords", medium: "any", scope: "flammable" }],
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentScoutAda", { dispatched: true }),
+      mkResident("residentScoutBen", { dispatched: true }),
+      mkCodify("codifyFirePaper", "techFireStarting", "paper", 10),
+      mkCodify("codifyFireTablet", "techFireStarting", "stoneTablet", 20),
+      mkCodify("codifyPotteryPaper", "techPottery", "paper", 30),
+      mkResearch("researchPottery", "techPottery", 0, 30),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchEmber",
+        destinationId: "eventNearEmber",
+        memberIds: ["residentScoutAda", "residentScoutBen"],
+        returnTick: 100,
+        nodes: [node],
+        eventId: "eventNearEmber",
+      }),
+    ],
+  );
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -1292,6 +1415,7 @@ export const SCENARIOS: readonly Scenario[] = [
     buildState: sc31BuildState,
   },
   { id: "sc32-foot-board-edge", contentPatch: null, buildState: sc32BuildState },
+  { id: "sc33-ev-destroy-records", contentPatch: null, buildState: sc33BuildState },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

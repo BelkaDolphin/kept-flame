@@ -18,6 +18,7 @@
 // 根拠である。
 // ---------------------------------------------------------------------------
 
+import { OVERFLOW_POLICIES, isOverflowPolicyKind } from "../src/engine/rules/types";
 import {
   IssueCollector,
   expectArray,
@@ -26,6 +27,7 @@ import {
   expectInteger,
   expectNumber,
   expectRecord,
+  expectString,
   fail,
   ok,
   validateId,
@@ -247,6 +249,25 @@ export interface ExplorationBandContent {
  * 省略時は engine 側で派遣コマンドが `contentUnsupported` になる = M21 以前と
  * 完全に同一挙動。
  */
+/**
+ * [M22] 探索報酬のオーバーフロー方策(GDD 12.1 の
+ * `item(… overflow{policy, convertTo, ratio})` / GDD 6.7)。**省略可**であり、
+ * 省略時は上限なし(= M21 と完全に同一挙動)。
+ *
+ * 置き場が balance なのは item カテゴリが MVP に無いためで、item entity が
+ * 入ったら方策の**出所だけ**がそちらへ移る(engine 側の primitive は不変)。
+ */
+export interface RewardOverflowContent {
+  /** `discard`(超過分破棄・GDD 6.7 の原則)/ `convert`(変換)。 */
+  readonly policy: string;
+  /** 受け取り上限。 */
+  readonly capacity: number;
+  /** `convert` のときの変換先 resource 定義 ID。`discard` では null。 */
+  readonly convertTo: string | null;
+  /** `convert` のときの変換率(0〜1)。`discard` では 0。 */
+  readonly ratio: number;
+}
+
 export interface ExplorationContent {
   readonly withdrawRewardRatio: number;
   readonly pressInjuryMul: number;
@@ -258,6 +279,8 @@ export interface ExplorationContent {
   readonly wipeMaxP: number;
   /** 距離帯別(裁定 B7 の `near`/`far`/`deep` が 3 つとも必須)。 */
   readonly bands: { readonly [band: string]: ExplorationBandContent };
+  /** [M22] 報酬のオーバーフロー方策。JSON に無ければ null(上限なし)。 */
+  readonly rewardOverflow: RewardOverflowContent | null;
 }
 
 export interface BalanceContent {
@@ -1095,6 +1118,38 @@ function validateExplorationBand(
   };
 }
 
+/** [M22] 報酬のオーバーフロー方策(GDD 12.1 `item.overflow`)。 */
+function validateRewardOverflow(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): RewardOverflowContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const policy = expectString(obj["policy"], `${path}.policy`, issues);
+  const capacity = expectNumber(obj["capacity"], `${path}.capacity`, issues, CAPACITY_RANGE);
+  const ratio = expectNumber(obj["ratio"], `${path}.ratio`, issues, UNIT_RANGE);
+  if (policy === undefined || capacity === undefined || ratio === undefined) return undefined;
+  if (!isOverflowPolicyKind(policy)) {
+    issues.add(
+      `${path}.policy`,
+      `policy は ${OVERFLOW_POLICIES.join(" | ")} のいずれか(実際: ${JSON.stringify(policy)})`,
+    );
+    return undefined;
+  }
+  const rawConvertTo = obj["convertTo"];
+  if (policy === "discard") {
+    if (rawConvertTo !== undefined && rawConvertTo !== null) {
+      issues.add(`${path}.convertTo`, "policy=discard では convertTo は null / 省略が必須");
+      return undefined;
+    }
+    return { policy, capacity, convertTo: null, ratio };
+  }
+  const convertTo = expectString(rawConvertTo, `${path}.convertTo`, issues);
+  if (convertTo === undefined) return undefined;
+  return { policy, capacity, convertTo, ratio };
+}
+
 function validateExploration(
   raw: unknown,
   path: string,
@@ -1147,6 +1202,13 @@ function validateExploration(
   );
   const wipeMaxP = expectNumber(obj["wipeMaxP"], `${path}.wipeMaxP`, issues, UNIT_RANGE);
 
+  // [M22] 省略可。キー不在 = 上限なし(M21 と同一挙動)。
+  const rawOverflow = obj["rewardOverflow"];
+  const rewardOverflow =
+    rawOverflow === undefined
+      ? null
+      : (validateRewardOverflow(rawOverflow, `${path}.rewardOverflow`, issues) ?? undefined);
+
   const rawBands = expectRecord(obj["bands"], `${path}.bands`, issues);
   let bands: { [band: string]: ExplorationBandContent } | undefined = {};
   if (rawBands === undefined) {
@@ -1177,6 +1239,7 @@ function validateExploration(
     forgoneOutputPerWorkerTick === undefined ||
     rareAssetValue === undefined ||
     wipeMaxP === undefined ||
+    rewardOverflow === undefined ||
     bands === undefined
   ) {
     return undefined;
@@ -1191,6 +1254,7 @@ function validateExploration(
     rareAssetValue,
     wipeMaxP,
     bands,
+    rewardOverflow,
   };
 }
 

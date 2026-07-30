@@ -115,16 +115,39 @@ import {
   type TraitDef,
 } from "../src/engine/rules/stats";
 import { DISPATCH_EVENT_NODES_MAX } from "../src/engine/commands";
-import { DISTANCE_BANDS } from "../src/engine/rules/types";
+import {
+  COND_COMPARE_OPERATORS,
+  COND_LOGICAL_OPERATORS,
+  condExprType,
+  isCondFunction,
+  isCondVariable,
+  type CondCompareOperator,
+  type CondExpr,
+  type CondLogicalOperator,
+} from "../src/engine/rules/cond";
+import { LOG_TEMPLATE_PLACEHOLDERS } from "../src/engine/rules/event";
+import {
+  DISTANCE_BANDS,
+  isDestroyRecordsMedium,
+  isDestroyRecordsScope,
+  isDistanceBand,
+  isOverflowPolicyKind,
+} from "../src/engine/rules/types";
 import type {
   DistanceBand,
   EngineContent,
   EraDef,
+  EventBranchDef,
+  EventChoiceDef,
+  EventDef,
+  EventNodeDef,
+  EventResult,
   ExplorationBandParams,
   ExplorationParams,
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
+  OverflowPolicy,
   RecallRiskParams,
   RecordMediaParams,
   RecordMediumParams,
@@ -145,11 +168,13 @@ import type {
   ExplorationContent,
   RecordMediaContent,
   RecordMediumContent,
+  RewardOverflowContent,
   StorageParamsContent,
   TownParamsContent,
 } from "./balance";
 import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
+import type { CondAst, EventChoice, EventContent, EventResultContent } from "./event";
 import type { FacilityContent, FacilityStatWeights } from "./facility";
 import type { TechContent } from "./tech";
 import type { TraitContent } from "./trait";
@@ -1328,6 +1353,11 @@ function toExplorationParams(
     "(B)資産の価値換算",
   );
   const wipeMaxPFix = toFix(content.wipeMaxP, `${path}.wipeMaxP`, issues, "全滅確率の上限");
+  // [M22] 省略可。null = 上限なし(M21 と同一挙動)。
+  const rewardOverflow =
+    content.rewardOverflow === null
+      ? null
+      : (toOverflowPolicy(content.rewardOverflow, issues) ?? undefined);
 
   const bands: { [K in DistanceBand]?: ExplorationBandParams } = {};
   for (const band of DISTANCE_BANDS) {
@@ -1398,13 +1428,14 @@ function toExplorationParams(
     forgoneOutputPerWorkerTickFix === undefined ||
     rareAssetValueFix === undefined ||
     wipeMaxPFix === undefined ||
+    rewardOverflow === undefined ||
     near === undefined ||
     far === undefined ||
     deep === undefined
   ) {
     return undefined;
   }
-  return {
+  const base = {
     byBand: { near, far, deep },
     withdrawRewardRatioFix,
     pressInjuryMulFix,
@@ -1415,6 +1446,345 @@ function toExplorationParams(
     rareAssetValueFix,
     wipeMaxPFix,
   };
+  // exactOptionalPropertyTypes ゆえ「値があるときだけキーを足す」形にする。
+  return rewardOverflow === null ? base : { ...base, rewardOverflow };
+}
+
+// --- 6d. rewardOverflow(GDD 12.1 `item.overflow`・M22)-----------------------
+
+/** [M22] 報酬のオーバーフロー方策を engine 内部表現へ写す。 */
+function toOverflowPolicy(
+  content: RewardOverflowContent,
+  issues: IssueCollector,
+): OverflowPolicy | undefined {
+  const path = "balance.exploration.rewardOverflow";
+  const capacityFix = toFix(content.capacity, `${path}.capacity`, issues, "受け取り上限");
+  const ratioFix = toFix(content.ratio, `${path}.ratio`, issues, "変換率");
+  if (capacityFix === undefined || ratioFix === undefined) return undefined;
+  if (!isOverflowPolicyKind(content.policy)) {
+    // schema 側で検査済み(型の穴の保険)。
+    issues.add(`${path}.policy`, `未知のオーバーフロー方策 "${content.policy}"`);
+    return undefined;
+  }
+  return {
+    policy: content.policy,
+    capacityFix,
+    convertToResourceId: content.convertTo === null ? null : entityIdFromString(content.convertTo),
+    ratioFix,
+  };
+}
+
+// --- 6e. event(GDD 8.2〜8.4 / 12.1 / 12.2)— M22 ------------------------------
+
+/**
+ * [M22] cond の中間表現({@link CondAst})を engine の {@link CondExpr} へ
+ * コンパイルする。
+ *
+ * ここが「cond DSL が固定小数点で閉じる」の境界である —— 数値リテラルは
+ * {@link rawFromHumanNumber}(10 進文字列経由の厳密変換・§2)で Fix になり、
+ * 以後 engine 側は raw 整数の比較しか行わない(`src/engine/rules/cond.ts` §2)。
+ *
+ * 変数名 / 関数名の権威は **engine 側**(`isCondVariable` / `isCondFunction`)で
+ * ある。`schema/event.ts` のホワイトリストと二重定義になっているが、両者を
+ * 実際に突き合わせる唯一の場所がここになる(trait の語彙表と同じ形・§1(d))。
+ */
+function toCondExpr(ast: CondAst, path: string, issues: IssueCollector): CondExpr | undefined {
+  switch (ast.kind) {
+    case "numberLiteral": {
+      const valueFix = toFix(ast.value, path, issues, "cond の数値リテラル");
+      return valueFix === undefined
+        ? undefined
+        : { kind: "literal", value: { kind: "number", valueFix } };
+    }
+    case "stringLiteral":
+      return { kind: "literal", value: { kind: "string", value: ast.value } };
+    case "booleanLiteral":
+      return { kind: "literal", value: { kind: "boolean", value: ast.value } };
+    case "variable": {
+      if (!isCondVariable(ast.name)) {
+        issues.add(path, `cond の変数 "${ast.name}" を engine が解決できない(GDD 12.2)`);
+        return undefined;
+      }
+      return { kind: "variable", name: ast.name };
+    }
+    case "call": {
+      if (!isCondFunction(ast.fn)) {
+        issues.add(path, `cond の関数 "${ast.fn}" を engine が解決できない`);
+        return undefined;
+      }
+      if (ast.arg.kind !== "stringLiteral") {
+        issues.add(
+          path,
+          `cond 関数 "${ast.fn}" の引数は string リテラルのみ(trait ID / stat ID を指すため)`,
+        );
+        return undefined;
+      }
+      return { kind: "call", fn: ast.fn, arg: { kind: "string", value: ast.arg.value } };
+    }
+    case "binary": {
+      const left = toCondExpr(ast.left, path, issues);
+      const right = toCondExpr(ast.right, path, issues);
+      if (left === undefined || right === undefined) return undefined;
+      if (isCondLogicalOperator(ast.operator)) {
+        return { kind: "logical", op: ast.operator, left, right };
+      }
+      if (isCondCompareOperator(ast.operator)) {
+        return { kind: "compare", op: ast.operator, left, right };
+      }
+      issues.add(path, `cond の演算子 "${ast.operator}" を engine が解決できない(GDD 12.2)`);
+      return undefined;
+    }
+    default: {
+      const unhandled: never = ast;
+      issues.add(path, `未知の cond 中間表現 ${JSON.stringify(unhandled)}`);
+      return undefined;
+    }
+  }
+}
+
+function isCondCompareOperator(op: string): op is CondCompareOperator {
+  return (COND_COMPARE_OPERATORS as readonly string[]).includes(op);
+}
+
+function isCondLogicalOperator(op: string): op is CondLogicalOperator {
+  return (COND_LOGICAL_OPERATORS as readonly string[]).includes(op);
+}
+
+/** cond 全体が boolean になるかを型検査する(`rules/cond.ts` §3)。 */
+function requireBooleanCond(expr: CondExpr, path: string, issues: IssueCollector): boolean {
+  let type: string;
+  try {
+    type = condExprType(expr);
+  } catch (error) {
+    issues.add(path, error instanceof Error ? error.message : String(error));
+    return false;
+  }
+  if (type !== "boolean") {
+    issues.add(path, `cond 全体は boolean でなければならない(実際: ${type})`);
+    return false;
+  }
+  return true;
+}
+
+/** その cond が「無条件成立」(リテラル `true`)か。 */
+function isTautologyCond(expr: CondExpr): boolean {
+  return expr.kind === "literal" && expr.value.kind === "boolean" && expr.value.value;
+}
+
+/** `logTemplate` の `{placeholder}` を洗い出す正規表現(engine の語彙表と突き合わせる)。 */
+const LOG_PLACEHOLDER_PATTERN = /\{([A-Za-z][A-Za-z0-9]*)\}/g;
+
+function checkLogTemplate(template: string, path: string, issues: IssueCollector): boolean {
+  let ok_ = true;
+  for (const match of template.matchAll(LOG_PLACEHOLDER_PATTERN)) {
+    const name = match[1];
+    if (name === undefined) continue;
+    if (!LOG_TEMPLATE_PLACEHOLDERS.includes(name)) {
+      issues.add(
+        path,
+        `logTemplate のプレースホルダ "{${name}}" が語彙(${LOG_TEMPLATE_PLACEHOLDERS.join(",")})に無い` +
+          "(置換されないまま本番へ出る経路を塞ぐため reject する)",
+      );
+      ok_ = false;
+    }
+  }
+  return ok_;
+}
+
+/** [M22] `branches[].result` を engine の {@link EventResult} へ写す。 */
+function toEventResult(
+  content: EventResultContent,
+  path: string,
+  issues: IssueCollector,
+): EventResult | undefined {
+  if (typeof content === "string") {
+    // 説明ラベル(continue / success / failure)は状態を動かさない
+    // (schema/event.ts の EVENT_RESULT_LABELS の doc)。
+    return content === "withdraw" ? { kind: "withdraw" } : { kind: "continue" };
+  }
+  if (content.kind === "withdraw") return { kind: "withdraw" };
+  if (content.kind === "continue") return { kind: "continue" };
+  if (content.kind !== "destroyRecords") {
+    issues.add(path, `未知の result kind "${content.kind}"`);
+    return undefined;
+  }
+  const medium = content.medium;
+  const scope = content.scope;
+  if (
+    medium === undefined ||
+    scope === undefined ||
+    !isDestroyRecordsMedium(medium) ||
+    !isDestroyRecordsScope(scope)
+  ) {
+    // schema 側で検査済み(型の穴の保険)。
+    issues.add(path, "destroyRecords の medium / scope が不正");
+    return undefined;
+  }
+  return { kind: "destroyRecords", medium, scope };
+}
+
+/** [M22] `nodes[].statWeights` を基礎ステ 5 種 + 派生値 `combatPower` へ分解する(裁定 B8)。 */
+function toEventStatWeights(
+  raw: Readonly<Record<string, number>>,
+  path: string,
+  issues: IssueCollector,
+): { readonly weights: StatWeights; readonly combatPowerWeightFix: Fix } | undefined {
+  const values: { [K in ResidentStatId]?: Fix } = {};
+  let combatPowerWeightFix: Fix = FIX_ZERO;
+  let failed = false;
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    const fix = toFix(value, `${path}.${key}`, issues, "statWeights の重み");
+    if (fix === undefined) {
+      failed = true;
+      continue;
+    }
+    if (isResidentStatId(key)) {
+      values[key] = fix;
+      continue;
+    }
+    if (isResidentDerivedStatId(key)) {
+      // 派生値は基礎ステと別扱いで解決する(裁定 B8)。現状 combatPower の 1 種のみ。
+      combatPowerWeightFix = fix;
+      continue;
+    }
+    // schema 側(strictStatWeights)で検査済み(型の穴の保険)。
+    issues.add(`${path}.${key}`, `statWeights のキー "${key}" が正本語彙に無い(裁定 B8)`);
+    failed = true;
+  }
+  if (failed) return undefined;
+  return {
+    weights: {
+      vigor: values.vigor ?? FIX_ZERO,
+      dexterity: values.dexterity ?? FIX_ZERO,
+      intellect: values.intellect ?? FIX_ZERO,
+      fortitude: values.fortitude ?? FIX_ZERO,
+      will: values.will ?? FIX_ZERO,
+    },
+    combatPowerWeightFix,
+  };
+}
+
+/** [M22] `choices[].effect` を engine 内部表現へ写す(未指定の軸は中立値で埋める)。 */
+function toEventChoiceDef(
+  choice: EventChoice,
+  path: string,
+  issues: IssueCollector,
+): EventChoiceDef | undefined {
+  const successModFix = toModFix(choice.effect.successMod, `${path}.effect.successMod`, issues);
+  const rewardModFix = toModFix(choice.effect.rewardMod, `${path}.effect.rewardMod`, issues);
+  const difficultyModFix = toModFix(
+    choice.effect.difficultyMod,
+    `${path}.effect.difficultyMod`,
+    issues,
+  );
+  const injuryRiskMulFix =
+    choice.effect.injuryRiskMul === null
+      ? FIX_ONE
+      : toFix(choice.effect.injuryRiskMul, `${path}.effect.injuryRiskMul`, issues, "負傷倍率");
+  if (
+    successModFix === undefined ||
+    rewardModFix === undefined ||
+    difficultyModFix === undefined ||
+    injuryRiskMulFix === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    label: choice.label,
+    successModFix,
+    rewardModFix,
+    difficultyModFix,
+    injuryRiskMulFix,
+  };
+}
+
+/** 未指定(null)の効果軸は 0(中立)。 */
+function toModFix(value: number | null, path: string, issues: IssueCollector): Fix | undefined {
+  return value === null ? FIX_ZERO : toFix(value, path, issues, "効果係数");
+}
+
+/** [M22] event 1 本を engine 内部表現へ写す。 */
+function toEventDef(content: EventContent, issues: IssueCollector): EventDef | undefined {
+  const path = `event.${content.id}`;
+  const nodes: EventNodeDef[] = [];
+  let failed = false;
+  for (let i = 0; i < content.nodes.length; i++) {
+    const node = content.nodes[i];
+    if (node === undefined) continue;
+    const nodePath = `${path}.nodes[${String(i)}]`;
+    const weights = toEventStatWeights(node.statWeights, `${nodePath}.statWeights`, issues);
+
+    const choices: EventChoiceDef[] = [];
+    for (let c = 0; c < node.choices.length; c++) {
+      const choice = node.choices[c];
+      if (choice === undefined) continue;
+      const def = toEventChoiceDef(choice, `${nodePath}.choices[${String(c)}]`, issues);
+      if (def === undefined) {
+        failed = true;
+        continue;
+      }
+      choices.push(def);
+    }
+
+    const branches: EventBranchDef[] = [];
+    for (let b = 0; b < node.branches.length; b++) {
+      const branch = node.branches[b];
+      if (branch === undefined) continue;
+      const branchPath = `${nodePath}.branches[${String(b)}]`;
+      const cond = toCondExpr(branch.condAst, `${branchPath}.cond`, issues);
+      const result = toEventResult(branch.result, `${branchPath}.result`, issues);
+      const templateOk = checkLogTemplate(branch.logTemplate, `${branchPath}.logTemplate`, issues);
+      if (cond === undefined || result === undefined || !templateOk) {
+        failed = true;
+        continue;
+      }
+      if (!requireBooleanCond(cond, `${branchPath}.cond`, issues)) {
+        failed = true;
+        continue;
+      }
+      branches.push({ cond, result, logTemplate: branch.logTemplate });
+    }
+    // **最後の branch は無条件成立(リテラル `true`)が必須**。こうしておくと
+    // 「どの分岐も成立しない」= 実行時に結果が決まらない状態が構造的に起きない
+    // (engine 側 `selectBranchIndex` はその不変条件の上で動く)。
+    const last = branches[branches.length - 1];
+    if (
+      branches.length === node.branches.length &&
+      (last === undefined || !isTautologyCond(last.cond))
+    ) {
+      issues.add(
+        `${nodePath}.branches`,
+        "最後の branch の cond は無条件成立(リテラル `true`)が必須" +
+          "(どの分岐も成立しない = 結果が決まらない状態を構造的に禁じるため)",
+      );
+      failed = true;
+    }
+
+    if (weights === undefined) {
+      failed = true;
+      continue;
+    }
+    nodes.push({
+      difficulty: node.difficulty,
+      rollRange: node.R,
+      statWeights: weights.weights,
+      combatPowerWeightFix: weights.combatPowerWeightFix,
+      choices,
+      branches,
+    });
+  }
+  if (failed) return undefined;
+  const destTags: DistanceBand[] = [];
+  for (const tag of content.destTags) {
+    if (!isDistanceBand(tag)) {
+      issues.add(`${path}.destTags`, `距離帯 "${tag}" が engine の正本語彙に無い(裁定 B7)`);
+      return undefined;
+    }
+    destTags.push(tag);
+  }
+  return { id: entityIdFromString(content.id), destTags, nodes };
 }
 
 // --- 7. 入口 ----------------------------------------------------------------
@@ -1481,6 +1851,14 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
       ? null
       : (toExplorationParams(bundle.balance.exploration, issues) ?? undefined);
 
+  // [M22] event(GDD 12.1)。**空なら EngineContent へキーを足さない**
+  //   (= M22 以前と 1 bit も違わない = 派遣は M21 の手続き生成へフォールバック)。
+  const eventDefs = new Map<EntityId, EventDef>();
+  for (const content of [...bundle.event].sort((l, r) => compareUtf16(l.id, r.id))) {
+    const def = toEventDef(content, issues);
+    if (def !== undefined) eventDefs.set(def.id, def);
+  }
+
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
     // engine の stochastic.ts が 1〜1440 を要求する(1 = ADR-014(3) の Fallback)。
@@ -1519,7 +1897,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   const withEras = eraDefs === null ? withStorage : { ...withStorage, eraDefs };
   const withMedia = recordMedia === null ? withEras : { ...withEras, recordMedia };
   const withTown = town === null ? withMedia : { ...withMedia, town };
-  return ok(exploration === null ? withTown : { ...withTown, exploration });
+  const withExploration = exploration === null ? withTown : { ...withTown, exploration };
+  return ok(eventDefs.size === 0 ? withExploration : { ...withExploration, eventDefs });
 }
 
 /**

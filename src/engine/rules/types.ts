@@ -33,6 +33,7 @@
 import type { AdjacencyMatrix, Tag } from "../adjacency";
 import type { Fix } from "../fp";
 import type { EntityId, FacilityFootprint } from "../state/state";
+import type { CondExpr } from "./cond";
 import type { StatWeights, TraitDef } from "./stats";
 
 /** rules の入力の誤り(content 定義の欠落・Lv 範囲外・産出先不在など)。 */
@@ -549,6 +550,214 @@ export interface ExplorationParams {
   readonly rareAssetValueFix: Fix;
   /** 安全曲線の全滅確率の上限(GDD 8.5「理不尽全滅はしない曲線」)。 */
   readonly wipeMaxPFix: Fix;
+  /**
+   * [M22] 探索報酬の受け取りに掛かるオーバーフロー方策(GDD 12.1 の
+   * `item(… overflow{policy, convertTo, ratio})` / GDD 6.7)。
+   *
+   * **省略時は上限なし**(= M21 と 1 bit も違わない)。GDD 8.1 の
+   * [2026-07-30裁定]⑥ が「探索報酬は保管上限/オーバーフロー会計を通さない」
+   * と定めているのは `cumulativeProduced` / `cumulativeOverflow`(生産側の
+   * 損失率会計・GDD 11.4-7)を膨らませないためであり、**上限そのものを
+   * 掛けてはいけないという意味ではない**。本ブロックは会計を通さずに
+   * 上限とあふれ処理だけを行う(rules/storage.ts の `applyOverflowPolicy`)。
+   *
+   * 置き場が balance なのは item カテゴリが MVP に無いためである。item entity が
+   * 入ったら方策の**出所だけ**がそちらへ移り、engine 側の primitive は変わらない。
+   */
+  readonly rewardOverflow?: OverflowPolicy;
+}
+
+/** [M22] {@link OverflowPolicy} の方策(GDD 12.1 `item.overflow.policy`・UTF-16 昇順)。 */
+export const OVERFLOW_POLICIES = ["convert", "discard"] as const;
+
+/** {@link OVERFLOW_POLICIES} のいずれか。 */
+export type OverflowPolicyKind = (typeof OVERFLOW_POLICIES)[number];
+
+/** 未知の文字列がオーバーフロー方策のいずれかか(型ガード)。 */
+export function isOverflowPolicyKind(value: string): value is OverflowPolicyKind {
+  for (const policy of OVERFLOW_POLICIES) {
+    if (policy === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M22] 「入りきらない分をどうするか」の方策(GDD 12.1 の
+ * `item.overflow{policy, convertTo, ratio}` / GDD 6.7「原則超過分破棄 +
+ * 低次資源は一定比率で廃材へ」)。
+ *
+ *   discard : 超過分は破棄する(GDD 6.7 の原則)
+ *   convert : 超過分 × `ratioFix` を `convertToResourceId` へ入れる
+ */
+export interface OverflowPolicy {
+  readonly policy: OverflowPolicyKind;
+  /** 受け取り上限。これを超えた分が「超過」になる。 */
+  readonly capacityFix: Fix;
+  /** `convert` のときの変換先 resource 定義 ID。`discard` では null。 */
+  readonly convertToResourceId: EntityId | null;
+  /** `convert` のときの変換率(0〜1)。`discard` では 0。 */
+  readonly ratioFix: Fix;
+}
+
+// --- 3f. event(GDD 8.2〜8.4 / 12.1 / 12.2)— M22 -----------------------------
+
+/**
+ * [M22] event ノードの choice 1 件(GDD 8.3「判定前の質的分岐」/ GDD 12.1
+ * `choices[{label, effect}]`)。
+ *
+ * 4 つの効果軸はいずれも**比率**であり、`schema/event.ts` の
+ * `EFFECT_MOD_RANGE`(±1)/ `INJURY_RISK_MUL_RANGE`(0〜5)がレンジを持つ。
+ * 省略された軸はここでは中立値(mod は 0 / mul は 1)で埋まっているので、
+ * engine 側に「指定されたか」の分岐は残らない。
+ */
+export interface EventChoiceDef {
+  /** 表示ラベル(UI 用。RNG の salt にも使う = `choiceKey`・ADR-007)。 */
+  readonly label: string;
+  /**
+   * 「慎重 = 成功率+」の量。判定式の左辺へ `successMod × R` を加える
+   * (一様乱数 0..R のモデルでは、これがそのまま成功確率の増分になる)。
+   */
+  readonly successModFix: Fix;
+  /** 「報酬-」「報酬+」の量。ノード報酬に `(1 + rewardMod)` を掛ける。 */
+  readonly rewardModFix: Fix;
+  /** 「難度+」の量。ノード難度に `(1 + difficultyMod)` を掛ける。 */
+  readonly difficultyModFix: Fix;
+  /** 「強行 = 負傷リスク ×1.5」の量。失敗時の負傷に掛ける(既定 1.0)。 */
+  readonly injuryRiskMulFix: Fix;
+}
+
+/**
+ * [M22] `destroyRecords{medium, scope}` の対象媒体
+ * (GDD 11.1 [2026-07-27追補]・engine 既知の 2 種 + 「媒体を問わない」)。
+ */
+export const DESTROY_RECORDS_MEDIA = ["any", "paper", "stoneTablet"] as const;
+
+/** {@link DESTROY_RECORDS_MEDIA} のいずれか。 */
+export type DestroyRecordsMedium = (typeof DESTROY_RECORDS_MEDIA)[number];
+
+/** 未知の文字列が対象媒体のいずれかか(型ガード)。 */
+export function isDestroyRecordsMedium(value: string): value is DestroyRecordsMedium {
+  for (const medium of DESTROY_RECORDS_MEDIA) {
+    if (medium === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M22] `destroyRecords{medium, scope}` の対象範囲(GDD 11.1 追補)。
+ *
+ *   all       : `medium` に一致する完成済み記録すべて
+ *   flammable : そのうち**可燃**なものだけ(火災の既定形。`medium: "any"` と
+ *               組めば GDD 11.1 の「可燃記録の焼失」そのものになる)
+ *   oldest    : そのうち最も古い 1 枚(完成 tick 昇順 → ID 昇順で一意)
+ */
+export const DESTROY_RECORDS_SCOPES = ["all", "flammable", "oldest"] as const;
+
+/** {@link DESTROY_RECORDS_SCOPES} のいずれか。 */
+export type DestroyRecordsScope = (typeof DESTROY_RECORDS_SCOPES)[number];
+
+/** 未知の文字列が対象範囲のいずれかか(型ガード)。 */
+export function isDestroyRecordsScope(value: string): value is DestroyRecordsScope {
+  for (const scope of DESTROY_RECORDS_SCOPES) {
+    if (scope === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M22] 分岐の結果(GDD 12.1 [2026-07-27追補]「`branches[].result` 語彙に
+ * `destroyRecords{medium, scope}` を予約する」)。
+ *
+ *   continue       : そのまま次のノードへ(既定。state を動かさない)
+ *   withdraw       : ここで探索を打ち切る(GDD 8.3 撤退 = 報酬半分・以降なし)
+ *   destroyRecords : 記録を破壊する(GDD 11.1 追補の焼失セマンティクス)
+ *
+ * **MVP では content 側から `destroyRecords` を使わない**(火災イベントを
+ * 1 本も入れない・GDD 11.1 追補)。engine には効果プリミティブだけを置き、
+ * 挙動を conformance で固定しておくことで、MVP 後に **event JSON の additive
+ * 追加だけ**で火災を解禁できる(engine 変更なし = golden 不変 = bump 不要)。
+ */
+export type EventResult =
+  | { readonly kind: "continue" }
+  | { readonly kind: "withdraw" }
+  | {
+      readonly kind: "destroyRecords";
+      readonly medium: DestroyRecordsMedium;
+      readonly scope: DestroyRecordsScope;
+    };
+
+/** {@link EventResult} の種別(UTF-16 昇順・schema 側の語彙表と対で維持する)。 */
+export const EVENT_RESULT_KINDS = ["continue", "destroyRecords", "withdraw"] as const;
+
+/** {@link EVENT_RESULT_KINDS} のいずれか。 */
+export type EventResultKind = (typeof EVENT_RESULT_KINDS)[number];
+
+/** 未知の文字列が結果種別のいずれかか(型ガード)。 */
+export function isEventResultKind(value: string): value is EventResultKind {
+  for (const kind of EVENT_RESULT_KINDS) {
+    if (kind === value) return true;
+  }
+  return false;
+}
+
+/**
+ * [M22] 判定後の分岐 1 本(GDD 12.1 `branches[{cond, result, logTemplate}]`)。
+ * `cond` は**コンパイル済み**の内部表現であり、実行時に文字列パースは走らない
+ * (rules/cond.ts §1)。
+ */
+export interface EventBranchDef {
+  readonly cond: CondExpr;
+  readonly result: EventResult;
+  /**
+   * 帰還ログの本文テンプレ(GDD 8.4)。`{name}` 形式のプレースホルダのみを
+   * 許し、語彙は `rules/event.ts` の `LOG_TEMPLATE_PLACEHOLDERS` が正本
+   * (未知プレースホルダはロード時 reject)。**レンダリング済みの完成文字列**が
+   * セーブへ入るので、後日テンプレを直しても過去ログは壊れない(GDD 12.5-7)。
+   */
+  readonly logTemplate: string;
+}
+
+/**
+ * [M22] event のノード 1 件(GDD 12.1 の `nodes[]`)。
+ *
+ * 難度と R が**人間単位の整数**なのは {@link ExplorationBandParams} と同じ理由
+ * (一様抽選のレンジ幅上限に掛からないため)。
+ */
+export interface EventNodeDef {
+  /** 判定難度(人間単位の整数。combatPower と同じ 0〜100 スケール)。 */
+  readonly difficulty: number;
+  /** `seededRoll(0..R)` の R(人間単位の整数)。 */
+  readonly rollRange: number;
+  /**
+   * 「関連ステータス」の重み(GDD 8.2「関連ステータスはイベント種別で変わる」)。
+   * 基礎ステ 5 種ぶん。指定の無い stat は 0 で埋まっている。
+   */
+  readonly statWeights: StatWeights;
+  /**
+   * 派生値 `combatPower` の重み(裁定 B8「`statWeights` に `combatPower` を
+   * 書く場合、ローダーは基礎ステと別扱いで解決する」)。省略時は 0。
+   */
+  readonly combatPowerWeightFix: Fix;
+  /** 判定前の質的分岐(GDD 8.3)。空なら選択肢なし。 */
+  readonly choices: readonly EventChoiceDef[];
+  /** 判定後の分岐(GDD 12.1)。**最後の 1 本は無条件成立**(ロードが強制)。 */
+  readonly branches: readonly EventBranchDef[];
+}
+
+/**
+ * [M22] event 定義(GDD 12.1 の `event(id, destTags, nodes[])`)。
+ *
+ * **省略可の content カテゴリ**であり、`content/event.json` が無い盤面では
+ * {@link EngineContent.eventDefs} が空 Map になる。そのとき派遣は M21 と同じ
+ * 手続き生成(`rules/exploration.ts` §3)へフォールバックし、1 bit も
+ * 挙動が変わらない。
+ */
+export interface EventDef {
+  readonly id: EntityId;
+  /** この event が出うる距離帯(裁定 B7)。 */
+  readonly destTags: readonly DistanceBand[];
+  /** イベント列(3〜8 ノード・GDD 8.2)。 */
+  readonly nodes: readonly EventNodeDef[];
 }
 
 // --- 4. content 全体 -------------------------------------------------------
@@ -608,6 +817,12 @@ export interface EngineContent {
    * (`commands.ts` の `dispatchExpedition` が `contentUnsupported` で拒否)。
    */
   readonly exploration?: ExplorationParams;
+  /**
+   * [M22] event 定義(GDD 12.1 / 8.2〜8.4)。**省略時 / 空のとき、派遣は M21 の
+   * 手続き生成へフォールバックする**(= M22 以前と 1 bit も違わない)。
+   * `content/event.json` はまだ無く、投入は M23 の担当。
+   */
+  readonly eventDefs?: ReadonlyMap<EntityId, EventDef>;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------

@@ -1119,6 +1119,21 @@ function applyDispatchExpedition(
     }
   }
 
+  // [M22] 目的地が event content を指しているなら、その event がこの距離帯に
+  //   出ることをここで確かめる(裁定 B7)。`buildDispatchSnapshot` の中でも
+  //   `eventDefForDestination` が RulesError にするが、**コマンドの引数の誤りは
+  //   例外ではなく reject で返す**のがこの層の規約(§3)なので先に落とす。
+  const eventDef = content.eventDefs?.get(command.destinationId);
+  if (eventDef !== undefined && !eventDef.destTags.includes(command.band)) {
+    return rejected("dispatchExpedition", index, {
+      code: "invalidArgument",
+      subjectId: command.destinationId,
+      message:
+        `event "${command.destinationId}" は距離帯 ${command.band} に出ない` +
+        `(destTags: ${eventDef.destTags.join(",")}・裁定 B7)`,
+    });
+  }
+
   // 報酬の受け皿(resource entity)が無いと帰還時に報酬が消える。ここで止める。
   const rewardResourceId = bandParamsOf(content, command.band).rewardResourceId;
   if (rewardResourceEntityIdOf(state, rewardResourceId) === undefined) {
