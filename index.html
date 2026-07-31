@@ -4,13 +4,46 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#24201c" />
     <title>継ぐ火 -Kept Flame-</title>
     <!--
       アプリシェルの外枠(M29)。
       - ライトテーマ固定(CLAUDE.md 絶対ルール)。`prefers-color-scheme` の分岐を書かない。
       - 外部フォント/CSS/CDN を参照しない(ADR-025 の静的アセット同梱・オフライン動作)。
       - 画面の中身はすべて src/main.tsx が #app へマウントする。
+
+      PWA の土台(M34・GDD 13.3/13.4・ADR-004(1)):
+      - `manifest.webmanifest` + アイコン(`public/icon.svg`)は自己完結(外部CDN・
+        ビットマップ素材なし)。マニフェスト側の icons はブラウザの installability
+        判定(同一オリジンで取得可能な画像リソース)を確実に満たすため同一オリジン
+        の SVG ファイルパスにしてあり、favicon/apple-touch-icon はここで
+        data: URI として直接埋め込む(HTML の <link> は data: URI が広く実証
+        されている一方、manifest.json の icons.src での data: URI 対応はブラウザ間
+        で文書が薄いため使い分けた・詳細は M34 の報告を参照)。
+      - **Service Worker は意図的に置かない**: 現行の Chrome/Chromium
+        installability 基準(web.dev "Web app manifest requirements for the
+        install banner" 系公式記事で確認)は 2026 時点で SW/fetch ハンドラを
+        要求しない。ADR-031 の stable/beta 昇格(別 Worker + soak)と、凝った
+        SW キャッシュ戦略が持つ更新反映の不整合リスクを避けるため、
+        Add-to-Home 誘導だけを目的とする本タスクでは SW を追加しない
+        (★ 判断・詳細は M34 の報告を参照)。
     -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%2324201c'/%3E%3Cpath d='M256 92c14 58 54 96 84 138 26 36 44 74 44 118a128 128 0 1 1-256 0c0-52 30-84 54-116 4 44-16 64-16 64 30-10 42-42 32-82 20 20 40 38 50-30 6-32-2-62 8-92z' fill='%23ffd34d'/%3E%3Cpath d='M256 224c16 30 40 52 40 88a64 64 0 1 1-128 0c0-22 12-38 22-52 2 22-8 32-8 32 16-6 22-22 16-42 10 10 20 20 30-6 6-16 4-32 28-20z' fill='%23a11334'/%3E%3C/svg%3E"
+    />
+    <link
+      rel="apple-touch-icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%2324201c'/%3E%3Cpath d='M256 92c14 58 54 96 84 138 26 36 44 74 44 118a128 128 0 1 1-256 0c0-52 30-84 54-116 4 44-16 64-16 64 30-10 42-42 32-82 20 20 40 38 50-30 6-32-2-62 8-92z' fill='%23ffd34d'/%3E%3Cpath d='M256 224c16 30 40 52 40 88a64 64 0 1 1-128 0c0-22 12-38 22-52 2 22-8 32-8 32 16-6 22-22 16-42 10 10 20 20 30-6 6-16 4-32 28-20z' fill='%23a11334'/%3E%3C/svg%3E"
+    />
+    <!-- iOS Safari は manifest.json の standalone 対応が新しく、旧バージョン互換のため
+         apple 系メタタグも併置する(検証済み・M34 の報告参照)。 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="継ぐ火" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <style>
       :root {
         color-scheme: light;

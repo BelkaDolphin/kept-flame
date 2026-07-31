@@ -1,0 +1,22 @@
+{
+  "id": "/",
+  "name": "継ぐ火 -Kept Flame-",
+  "short_name": "継ぐ火",
+  "description": "コロニー運営×テックツリー×派遣探索の完全決定論ブラウザゲーム",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#24201c",
+  "lang": "ja",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

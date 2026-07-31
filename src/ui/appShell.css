@@ -413,6 +413,54 @@
   cursor: pointer;
 }
 
+/* --- [M34] 誘導バナー(Add-to-Home/通知オプトイン・src/ui/InstallPromotionBanner.tsx
+   / src/ui/NotificationOptInBanner.tsx 共通) ----------------------------------- */
+
+.kf-promo-banner {
+  margin: 0.5rem 0.75rem 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-panel);
+}
+
+.kf-promo-banner__title {
+  margin: 0 0 0.3rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.kf-promo-banner__body {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--kf-ink-muted);
+}
+
+.kf-promo-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.kf-promo-banner__button {
+  font: inherit;
+  font-size: 0.8rem;
+  min-height: 44px;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--kf-line-grid);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
+.kf-promo-banner__button--primary {
+  border-color: var(--kf-ink-body);
+  border-width: 2px;
+  background: #fcefd0;
+  font-weight: 600;
+}
+
 /* --- [M30] コマンド拒否バナー(②③④共通・src/ui/screens/RejectionBanner.tsx) -- */
 
 .kf-rejection-banner {

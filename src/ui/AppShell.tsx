@@ -34,6 +34,8 @@
 import { useEffect, useState } from "preact/hooks";
 
 import "./appShell.css";
+import { InstallPromotionBanner } from "./InstallPromotionBanner";
+import { NotificationOptInBanner } from "./NotificationOptInBanner";
 import { formatGameClock } from "./screens/format";
 import { SCREEN_META, SCREEN_IDS, type ScreenId } from "./screens";
 import { SCREEN_REGISTRY } from "./screens/registry";
@@ -108,7 +110,28 @@ export function ScreenHost({ screenId, store, bootTick, onNavigate }: ScreenHost
   );
 }
 
-// --- 4. シェル本体 -----------------------------------------------------------
+// --- 4. 誘導バナーの view model(M34)----------------------------------------
+//
+//   composition root(`src/main.tsx`)が「出す意味があるか」(環境検出)と
+//   「出すべきか」(`platform/{installPromotion,notificationCapability}.ts` の
+//   タイムスタンプ判定)を先に AND 済みにした最終値だけをここへ渡す。シェルが
+//   追加で持つのは「このセッション中に閉じたか」という**揮発性の UI 状態
+//   だけ**(`installBannerClosed`/`notificationBannerClosed`。次回起動時は
+//   このセッション内の閉鎖は引き継がない——永続的な頻度抑制は
+//   `PromotionPromptTracker` 側の責務であり、二重に持たない)。
+
+export interface InstallPromotionViewModel {
+  readonly visible: boolean;
+  readonly canPromptDirectly: boolean;
+  readonly onInstall: () => void;
+}
+
+export interface NotificationOptInViewModel {
+  readonly visible: boolean;
+  readonly onRequestPermission: () => void;
+}
+
+// --- 5. シェル本体 -----------------------------------------------------------
 
 export interface AppShellProps {
   readonly store: GameStore;
@@ -116,10 +139,22 @@ export interface AppShellProps {
   readonly session: ShellSession;
   /** 起動直後(catch-up 前)の tick。⑫が「不在中」の起点に使う。 */
   readonly bootTick: number;
+  /** Add-to-Home 誘導バナー(M34)。省略時は描かない(既存呼び出し元との互換)。 */
+  readonly installPromotion?: InstallPromotionViewModel;
+  /** 通知オプトイン誘導バナー(M34)。省略時は描かない。 */
+  readonly notificationOptIn?: NotificationOptInViewModel;
 }
 
-export function AppShell({ store, session, bootTick }: AppShellProps) {
+export function AppShell({
+  store,
+  session,
+  bootTick,
+  installPromotion,
+  notificationOptIn,
+}: AppShellProps) {
   const [screenId, setScreenId] = useState<ScreenId>(() => session.screen());
+  const [installBannerClosed, setInstallBannerClosed] = useState(false);
+  const [notificationBannerClosed, setNotificationBannerClosed] = useState(false);
 
   useEffect(() => {
     // 購読を張る前にルータが動いていた可能性があるので、まず現在地へ揃える。
@@ -138,6 +173,21 @@ export function AppShell({ store, session, bootTick }: AppShellProps) {
         </h1>
         <ColonyClock store={store} />
       </header>
+      {installPromotion && (
+        <InstallPromotionBanner
+          visible={installPromotion.visible && !installBannerClosed}
+          canPromptDirectly={installPromotion.canPromptDirectly}
+          onInstall={installPromotion.onInstall}
+          onClose={() => setInstallBannerClosed(true)}
+        />
+      )}
+      {notificationOptIn && (
+        <NotificationOptInBanner
+          visible={notificationOptIn.visible && !notificationBannerClosed}
+          onRequestPermission={notificationOptIn.onRequestPermission}
+          onClose={() => setNotificationBannerClosed(true)}
+        />
+      )}
       <ScreenHost
         screenId={screenId}
         store={store}

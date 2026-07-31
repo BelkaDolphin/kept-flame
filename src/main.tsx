@@ -36,12 +36,31 @@ import type { EngineContent } from "./engine/rules/types";
 import type { GameState } from "./engine/state/state";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "./platform/catchUp";
 import { createTickDriver } from "./platform/clock";
+import {
+  createInstallPromotionTracker,
+  isStandaloneDisplayMode,
+  saveInstallPromotionSnapshot,
+} from "./platform/installPromotion";
+import { createInstallPromptController } from "./platform/installPromptEvent";
+import { resolveLocalStorage } from "./platform/localStorageMirror";
+import {
+  assessNotificationCapability,
+  createNotificationOptInTracker,
+  detectNotificationCapabilityEnv,
+  requestNotificationPermission,
+  saveNotificationOptInSnapshot,
+  shouldOfferNotificationOptIn,
+} from "./platform/notificationCapability";
 import { loadLatestSave, openSaveDb, saveGameState } from "./platform/persistence";
 import { createBrowserRouterHost, createHashRouter } from "./platform/router";
 import { SaveScheduler, attachLifecycleFlush } from "./platform/saveScheduler";
 import { startCatchUpWorker } from "./platform/workerClient";
 import { createNewGameState } from "./newGame";
-import { AppShell } from "./ui/AppShell";
+import {
+  AppShell,
+  type InstallPromotionViewModel,
+  type NotificationOptInViewModel,
+} from "./ui/AppShell";
 import {
   DEFAULT_SCREEN_ID,
   RETURN_DIGEST_SCREEN_ID,
@@ -50,6 +69,14 @@ import {
 } from "./ui/screens";
 import { createShellSession } from "./ui/shellSession";
 import { createGameStore, type GameStore } from "./ui/store";
+
+// `beforeinstallprompt` はページ生存中いつでも来うるが、条件を満たしていれば
+// 早い段階で発火することが多い。boot() の非同期処理(content 検証・セーブ
+// 復元)より前、モジュール評価の同期区間で listener を張ることで取りこぼしを
+// 減らす(platform/installPromptEvent.ts §1)。イベントが来なければ
+// `getState()` は `"unavailable"` のままで、誘導バナーはテキスト誘導へ
+// フォールバックする(iOS Safari 等)。
+const installPromptController = createInstallPromptController(window);
 
 /** 復帰時に⑫帰還ダイジェストを出す tick 差のしきい値(1 ゲーム時間)。 */
 const DIGEST_MIN_ELAPSED_TICKS = 60;
@@ -199,6 +226,56 @@ async function boot(): Promise<void> {
     if (document.visibilityState === "visible") driver.pump();
   });
 
+  // --- Add-to-Home 誘導(M34・GDD 13.4・ADR-004(1))---------------------------
+  // 判定は「最終起動 monotonicTimestamp のみ」(installPromotion.ts §1)。
+  // standalone 検出は判定そのものには混ぜず、無意味な表示を止める役に限定する。
+  const promotionStorage = resolveLocalStorage();
+  const installTracker = createInstallPromotionTracker({ storage: promotionStorage });
+  // iOS Safari 独自の `navigator.standalone`(lib.dom.d.ts に型定義なし)。
+  // `exactOptionalPropertyTypes` の下では未定義キーを明示せず省略する。
+  const iosStandalone = (window.navigator as { standalone?: boolean }).standalone;
+  const standaloneEnv = {
+    matchMedia: (query: string) => window.matchMedia(query),
+    navigator: iosStandalone === undefined ? {} : { standalone: iosStandalone },
+  };
+  const installVisible =
+    installTracker.status().shouldShow && !isStandaloneDisplayMode(standaloneEnv);
+  if (installVisible) {
+    // 表示すると決めた直後に記録する(永続化は installPromotion.ts §3 の規約)。
+    installTracker.recordShown();
+    saveInstallPromotionSnapshot(promotionStorage, installTracker.snapshot());
+  }
+  const installPromotion: InstallPromotionViewModel = {
+    visible: installVisible,
+    canPromptDirectly: installPromptController.getState() === "available",
+    onInstall: () => {
+      void installPromptController.promptInstall();
+    },
+  };
+
+  // --- 通知の条件分岐(M34・GDD 13.3)-----------------------------------------
+  // 実送信ロジック(Worker cron 等)は本タスク外。ここは「本命として使える
+  // 環境か」を機能検出だけで判定し(notificationCapability.ts §2)、使えなければ
+  // オプトインバナーを一切描かない(代替リテンションは①⑫等の既存導線が担う)。
+  const notificationEnv = detectNotificationCapabilityEnv(window);
+  const notificationCapability = assessNotificationCapability(notificationEnv);
+  const notificationTracker = createNotificationOptInTracker({ storage: promotionStorage });
+  const notificationVisible = shouldOfferNotificationOptIn(
+    notificationCapability,
+    notificationEnv.permission,
+    notificationTracker.status(),
+  );
+  if (notificationVisible) {
+    notificationTracker.recordShown();
+    saveNotificationOptInSnapshot(promotionStorage, notificationTracker.snapshot());
+  }
+  const notificationOptIn: NotificationOptInViewModel = {
+    visible: notificationVisible,
+    onRequestPermission: () => {
+      void requestNotificationPermission(window);
+    },
+  };
+
   // --- 初期画面(GDD 4.2「復帰時に必ず最初に表示」)---------------------------
   // 判定は **plan の targetTick** で行う。長期不在(> 600 tick)は Worker 経路が
   // 非同期に適用されるので、この時点の `store.peekState().tick` はまだ動いておらず、
@@ -208,7 +285,16 @@ async function boot(): Promise<void> {
     router.replace(RETURN_DIGEST_SCREEN_ID);
   }
 
-  render(<AppShell store={store} session={session} bootTick={bootTick} />, root);
+  render(
+    <AppShell
+      store={store}
+      session={session}
+      bootTick={bootTick}
+      installPromotion={installPromotion}
+      notificationOptIn={notificationOptIn}
+    />,
+    root,
+  );
 }
 
 void boot().catch((error: unknown) => {
