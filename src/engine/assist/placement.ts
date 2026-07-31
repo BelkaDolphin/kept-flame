@@ -624,3 +624,63 @@ export function placementPlanToCommands(plan: PlacementPlan): readonly PlaceFaci
   }
   return commands;
 }
+
+// ---------------------------------------------------------------------------
+// 8. 瓦礫ヘルパ(A-7・[2026-07-31裁定] M27 行) — M52 との結線点
+// ---------------------------------------------------------------------------
+//   M52(瓦礫の state 化)により `state.terrain.rubbleCells` が瓦礫セルの権威に
+//   なった(`rules/reclaim.ts` §1)。上の {@link PlacementAssistOptions.blockedCells}
+//   の doc は「M52 の結線点であり、瓦礫が無い間は呼び出し側が渡さなくてよい」と
+//   書いていたが、M52 が入った今、呼び出し側がこれを渡し忘れると瓦礫の上へ
+//   平然と施設を提案してしまう(施設の設置自体は `placeFacility` コマンドが
+//   瓦礫チェックで reject するので state が壊れることは無いが、「提案したのに
+//   置けない」という無駄なやり取りが起きる)。
+//
+//   本節はその「渡し忘れ」を構造的に防ぐ薄いヘルパ 2 つだけを足す。判定ロジック
+//   (何が瓦礫か)は一切再実装せず、`state.terrain.rubbleCells`(state 権威・
+//   既に昇順・重複なし)をそのまま読むだけである。
+
+/**
+ * その state の瓦礫セル一覧({@link PlacementAssistOptions.blockedCells} へ
+ * そのまま渡せる形)。`state.terrain.rubbleCells` は既に昇順・重複なしの正準形
+ * (state.ts の不変条件(i))なので、ここでは複製して返すだけで独自の正規化は
+ * 行わない。
+ */
+export function rubbleBlockedCells(state: GameState): readonly number[] {
+  return state.terrain.rubbleCells;
+}
+
+/** 呼び出し側指定の blockedCells と瓦礫セルを昇順・重複なしへ統合する。 */
+function mergeBlockedCells(
+  explicitCells: readonly number[],
+  rubbleCells: readonly number[],
+): readonly number[] {
+  const merged = new Set<number>(explicitCells);
+  for (const cell of rubbleCells) merged.add(cell);
+  return [...merged].sort((a, b) => a - b);
+}
+
+/**
+ * `suggestPlacements` の薄いラッパ(A-7)。呼び出し側が渡した `blockedCells`
+ * (あれば)へ瓦礫セルを自動で合流させてから本体を呼ぶだけであり、それ以外の
+ * 挙動(80/100 約束・決定論・state を変更しない純関数であること)は
+ * {@link suggestPlacements} と完全に同じ。呼び出し側は瓦礫を意識せずに
+ * 呼んでよい(呼び忘れ防止)。
+ */
+export function suggestPlacementsAvoidingRubble(
+  state: GameState,
+  content: EngineContent,
+  requests: readonly PlacementRequest[],
+  options: PlacementAssistOptions = {},
+): PlacementPlan {
+  const blockedCells = mergeBlockedCells(options.blockedCells ?? [], rubbleBlockedCells(state));
+  // 生スプレッド禁止(ADR-028(1))なので、qualityRatioFix の有無で作り分ける
+  // (exactOptionalPropertyTypes 下で `undefined` を明示キーに持たせないため)。
+  if (options.qualityRatioFix === undefined) {
+    return suggestPlacements(state, content, requests, { blockedCells });
+  }
+  return suggestPlacements(state, content, requests, {
+    qualityRatioFix: options.qualityRatioFix,
+    blockedCells,
+  });
+}

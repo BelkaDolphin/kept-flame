@@ -31,11 +31,14 @@ import {
   AssistError,
   boardOutputScore,
   placementPlanToCommands,
+  rubbleBlockedCells,
   suggestPlacements,
+  suggestPlacementsAvoidingRubble,
   type PlacementPlan,
   type PlacementRequest,
 } from "../../src/engine/assist/placement";
 import { apply } from "../../src/engine/commands";
+import { setTerrain } from "../../src/engine/state/update";
 
 import { footprintFitsGrid, occupiedCells } from "../../src/engine/footprint";
 import { FIX_ONE, fixFromRaw, toApproxNumber, toRaw, type Fix } from "../../src/engine/fp";
@@ -614,5 +617,82 @@ describe("M26 推奨配置: 入力の契約", () => {
     const plan = suggestPlacements(state, engineContent, []);
     expect(plan.suggestions).toStrictEqual([]);
     expect(toRaw(plan.boardScoreBeforeFix)).toBe(toRaw(plan.boardScoreAfterFix));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [2026-07-31裁定 A-7] 瓦礫ヘルパ: M52 の `state.terrain.rubbleCells` を
+// `blockedCells` へ自動で流し込む薄いラッパ(呼び出し側の呼び忘れ防止)。
+// ---------------------------------------------------------------------------
+
+describe("M27(A-7) 瓦礫ヘルパ: rubbleBlockedCells / suggestPlacementsAvoidingRubble", () => {
+  const engineContent = testContent();
+
+  function stateWithRubble(rubbleCells: readonly number[]): ReturnType<typeof stateOf> {
+    return setTerrain(stateOf([]), { rubbleCells, reclaimedCount: 0 });
+  }
+
+  it("rubbleBlockedCells は state.terrain.rubbleCells をそのまま返す", () => {
+    const state = stateWithRubble([2, 5, 9]);
+    expect(rubbleBlockedCells(state)).toStrictEqual([2, 5, 9]);
+  });
+
+  it("瓦礫セルが無い state では空配列(既存 conformance シナリオと同じ既定)", () => {
+    expect(rubbleBlockedCells(stateOf([]))).toStrictEqual([]);
+  });
+
+  it("瓦礫セルには提案しない(呼び出し側が blockedCells を渡さなくても効く)", () => {
+    const allowed = rect(0, 0, 3, 3);
+    const rubble = blockedOutside(allowed); // 3x3 の外側全部を瓦礫扱いにする
+    const state = stateWithRubble(rubble);
+    const plan = suggestPlacementsAvoidingRubble(state, engineContent, [
+      req("rbF1", HEAT.id),
+      req("rbF2", HEAT.id),
+    ]);
+    for (const suggestion of plan.suggestions) {
+      expect(allowed).toContain(suggestion.cellIndex);
+    }
+  });
+
+  it("呼び出し側指定の blockedCells と瓦礫セルは和集合になる(どちらも避ける)", () => {
+    // 瓦礫 = 0〜2、呼び出し側指定 = 3〜5。空きは 6 以降だけ。
+    const state = stateWithRubble([0, 1, 2]);
+    const plan = suggestPlacementsAvoidingRubble(state, engineContent, [req("mergeF1", HEAT.id)], {
+      blockedCells: [3, 4, 5],
+    });
+    const suggestion = plan.suggestions[0];
+    expect(suggestion).toBeDefined();
+    if (suggestion === undefined) return;
+    expect([0, 1, 2, 3, 4, 5]).not.toContain(suggestion.cellIndex);
+  });
+
+  it("qualityRatioFix を渡しても瓦礫は避けたまま(素の貪欲 = ratio 1.0)", () => {
+    const allowed = rect(0, 0, 3, 3);
+    const rubble = blockedOutside(allowed);
+    const state = stateWithRubble(rubble);
+    const plan = suggestPlacementsAvoidingRubble(state, engineContent, [req("ratioF1", HEAT.id)], {
+      qualityRatioFix: FIX_ONE,
+    });
+    const suggestion = plan.suggestions[0];
+    expect(suggestion).toBeDefined();
+    if (suggestion === undefined) return;
+    expect(allowed).toContain(suggestion.cellIndex);
+  });
+
+  it("瓦礫を避けたラッパは、瓦礫を明示的に blockedCells へ渡した suggestPlacements と同じ提案を返す", () => {
+    const rubble = [10, 11, 12, 13];
+    const state = stateWithRubble(rubble);
+    const viaHelper = suggestPlacementsAvoidingRubble(state, engineContent, [req("eqF1", HEAT.id)]);
+    const viaExplicit = suggestPlacements(state, engineContent, [req("eqF1", HEAT.id)], {
+      blockedCells: rubble,
+    });
+    expect(viaHelper).toStrictEqual(viaExplicit);
+  });
+
+  it("state を 1 bit も変えない(瓦礫ヘルパも純関数)", () => {
+    const state = stateWithRubble([4, 6, 8]);
+    const snapshot = JSON.stringify(state.terrain);
+    suggestPlacementsAvoidingRubble(state, engineContent, [req("pureF1", HEAT.id)]);
+    expect(JSON.stringify(state.terrain)).toBe(snapshot);
   });
 });
