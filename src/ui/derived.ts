@@ -69,7 +69,11 @@ import {
   codifyResidualTick,
   suggestCodification,
 } from "../engine/assist/codify";
+import { explorationTeamCandidates } from "../engine/assist/exploration";
 import { isCodified, recordMediaOfTech } from "../engine/rules/codify";
+import { residentCombatPower } from "../engine/rules/combat";
+import { explorationRoi, type ExplorationRoiReport } from "../engine/rules/exploration";
+import { outpostNetworkRoi } from "../engine/rules/outpost";
 import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
 import { recallRiskPerDay } from "../engine/rules/recall";
@@ -81,21 +85,25 @@ import {
   lossClassOfTech,
   prereqsOfTech,
   requireFacilityDef,
+  type DistanceBand,
   type EngineContent,
   type FacilityDef,
   type RecordMedium,
   type TechLossClass,
 } from "../engine/rules/types";
 import {
+  allOutposts,
   entitiesOfKind,
   isAliveResident,
   type CodifyState,
   type DispatchSnapshot,
+  type DispatchStance,
   type EntityId,
   type FacilityFootprint,
   type GameState,
   type MemoirEntry,
   type RenderedLogEntry,
+  type RenderedLogState,
   type ResearchState,
   type ResidentState,
 } from "../engine/state/state";
@@ -773,6 +781,21 @@ export interface StoreDerived {
    * 押すまで state を動かさない(提案は常に読み取り専用)。
    */
   readonly codifySuggestions: ReadonlyComputed<readonly CodifySuggestionView[]>;
+  /**
+   * [M32] ⑦探索本部の派遣候補(GDD 8.1 [2026-07-30裁定]②「寿命を持たない
+   * 住民は派遣拒否」を候補列挙の段階で先に除外・M27 と同じ立場)。
+   */
+  readonly expeditionCandidates: ReadonlyComputed<readonly ExpeditionCandidateView[]>;
+  /** [M32] ⑦/⑧が読む未帰還派遣一覧(派遣 ID 昇順・state.ts 不変条件(g))。 */
+  readonly expeditionDispatches: ReadonlyComputed<readonly ExpeditionDispatchView[]>;
+  /** [M32] ⑦の派遣枠使用状況(GDD 8.1「派遣枠上限＝同時2枠」)。 */
+  readonly expeditionSlots: ReadonlyComputed<ExpeditionSlotView>;
+  /** [M32] ⑧が読む住民 memoir の一覧(tick 昇順・GDD 7.3)。 */
+  readonly memoirFeed: ReadonlyComputed<readonly MemoirFeedEntry[]>;
+  /** [M32] ⑧が読む帰還ログ(GDD 8.4・レンダリング済み文字列・50件上限)。 */
+  readonly renderedLog: ReadonlyComputed<RenderedLogState>;
+  /** [M32] ⑨衛星拠点の一覧 + 拠点網 ROI(GDD 9.2 / 11.4-7)。 */
+  readonly outpostOverview: ReadonlyComputed<OutpostOverviewView>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -1198,6 +1221,31 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "codifySuggestions" },
   );
 
+  // [M32] ⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理(§8 の builder を呼ぶだけ)。
+  const expeditionCandidates = computed<readonly ExpeditionCandidateView[]>(
+    () => buildExpeditionCandidates(sources.state.value, sources.content.value),
+    { name: "expeditionCandidates" },
+  );
+  const expeditionDispatches = computed<readonly ExpeditionDispatchView[]>(
+    () => buildExpeditionDispatches(sources.state.value),
+    { name: "expeditionDispatches" },
+  );
+  const expeditionSlots = computed<ExpeditionSlotView>(
+    () => buildExpeditionSlots(sources.state.value),
+    { name: "expeditionSlots" },
+  );
+  const memoirFeed = computed<readonly MemoirFeedEntry[]>(
+    () => buildMemoirFeed(sources.state.value),
+    { name: "memoirFeed" },
+  );
+  const renderedLog = computed<RenderedLogState>(() => sources.state.value.renderedLogs, {
+    name: "renderedLog",
+  });
+  const outpostOverview = computed<OutpostOverviewView>(
+    () => buildOutpostOverview(sources.state.value, sources.content.value),
+    { name: "outpostOverview" },
+  );
+
   return {
     adjacencyMatrix,
     cellAdjacency,
@@ -1219,6 +1267,12 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     researchTree,
     codifyTechs,
     codifySuggestions,
+    expeditionCandidates,
+    expeditionDispatches,
+    expeditionSlots,
+    memoirFeed,
+    renderedLog,
+    outpostOverview,
   };
 }
 
@@ -1877,4 +1931,250 @@ function buildCodifySuggestions(
     cumulativeTicks: suggestion.cumulativeTicks,
     onSchedule: suggestion.onSchedule,
   }));
+}
+
+// --- 8. 探索本部/冒険記/衛星拠点(⑦⑧⑨・M32)------------------------------------
+//
+// 3 画面とも「engine の既存データ/既存計算を読むだけ」(GDD 8.6 の ROI 式は
+// rules/exploration.ts の explorationRoi を、GDD 9.2 / 11.4-7 の拠点網 ROI は
+// rules/outpost.ts の outpostNetworkRoi をそのまま呼ぶ。UI 側で式を書き直さない
+// —— §3 冒頭の「単一正準実装」の規律を⑦⑨へも適用する)。
+//
+// (a) 探索編成テンプレの提案(assist/exploration.ts の suggestExpeditionTeams)は
+//     **画面(ExpeditionScreen.tsx)側が直接呼ぶ**。ここの expeditionCandidates
+//     と違い、提案は「その場のチーム人数/除外指定」という画面ローカルの一時
+//     入力に依存するので、signal グラフの computed にする理由が無い
+//     (§5 の computePlacementPreview と同じ立場)。
+// (b) ROI プレビュー({@link previewExplorationRoi})も同じ理由で computed に
+//     しない —— 距離帯とチーム編成という画面ローカルの選択に依存するため。
+
+/** ⑦の派遣候補 1 名(GDD 8.1 [2026-07-30裁定]②「寿命を持たない住民は除外」)。 */
+export interface ExpeditionCandidateView {
+  readonly entityId: EntityId;
+  /** GDD 8.2 の combatPower(装備補正を含まないチーム編成前の個人値)。 */
+  readonly combatPowerApprox: number;
+  readonly moraleApprox: number;
+  readonly traitIds: readonly EntityId[];
+}
+
+/** ⑦/⑧が読む未帰還派遣 1 件(`DispatchSnapshot` の表示用の写し)。 */
+export interface ExpeditionDispatchView {
+  readonly dispatchId: EntityId;
+  readonly destinationId: EntityId;
+  readonly band: DistanceBand;
+  readonly stance: DispatchStance;
+  readonly memberIds: readonly EntityId[];
+  readonly dispatchTick: number;
+  readonly returnTick: number;
+  readonly rewardResourceId: EntityId;
+  readonly rewardApprox: number;
+  readonly withdrawn: boolean;
+  readonly casualtyMemberIds: readonly EntityId[];
+}
+
+/** ⑦の派遣枠使用状況(GDD 8.1「派遣枠上限＝同時2枠」)。 */
+export interface ExpeditionSlotView {
+  readonly used: number;
+  readonly max: number;
+}
+
+/**
+ * ⑧が読む住民 memoir 1 件(GDD 7.3)。文言は持たず(テンプレ ID + 決定論
+ * パラメータのまま・state.ts の doc「実文言は content/UI 層の担当」)、
+ * 画面側(ChronicleScreen.tsx)が種別ごとの文言テーブルを持つ
+ * (ReturnDigest.tsx の DIGEST_LEAD_TEXT と同じ作法)。
+ */
+export interface MemoirFeedEntry {
+  readonly residentId: EntityId;
+  readonly entry: MemoirEntry;
+}
+
+/** ⑨の拠点 1 基(GDD 9.2)。ROI 内訳は `rules/outpost.ts` の算出をそのまま写す。 */
+export interface OutpostRosterEntry {
+  readonly outpostId: EntityId;
+  readonly outpostTypeId: EntityId;
+  readonly resourceId: EntityId;
+  readonly band: DistanceBand;
+  readonly level: number;
+  readonly residentIds: readonly EntityId[];
+  readonly establishedTick: number;
+  readonly supplyApprox: number;
+  readonly upkeepApprox: number;
+  readonly netRevenueApprox: number;
+  /** hazard(GDD 9.2 の「駐在員が (B) 資産を失う期待確率」・0〜1)。 */
+  readonly hazardApprox: number;
+  readonly rareAssetCount: number;
+  /** 期待 (B) 喪失損失(GDD 8.6 を拠点へ援用・rules/outpost.ts §4)。 */
+  readonly expectedRareLossApprox: number;
+  /** ROI = supply / (upkeep + 期待B喪失損失)。分母 0 なら null。 */
+  readonly roiApprox: number | null;
+}
+
+/** ⑨の拠点網全体(GDD 11.4-7「拠点網ROI」)。 */
+export interface OutpostNetworkView {
+  readonly outpostCount: number;
+  readonly totalSupplyApprox: number;
+  readonly totalUpkeepApprox: number;
+  readonly totalNetRevenueApprox: number;
+  readonly totalExpectedRareLossApprox: number;
+  readonly roiApprox: number | null;
+}
+
+/** ⑨の表示モデル一式(1 回の `outpostNetworkRoi` 呼び出しから両方を作る・§7)。 */
+export interface OutpostOverviewView {
+  readonly network: OutpostNetworkView;
+  readonly roster: readonly OutpostRosterEntry[];
+}
+
+/**
+ * [M32] ⑦の派遣候補一覧。`assist/exploration.ts` の `explorationTeamCandidates`
+ * (寿命なし住民の事前除外込み)をそのまま呼ぶ——候補列挙のロジックを
+ * ここで書き直さない(M27 の既存実装と 2 通りの候補基準を作らないため)。
+ */
+function buildExpeditionCandidates(
+  state: GameState,
+  content: EngineContent,
+): readonly ExpeditionCandidateView[] {
+  return explorationTeamCandidates(state).map((resident) => ({
+    entityId: resident.id,
+    combatPowerApprox: toApproxNumber(residentCombatPower(resident, content)),
+    moraleApprox: toApproxNumber(resident.morale),
+    traitIds: resident.traitIds,
+  }));
+}
+
+/** [M32] 未帰還派遣一覧(`state.dispatchSnapshots` は既に派遣 ID 昇順)。 */
+function buildExpeditionDispatches(state: GameState): readonly ExpeditionDispatchView[] {
+  return state.dispatchSnapshots.map((snapshot) => ({
+    dispatchId: snapshot.id,
+    destinationId: snapshot.destinationId,
+    band: snapshot.band,
+    stance: snapshot.stance,
+    memberIds: snapshot.memberIds,
+    dispatchTick: snapshot.dispatchTick,
+    returnTick: snapshot.returnTick,
+    rewardResourceId: snapshot.rewardResourceId,
+    rewardApprox: toApproxNumber(snapshot.rewardFix),
+    withdrawn: snapshot.withdrawn,
+    casualtyMemberIds: snapshot.casualtyMemberIds,
+  }));
+}
+
+/**
+ * GDD 8.1「派遣枠上限＝同時2枠」。**`src/engine/commands.ts` の
+ * `CONCURRENT_DISPATCH_MAX` と同じ計算の意図的な複製**である
+ * (`tests/engine/commands.test.ts`「検分: engine コマンドを呼ぶ ui ファイルは
+ * store.ts だけ(単一入口)」が `derived.ts` からの `engine/commands` import を
+ * 禁じているため、値だけを写す。§3-2 の `displayFacilityMaxLevel` と同じ
+ * 立場の軽い重複であり、engine 側にネイティブ公開する形への一本化は将来の
+ * タスクへ送る・最終報告の★参照)。
+ */
+const EXPEDITION_CONCURRENT_DISPATCH_MAX = 2;
+
+function buildExpeditionSlots(state: GameState): ExpeditionSlotView {
+  return { used: state.dispatchSnapshots.length, max: EXPEDITION_CONCURRENT_DISPATCH_MAX };
+}
+
+/**
+ * [M32] 住民 memoir を 1 本の feed へ平坦化する。走査は `entitiesOfKind` の
+ * 正準順(住民 ID 昇順)だが、表示は出来事の時系列(tick 昇順)にしたいので
+ * 明示ソートを挟む(tick が同値なら住民 ID 昇順で決定論の全順序にする)。
+ */
+function buildMemoirFeed(state: GameState): readonly MemoirFeedEntry[] {
+  const feed: MemoirFeedEntry[] = [];
+  for (const resident of entitiesOfKind(state, "resident")) {
+    for (const entry of resident.memoir?.entries ?? []) {
+      feed.push({ residentId: resident.id, entry });
+    }
+  }
+  feed.sort((a, b) => {
+    if (a.entry.tick !== b.entry.tick) return a.entry.tick - b.entry.tick;
+    return compareUtf16(a.residentId, b.residentId);
+  });
+  return feed;
+}
+
+/**
+ * [M32] ⑨の表示モデル(GDD 9.2 / 11.4-7)。**`outpostNetworkRoi` を 1 回だけ
+ * 呼び**、その `perOutpost`(= `allOutposts(state)` と同じ順序・
+ * rules/outpost.ts §7 の doc)を使って拠点 1 基ぶんの内訳を作る——同じ ROI を
+ * ここで再計算しない(§3 の規律をそのまま踏襲)。
+ *
+ * 拠点が 1 つも無い盤面(新規ゲームの既定)では `allOutposts` が空配列を返し、
+ * `outpostNetworkRoi` は outpostType 定義の有無を検査せずに全フィールド
+ * 0/null で返す(rules/outpost.ts の doc どおり)ので、content に拠点系
+ * ブロックが無い盤面でもこの関数は安全に呼べる。
+ */
+function buildOutpostOverview(state: GameState, content: EngineContent): OutpostOverviewView {
+  const report = outpostNetworkRoi(state, content, state.tick);
+  const outposts = allOutposts(state);
+  const roster: OutpostRosterEntry[] = [];
+  for (let i = 0; i < outposts.length; i++) {
+    const outpost = outposts[i];
+    const perOutpost = report.perOutpost[i];
+    if (outpost === undefined || perOutpost === undefined) continue;
+    // content に定義が無い(理論上は起きない)状態で画面を落とさない
+    // (§3 の bLossImminentTechIds / buildFacilityRoster と同じ防御的スキップ)。
+    const resourceId =
+      content.outpostTypeDefs?.get(outpost.outpostTypeId)?.resourceId ?? outpost.outpostTypeId;
+    roster.push({
+      outpostId: outpost.id,
+      outpostTypeId: outpost.outpostTypeId,
+      resourceId,
+      band: outpost.band,
+      level: outpost.level,
+      residentIds: outpost.residentIds,
+      establishedTick: outpost.establishedTick,
+      supplyApprox: toApproxNumber(perOutpost.supplyValueFix),
+      upkeepApprox: toApproxNumber(perOutpost.upkeepValueFix),
+      netRevenueApprox: toApproxNumber(perOutpost.netRevenueFix),
+      hazardApprox: toApproxNumber(perOutpost.hazardFix),
+      rareAssetCount: perOutpost.rareAssetCount,
+      expectedRareLossApprox: toApproxNumber(perOutpost.expectedRareLossFix),
+      roiApprox: perOutpost.roiFix === null ? null : toApproxNumber(perOutpost.roiFix),
+    });
+  }
+  return {
+    network: {
+      outpostCount: report.outpostCount,
+      totalSupplyApprox: toApproxNumber(report.totalSupplyValueFix),
+      totalUpkeepApprox: toApproxNumber(report.totalUpkeepValueFix),
+      totalNetRevenueApprox: toApproxNumber(report.totalNetRevenueFix),
+      totalExpectedRareLossApprox: toApproxNumber(report.totalExpectedRareLossFix),
+      roiApprox: report.roiFix === null ? null : toApproxNumber(report.roiFix),
+    },
+    roster,
+  };
+}
+
+/**
+ * [M32] ⑦の目的地選択肢(GDD 8.1「目的地」= 距離帯 + M22 の event content)。
+ * content にその距離帯へ出る event が無ければ空(= 画面側が手続き生成
+ * フォールバックの 1 択を出す・ExpeditionScreen.tsx の doc)。
+ */
+export function explorationDestinationsForBand(
+  content: EngineContent,
+  band: DistanceBand,
+): readonly EntityId[] {
+  const ids: EntityId[] = [];
+  for (const [defId, def] of content.eventDefs ?? []) {
+    if (def.destTags.includes(band)) ids.push(defId);
+  }
+  return ids.sort(compareUtf16);
+}
+
+/**
+ * [M32] ⑦の派遣前 ROI プレビュー(GDD 8.6・検収条件そのもの=(B)損失リスク項が
+ * 画面に出ているか)。**`explorationRoi` をそのまま呼ぶ**(UI 独自の式を
+ * 書かない)。content に exploration ブロックが無ければ null(= 派遣システム
+ * そのものが不活性)。
+ */
+export function previewExplorationRoi(
+  state: GameState,
+  content: EngineContent,
+  band: DistanceBand,
+  memberIds: readonly EntityId[],
+): ExplorationRoiReport | null {
+  if (content.exploration === undefined) return null;
+  return explorationRoi(state, content, band, memberIds);
 }

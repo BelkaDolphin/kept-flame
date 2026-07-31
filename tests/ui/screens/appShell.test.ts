@@ -18,10 +18,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ScreenHost, ScreenNav } from "../../../src/ui/AppShell";
 import { NUMBERED_SCREEN_COUNT, SCREEN_IDS, SCREEN_META } from "../../../src/ui/screens";
+import { ChronicleScreen } from "../../../src/ui/screens/chronicle/ChronicleScreen";
 import { CodifyScreen } from "../../../src/ui/screens/codify/CodifyScreen";
+import { ExpeditionScreen } from "../../../src/ui/screens/expedition/ExpeditionScreen";
 import { FacilityScreen } from "../../../src/ui/screens/facility/FacilityScreen";
 import { GridScreen } from "../../../src/ui/screens/grid/GridScreen";
 import { HomeHub } from "../../../src/ui/screens/home/HomeHub";
+import { OutpostsScreen } from "../../../src/ui/screens/outposts/OutpostsScreen";
 import { PlaceholderScreen } from "../../../src/ui/screens/PlaceholderScreen";
 import { ResearchScreen } from "../../../src/ui/screens/research/ResearchScreen";
 import { ResidentsScreen } from "../../../src/ui/screens/residents/ResidentsScreen";
@@ -58,11 +61,14 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     expect(SCREEN_REGISTRY.codify.ownerTask).toBeNull();
   });
 
-  it("未実装画面の担当タスクはロードマップ(M32〜M33)と一致する", () => {
+  it("[M32] ⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理は実装済み(担当タスク無し)", () => {
+    expect(SCREEN_REGISTRY.expedition.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.chronicle.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.outposts.ownerTask).toBeNull();
+  });
+
+  it("未実装画面の担当タスクはロードマップ(M33)と一致する", () => {
     const expected: Record<string, string> = {
-      expedition: "M32",
-      chronicle: "M32",
-      outposts: "M32",
       migration: "M33",
       inheritance: "M33",
       settings: "M33",
@@ -73,7 +79,7 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     }
   });
 
-  it("実装済み 7 画面はそれぞれのコンポーネントを、残りはプレースホルダを返す", () => {
+  it("実装済み 10 画面はそれぞれのコンポーネントを、残りはプレースホルダを返す", () => {
     const { store } = createTestStore();
     const props = screenProps(store);
     expect(SCREEN_REGISTRY.home.render(props).type).toBe(HomeHub);
@@ -83,6 +89,9 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     expect(SCREEN_REGISTRY.residents.render(props).type).toBe(ResidentsScreen);
     expect(SCREEN_REGISTRY.research.render(props).type).toBe(ResearchScreen);
     expect(SCREEN_REGISTRY.codify.render(props).type).toBe(CodifyScreen);
+    expect(SCREEN_REGISTRY.expedition.render(props).type).toBe(ExpeditionScreen);
+    expect(SCREEN_REGISTRY.chronicle.render(props).type).toBe(ChronicleScreen);
+    expect(SCREEN_REGISTRY.outposts.render(props).type).toBe(OutpostsScreen);
     for (const entry of SCREEN_ENTRIES) {
       if (entry.ownerTask === null) continue;
       const vnode = entry.render(props);
@@ -100,9 +109,9 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
 describe("ScreenHost(非アクティブ画面は物理アンマウント・ADR-027(2))", () => {
   it("現在画面 1 個ぶんしか vnode を作らない(未実装画面=プレースホルダで確認)", () => {
     const { store } = createTestStore();
-    // [M31] research は実装済みになったので、未実装のまま残る expedition(M32)で
-    // プレースホルダ経路を確認する(前例=M30 が同じ理由で対象画面を差し替えた形)。
-    const vnode = ScreenHost({ screenId: "expedition", ...screenProps(store) });
+    // [M31/M32 統合] expedition も実装済みになったので、未実装のまま残る
+    // migration(M33)でプレースホルダ経路を確認する(前例=M30/M31 が同じ理由で差し替えた形)。
+    const vnode = ScreenHost({ screenId: "migration", ...screenProps(store) });
     const children = vnode.props.children as unknown;
     // `display:none` で 13 画面を並べる形なら配列になる。1 個だけであることを固定する。
     expect(Array.isArray(children)).toBe(false);

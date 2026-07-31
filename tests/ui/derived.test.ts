@@ -25,14 +25,18 @@ import {
   toRaw,
 } from "../../src/engine/fp";
 import { CODIFY_NO_DEADLINE_TICKS, suggestCodification } from "../../src/engine/assist/codify";
+import { explorationRoi } from "../../src/engine/rules/exploration";
+import { outpostNetworkRoi, outpostRoi } from "../../src/engine/rules/outpost";
 import { activeLaborFix, facilityOutputPerTick } from "../../src/engine/rules/production";
 import { recallRiskPerDay } from "../../src/engine/rules/recall";
 import { reclaimCostFix } from "../../src/engine/rules/reclaim";
+import { residentCombatPower } from "../../src/engine/rules/combat";
 import { techMemoryKeyOf } from "../../src/engine/rules/techMemory";
 import type { TraitDef } from "../../src/engine/rules/stats";
 import type {
   EngineContent,
   EraDef,
+  EventDef,
   ReclaimParams,
   RecordMediaParams,
   TechDef,
@@ -40,6 +44,8 @@ import type {
 import {
   entitiesOfKind,
   requireEntity,
+  type DispatchSnapshot,
+  type EntityId,
   type EntityState,
   type ResearchState,
   type ResidentState,
@@ -51,8 +57,19 @@ import {
   setTechMemories,
   updateEntity,
 } from "../../src/engine/state/update";
-import { computePlacementPreview } from "../../src/ui/derived";
+import {
+  computePlacementPreview,
+  explorationDestinationsForBand,
+  previewExplorationRoi,
+} from "../../src/ui/derived";
 import { createGameStore } from "../../src/ui/store";
+import {
+  candidateResident,
+  m32Content,
+  M32_OUTPOST_TYPE,
+  M32_REWARD_RESOURCE,
+  outpostOf,
+} from "./m32Fixtures";
 import { FORGE, META, research, stateOf } from "../engine/fixtures";
 import {
   CELL_CENTER,
@@ -1294,5 +1311,208 @@ describe("[M31] codifySuggestions(おまかせ成文化の提案・GDD 2.1)", ()
       expect(view?.cumulativeTicks).toBe(suggestion?.cumulativeTicks);
       expect(view?.onSchedule).toBe(suggestion?.onSchedule);
     }
+  });
+});
+
+// --- M32: ⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理 --------------------------
+
+describe("[M32] expeditionCandidates(GDD 8.1 [2026-07-30裁定]②の事前除外)", () => {
+  it("寿命あり・生存・非派遣中の住民だけが候補になる", () => {
+    const alive = candidateResident("aAlive");
+    const dispatchedResident = candidateResident("aDispatched", { dispatched: true });
+    const noLife = resident("aNoLife");
+    const dead = {
+      ...candidateResident("aDead"),
+      life: { bornTick: 0, lifespanTick: 100, diedTick: 50 },
+    };
+    const state = createGameState(META, [alive, dispatchedResident, noLife, dead]);
+    const content = m32Content();
+    const store = createGameStore({ state, content });
+    const candidates = store.derived.expeditionCandidates.value;
+    expect(candidates.map((c) => c.entityId)).toEqual([alive.id]);
+    expect(candidates[0]?.combatPowerApprox).toBe(
+      toApproxNumber(residentCombatPower(alive, content)),
+    );
+    expect(candidates[0]?.moraleApprox).toBe(toApproxNumber(alive.morale));
+  });
+});
+
+describe("[M32] expeditionDispatches / expeditionSlots(GDD 8.1「派遣枠上限＝同時2枠」)", () => {
+  function snapshotOf(
+    name: string,
+    band: "near" | "far" | "deep",
+    memberIds: readonly EntityId[],
+  ): DispatchSnapshot {
+    return {
+      id: id(name),
+      destinationId: id(`${name}Dest`),
+      band,
+      stance: "cautious",
+      memberIds,
+      dispatchTick: 0,
+      returnTick: 60,
+      teamPowerFix: fixFromInt(100),
+      nodes: [],
+      withdrawn: false,
+      rewardFix: fixFromInt(30),
+      rewardResourceId: M32_REWARD_RESOURCE,
+      casualtyMemberIds: [],
+    };
+  }
+
+  it("state.dispatchSnapshots をそのまま写す・派遣枠は使用数/上限2", () => {
+    const alive = candidateResident("aTeam", { dispatched: true });
+    const state = createGameState(
+      META,
+      [alive],
+      [],
+      [],
+      [],
+      [snapshotOf("dispatchNear1", "near", [alive.id]), snapshotOf("dispatchFar1", "far", [])],
+    );
+    const store = createGameStore({ state, content: m32Content() });
+    const dispatches = store.derived.expeditionDispatches.value;
+    expect(dispatches.map((d) => d.dispatchId)).toEqual([id("dispatchFar1"), id("dispatchNear1")]);
+    expect(dispatches[1]?.memberIds).toEqual([alive.id]);
+    expect(dispatches[1]?.rewardApprox).toBe(30);
+
+    const slots = store.derived.expeditionSlots.value;
+    expect(slots).toEqual({ used: 2, max: 2 });
+  });
+
+  it("未帰還派遣が無ければ 0/2", () => {
+    const { store } = createTestStore();
+    expect(store.derived.expeditionSlots.value).toEqual({ used: 0, max: 2 });
+  });
+});
+
+describe("[M32] memoirFeed(GDD 7.3・tick 昇順に平坦化)", () => {
+  it("複数住民の memoir を tick 昇順(同値は住民ID昇順)へ並べる", () => {
+    const first: ReturnType<typeof resident> = {
+      ...resident("aFirst"),
+      memoir: {
+        entries: [
+          { kind: "arrival", tick: 10 },
+          { kind: "bondMilestone", tick: 30, partnerId: id("aSecond"), tier: 1 },
+        ],
+        foldedCount: 0,
+      },
+    };
+    const second: ReturnType<typeof resident> = {
+      ...resident("aSecond"),
+      memoir: {
+        entries: [
+          { kind: "explorationRescue", tick: 20, rescuedId: id("aRescued"), band: "near" },
+          { kind: "arrival", tick: 10 },
+        ],
+        foldedCount: 0,
+      },
+    };
+    const state = createGameState(META, [first, second]);
+    const store = createGameStore({ state, content: m32Content() });
+    const feed = store.derived.memoirFeed.value;
+    expect(feed.map((entry) => [entry.residentId, entry.entry.tick, entry.entry.kind])).toEqual([
+      [id("aFirst"), 10, "arrival"],
+      [id("aSecond"), 10, "arrival"],
+      [id("aSecond"), 20, "explorationRescue"],
+      [id("aFirst"), 30, "bondMilestone"],
+    ]);
+  });
+});
+
+describe("[M32] renderedLog(GDD 8.4・帰還ログのそのままの写し)", () => {
+  it("state.renderedLogs を 1 バイトも変えずに公開する", () => {
+    const state = createGameState(META, [], [], [], [], [], {
+      entries: [{ tick: 5, text: "近郊探索「x」より1名が帰還。" }],
+      foldedCount: 3,
+    });
+    const store = createGameStore({ state, content: m32Content() });
+    expect(store.derived.renderedLog.value).toEqual(state.renderedLogs);
+  });
+});
+
+describe("[M32] outpostOverview(GDD 9.2 / 11.4-7・outpostNetworkRoi をそのまま呼ぶ)", () => {
+  it("engine の outpostRoi/outpostNetworkRoi と 1 対 1 で一致する(congruence)", () => {
+    const stationed = candidateResident("aStation");
+    const outpost = outpostOf("outpost1", "near", [stationed.id]);
+    const state = createGameState(META, [stationed], [], [], [], [], undefined, [outpost]);
+    const content = m32Content();
+    const store = createGameStore({ state, content });
+
+    const expectedReport = outpostRoi(state, content, outpost, state.tick);
+    const overview = store.derived.outpostOverview.value;
+    const view = overview.roster.find((entry) => entry.outpostId === outpost.id);
+    expect(view).toBeDefined();
+    expect(view?.resourceId).toBe(M32_OUTPOST_TYPE.resourceId);
+    expect(view?.supplyApprox).toBe(toApproxNumber(expectedReport.supplyValueFix));
+    expect(view?.upkeepApprox).toBe(toApproxNumber(expectedReport.upkeepValueFix));
+    expect(view?.hazardApprox).toBe(toApproxNumber(expectedReport.hazardFix));
+    expect(view?.rareAssetCount).toBe(expectedReport.rareAssetCount);
+    expect(view?.expectedRareLossApprox).toBe(toApproxNumber(expectedReport.expectedRareLossFix));
+    expect(view?.roiApprox).toBe(
+      expectedReport.roiFix === null ? null : toApproxNumber(expectedReport.roiFix),
+    );
+
+    const expectedNetwork = outpostNetworkRoi(state, content, state.tick);
+    expect(overview.network.outpostCount).toBe(expectedNetwork.outpostCount);
+    expect(overview.network.totalSupplyApprox).toBe(
+      toApproxNumber(expectedNetwork.totalSupplyValueFix),
+    );
+    expect(overview.network.roiApprox).toBe(
+      expectedNetwork.roiFix === null ? null : toApproxNumber(expectedNetwork.roiFix),
+    );
+  });
+
+  it("拠点が無ければ全フィールドが 0/null(content に拠点ブロックが無い盤面でも落ちない)", () => {
+    const { store } = createTestStore();
+    const overview = store.derived.outpostOverview.value;
+    expect(overview.network).toEqual({
+      outpostCount: 0,
+      totalSupplyApprox: 0,
+      totalUpkeepApprox: 0,
+      totalNetRevenueApprox: 0,
+      totalExpectedRareLossApprox: 0,
+      roiApprox: null,
+    });
+    expect(overview.roster).toEqual([]);
+  });
+});
+
+describe("[M32] explorationDestinationsForBand(GDD 8.1「目的地」+ M22 event content)", () => {
+  it("destTags がその距離帯を含む event だけを ID 昇順で返す", () => {
+    const nearEvent: EventDef = { id: id("eventNearA"), destTags: ["near"], nodes: [] };
+    const bothEvent: EventDef = { id: id("eventBothB"), destTags: ["near", "far"], nodes: [] };
+    const farOnlyEvent: EventDef = { id: id("eventFarOnly"), destTags: ["far"], nodes: [] };
+    const content: EngineContent = {
+      ...m32Content(),
+      eventDefs: new Map([
+        [nearEvent.id, nearEvent],
+        [bothEvent.id, bothEvent],
+        [farOnlyEvent.id, farOnlyEvent],
+      ]),
+    };
+    expect(explorationDestinationsForBand(content, "near")).toEqual([bothEvent.id, nearEvent.id]);
+    expect(explorationDestinationsForBand(content, "deep")).toEqual([]);
+  });
+
+  it("content に eventDefs が無ければ空(= 手続き生成フォールバック)", () => {
+    expect(explorationDestinationsForBand(m32Content(), "near")).toEqual([]);
+  });
+});
+
+describe("[M32] previewExplorationRoi(GDD 8.6・explorationRoi をそのまま呼ぶ)", () => {
+  it("content に exploration ブロックが無ければ null", () => {
+    const { store } = createTestStore();
+    expect(previewExplorationRoi(store.peekState(), boardContent(), "near", [])).toBeNull();
+  });
+
+  it("engine の explorationRoi と 1 対 1 で一致する(congruence・(B)損失項を含む)", () => {
+    const member = candidateResident("aMember");
+    const state = createGameState(META, [member, resource("wStock", M32_REWARD_RESOURCE)]);
+    const content = m32Content();
+    const expected = explorationRoi(state, content, "near", [member.id]);
+    const actual = previewExplorationRoi(state, content, "near", [member.id]);
+    expect(actual).toEqual(expected);
+    expect(toRaw(expected.expectedRareLossFix)).toBeGreaterThanOrEqual(0);
   });
 });

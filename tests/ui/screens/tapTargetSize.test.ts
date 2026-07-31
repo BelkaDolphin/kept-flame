@@ -58,6 +58,7 @@ import { ResidentRow } from "../../../src/ui/screens/residents/ResidentsScreen";
 import type {
   CodifySuggestionView,
   CodifyTechEntry,
+  ExpeditionCandidateView,
   FacilityRosterEntry,
   ResearchTreeEntry,
   ResidentView,
@@ -67,6 +68,12 @@ import { RejectionBanner } from "../../../src/ui/screens/RejectionBanner";
 import { ScreenNav } from "../../../src/ui/AppShell";
 import { ResearchTechRow } from "../../../src/ui/screens/research/ResearchScreen";
 import { CodifySuggestionPanel, CodifyTechRow } from "../../../src/ui/screens/codify/CodifyScreen";
+import {
+  BandPicker,
+  CandidateRow,
+  DestinationPicker,
+  StancePicker,
+} from "../../../src/ui/screens/expedition/ExpeditionScreen";
 
 const id = entityIdFromString;
 
@@ -121,6 +128,10 @@ const ALL_RULES: ReadonlyMap<string, CssDeclarations> = new Map([
   // [M31]
   ...readCss("src/ui/screens/research/researchScreen.css"),
   ...readCss("src/ui/screens/codify/codifyScreen.css"),
+  // [M32]
+  ...readCss("src/ui/screens/expedition/expeditionScreen.css"),
+  ...readCss("src/ui/screens/chronicle/chronicleScreen.css"),
+  ...readCss("src/ui/screens/outposts/outpostsScreen.css"),
 ]);
 
 function pxValue(raw: string | undefined): number | null {
@@ -270,6 +281,18 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
     ".kf-codify-row__enqueue-button",
     ".kf-codify-assist__apply-button",
     ".kf-codify-screen__nav-button",
+    // [M32] 新規(⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理)
+    ".kf-expedition__band-button",
+    ".kf-expedition__destination-button",
+    ".kf-expedition__stance-button",
+    ".kf-expedition__candidate-button",
+    ".kf-expedition__team-size-button",
+    ".kf-expedition__suggest-button",
+    ".kf-expedition__apply-button",
+    ".kf-expedition__dispatch-button",
+    ".kf-expedition-screen__nav-button",
+    ".kf-chronicle-screen__nav-button",
+    ".kf-outposts-screen__nav-button",
   ] as const;
 
   it.each(INTERACTIVE_SELECTORS)("%s は 44px 角を満たす", (selector) => {
@@ -519,6 +542,48 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
       found,
     );
     expect(found).toHaveLength(0);
+  });
+});
+
+// --- 4-3. [M32] ⑦探索本部の hooks 不使用コンポーネントの実レンダー突合せ ----
+
+describe("44px 最小タップ領域 — ⑦探索本部(M32)の実レンダー突合せ", () => {
+  it("BandPicker(距離帯3ボタン)", () => {
+    const vnode = BandPicker({ band: "near", onPick: () => undefined });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.length).toBe(3);
+  });
+
+  it("DestinationPicker(目的地ボタン)", () => {
+    const vnode = DestinationPicker({
+      options: [id("eventNearRubbleSweep")],
+      destinationId: id("eventNearRubbleSweep"),
+      onPick: () => undefined,
+      procedural: false,
+    });
+    assertAllInteractiveElementsMeetMinTapTarget(vnode);
+  });
+
+  it("StancePicker(方針2ボタン)", () => {
+    const vnode = StancePicker({ stance: "cautious", onPick: () => undefined });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.length).toBe(2);
+  });
+
+  it("CandidateRow(派遣候補トグルボタン)", () => {
+    const candidate: ExpeditionCandidateView = {
+      entityId: id("aRui"),
+      combatPowerApprox: 50,
+      moraleApprox: 60,
+      traitIds: [],
+    };
+    const vnode = CandidateRow({
+      candidate,
+      selected: false,
+      disabled: false,
+      onToggle: () => undefined,
+    });
+    assertAllInteractiveElementsMeetMinTapTarget(vnode);
   });
 });
 

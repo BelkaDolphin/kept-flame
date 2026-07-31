@@ -9,8 +9,10 @@ import { describe, expect, it } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
 import {
+  distanceBandLabel,
   eraLabel,
   facilityLabel,
+  outpostTypeLabel,
   resourceLabel,
   techLabel,
   traitLabel,
@@ -85,6 +87,28 @@ describe("contentLabels: 既知 ID の日本語名", () => {
     expect(eraLabel("e1")).toBe("灰の時代");
     expect(eraLabel("e2")).toBe("窯と畑の時代");
     expect(eraLabel("e3")).toBe("鉄と歯車の時代");
+  });
+
+  it("[M32] outpostType: GDD 9.2 [2026-07-31裁定] の 3 種", () => {
+    expect(outpostTypeLabel(id("outpostMine"))).toBe("鉱山");
+    expect(outpostTypeLabel(id("outpostFarm"))).toBe("農園");
+    expect(outpostTypeLabel(id("outpostForest"))).toBe("林");
+  });
+
+  it("[M32] resource: 農園が産出する grain(GDD 9.2)", () => {
+    expect(resourceLabel(id("grain"))).toBe("穀物");
+  });
+
+  it("[M32] distanceBand: 裁定 B7(近郊/遠隔/深部)", () => {
+    expect(distanceBandLabel("near")).toBe("近郊");
+    expect(distanceBandLabel("far")).toBe("遠隔");
+    expect(distanceBandLabel("deep")).toBe("深部");
+  });
+});
+
+describe("contentLabels: [M32] outpostType の未登録 ID も捏造せず raw ID を返す", () => {
+  it("outpostTypeLabel", () => {
+    expect(outpostTypeLabel(id("outpostQuarry"))).toBe("outpostQuarry");
   });
 });
 

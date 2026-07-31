@@ -1,0 +1,95 @@
+/*
+ * 継ぐ火 -Kept Flame- ⑧冒険記ビューア(M32)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-chronicle-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-chronicle-screen__subtitle {
+  font-size: 0.85rem;
+  margin: 0.7rem 0 0.3rem;
+}
+
+.kf-chronicle-screen__empty {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-chronicle__log-list,
+.kf-chronicle__memoir-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.kf-chronicle__log-row {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.4rem 0.55rem;
+  background: #ffffff;
+  font-size: 0.82rem;
+}
+
+.kf-chronicle__log-tick {
+  display: block;
+  font-size: 0.72rem;
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.15rem;
+}
+
+.kf-chronicle__folded {
+  font-size: 0.78rem;
+  color: #5b534b;
+  margin: 0 0 0.6rem;
+}
+
+.kf-chronicle__memoir-row {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.35rem 0.55rem;
+  background: #faf8f5;
+  font-size: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.kf-chronicle__memoir-tick {
+  font-size: 0.72rem;
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-chronicle__memoir-subject {
+  font-weight: 600;
+}
+
+.kf-chronicle-screen__nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.kf-chronicle-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

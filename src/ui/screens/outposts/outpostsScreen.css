@@ -1,0 +1,111 @@
+/*
+ * 継ぐ火 -Kept Flame- ⑨衛星拠点管理(M32)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-outposts-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-outposts-screen__network {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.5rem;
+}
+
+.kf-outposts-screen__network-count,
+.kf-outposts-screen__network-supply,
+.kf-outposts-screen__network-upkeep,
+.kf-outposts-screen__network-net,
+.kf-outposts-screen__network-roi {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.25rem;
+}
+
+/* [M32] GDD 8.6 を援用した拠点網の (B) 喪失リスク項。検収条件なので目立たせる。 */
+.kf-outposts-screen__network-loss {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #a11334;
+  margin: 0 0 0.3rem;
+}
+
+.kf-outposts-screen__note {
+  font-size: 0.78rem;
+  color: #5b534b;
+  margin: 0 0 0.6rem;
+}
+
+.kf-outposts-screen__empty {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-outposts-screen__list {
+  list-style: none;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kf-outpost-card {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+}
+
+.kf-outpost-card__title {
+  font-size: 0.9rem;
+  margin: 0 0 0.35rem;
+}
+
+.kf-outpost-card__residents,
+.kf-outpost-card__established,
+.kf-outpost-card__supply,
+.kf-outpost-card__upkeep,
+.kf-outpost-card__net,
+.kf-outpost-card__hazard,
+.kf-outpost-card__roi {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.25rem;
+  color: #5b534b;
+}
+
+/* [M32] GDD 8.6 を援用した拠点個別の (B) 喪失リスク項。検収条件。 */
+.kf-outpost-card__loss {
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #a11334;
+  margin: 0 0 0.25rem;
+}
+
+.kf-outposts-screen__nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.kf-outposts-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

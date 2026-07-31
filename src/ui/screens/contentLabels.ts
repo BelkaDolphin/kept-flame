@@ -23,6 +23,7 @@
 // (存在しない情報を捏造しない・PlaceholderScreen.tsx と同じ方針)。
 // ---------------------------------------------------------------------------
 
+import type { DistanceBand } from "../../engine/rules/types";
 import type { EntityId } from "../../engine/state/state";
 
 const FACILITY_LABELS: { readonly [key: string]: string } = {
@@ -37,6 +38,33 @@ const RESOURCE_LABELS: { readonly [key: string]: string } = {
   clay: "粘土",
   paper: "紙",
   waste: "廃材",
+  // [M32] GDD 9.2「タイプ別供給(鉱山＝鉄/石炭、農園＝穀物、林＝薪/繊維)」の
+  // 農園が産出する資源(`content/outpostType.json` の `outpostFarm.resource`)。
+  grain: "穀物",
+};
+
+/**
+ * [M32] 衛星拠点タイプ(GDD 9.2「[2026-07-31裁定] MVP の拠点タイプは
+ * 鉱山(iron)/農園(grain)/林(firewood) の3種」)。`content/outpostType.json` の
+ * ID(outpostMine/outpostFarm/outpostForest)と GDD が直接使う日本語名の対応
+ * であり、facility と違い ID の literal 直訳ではなく GDD 本文の用語をそのまま
+ * 採る(捏造ではなく出典つきの対応)。
+ */
+const OUTPOST_TYPE_LABELS: { readonly [key: string]: string } = {
+  outpostMine: "鉱山",
+  outpostFarm: "農園",
+  outpostForest: "林",
+};
+
+/**
+ * [M32] 距離帯(裁定 B7「近郊 = near / 遠隔 = far / 深部 = deep」)。engine の
+ * 定数(`rules/exploration.ts` の `BAND_LABEL`)と同じ対応を UI 側にも 1 つ
+ * 持つ(⑦⑧⑨の 3 画面が共有するため contentLabels.ts へ集約)。
+ */
+const DISTANCE_BAND_LABELS: { readonly [K in DistanceBand]: string } = {
+  near: "近郊",
+  far: "遠隔",
+  deep: "深部",
 };
 
 /** GDD 7.2 の 8 種(裁定どおりの日本語名)。 */
@@ -125,4 +153,14 @@ export function techLabel(techId: EntityId): string {
 export function eraLabel(eraId: string | null): string {
   if (eraId === null) return "?";
   return ERA_LABELS[eraId] ?? eraId;
+}
+
+/** [M32] outpostType ID → 日本語名(GDD 9.2 の用語)。 */
+export function outpostTypeLabel(outpostTypeId: EntityId): string {
+  return labelOf(OUTPOST_TYPE_LABELS, outpostTypeId);
+}
+
+/** [M32] 距離帯 → 日本語名(裁定 B7)。全件を必ず埋める(型で強制)。 */
+export function distanceBandLabel(band: DistanceBand): string {
+  return DISTANCE_BAND_LABELS[band];
 }
