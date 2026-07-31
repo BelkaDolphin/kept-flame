@@ -16,10 +16,23 @@
 import { describe, expect, it } from "vitest";
 
 import { GRID_CELL_COUNT } from "../../src/engine/adjacency";
-import { toRaw } from "../../src/engine/fp";
+import {
+  FIX_ONE,
+  fixFromInt,
+  fixFromRaw,
+  mulFix,
+  toApproxNumber,
+  toRaw,
+} from "../../src/engine/fp";
+import { activeLaborFix, facilityOutputPerTick } from "../../src/engine/rules/production";
+import { reclaimCostFix } from "../../src/engine/rules/reclaim";
+import type { TraitDef } from "../../src/engine/rules/stats";
+import type { EngineContent, ReclaimParams } from "../../src/engine/rules/types";
 import { entitiesOfKind, requireEntity } from "../../src/engine/state/state";
-import { setField, updateEntity } from "../../src/engine/state/update";
+import { createGameState, setField, updateEntity } from "../../src/engine/state/update";
 import { computePlacementPreview } from "../../src/ui/derived";
+import { createGameStore } from "../../src/ui/store";
+import { FORGE, META } from "../engine/fixtures";
 import {
   CELL_CENTER,
   CELL_EAST,
@@ -27,9 +40,13 @@ import {
   CELL_SOUTHEAST,
   CELL_WEST,
   HEARTH,
+  SMELTER,
   STUDY_DESK,
+  WOOD,
+  WORKER_ID,
   at,
   boardContent,
+  boardState,
   changedCells,
   createTestStore,
   facility,
@@ -38,6 +55,8 @@ import {
   placeHearth,
   primeAllCells,
   recomputeCounts,
+  resident,
+  resource,
 } from "./fixtures";
 
 describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限定される(ADR-002(2))", () => {
@@ -182,8 +201,10 @@ describe("fan-in 上界: 1 セル編集の再計算は自セル + 8 近傍に限
     expect(at(store.derived.cellAdjacency, CELL_CENTER).dependencyCount).toBe(10);
     // 空きセルは近傍を 1 つも読まない(自セルの配置だけ)。
     expect(at(store.derived.cellAdjacency, 0).dependencyCount).toBe(1);
-    // 表示モデルは「隣接結果 + 自セルの施設 + 自セルの配置」の 3 本。
-    expect(at(store.derived.cellView, CELL_CENTER).dependencyCount).toBe(3);
+    // 表示モデルは「隣接結果 + 自セルの施設 + 自セルの配置 + 自セルの瓦礫」の
+    // 4 本([M30] cellRubble[i] を追加。自セルのみへの依存なので近傍越しの
+    // O(近傍) 上界そのものは変わらない・sources.ts の doc 参照)。
+    expect(at(store.derived.cellView, CELL_CENTER).dependencyCount).toBe(4);
   });
 });
 
@@ -547,6 +568,24 @@ describe("[M19] computePlacementPreview(GDD 6.5 配置プレビュー)", () => {
     expect(occupied?.fits).toBe(false);
   });
 
+  it("[M30] 瓦礫セル(GDD 9.1)は fits=false(engine の cellIsRubble reject と食い違わせない)", () => {
+    const RUBBLE_CELL = 30;
+    const state = createGameState(META, [resource("wStock", WOOD)], [], [], [], [], undefined, [], {
+      rubbleCells: [RUBBLE_CELL],
+      reclaimedCount: 0,
+    });
+    const store = createGameStore({ state, content: boardContent() });
+    const previews = computePlacementPreview(
+      store.sources,
+      store.peekContent(),
+      store.sources.worldSeedU32.peek(),
+      HEARTH.id,
+    );
+    expect(previews.find((p) => p.cellIndex === RUBBLE_CELL)?.fits).toBe(false);
+    // 瓦礫でない空きセルは引き続き fits=true。
+    expect(previews.find((p) => p.cellIndex === CELL_WEST)?.fits).toBe(true);
+  });
+
   it("大型施設(2×1)は盤外へはみ出すアンカーで fits=false になる", () => {
     const wideDef = { ...HEARTH, id: id("wideHearth"), footprint: { width: 2, height: 1 } };
     const { store } = createTestStore();
@@ -566,5 +605,228 @@ describe("[M19] computePlacementPreview(GDD 6.5 配置プレビュー)", () => {
     // 1 列左(x=4)なら収まる(近傍に施設が無いので空きセルとして fits=true)。
     const fitsAnchor = 4;
     expect(previews.find((p) => p.cellIndex === fitsAnchor)?.fits).toBe(true);
+  });
+});
+
+// --- M30: 格子/施設詳細/住民配置 ---------------------------------------------
+
+describe("[M30] CellViewModel.isRubble(GDD 9.1)", () => {
+  const RUBBLE_CELL = 30;
+
+  function terrainState(rubbleCells: readonly number[], firewoodStockHuman = 0) {
+    return createGameState(
+      META,
+      [resident("rSolo"), resource("wStock", WOOD, firewoodStockHuman)],
+      [],
+      [],
+      [],
+      [],
+      undefined,
+      [],
+      { rubbleCells, reclaimedCount: 0 },
+    );
+  }
+
+  it("terrain.rubbleCells に載っているセルは isRubble=true・非占有として表示される", () => {
+    const store = createGameStore({ state: terrainState([RUBBLE_CELL]), content: boardContent() });
+    const cell = at(store.derived.cellView, RUBBLE_CELL).value;
+    expect(cell.isRubble).toBe(true);
+    expect(cell.occupied).toBe(false);
+  });
+
+  it("瓦礫リストに無いセルは isRubble=false", () => {
+    const store = createGameStore({ state: terrainState([RUBBLE_CELL]), content: boardContent() });
+    expect(at(store.derived.cellView, CELL_WEST).value.isRubble).toBe(false);
+  });
+
+  it("開墾(reclaimCell)で isRubble が反転し、変わるのは自セルだけ(近傍の隣接には無関係・fan-in)", () => {
+    const reclaimParams: ReclaimParams = {
+      baseCostFix: fixFromInt(10),
+      costGrowthFix: FIX_ONE,
+      costCapFix: fixFromInt(10),
+      costResourceId: WOOD,
+      initialRubbleCells: [],
+    };
+    const withReclaim: EngineContent = { ...boardContent(), reclaim: reclaimParams };
+    const store = createGameStore({
+      state: terrainState([RUBBLE_CELL], 100),
+      content: withReclaim,
+    });
+    primeAllCells(store);
+    const beforeAdjacency = recomputeCounts(store.derived.cellAdjacency);
+    const beforeView = recomputeCounts(store.derived.cellView);
+
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: { kind: "reclaimCell", cellIndex: RUBBLE_CELL },
+    });
+    expect(result.command?.ok).toBe(true);
+    primeAllCells(store);
+
+    expect(at(store.derived.cellView, RUBBLE_CELL).value.isRubble).toBe(false);
+    expect(changedCells(beforeAdjacency, recomputeCounts(store.derived.cellAdjacency))).toEqual([]);
+    expect(changedCells(beforeView, recomputeCounts(store.derived.cellView))).toEqual([
+      RUBBLE_CELL,
+    ]);
+  });
+});
+
+describe("[M30] residents: ステータス5種/生存/死亡tombstone(GDD 7.1/7.5)", () => {
+  it("ステータス未設定の住民は中立既定値(基準50)が5種とも出る", () => {
+    const { store } = createTestStore();
+    const view = at(store.derived.residents.value, 0);
+    expect(view.stats).toEqual({
+      vigorApprox: 50,
+      dexterityApprox: 50,
+      intellectApprox: 50,
+      fortitudeApprox: 50,
+      willApprox: 50,
+    });
+    expect(view.alive).toBe(true);
+    expect(view.diedTick).toBeNull();
+  });
+
+  it("trait の加算効果が反映される(生産式と同じ合成経路 = residentContribution)", () => {
+    const vigorTrait: TraitDef = {
+      id: id("traitVigorTest"),
+      statAddFixById: new Map([["vigor", fixFromInt(5)]]),
+      statMulFixById: new Map(),
+      yieldMulFix: FIX_ONE,
+    };
+    const state = createGameState(META, [resident("rTrait", { traitIds: [vigorTrait.id] })]);
+    const withTrait: EngineContent = {
+      ...boardContent(),
+      traitDefs: new Map([[vigorTrait.id, vigorTrait]]),
+    };
+    const store = createGameStore({ state, content: withTrait });
+    expect(at(store.derived.residents.value, 0).stats.vigorApprox).toBe(55);
+    // 他の 4 種は無変更のまま中立既定値。
+    expect(at(store.derived.residents.value, 0).stats.willApprox).toBe(50);
+  });
+
+  it("life.diedTick が立っている住民は alive=false・diedTick が表示される(GDD 7.5 tombstone)", () => {
+    const state = createGameState(META, [
+      { ...resident("rDead"), life: { bornTick: -1000, lifespanTick: 2000, diedTick: 500 } },
+    ]);
+    const store = createGameStore({ state, content: boardContent() });
+    const view = at(store.derived.residents.value, 0);
+    expect(view.alive).toBe(false);
+    expect(view.diedTick).toBe(500);
+  });
+
+  it("寿命(life)を持たない住民は alive=true・diedTick=null(死なない仕様のまま)", () => {
+    const { store } = createTestStore();
+    expect(at(store.derived.residents.value, 0).alive).toBe(true);
+    expect(at(store.derived.residents.value, 0).diedTick).toBeNull();
+  });
+});
+
+describe("[M30] facilityCatalog(②施設カタログ・content のみに依存)", () => {
+  it("content の facilityDefs が ID 昇順で並び、産出種別が正しく写る", () => {
+    const { store } = createTestStore();
+    const catalog = store.derived.facilityCatalog.value;
+    const ids = catalog.map((entry) => entry.defId);
+    expect(ids).toEqual([...ids].sort());
+    expect(new Set(ids)).toEqual(new Set([FORGE.id, HEARTH.id, SMELTER.id, STUDY_DESK.id]));
+
+    const hearthEntry = catalog.find((entry) => entry.defId === HEARTH.id);
+    expect(hearthEntry?.tags).toEqual(["heat"]);
+    expect(hearthEntry?.outputKind).toBe("resource");
+    expect(hearthEntry?.outputResourceId).toBe(WOOD);
+
+    const studyDeskEntry = catalog.find((entry) => entry.defId === STUDY_DESK.id);
+    expect(studyDeskEntry?.outputKind).toBe("research");
+    expect(studyDeskEntry?.outputResourceId).toBeNull();
+  });
+
+  it("盤面(state)が変わってもカタログの参照は変わらない(content のみ依存・再計算なし)", () => {
+    const { store } = createTestStore();
+    const before = store.derived.facilityCatalog.value;
+    store.dispatch({ type: "ticked", toTick: 30 });
+    expect(store.derived.facilityCatalog.value).toBe(before);
+  });
+});
+
+describe("[M30] facilityRoster(④住民配置の就労先選択)", () => {
+  it("盤面の施設が ID 昇順・タグ/Lv/就労者つきで並ぶ", () => {
+    const { store } = createTestStore();
+    const roster = store.derived.facilityRoster.value;
+    expect(roster.map((entry) => entry.facilityId)).toEqual([
+      id("fEast"),
+      id("fFar"),
+      id("fHearth"),
+    ]);
+    const hearthEntry = roster.find((entry) => entry.facilityId === id("fHearth"));
+    expect(hearthEntry?.tags).toEqual(["heat"]);
+    expect(hearthEntry?.level).toBe(1);
+    expect(hearthEntry?.workerIds).toEqual([WORKER_ID]);
+    // HEARTH フィクスチャは workerSlotsByLevel を持たないので上限なし(null)。
+    expect(hearthEntry?.slotsMax).toBeNull();
+  });
+});
+
+describe("[M30] selectedFacilityDetail(③施設詳細/増築)", () => {
+  it("未選択・空きセルは null", () => {
+    const { store } = createTestStore();
+    expect(store.derived.selectedFacilityDetail.value).toBeNull();
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_SOUTHEAST });
+    expect(store.derived.selectedFacilityDetail.value).toBeNull();
+  });
+
+  it("占有セルは Lv/就労者/産出レートを返し、産出レートは engine の式と一致する(congruence)", () => {
+    const { store, state, content } = createTestStore();
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_CENTER });
+    const detail = store.derived.selectedFacilityDetail.value;
+    expect(detail).not.toBeNull();
+    expect(detail?.facilityId).toBe(id("fHearth"));
+    expect(detail?.defId).toBe(HEARTH.id);
+    expect(detail?.level).toBe(1);
+    expect(detail?.maxLevel).toBe(HEARTH.outputPerTickByLevel.length);
+    expect(detail?.workers).toHaveLength(1);
+    expect(detail?.workers[0]?.residentId).toBe(WORKER_ID);
+    expect(detail?.outputKind).toBe("resource");
+    expect(detail?.outputResourceId).toBe(WOOD);
+
+    const facilityEntity = requireEntity(state, id("fHearth"), "facility");
+    const def = content.facilityDefs.get(HEARTH.id);
+    if (def === undefined) throw new Error("HEARTH 定義がフィクスチャに無い");
+    const cell = at(store.derived.cellView, CELL_CENTER).value;
+    const expectedRateFix = mulFix(
+      mulFix(facilityOutputPerTick(def, facilityEntity.level), cell.multiplierFix),
+      activeLaborFix(state, content, facilityEntity, def, state.tick),
+    );
+    expect(detail?.outputPerTickApprox).toBe(toApproxNumber(expectedRateFix));
+    expect(detail?.multiplierApprox).toBe(cell.multiplierApprox);
+  });
+});
+
+describe("[M30] reclaimInfo(②瓦礫開墾の現況・GDD 9.1)", () => {
+  it("content に reclaim ブロックが無ければ不活性", () => {
+    const { store } = createTestStore();
+    const info = store.derived.reclaimInfo.value;
+    expect(info.available).toBe(false);
+    expect(info.nextCostApprox).toBeNull();
+    expect(info.costResourceId).toBeNull();
+  });
+
+  it("reclaim ブロックがあれば次のコストが engine の式と一致する(congruence)", () => {
+    const reclaimParams: ReclaimParams = {
+      baseCostFix: fixFromInt(40),
+      costGrowthFix: fixFromRaw(1_150_000), // 1.15(GDD 9.1)
+      costCapFix: fixFromInt(2000),
+      costResourceId: WOOD,
+      initialRubbleCells: [],
+    };
+    const withReclaim: EngineContent = { ...boardContent(), reclaim: reclaimParams };
+    const state = boardState();
+    const store = createGameStore({ state, content: withReclaim });
+    const info = store.derived.reclaimInfo.value;
+    expect(info.available).toBe(true);
+    const expectedCostFix = reclaimCostFix(reclaimParams, state.terrain.reclaimedCount);
+    expect(info.nextCostApprox).toBe(toApproxNumber(expectedCostFix));
+    expect(info.costResourceId).toBe(WOOD);
+    expect(info.availableStockApprox).toBe(
+      toApproxNumber(requireEntity(state, id("wStock"), "resource").stock),
+    );
   });
 });

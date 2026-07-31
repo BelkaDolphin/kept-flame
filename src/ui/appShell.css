@@ -412,3 +412,15 @@
   color: var(--kf-ink-body);
   cursor: pointer;
 }
+
+/* --- [M30] コマンド拒否バナー(②③④共通・src/ui/screens/RejectionBanner.tsx) -- */
+
+.kf-rejection-banner {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--kf-urgency-critical-line);
+  border-radius: 4px;
+  background: #f7ecea;
+  color: var(--kf-urgency-critical-line);
+  font-size: 0.82rem;
+}

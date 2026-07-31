@@ -133,6 +133,13 @@ export interface ReadonlyStoreSources {
   readonly worldSeedU32: ReadonlySignal<number>;
   readonly cellPlacement: readonly ReadonlySignal<CellPlacement | null>[];
   readonly cellFacility: readonly ReadonlySignal<FacilityState | null>[];
+  /**
+   * [M30] セル i が未開墾の瓦礫か(GDD 9.1)。**セル単位に割った根**であり、
+   * `cellPlacement`/`cellFacility` と同じ理由(ADR-002(2) の fan-in 上界)で
+   * 独立させてある —— `cellView[i]` がこれを読んでも足すのは「自セル自身への
+   * 依存」1 本だけなので、近傍越しの再計算(O(近傍))という上界は崩れない。
+   */
+  readonly cellRubble: readonly ReadonlySignal<boolean>[];
   readonly selectedCellIndex: ReadonlySignal<number | null>;
   readonly activeScreen: ReadonlySignal<ScreenId>;
 }
@@ -161,6 +168,8 @@ export interface StoreSources extends ReadonlyStoreSources {
   readonly cellPlacement: readonly Signal<CellPlacement | null>[];
   /** 長さ 48。index = cellIndex。 */
   readonly cellFacility: readonly Signal<FacilityState | null>[];
+  /** [M30] 長さ 48。index = cellIndex。瓦礫の有無(GDD 9.1・`GameState.terrain`)。 */
+  readonly cellRubble: readonly Signal<boolean>[];
 
   // --- UI 状態(engine の外・セーブに載らない) ---
   /** タップ選択→配置先タップの 2 ステップ(GDD 6.6)の選択中セル。 */
@@ -183,6 +192,7 @@ function cellIndexInRange(cellIndex: number): boolean {
 export function createStoreSources(input: CreateStoreSourcesInput): StoreSources {
   const cellPlacement: Signal<CellPlacement | null>[] = [];
   const cellFacility: Signal<FacilityState | null>[] = [];
+  const cellRubble: Signal<boolean>[] = [];
   for (let i = 0; i < GRID_CELL_COUNT; i++) {
     cellPlacement.push(
       new Signal<CellPlacement | null>(null, {
@@ -193,6 +203,7 @@ export function createStoreSources(input: CreateStoreSourcesInput): StoreSources
     cellFacility.push(
       new Signal<FacilityState | null>(null, { name: `cellFacility[${String(i)}]` }),
     );
+    cellRubble.push(new Signal<boolean>(false, { name: `cellRubble[${String(i)}]` }));
   }
 
   return {
@@ -202,6 +213,7 @@ export function createStoreSources(input: CreateStoreSourcesInput): StoreSources
     worldSeedU32: new Signal(input.advanceContext.worldSeedU32, { name: "worldSeedU32" }),
     cellPlacement,
     cellFacility,
+    cellRubble,
     selectedCellIndex: new Signal<number | null>(null, { name: "selectedCellIndex" }),
     activeScreen: new Signal<ScreenId>(DEFAULT_SCREEN_ID, { name: "activeScreen" }),
   };
@@ -213,6 +225,8 @@ export interface SourceSyncReport {
   readonly changedPlacementCells: readonly number[];
   /** 施設 entity の参照が変わったセル(昇順)。配置変更はこちらにも必ず現れる。 */
   readonly changedFacilityCells: readonly number[];
+  /** [M30] 瓦礫の有無が変わったセル(昇順)。開墾(`reclaimCell`)でのみ動く。 */
+  readonly changedRubbleCells: readonly number[];
   /** GameState signal が実際に差し替わったか。 */
   readonly stateChanged: boolean;
   /** 参照比較で早期 continue したセル数(§2 の効き具合の可視化)。 */
@@ -261,8 +275,15 @@ export function syncSourcesFromState(
     }
   }
 
+  // [M30] 瓦礫セルの集合(GDD 9.1)。`rubbleCells` はセル番号の昇順・重複なしの
+  // 不変条件がある(state.ts §3(i))ので、Set 化してのメンバーシップ判定は
+  // O(1)。facility の occupancy とは独立の性質なので、下のループとは別に
+  // 一度だけ作る(facility 側の早期 continue に巻き込まれないようにするため)。
+  const rubbleCellSet = new Set(state.terrain.rubbleCells);
+
   const changedPlacementCells: number[] = [];
   const changedFacilityCells: number[] = [];
+  const changedRubbleCells: number[] = [];
   let unchangedCellCount = 0;
   let stateChanged = false;
 
@@ -271,9 +292,19 @@ export function syncSourcesFromState(
       const facility = facilityByCell[i] ?? null;
       const facilitySignal = sources.cellFacility[i];
       const placementSignal = sources.cellPlacement[i];
-      if (facilitySignal === undefined || placementSignal === undefined) {
+      const rubbleSignal = sources.cellRubble[i];
+      if (
+        facilitySignal === undefined ||
+        placementSignal === undefined ||
+        rubbleSignal === undefined
+      ) {
         throw new StoreSourceError(`根 signal の配列長が ${String(GRID_CELL_COUNT)} でない`);
       }
+
+      // [M30] 瓦礫は facility の occupancy と独立な性質なので、facility 側の
+      // 早期 continue より**前**に必ず同期する(開墾直後も普通の tick 進行も
+      // 同じ経路を通るようにするため)。
+      if (rubbleSignal.set(rubbleCellSet.has(i))) changedRubbleCells.push(i);
 
       // (1) 構造共有の早期打ち切り: entity の参照が同じならセルは何も変わっていない。
       if (Object.is(facilitySignal.peek(), facility)) {
@@ -300,5 +331,11 @@ export function syncSourcesFromState(
     stateChanged = sources.state.set(state);
   });
 
-  return { changedPlacementCells, changedFacilityCells, stateChanged, unchangedCellCount };
+  return {
+    changedPlacementCells,
+    changedFacilityCells,
+    changedRubbleCells,
+    stateChanged,
+    unchangedCellCount,
+  };
 }

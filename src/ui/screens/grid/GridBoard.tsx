@@ -25,21 +25,27 @@
 //   参照。
 //
 // ===========================================================================
-// 3. 2ステップ操作(GDD 6.6)と「瓦礫開墾」の扱い
+// 3. 2ステップ操作(GDD 6.6)と「瓦礫開墾」の扱い [2026-08-01 / M30 更新]
 // ===========================================================================
 //   タップ選択 → 配置先タップの2ステップのうち、「何を建てるか」の選択(施設
-//   カタログ)は M30 の担当。本コンポーネントは `pendingPlacement`(defId +
-//   facilityId。ID は呼び出し側が用意する——engine の `placeFacility` は
-//   呼び出し側が生成した ID を要求する契約であり、ここで ID を発行しない)を
-//   受け取り、空きセルへのタップをその場で `placeFacility` コマンドへ変換する
+//   カタログ)は M30 が `GridScreen.tsx` に実装した。本コンポーネントは
+//   `pendingPlacement`(defId + facilityId。ID は呼び出し側が用意する——engine の
+//   `placeFacility` は呼び出し側が生成した ID を要求する契約であり、ここで ID
+//   を発行しない。採番は `facilityId.ts` の `nextFacilityId`)を受け取り、
+//   空きセルへのタップをその場で `placeFacility` コマンドへ変換する
 //   「配置先タップ」だけを持つ。
 //
-//   **瓦礫開墾(GDD 9.1)は実装していない**。engine の `GameState` に地形/瓦礫の
-//   概念が一切無く(`commands.ts` の `reclaimCell` は型のみ予約・M18 が担当と
-//   注記されているが、実体は state 拡張を要する = engine 変更)、本タスクの
-//   絶対制約(`src/engine/` 変更禁止)により実装できない。したがって現状は
-//   **全 48 セルが「開墾済み」として扱われる**(既存 engine の実際の挙動と一致
-//   させてあるだけで、UI 側で情報を捏造してはいない)。詳細は最終報告を参照。
+//   **[M30] 瓦礫開墾(GDD 9.1)は M52(`GameState.terrain`)の state 化を受けて
+//   実装した**。本コンポーネント自身は瓦礫の意味(コスト計算・
+//   `reclaimCell` の発行)を持たない——それは `GridScreen.tsx` の担当であり、
+//   ここが持つのは 2 点だけ:
+//     (a) `CellViewModel.isRubble` を見て瓦礫セルを視覚的に区別する描画
+//         (§1(b) 参照)
+//     (b) `resolveTapAction` が瓦礫セルを「配置先」候補から除外し、常に
+//         「選択」へ倒す(配置待ち中でも瓦礫セルは `placeFacility` を組み立て
+//         ない——engine が `cellIsRubble` で reject すること自体は変わらないが、
+//         「選択して瓦礫パネルを見る」という GDD 9.1 の導線を配置待ちが塞がない
+//         ようにするための UX 上の判断)
 //
 // ===========================================================================
 // 4. ピンチズーム/パンはロジックを純関数へ分離(タスク指示どおりの方針)
@@ -171,9 +177,13 @@ function overcrowdBadgeTag(cell: CellViewModel): Tag | undefined {
 /**
  * セル 1 個ぶんの vnode を作る(hooks 不使用・DOM 非依存)。
  *
- * 3 通りの描画(§1)+ 配置プレビュー(空きセルの第4のケース・GDD 6.5):
+ * 3 通りの描画(§1)+ 配置プレビュー(空きセルの第4のケース・GDD 6.5)
+ * + [M30] 瓦礫(空きセルの第5のケース・GDD 9.1):
  *   - 空きセル: プレースホルダのみ(タップ可能領域は 44px を確保)。
  *     `preview` があれば半透明オーバーレイ(色+記号+数値)を重ねる。
+ *   - **[M30] 瓦礫セル**(`isRubble=true`・`preview` 無し): 専用の記号+文言で
+ *     「未開墾」を明示する(GDD 9.1 の開墾導線の入口・GridScreen.tsx が
+ *     コスト表示と `reclaimCell` 発行を持つ)。
  *   - アンカーセル(占有 かつ `anchorCellIndex === cellIndex`): 枠・タグ
  *     マーカー(色+記号+パターン+数値の4重符号化・LOD 劣化あり)・
  *     Lv/就労者バッジ・常時過密警告バッジまで全部出す
@@ -197,6 +207,23 @@ export function GridCell({ cell, selected, zoom, preview = null }: GridCellProps
             {preview.kind === "add" ? "+" : "−"}
           </span>
           <span class="kf-cell__preview-value">{preview.percentLabel}</span>
+        </div>
+      );
+    }
+    if (cell.isRubble) {
+      const classes = ["kf-cell", "kf-cell--empty", "kf-cell--rubble"];
+      if (selected) classes.push("kf-cell--selected");
+      return (
+        <div
+          class={classes.join(" ")}
+          style={positionStyle}
+          data-cell-id={cell.cellId}
+          data-cell-index={cell.cellIndex}
+        >
+          <span class="kf-cell__rubble-symbol" aria-hidden="true">
+            ▲
+          </span>
+          <span class="kf-cell__rubble-label">未開墾</span>
         </div>
       );
     }
@@ -321,6 +348,14 @@ export type TapAction =
  * **判定(置けるか)はここでは行わない**(architecture.md §6 の7箇条目)。
  * 空きセルかどうかだけを見て `placeFacility` を組み立て、実際に置けるかは
  * engine の `apply` が返す拒否(`CommandResult`)に委ねる。
+ *
+ * **[M30] 例外 1 つだけ: 瓦礫セル(`isRubble`)は配置待ち中でも常に「選択」**。
+ * これは「置けるかの判定」ではなく UX 上の判断——瓦礫セルは`placeFacility`が
+ * 呼ばれても engine が必ず `cellIsRubble` で reject する(commands.ts §4)ので
+ * 判定の正しさに影響しないが、瓦礫セルをタップしたら常に②の開墾パネル
+ * (GridScreen.tsx)が開くようにするため、配置待ちの有無に関係なく同じ挙動に
+ * している(判定不要で決まる=瓦礫かどうかは `computeCellAdjacency` を呼ばない
+ * 静的な状態フラグなので、7箇条目の「判定を画面に書かない」とは抵触しない)。
  */
 export function resolveTapAction(
   cells: readonly CellViewModel[],
@@ -330,7 +365,7 @@ export function resolveTapAction(
   const cell = cells[cellIndex];
   if (cell === undefined) return { kind: "none" };
 
-  if (pendingPlacement !== null && !cell.occupied) {
+  if (pendingPlacement !== null && !cell.occupied && !cell.isRubble) {
     return {
       kind: "place",
       command: {

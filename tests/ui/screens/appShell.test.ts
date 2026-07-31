@@ -18,8 +18,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ScreenHost, ScreenNav } from "../../../src/ui/AppShell";
 import { NUMBERED_SCREEN_COUNT, SCREEN_IDS, SCREEN_META } from "../../../src/ui/screens";
+import { FacilityScreen } from "../../../src/ui/screens/facility/FacilityScreen";
+import { GridScreen } from "../../../src/ui/screens/grid/GridScreen";
 import { HomeHub } from "../../../src/ui/screens/home/HomeHub";
 import { PlaceholderScreen } from "../../../src/ui/screens/PlaceholderScreen";
+import { ResidentsScreen } from "../../../src/ui/screens/residents/ResidentsScreen";
 import { ReturnDigest } from "../../../src/ui/screens/digest/ReturnDigest";
 import { SCREEN_ENTRIES, SCREEN_REGISTRY } from "../../../src/ui/screens/registry";
 import { formatGameClock, formatTickSpan } from "../../../src/ui/screens/format";
@@ -42,11 +45,14 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     expect(SCREEN_REGISTRY.digest.ownerTask).toBeNull();
   });
 
-  it("未実装画面の担当タスクはロードマップ(M30〜M33)と一致する", () => {
+  it("[M30] ②格子ビュー/③施設詳細・増築/④住民一覧・配置は実装済み(担当タスク無し)", () => {
+    expect(SCREEN_REGISTRY.grid.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.facility.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.residents.ownerTask).toBeNull();
+  });
+
+  it("未実装画面の担当タスクはロードマップ(M31〜M33)と一致する", () => {
     const expected: Record<string, string> = {
-      grid: "M30",
-      facility: "M30",
-      residents: "M30",
       research: "M31",
       codify: "M31",
       expedition: "M32",
@@ -62,11 +68,14 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     }
   });
 
-  it("実装済み 2 画面はそれぞれのコンポーネントを、残りはプレースホルダを返す", () => {
+  it("実装済み 5 画面はそれぞれのコンポーネントを、残りはプレースホルダを返す", () => {
     const { store } = createTestStore();
     const props = screenProps(store);
     expect(SCREEN_REGISTRY.home.render(props).type).toBe(HomeHub);
     expect(SCREEN_REGISTRY.digest.render(props).type).toBe(ReturnDigest);
+    expect(SCREEN_REGISTRY.grid.render(props).type).toBe(GridScreen);
+    expect(SCREEN_REGISTRY.facility.render(props).type).toBe(FacilityScreen);
+    expect(SCREEN_REGISTRY.residents.render(props).type).toBe(ResidentsScreen);
     for (const entry of SCREEN_ENTRIES) {
       if (entry.ownerTask === null) continue;
       const vnode = entry.render(props);
@@ -82,13 +91,21 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
 });
 
 describe("ScreenHost(非アクティブ画面は物理アンマウント・ADR-027(2))", () => {
-  it("現在画面 1 個ぶんしか vnode を作らない", () => {
+  it("現在画面 1 個ぶんしか vnode を作らない(未実装画面=プレースホルダで確認)", () => {
     const { store } = createTestStore();
-    const vnode = ScreenHost({ screenId: "grid", ...screenProps(store) });
+    const vnode = ScreenHost({ screenId: "research", ...screenProps(store) });
     const children = vnode.props.children as unknown;
     // `display:none` で 13 画面を並べる形なら配列になる。1 個だけであることを固定する。
     expect(Array.isArray(children)).toBe(false);
     expect((children as { readonly type: unknown }).type).toBe(PlaceholderScreen);
+  });
+
+  it("[M30] 実装済み画面(grid)でも同じく 1 個ぶんしか vnode を作らない", () => {
+    const { store } = createTestStore();
+    const vnode = ScreenHost({ screenId: "grid", ...screenProps(store) });
+    const children = vnode.props.children as unknown;
+    expect(Array.isArray(children)).toBe(false);
+    expect((children as { readonly type: unknown }).type).toBe(GridScreen);
   });
 
   it("画面 ID を key にしてあるので、同じコンポーネント型どうしでも作り直される", () => {

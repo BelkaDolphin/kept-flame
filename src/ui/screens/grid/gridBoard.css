@@ -59,6 +59,29 @@
   color: #8a857d;
 }
 
+/* --- [M30] 瓦礫セル(GDD 9.1・開墾導線の入口) -------------------------------- */
+
+.kf-cell--rubble {
+  background: #e8e2d6;
+  background-image: repeating-linear-gradient(
+    45deg,
+    #8a857d 0,
+    #8a857d 1.5px,
+    transparent 1.5px,
+    transparent 7px
+  );
+  color: #5b534b;
+}
+
+.kf-cell__rubble-symbol {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.kf-cell__rubble-label {
+  font-size: 0.62rem;
+}
+
 .kf-cell--connected {
   background: #efe9df;
   border-style: dashed;
@@ -308,4 +331,132 @@
 
 .kf-breakdown__contribution--excess {
   color: #8c290b;
+}
+
+/* --- [M30] ②格子ビュー画面の合成(施設カタログ/拒否バナー/瓦礫開墾/遷移) --- */
+
+.kf-grid-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-grid-screen__summary {
+  font-size: 0.82rem;
+  color: #5b534b;
+  margin: 0 0 0.6rem;
+}
+
+.kf-catalog {
+  margin: 0 0 0.75rem;
+}
+
+.kf-catalog__title {
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin: 0 0 0.4rem;
+}
+
+.kf-catalog__list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+  padding: 0;
+}
+
+.kf-catalog__button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.3rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-catalog__button--active {
+  border-color: #24201c;
+  border-width: 2px;
+  background: #fcefd0;
+  font-weight: 600;
+}
+
+.kf-catalog__footprint {
+  font-size: 0.68rem;
+  color: #5b534b;
+}
+
+.kf-catalog__cancel {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-reclaim {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem;
+  border: 1px dashed #8a857d;
+  border-radius: 4px;
+  background: #efe9df;
+}
+
+.kf-reclaim__title {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+}
+
+.kf-reclaim__inactive {
+  font-size: 0.82rem;
+  color: #5b534b;
+}
+
+.kf-reclaim__cost,
+.kf-reclaim__stock {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.3rem;
+}
+
+.kf-reclaim__button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-grid-screen__to-facility {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
 }

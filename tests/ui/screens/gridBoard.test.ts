@@ -61,6 +61,7 @@ function emptyCellView(cellIndex: number): CellViewModel {
     overcrowdPenaltyFix: FIX_ZERO,
     overcrowdedNeighborCount: 0,
     overcrowded: false,
+    isRubble: false,
   };
 }
 
@@ -120,6 +121,30 @@ describe("GridCell(空きセル)", () => {
     const vnode = GridCell({ cell: emptyCellView(5), selected: false, zoom: ZOOM_L3 });
     expect(vnode.props.class).toContain("kf-cell--empty");
     expect(countElementNodes(vnode)).toBe(2); // container + placeholder
+  });
+});
+
+describe("[M30] GridCell(瓦礫セル・GDD 9.1)", () => {
+  it("isRubble=true は専用クラス+記号+文言で描かれ、通常の空きプレースホルダにはならない", () => {
+    const cell = { ...emptyCellView(5), isRubble: true };
+    const vnode = GridCell({ cell, selected: false, zoom: ZOOM_L3 });
+    expect(vnode.props.class).toContain("kf-cell--rubble");
+    expect(vnode.props.class).toContain("kf-cell--empty");
+    expect(JSON.stringify(vnode)).toContain("未開墾");
+  });
+
+  it("選択中は kf-cell--selected も付く(瓦礫パネルの選択枠)", () => {
+    const cell = { ...emptyCellView(5), isRubble: true };
+    const selected = GridCell({ cell, selected: true, zoom: ZOOM_L3 });
+    expect(selected.props.class).toContain("kf-cell--selected");
+  });
+
+  it("GridCell 自身の優先順位は preview > 瓦礫(実運用では computePlacementPreview が瓦礫セルを fits=false にするので preview は null になり、この分岐へは来ない・derived.test.ts で別途確認)", () => {
+    const cell = { ...emptyCellView(5), isRubble: true };
+    const preview: CellPreviewView = { kind: "sub", percentLabel: "-10" };
+    const vnode = GridCell({ cell, selected: false, zoom: ZOOM_L3, preview });
+    expect(vnode.props.class).toContain("kf-cell--preview-sub");
+    expect(vnode.props.class).not.toContain("kf-cell--rubble");
   });
 });
 
@@ -348,6 +373,22 @@ describe("resolveTapAction(判定は行わず「空きセルか」だけで振�
 
   it("範囲外セル番号は none", () => {
     expect(resolveTapAction(cells, null, 999)).toEqual({ kind: "none" });
+  });
+
+  it("[M30] 配置待ちがあっても瓦礫セルは常に選択(GDD 9.1 の開墾導線を塞がない)", () => {
+    const rubbleIndex = 8;
+    const withRubble = cells.map((cell, i) =>
+      i === rubbleIndex ? { ...cell, isRubble: true } : cell,
+    );
+    expect(resolveTapAction(withRubble, pending, rubbleIndex)).toEqual({
+      kind: "select",
+      cellIndex: rubbleIndex,
+    });
+    // 配置待ちが無いときも変わらず選択(既存の空きセルと同じ挙動)。
+    expect(resolveTapAction(withRubble, null, rubbleIndex)).toEqual({
+      kind: "select",
+      cellIndex: rubbleIndex,
+    });
   });
 });
 

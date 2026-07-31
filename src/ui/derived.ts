@@ -62,20 +62,27 @@ import {
   isUnitFootprint,
   occupiedCells,
 } from "../engine/footprint";
-import { FIX_ONE, FIX_ZERO, toApproxNumber, toRaw, type Fix } from "../engine/fp";
+import { FIX_ONE, FIX_ZERO, mulFix, toApproxNumber, toRaw, type Fix } from "../engine/fp";
+import { compareUtf16 } from "../engine/canonicalize";
 import { isCodified } from "../engine/rules/codify";
+import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
+import { reclaimCostFix } from "../engine/rules/reclaim";
+import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
 import { techHoldersOf } from "../engine/rules/techMemory";
 import {
   lossClassOfTech,
   requireFacilityDef,
   type EngineContent,
+  type FacilityDef,
   type RecordMedium,
 } from "../engine/rules/types";
 import {
   entitiesOfKind,
+  isAliveResident,
   type CodifyState,
   type DispatchSnapshot,
   type EntityId,
+  type FacilityFootprint,
   type GameState,
   type MemoirEntry,
   type RenderedLogEntry,
@@ -150,6 +157,12 @@ export interface CellViewModel {
   /** 過密でボーナスが無効化された近傍の件数(常時過密警告バッジ・GDD 6.5)。 */
   readonly overcrowdedNeighborCount: number;
   readonly overcrowded: boolean;
+  /**
+   * [M30] 未開墾の瓦礫か(GDD 9.1)。`occupied` とは独立の性質(瓦礫セルには
+   * 施設を置けないので通常は両立しないが、値としては別々に持つ)。
+   * `sources.cellRubble[cellIndex]` をそのまま写す(§0 の自セル限定 fan-in)。
+   */
+  readonly isRubble: boolean;
 }
 
 function cellAdjacencyEquals(
@@ -179,7 +192,8 @@ function cellViewEquals(a: CellViewModel, b: CellViewModel): boolean {
     toRaw(a.multiplierFix) === toRaw(b.multiplierFix) &&
     toRaw(a.bonusFix) === toRaw(b.bonusFix) &&
     toRaw(a.overcrowdPenaltyFix) === toRaw(b.overcrowdPenaltyFix) &&
-    a.overcrowdedNeighborCount === b.overcrowdedNeighborCount
+    a.overcrowdedNeighborCount === b.overcrowdedNeighborCount &&
+    a.isRubble === b.isRubble
   );
 }
 
@@ -225,6 +239,19 @@ export interface ResearchView {
   readonly completed: boolean;
 }
 
+/**
+ * [M30] ステータス 5 種(裁定 B8 / GDD 7.1)の表示値。trait 適用後
+ * (`effectiveStats`)を近似値へ落としたもの——生産式が実際に読む値と同じ
+ * (rules/production.ts の `residentContribution` と同一の合成経路)。
+ */
+export interface ResidentStatsView {
+  readonly vigorApprox: number;
+  readonly dexterityApprox: number;
+  readonly intellectApprox: number;
+  readonly fortitudeApprox: number;
+  readonly willApprox: number;
+}
+
 export interface ResidentView {
   readonly entityId: EntityId;
   readonly moraleApprox: number;
@@ -235,6 +262,33 @@ export interface ResidentView {
   readonly recallImpaired: boolean;
   readonly recallImpairedUntilTick: number;
   readonly traitIds: readonly EntityId[];
+  /** [M30] ステータス 5 種(trait 適用後)。GDD 7.1。 */
+  readonly stats: ResidentStatsView;
+  /** [M30] 生存しているか(GDD 7.5 の tombstone)。`isAliveResident` をそのまま写す。 */
+  readonly alive: boolean;
+  /** [M30] 死亡した tick(生存中は null)。 */
+  readonly diedTick: number | null;
+}
+
+/**
+ * [M30] 住民 1 人ぶんのステータス 5 種を表示用に組み立てる。
+ *
+ * **生産式(rules/production.ts の `residentContribution`)と同じ合成経路**
+ * (`resolveTraitDefs` → `effectiveStats`)を呼ぶだけで、表示用に式を書き直さ
+ * ない(architecture.md §6 の「単一正準実装」の規律を住民ステータスへも適用)。
+ * ステータス未設定の住民は {@link NEUTRAL_RESIDENT_STATS}(基準 50)が既定値
+ * になる(rules/stats.ts §1 と同じ中立既定値)。
+ */
+function residentStatsView(resident: ResidentState, content: EngineContent): ResidentStatsView {
+  const traits = resolveTraitDefs(resident.traitIds, content.traitDefs);
+  const effective = effectiveStats(resident.stats ?? NEUTRAL_RESIDENT_STATS, traits);
+  return {
+    vigorApprox: toApproxNumber(effective.vigor),
+    dexterityApprox: toApproxNumber(effective.dexterity),
+    intellectApprox: toApproxNumber(effective.intellect),
+    fortitudeApprox: toApproxNumber(effective.fortitude),
+    willApprox: toApproxNumber(effective.will),
+  };
 }
 
 export interface CodifyView {
@@ -391,6 +445,243 @@ function homeBadgesEqual(a: HomeBadges, b: HomeBadges): boolean {
   );
 }
 
+// --- 3-2. 施設カタログ/一覧/詳細/開墾(M30・GDD 6.1/6.5/7.7/9.1) -------------
+//
+// ③施設詳細・④住民配置・②の瓦礫開墾導線が読む値。施設数は高々数十・住民数は
+// 8〜20 人(GDD 7.7)という規模感なので、§3 の値の派生と同じく state/content へ
+// 直依存してよい(セル局所の fan-in 上界は §1 の cellView/cellAdjacency だけが
+// 守るべき契約であり、ここは対象外)。
+
+/**
+ * [M30] 施設の最大 Lv / Lv 別就労スロット数。
+ *
+ * **`src/engine/commands.ts` の `facilityMaxLevel`/`facilityWorkerSlots` と
+ * 同じ計算の意図的な複製**である。`commands.ts` は UI からの import を
+ * `store.ts` 1 箇所に制限する検収済みの単一入口(architecture.md §4-1・
+ * `tests/engine/commands.test.ts` 「検分: 判定は engine にあり UI に無い」)
+ * であり、`src/ui/**` の他ファイルから import すると検収が壊れる。
+ *
+ * ここで要るのは「置けるか/払えるか」の**判定**ではなく、Lv 別配列の**構造**
+ * (最短の配列長・省略時のフォールバック)から決まる表示専用の値であり、
+ * commands.ts 側の判定ロジックとは独立に変わりようがない(配列の形が
+ * 双方の唯一の入力)。M19★5 の adjacencyBreakdown.ts と同じ立場で軽い重複を
+ * 許容し、engine 側にネイティブ公開する形への一本化は将来のタスクへ送る
+ * (最終報告の★参照)。
+ */
+function displayFacilityMaxLevel(def: FacilityDef): number {
+  let max = def.outputPerTickByLevel.length;
+  if (def.storage !== undefined && def.storage.capacityByLevel.length < max) {
+    max = def.storage.capacityByLevel.length;
+  }
+  if (def.bedCapacityByLevel !== undefined && def.bedCapacityByLevel.length < max) {
+    max = def.bedCapacityByLevel.length;
+  }
+  if (def.workerSlotsByLevel !== undefined && def.workerSlotsByLevel.length < max) {
+    max = def.workerSlotsByLevel.length;
+  }
+  return max;
+}
+
+/** `undefined` = 上限なし(commands.ts の `facilityWorkerSlots` と同じ意味)。 */
+function displayFacilityWorkerSlots(def: FacilityDef, level: number): number | undefined {
+  const slots = def.workerSlotsByLevel;
+  if (slots === undefined) return undefined;
+  if (slots.length === 0) return 0;
+  return slots[level - 1] ?? slots[slots.length - 1];
+}
+
+/** [M30] 施設カタログ 1 件(②の「何を建てるか」・content のみに依存)。 */
+export interface FacilityCatalogEntry {
+  readonly defId: EntityId;
+  readonly tags: readonly Tag[];
+  readonly footprint: FacilityFootprint;
+  readonly harshWork: boolean;
+  readonly outputKind: "resource" | "research";
+  readonly outputResourceId: EntityId | null;
+}
+
+function facilityCatalogEntryOf(def: FacilityDef): FacilityCatalogEntry {
+  return {
+    defId: def.id,
+    tags: def.tags,
+    footprint: def.footprint ?? UNIT_FOOTPRINT,
+    harshWork: def.harshWork,
+    outputKind: def.output.kind,
+    outputResourceId: def.output.kind === "resource" ? def.output.resourceId : null,
+  };
+}
+
+/** ID 昇順(GDD 11.7 の安定順序)。content の Map 反復順に依存しない。 */
+function buildFacilityCatalog(content: EngineContent): readonly FacilityCatalogEntry[] {
+  const entries = Array.from(content.facilityDefs.values(), facilityCatalogEntryOf);
+  entries.sort((a, b) => compareUtf16(a.defId, b.defId));
+  return entries;
+}
+
+/** [M30] 盤面に建っている施設 1 基(④の就労先選択)。 */
+export interface FacilityRosterEntry {
+  readonly facilityId: EntityId;
+  readonly defId: EntityId;
+  readonly cellIndex: number;
+  readonly cellId: string;
+  readonly level: number;
+  readonly tags: readonly Tag[];
+  readonly workerIds: readonly EntityId[];
+  /** `null` = 上限なし(commands.ts の `facilityWorkerSlots` と同じ意味)。 */
+  readonly slotsMax: number | null;
+}
+
+/** `entitiesOfKind` が返す順序(ID 昇順・state.ts §3(a))をそのまま使う。 */
+function buildFacilityRoster(
+  state: GameState,
+  content: EngineContent,
+): readonly FacilityRosterEntry[] {
+  const entries: FacilityRosterEntry[] = [];
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const def = content.facilityDefs.get(facility.defId);
+    // content に定義が無い(理論上は起きない)状態で画面を落とさない、
+    // という §3 の bLossImminentTechIds と同じ防御的スキップ。
+    if (def === undefined) continue;
+    entries.push({
+      facilityId: facility.id,
+      defId: facility.defId,
+      cellIndex: facility.cellIndex,
+      cellId: cellIdOf(facility.cellIndex),
+      level: facility.level,
+      tags: def.tags,
+      workerIds: facility.workerIds,
+      slotsMax: displayFacilityWorkerSlots(def, facility.level) ?? null,
+    });
+  }
+  return entries;
+}
+
+/** [M30] 選択施設の就労者 1 人(③施設詳細の就労者一覧)。 */
+export interface FacilityWorkerView {
+  readonly residentId: EntityId;
+  readonly moraleApprox: number;
+  readonly alive: boolean;
+  readonly dispatched: boolean;
+  readonly recallImpaired: boolean;
+}
+
+/** [M30] 選択施設の詳細(③施設詳細/増築)。 */
+export interface FacilityDetailView {
+  readonly facilityId: EntityId;
+  readonly defId: EntityId;
+  readonly cellIndex: number;
+  readonly cellId: string;
+  readonly tags: readonly Tag[];
+  readonly level: number;
+  readonly maxLevel: number;
+  /** `null` = 上限なし。 */
+  readonly slotsMax: number | null;
+  readonly workers: readonly FacilityWorkerView[];
+  readonly outputKind: "resource" | "research";
+  readonly outputResourceId: EntityId | null;
+  /**
+   * 現在の実際の産出レート(GDD 11.1 の全系統形。1 tick あたり)。
+   * `facilityOutputPerTick`(Lv 別基礎産出)× `multiplierApprox`(隣接乗数・
+   * ②と同じ `computeCellAdjacency`)× `activeLaborFix`(稼働就労者の寄与総和)
+   * という **engine と同じ 3 項の積**で求める(rules/production.ts §2 の式を
+   * 表示用に書き直さない)。
+   */
+  readonly outputPerTickApprox: number;
+  /** ②のセルと同じ隣接乗数(`selectedCell.multiplierApprox` を転記)。 */
+  readonly multiplierApprox: number;
+}
+
+/**
+ * 選択セルの施設詳細を組み立てる。**隣接乗数は `cell`(= `computeCellAdjacency`
+ * の結果)からもらう**——`AdvanceContext.multiplierByFacilityId` を再度引かず、
+ * ②の内訳ビューと同じ 1 個の数値を見せるため(両者の一致は
+ * tests/ui/derived.test.ts が既に固定している§3 の規律の延長)。
+ */
+function buildFacilityDetail(
+  state: GameState,
+  content: EngineContent,
+  cell: CellViewModel,
+): FacilityDetailView | null {
+  if (!cell.occupied || cell.facilityId === null) return null;
+  const facilityEntity = state.entityStateById.get(cell.facilityId);
+  if (facilityEntity === undefined || facilityEntity.kind !== "facility") return null;
+  const def = content.facilityDefs.get(facilityEntity.defId);
+  if (def === undefined) return null;
+
+  const workers: FacilityWorkerView[] = [];
+  for (const workerId of facilityEntity.workerIds) {
+    const residentEntity = state.entityStateById.get(workerId);
+    if (residentEntity === undefined || residentEntity.kind !== "resident") continue;
+    workers.push({
+      residentId: workerId,
+      moraleApprox: toApproxNumber(residentEntity.morale),
+      alive: isAliveResident(residentEntity),
+      dispatched: residentEntity.dispatched,
+      recallImpaired: residentEntity.recallImpairedUntilTick > state.tick,
+    });
+  }
+
+  const outputRateFix = mulFix(
+    mulFix(facilityOutputPerTick(def, facilityEntity.level), cell.multiplierFix),
+    activeLaborFix(state, content, facilityEntity, def, state.tick),
+  );
+
+  return {
+    facilityId: facilityEntity.id,
+    defId: facilityEntity.defId,
+    cellIndex: cell.cellIndex,
+    cellId: cell.cellId,
+    tags: cell.tags,
+    level: facilityEntity.level,
+    maxLevel: displayFacilityMaxLevel(def),
+    slotsMax: displayFacilityWorkerSlots(def, facilityEntity.level) ?? null,
+    workers,
+    outputKind: def.output.kind,
+    outputResourceId: def.output.kind === "resource" ? def.output.resourceId : null,
+    outputPerTickApprox: toApproxNumber(outputRateFix),
+    multiplierApprox: cell.multiplierApprox,
+  };
+}
+
+/** [M30] 開墾(GDD 9.1)の現況。②の瓦礫セル選択時に表示する。 */
+export interface ReclaimInfo {
+  /** content に `balance.reclaim` ブロックがあるか(無ければ開墾システム不活性)。 */
+  readonly available: boolean;
+  /** 次の 1 枚の開墾コスト(近似値)。`available=false` なら null。 */
+  readonly nextCostApprox: number | null;
+  readonly costResourceId: EntityId | null;
+  /** コスト資源の現在庫(近似値)。受け皿 entity が無ければ null。 */
+  readonly availableStockApprox: number | null;
+  readonly reclaimedCount: number;
+}
+
+function buildReclaimInfo(state: GameState, content: EngineContent): ReclaimInfo {
+  const params = content.reclaim;
+  if (params === undefined) {
+    return {
+      available: false,
+      nextCostApprox: null,
+      costResourceId: null,
+      availableStockApprox: null,
+      reclaimedCount: state.terrain.reclaimedCount,
+    };
+  }
+  const costFix = reclaimCostFix(params, state.terrain.reclaimedCount);
+  let availableStockApprox: number | null = null;
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId !== params.costResourceId) continue;
+    availableStockApprox = toApproxNumber(resource.stock);
+    break;
+  }
+  return {
+    available: true,
+    nextCostApprox: toApproxNumber(costFix),
+    costResourceId: params.costResourceId,
+    availableStockApprox,
+    reclaimedCount: state.terrain.reclaimedCount,
+  };
+}
+
 // --- 4. 派生値一式 ---------------------------------------------------------
 
 /**
@@ -429,6 +720,29 @@ export interface StoreDerived {
    * fan-in 上界は崩れない(§3(a)と同型)。
    */
   readonly selectedCellBreakdown: ReadonlyComputed<CellAdjacencyBreakdown | null>;
+
+  /**
+   * [M30] 施設カタログ(②の「何を建てるか」の選択肢)。content のみに依存し
+   * state を読まない(建てられる種類は盤面と無関係)。
+   */
+  readonly facilityCatalog: ReadonlyComputed<readonly FacilityCatalogEntry[]>;
+  /**
+   * [M30] 盤面に建っている施設の一覧(④の就労先選択・GDD 7.7)。
+   * `resources`/`residents` と同じく state 直依存(値の派生・§2)。
+   */
+  readonly facilityRoster: ReadonlyComputed<readonly FacilityRosterEntry[]>;
+  /**
+   * [M30] 選択中セルの施設詳細(③施設詳細/増築)。未選択/空き/瓦礫セルは null。
+   * `selectedCell` を先に読み、施設が無ければ state/content へ触れずに
+   * 早期 return する(selectedCellBreakdown と同じ短絡の作法)。
+   */
+  readonly selectedFacilityDetail: ReadonlyComputed<FacilityDetailView | null>;
+  /**
+   * [M30] 開墾(GDD 9.1)の現況。次の 1 枚のコストは選択セルに依らず
+   * `state.terrain.reclaimedCount` だけで決まる(rules/reclaim.ts §2)ので、
+   * セル局所ではなく全体の値として持つ。
+   */
+  readonly reclaimInfo: ReadonlyComputed<ReclaimInfo>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -437,6 +751,7 @@ function buildCellView(
   cellIndex: number,
   sources: StoreSources,
   adjacency: CellAdjacencyResult | null,
+  isRubble: boolean,
 ): CellViewModel {
   const facilitySignal = sources.cellFacility[cellIndex];
   const placementSignal = sources.cellPlacement[cellIndex];
@@ -464,6 +779,7 @@ function buildCellView(
       overcrowdPenaltyFix: FIX_ZERO,
       overcrowdedNeighborCount: 0,
       overcrowded: false,
+      isRubble,
     };
   }
 
@@ -483,6 +799,10 @@ function buildCellView(
     overcrowdPenaltyFix: adjacency.overcrowdPenaltyFix,
     overcrowdedNeighborCount: adjacency.overcrowdedNeighborCount,
     overcrowded: adjacency.overcrowdedNeighborCount > 0,
+    // [M30] 占有セルは配置時に瓦礫が拒否されている(commands.ts の
+    // cellIsRubble)ので通常は false だが、手編集セーブ等の異常系でも
+    // 値を捏造せず素直に写す(rules/reclaim.ts §1 のコメントと同じ立場)。
+    isRubble,
   };
 }
 
@@ -539,10 +859,13 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
       computed<CellViewModel>(
         () => {
           const adjacency = cellAdjacency[cellIndex];
-          if (adjacency === undefined) {
+          const rubbleSignal = sources.cellRubble[cellIndex];
+          if (adjacency === undefined || rubbleSignal === undefined) {
             throw new RangeError(`セル番号 ${String(cellIndex)} が格子の範囲を外れている`);
           }
-          return buildCellView(cellIndex, sources, adjacency.value);
+          // [M30] 自セルのみを読む(§0 の fan-in 上界を保つ・cellFacility/
+          // cellPlacement と同じ扱い)。
+          return buildCellView(cellIndex, sources, adjacency.value, rubbleSignal.value);
         },
         { equals: cellViewEquals, name: `cellView[${String(i)}]` },
       ),
@@ -612,6 +935,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
   const residents = computed<readonly ResidentView[]>(
     () => {
       const state: GameState = sources.state.value;
+      const content: EngineContent = sources.content.value;
       return entitiesOfKind(state, "resident").map((resident) => ({
         entityId: resident.id,
         moraleApprox: toApproxNumber(resident.morale),
@@ -621,6 +945,9 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: resident.recallImpairedUntilTick > state.tick,
         recallImpairedUntilTick: resident.recallImpairedUntilTick,
         traitIds: resident.traitIds,
+        stats: residentStatsView(resident, content),
+        alive: isAliveResident(resident),
+        diedTick: resident.life?.diedTick ?? null,
       }));
     },
     { name: "residents" },
@@ -794,6 +1121,35 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "selectedCellBreakdown" },
   );
 
+  // [M30] content のみに依存(盤面と無関係の「何を建てられるか」)。
+  const facilityCatalog = computed<readonly FacilityCatalogEntry[]>(
+    () => buildFacilityCatalog(sources.content.value),
+    { name: "facilityCatalog" },
+  );
+
+  // [M30] state 直依存(§2 の「値の派生」と同じ扱い・施設数は高々数十)。
+  const facilityRoster = computed<readonly FacilityRosterEntry[]>(
+    () => buildFacilityRoster(sources.state.value, sources.content.value),
+    { name: "facilityRoster" },
+  );
+
+  // [M30] selectedCell を先に読み、未選択/空き/瓦礫セルなら state/content へ
+  // 触れずに早期 return する(selectedCellBreakdown と同じ短絡の作法)。
+  const selectedFacilityDetail = computed<FacilityDetailView | null>(
+    () => {
+      const cell = selectedCell.value;
+      if (cell === null || !cell.occupied) return null;
+      return buildFacilityDetail(sources.state.value, sources.content.value, cell);
+    },
+    { name: "selectedFacilityDetail" },
+  );
+
+  // [M30] 開墾(GDD 9.1)。次のコストは選択セルに依らないので全体の値として持つ。
+  const reclaimInfo = computed<ReclaimInfo>(
+    () => buildReclaimInfo(sources.state.value, sources.content.value),
+    { name: "reclaimInfo" },
+  );
+
   return {
     adjacencyMatrix,
     cellAdjacency,
@@ -808,6 +1164,10 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     homeAlerts,
     selectedCell,
     selectedCellBreakdown,
+    facilityCatalog,
+    facilityRoster,
+    selectedFacilityDetail,
+    reclaimInfo,
   };
 }
 
@@ -848,6 +1208,11 @@ const PREVIEW_UNFIT: Omit<PlacementPreviewCell, "cellIndex"> = {
  * 既存施設の乗数には一切触れない(= 二次効果の再計算はしない・最終報告の
  * ★ 注記参照)。
  *
+ * **[M30] 瓦礫セル(GDD 9.1)も `fits=false` にする**——`placeFacility` は
+ * 占有セルのいずれかが瓦礫なら `cellIsRubble` で reject するので(commands.ts
+ * §4)、プレビューが「置ける」と示して実際は reject される食い違いを防ぐ
+ * (GDD 6.3 の「共通ロジック」要件をここでも満たす)。
+ *
  * @throws {RulesError} `defId` が content に無い場合
  */
 export function computePlacementPreview(
@@ -875,7 +1240,8 @@ export function computePlacementPreview(
     }
     const cells = occupiedCells(anchor, footprint);
     const allEmpty = cells.every((c) => !occupancy.has(c));
-    if (!allEmpty) {
+    const anyRubble = cells.some((c) => sources.cellRubble[c]?.peek() ?? false);
+    if (!allEmpty || anyRubble) {
       results.push({ cellIndex: anchor, ...PREVIEW_UNFIT });
       continue;
     }
