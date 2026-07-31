@@ -192,6 +192,27 @@ export interface ProductionRates {
   /** 1 tick あたりの研究点産出((B)研究完了の予測に使う)。 */
   readonly researchRateFix: Fix;
   /**
+   * [M50] 1 tick あたりの成文化作業量 = **稼働している「学者」の寄与の総和**
+   * ((B)成文化完了の予測に使う・GDD 11.1「記録1枚 = 媒体別コスト + **学者作業
+   * 時間** × 媒体別倍率」)。
+   *
+   * 「学者」= **産出先が研究点の施設(`output.kind === "research"`)で稼働して
+   * いる就労者**である。GDD は学者という職業 entity を持たないので、
+   * 「研究点を生む場所で働いている人 = 学者」と読むのが content の語彙で表せる
+   * 唯一の解釈になる(GDD 6.2 の学芸タグは施設の属性であって就労者ではない)。
+   *
+   * 値は `activeLaborFix`(生産式の第 4・第 5 項)をそのまま流用する = 中立既定値
+   * では**稼働人数そのもの**になり、`CodifyPlan.durationTicks`(rules/codify.ts
+   * §2 の「学者 1 人が働いたときの tick 数」)の定義と厳密に噛み合う。
+   * 隣接乗数(GDD 6.2 の `codifySpeed`)を掛けないのは、その効果が engine 未実装
+   * である(裁定 N7・GDD 6.2 [2026-07-28・M6])ことと整合させるためである。
+   *
+   * **研究点の産出と就労者を共有する**(同じ人が研究も成文化も進める)。GDD は
+   * 成文化専用の就労スロットを定義しておらず、専用スロットを新設すると
+   * facility スキーマの拡張(= 別裁定)を伴うため M50 では採らない(★報告)。
+   */
+  readonly codifyLaborFix: Fix;
+  /**
    * [M5] content の resourceId → 保管上限(§3)。
    * **この Map に無い資源は上限なし**であり、オーバーフロー機構に入らない。
    */
@@ -354,6 +375,7 @@ export function activeLaborFix(
 export function computeProductionRates(state: GameState, ctx: AdvanceContext): ProductionRates {
   const resourceRateByResourceId = new Map<EntityId, Fix>();
   let researchRateFix = FIX_ZERO;
+  let codifyLaborFix = FIX_ZERO;
   // [M13] 「誰のどの施設が想起困難で止まっているか」を 1 パスで索引化する
   // (就労者ごとに全件走査すると区間あたり二乗になる・rules/techMemory.ts)。
   const impairment = buildImpairmentIndex(state, ctx.content, state.tick);
@@ -383,6 +405,10 @@ export function computeProductionRates(state: GameState, ctx: AdvanceContext): P
 
     if (def.output.kind === "research") {
       researchRateFix = addFix(researchRateFix, rate);
+      // [M50] 成文化の「学者作業時間」は産出量ではなく**人の寄与**で数える
+      // (ProductionRates.codifyLaborFix の doc)。`labor` は既にこの区間の
+      // 稼働者ぶんだけを合算した値なので、走査を 1 パス共有できる。
+      codifyLaborFix = addFix(codifyLaborFix, labor);
       continue;
     }
     const resourceId = def.output.resourceId;
@@ -395,6 +421,7 @@ export function computeProductionRates(state: GameState, ctx: AdvanceContext): P
   return {
     resourceRateByResourceId,
     researchRateFix,
+    codifyLaborFix,
     capacityByResourceId: resolveCapacityByResourceId(state, ctx.content),
     storage: ctx.content.storage,
     // [M13] 定着度の蓄積レート。「稼働している就労者」の判定は生産式と同一の

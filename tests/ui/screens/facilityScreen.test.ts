@@ -126,7 +126,7 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
 
   it("増築コストは無いことを正直に表示する(★ architecture.md §9-5)", () => {
     const vnode = FacilityDetailPanel({ detail: detailView(), onUpgrade: () => undefined });
-    expect(flattenText(vnode)).toContain("資源を消費しません");
+    expect(flattenText(vnode)).toContain("content 定義の資源を消費します");
   });
 
   it("増築ボタンは Lv 上限でも非活性にせず、押すと onUpgrade が呼ばれる(判定は engine に委ねる)", () => {

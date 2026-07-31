@@ -138,6 +138,21 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/**
+ * [M50] patch が新設する facility へ付ける建設/増築コスト(GDD 12.1
+ * [2026-07-30裁定]。`schema/engineContent.ts` の `toFacilityDef` が欠落を
+ * reject する = 「schema では省略可・ローダーでは必須」の二段構え)。
+ *
+ * **値は golden vector に一切影響しない**。コストを読むのは `commands.ts` の
+ * 配置/増築コマンドだけで、golden シナリオはコマンドを 1 つも実行せず
+ * `advance` だけを回すためである(rules/types.ts の `FacilityDef.cost` の doc)。
+ * よってここは「ローダーを通すための最小の埋め草」であり、盤面の意味を持たない。
+ */
+const PATCH_FACILITY_COST = {
+  buildCost: { resourceId: "firewood", amount: 1 },
+  upgradeCostCurve: [1, 1, 1, 1, 1],
+} as const;
+
 function mapById(
   entries: readonly unknown[],
   targetId: string,
@@ -226,6 +241,7 @@ function patchOvercrowdFixtures(
       footprint: { width: 1, height: 1 },
       harshWork: true,
       output: { kind: "resource", resourceId: "iron" },
+      ...PATCH_FACILITY_COST,
     };
     const cistern = {
       id: "cistern",
@@ -236,6 +252,7 @@ function patchOvercrowdFixtures(
       footprint: { width: 1, height: 1 },
       harshWork: false,
       output: { kind: "resource", resourceId: "firewood" },
+      ...PATCH_FACILITY_COST,
     };
     const facility = [...(clone(raw.facility) as unknown[]), smelter, cistern];
 
@@ -335,6 +352,7 @@ function patchAddBunkhouse(bedCapacityLv1: number): (raw: RawContentBundle) => R
       footprint: { width: 1, height: 1 },
       harshWork: false,
       output: { kind: "resource", resourceId: "firewood" },
+      ...PATCH_FACILITY_COST,
       bedCapacityCurve: [
         bedCapacityLv1,
         bedCapacityLv1,
@@ -544,6 +562,35 @@ function mkCodify(
     requiredWork: fixFromInt(1),
     progress: fixFromInt(1),
     completedTick,
+  };
+}
+
+/**
+ * [M50] **作業中**の成文化ジョブ(未完了 codify entity)を直接組み立てる。
+ *
+ * {@link mkCodify}(完成済み)と対で、こちらは scheduler 段50 の結線
+ * (`applyCodifyProgress` / `completeCodification`)が実際に動くことを観測する
+ * ための口である。`beginCodification` コマンドを通さないのは golden シナリオが
+ * コマンドを持たない(= `advance` だけを回す)ためで、`requiredWork` は
+ * `planCodification` が着手時にスナップショットする値そのもの(rules/codify.ts
+ * §4(b))なので、確定値を直接置くことは「コマンドが作ったのと同じもの」を
+ * 置くことに等しい(`mkDispatchSnapshot` と同じ考え方)。
+ */
+function mkCodifyJob(
+  name: string,
+  techId: string,
+  medium: "paper" | "stoneTablet",
+  requiredWorkTicks: number,
+  progressHuman = 0,
+): CodifyState {
+  return {
+    kind: "codify",
+    id: eid(name),
+    techId: eid(techId),
+    medium,
+    requiredWork: fixFromInt(requiredWorkTicks),
+    progress: fixFromInt(progressHuman),
+    completedTick: null,
   };
 }
 
@@ -1648,6 +1695,81 @@ function sc38BuildState(worldSeed: string): GameState {
   );
 }
 
+// --- sc39-codify-queue(M50: 成文化の scheduler 段50 結線・GDD 11.7 段50) ------
+
+/**
+ * [M50] 学者 1 人(workbench = 産出先が研究点の施設)が成文化キューを 2 本
+ * 順に片付ける盤面。
+ *
+ * 数値の設計(1 本の run で 3 つの壊れ方を同時に押さえる):
+ *   - 学者の寄与 = 1.0/tick(中立ステータス・trait なし = `activeLaborFix` が
+ *     厳密に 1 人 = 1.0 になる・rules/production.ts §2)。よって
+ *     `requiredWork` の値がそのまま完了 tick になる。
+ *   - `codifyAlpha`(requiredWork 30)は **tick 30 = 粗粒度ステップ境界の上**で
+ *     完了する → 同一 tick に (C) 抽選(段24)と成文化完了(段50)が並び、
+ *     tie-break の全順序が効く。
+ *   - `codifyBravo`(requiredWork 45)は tick 30 + 45 = **tick 75 = グリッド外**
+ *     で完了する → 区間が余分に 1 本切れる(`b-research-off-grid` の成文化版)。
+ *   - toTick 100 まで回すので、キューが空になった後の区間(完了予測が積まれない)
+ *     も同じ run で踏む。
+ *
+ * research entity を**置かない**のは、研究完了 (B) と成文化完了 (B) を同じ
+ * ベクタへ重ねると「どちらの結線が壊れたのか」が digest から切り分けられなく
+ * なるためである(spec §9.2(4): 診断可能性はシナリオを小さく保って担保する)。
+ * その副作用として (C) の判定ペアが 0 件になる = 抽選は走るが試行 0 になる。
+ */
+function sc39BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentSage", { assignedFacilityId: "facilityDeskA" }),
+    mkFacility("facilityDeskA", "workbench", 20, ["residentSage"], 1),
+    mkCodifyJob("codifyAlpha", "techFireStarting", "stoneTablet", 30),
+    mkCodifyJob("codifyBravo", "techPottery", "paper", 45),
+  ]);
+}
+
+// --- sc40-research-select(M50: 研究対象の選択・GDD 5) -------------------------
+
+/**
+ * [M50] **ID 昇順で先頭ではない**研究が選ばれている盤面。
+ *
+ * `researchAlpha`(techBasketWeaving)が ID 昇順の先頭で、`researchBravo`
+ * (techFireStarting)が選択されている。よって
+ *   - 選択が効いていれば: Bravo(コスト 8000 / レート 80 = 100 tick)が **tick 100**
+ *     で完了し、その瞬間に選択が失効(完了済み)して先頭の Alpha
+ *     (コスト 24000)へ点が向き直る。toTick 250 では Alpha は未完了。
+ *   - 選択を無視して従来の縮約(ID 昇順先頭)のままなら: Alpha だけが進み、
+ *     toTick 250 まで 1 本も完了しない(`researchCompletedCount` 0 / 1 の差)。
+ * という**符号の違う 2 つの結果**になるので、選択が実際に効いていることと
+ * 「失効したら従来経路へ落ちる」ことが 1 本の run で同時に固定される。
+ *
+ * `selectedResearchId` は `createGameState` の第 11 引数で直接置く
+ * (コマンドを通さないのは他のシナリオと同じ理由)。この state を
+ * `toSerializable` → JSON → `fromSerializable` で往復しても digest が変わらない
+ * ことは、`research-select-serialize-roundtrip` を申告したベクタについて
+ * `tools/goldenVectorBuilder.ts` が実際に確認する(= 検収条件「研究選択が
+ * セーブ往復で保持される」の golden 側の担保)。
+ */
+function sc40BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentAnn", { assignedFacilityId: "facilityDeskA" }),
+      mkFacility("facilityDeskA", "workbench", 20, ["residentAnn"], 1),
+      mkResearch("researchAlpha", "techBasketWeaving", 0),
+      mkResearch("researchBravo", "techFireStarting", 0),
+    ],
+    [],
+    [],
+    [],
+    [],
+    undefined,
+    [],
+    undefined,
+    undefined,
+    eid("researchBravo"),
+  );
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -1754,6 +1876,15 @@ export const SCENARIOS: readonly Scenario[] = [
     buildState: sc37BuildState,
   },
   { id: "sc38-out-supply", contentPatch: patchAddOutpostType(), buildState: sc38BuildState },
+  { id: "sc39-codify-queue", contentPatch: null, buildState: sc39BuildState },
+  {
+    id: "sc40-research-select",
+    contentPatch: composePatches(
+      patchTechResearchCost("techFireStarting", 8000),
+      patchTechResearchCost("techBasketWeaving", 24_000),
+    ),
+    buildState: sc40BuildState,
+  },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

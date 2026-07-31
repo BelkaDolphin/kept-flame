@@ -179,8 +179,11 @@ const PLACE_FREE: Command = {
 describe("コマンド語彙のレジストリ", () => {
   it("実装済みと予約が全語彙を過不足なく覆う(重複なし)", () => {
     // [M21] dispatchExpedition は実装済みへ移った。
-    // [M52] reclaimCell も実装済みへ移った(予約は beginResearch の 1 種のみ)。
-    const reserved = ["beginResearch"] as const;
+    // [M52] reclaimCell も実装済みへ移った。
+    // [M50] beginResearch が実装済みへ移り、**予約は 0 件になった**。加えて
+    //   cancelCodification / establishOutpost / abandonOutpost /
+    //   stationResident / unstationResident の 5 種が新設された(11 → 17)。
+    const reserved: readonly CommandKind[] = [];
     const all: CommandKind[] = [...IMPLEMENTED_COMMAND_KINDS, ...reserved];
     expect([...all].sort()).toEqual([...all].sort()); // 型の網羅は下の switch で担保
     for (const kind of reserved) {
@@ -191,26 +194,19 @@ describe("コマンド語彙のレジストリ", () => {
       expect(isImplementedCommandKind(kind)).toBe(true);
       expect(RESERVED_COMMAND_OWNER_TASK[kind]).toBeUndefined();
     }
-    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(11);
+    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(17);
   });
 
   it("実装済みの一覧は UTF-16 昇順(正準順)", () => {
     expect([...IMPLEMENTED_COMMAND_KINDS].sort()).toEqual([...IMPLEMENTED_COMMAND_KINDS]);
   });
 
-  it("予約語彙は黙って何もせず、担当タスク付きで reject する", () => {
-    const state = board();
-    const cases: readonly Command[] = [
-      { kind: "beginResearch", researchId: id("rNew"), techId: TECH_BRONZE.id },
-    ];
-    for (const command of cases) {
-      const result = apply(state, CONTENT, command);
-      expect(result.ok).toBe(false);
-      if (result.ok) continue;
-      expect(result.rejection.code).toBe("notImplemented");
-      expect(result.rejection.ownerTask).not.toBeNull();
-      expect(result.rejection.commandKind).toBe(command.kind);
-    }
+  it("[M50] 予約テーブルは空 = 全語彙に実装がある(notImplemented の経路が残っていない)", () => {
+    // 予約の仕組み自体は残してある(次に語彙だけ先に決めたいコマンドのため)が、
+    // いま `notImplemented` を返すコマンドは 1 つも無い。テーブルを唯一の正本に
+    // した(`applyOne` が switch より先に引く)ので、この 1 行が
+    // 「実装があるのに notImplemented」「その逆」の両方を同時に禁じる。
+    expect(Object.keys(RESERVED_COMMAND_OWNER_TASK)).toEqual([]);
   });
 });
 

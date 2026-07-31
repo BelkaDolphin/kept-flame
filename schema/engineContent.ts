@@ -145,6 +145,7 @@ import type {
   ExodusParams,
   ExplorationBandParams,
   ExplorationParams,
+  FacilityCostDef,
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
@@ -504,10 +505,58 @@ function toFootprint(footprint: FacilityContent["footprint"]): FacilityFootprint
   return { width: footprint.width, height: footprint.height };
 }
 
+/**
+ * [M50] `buildCost` / `upgradeCostCurve` → engine の {@link FacilityCostDef}
+ * (GDD 12.1 [2026-07-30裁定])。
+ *
+ * **どちらか一方だけの指定は reject** する。片方だけを許すと「建てるのは有料だが
+ * 増築は無料」という盤面が content の書き忘れで静かに成立してしまい、
+ * GDD 6.7 の廃材 3 出口(1)(建設/増築コストの 20% 代替)が効く対象も曖昧になる。
+ * 欠落そのもの(両方 null)を reject するのは呼び出し側({@link toFacilityDef})。
+ */
+function toFacilityCost(
+  content: FacilityContent,
+  path: string,
+  issues: IssueCollector,
+): FacilityCostDef | undefined {
+  const buildCost = content.buildCost;
+  const curve = content.upgradeCostCurve;
+  if (buildCost === null || curve === null) return undefined;
+
+  const buildFix = toFix(buildCost.amount, `${path}.buildCost.amount`, issues, "建設コスト");
+  const upgradeByLevel: Fix[] = [];
+  for (let level = 0; level < curve.length; level++) {
+    const raw = curve[level];
+    if (raw === undefined) continue;
+    const fix = toFix(raw, `${path}.upgradeCostCurve[${String(level)}]`, issues, "Lv 別増築コスト");
+    if (fix !== undefined) upgradeByLevel.push(fix);
+  }
+  if (buildFix === undefined || upgradeByLevel.length !== curve.length) return undefined;
+  return {
+    resourceId: entityIdFromString(buildCost.resourceId),
+    buildFix,
+    upgradeByLevel,
+  };
+}
+
 function toFacilityDef(content: FacilityContent, issues: IssueCollector): FacilityDef | undefined {
   const path = `facility.${content.id}`;
   const tags = toEngineTags(content, path, issues);
   const output = toEngineOutput(content, path, issues);
+
+  // [M50] 建設/増築コスト(GDD 12.1 [2026-07-30裁定])。harshWork / output と同じ
+  // 「schema では省略可・ローダーでは必須」の二段構え。**既定値で埋めない**のは、
+  // 埋めた瞬間に「無料で建つ施設」が content の書き忘れとして静かに成立し、
+  // 経済側の全ての検証(sim・拠点網 ROI・廃材3出口)がその前提のまま通るため。
+  if (content.buildCost === null || content.upgradeCostCurve === null) {
+    issues.add(
+      `${path}.buildCost`,
+      "配置/増築コマンド(src/engine/commands.ts)が建設/増築コストを要求する" +
+        "(GDD 12.1 [2026-07-30裁定])。`buildCost{resourceId, amount}` と " +
+        "`upgradeCostCurve`(Lv1〜Lv5 の 5 個)を両方明示すること" +
+        "(欠落を既定値で埋めない・schema/facility.ts 冒頭 [M50])",
+    );
+  }
 
   if (content.harshWork === null) {
     issues.add(
@@ -535,6 +584,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
     content.storageCapacityCurve === null
       ? null
       : (toFacilityStorage(content, path, issues) ?? undefined);
+  const cost = toFacilityCost(content, path, issues);
 
   if (
     tags === undefined ||
@@ -542,6 +592,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
     content.harshWork === null ||
     statWeights === undefined ||
     storage === undefined ||
+    cost === undefined ||
     outputPerTickByLevel.length !== content.lvCurve.length
   ) {
     return undefined;
@@ -556,6 +607,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
   // [M16] footprint は content 側で必須なので条件分岐が要らない(slots と同じ)。
   const workerSlotsByLevel = toWorkerSlotsByLevel(content.slots);
   const footprint = toFootprint(content.footprint);
+  // [M50] cost はローダー必須なので条件分岐が要らない(slots / footprint と同じ)。
   const beds = content.bedCapacityCurve;
   const base =
     beds === null
@@ -567,6 +619,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           output,
           workerSlotsByLevel,
           footprint,
+          cost,
         }
       : {
           id: entityIdFromString(content.id),
@@ -576,6 +629,7 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           output,
           workerSlotsByLevel,
           footprint,
+          cost,
           bedCapacityByLevel: [...beds],
         };
   if (statWeights === null && storage === null) return base;

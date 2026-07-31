@@ -214,6 +214,26 @@
 //   まとめてあるのは state.ts の [M28] 節に理由がある(要点: 3 つめの値
 //   `inheritTiers` が必要であること + 必須トップレベルキーは既存 73 本の
 //   バイト列を全て動かすこと)。
+//
+// ===========================================================================
+// 12. [M50] `selectedResearchId`(研究対象の選択)は §10/§11 と同じ形
+// ===========================================================================
+//   研究対象の選択(GDD 5・`commands.ts` の `beginResearch`)は GameState 直下の
+//   スカラであり、**未選択(null)なら書き出さない**。既存セーブ・golden vector
+//   73 本のバイト列が 1 bit も動かないことの根拠がここにある(既存シナリオは
+//   1 件も選択を持たない = `currentResearch` の従来経路のまま)。
+//
+//   §10/§11 と同じく**書けてしまう非正準形**がある: `"selectedResearchId": null`
+//   を明示した形は読み込みで未選択へ畳まれ、書き出しでキーが消える。よって
+//   **null を明示した直列化形は reject** する(空 terrain の明示と同じ理屈)。
+//
+//   **`saveSchemaVersion` は上げていない**(v6 のまま)。ADR-012(a) の線引きは
+//   「旧ビルドが新セーブを読むと **黙って潰れる**類の変更は版差で塞ぐ」であり、
+//   既存 5 段(footprint / 派遣 / event 効果 / 地形 / 周回)はいずれも
+//   **回復不能な損失か exploit** を伴っていた。選択の欠落はそのどちらでもない:
+//   各 research entity の `progress` は選択と独立に保存され続け、失われるのは
+//   「どれへ点を入れるか」の 1 スカラだけで、再選択 1 回で完全に元へ戻る。
+//   詳細な両論と bump したい場合の手順は M50 の★報告に記録してある。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
@@ -463,6 +483,11 @@ export type SerializedGameState = {
    * 解釈される。
    */
   readonly progression?: SerializedProgression;
+  /**
+   * [M50] 研究対象の選択(GDD 5・§12)。**未選択(null)ならキーごと省略**され、
+   * キー不在 = 未選択 = 従来どおり ID 昇順先頭が対象、と解釈される。
+   */
+  readonly selectedResearchId?: string;
 };
 
 /**
@@ -1078,6 +1103,11 @@ export function toSerializable(state: GameState): SerializedGameState {
         })),
       },
     ]);
+  }
+  // [M50] 研究対象の選択(GDD 5・§12)。未選択なら省略 = M50 以前のセーブと
+  // バイト同一(= 既存 golden vector 73 本が動かないことの根拠)。
+  if (state.selectedResearchId !== null) {
+    optional.push(["selectedResearchId", state.selectedResearchId]);
   }
   const raw: SerializedGameState =
     optional.length === 0
@@ -1933,6 +1963,30 @@ function deserializeProgression(value: unknown): ProgressionState {
   return { runCount, cumulativeInheritPoints, inheritTiers };
 }
 
+/**
+ * [M50] `selectedResearchId`(§12)を読む。**キーが無ければ null**(= 未選択)で
+ * あり、これが「M50 以前の旧セーブが無損失でロードされる」経路そのものである。
+ *
+ * `null` を明示した形は**非正準形として reject** する(§12。空 terrain / 既定
+ * progression の明示を reject するのと同じ理屈)。指す research entity が実在
+ * するかの検査は `createGameState`(update.ts の `requireValidSelectedResearch`)
+ * の担当であり、ここでは ID 規則だけを見る(entityStateById のキー検査と同じ層)。
+ */
+function deserializeSelectedResearchId(value: unknown): EntityId | null {
+  if (value === undefined) return null;
+  if (value === null) {
+    throw new SerializeError(
+      "$.selectedResearchId: 未選択は**キーごと省略**が正準形" +
+        "(明示するとキー不在の旧セーブと同じ state が別のバイト列になる・§12)",
+    );
+  }
+  const id = requireString(value, "$.selectedResearchId");
+  if (!isEntityId(id)) {
+    throw new SerializeError(`$.selectedResearchId: "${id}" は ID 規則に一致しない(ADR-011)`);
+  }
+  return entityIdFromString(id);
+}
+
 /** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */
 function deserializeRenderedLogs(value: unknown): RenderedLogState {
   if (value === undefined) return EMPTY_RENDERED_LOGS;
@@ -2000,5 +2054,6 @@ export function fromSerializable(input: unknown): GameState {
     deserializeOutpostsById(root["outpostsById"]),
     deserializeTerrain(root["terrain"]),
     deserializeProgression(root["progression"]),
+    deserializeSelectedResearchId(root["selectedResearchId"]),
   );
 }

@@ -20,17 +20,37 @@
 //   余分に進むことはあるが、その余剰はそのまま progress に残す(捨てない)。
 //
 // ===========================================================================
-// 2. 縮約: 研究は 1 本ずつ(単一キュー)
+// 2. 研究は 1 本ずつ(単一キュー)+ [M50] プレイヤーの選択
 // ===========================================================================
-//   研究点は「未完了の research entity のうち ID 昇順で最初の 1 本」にだけ入る。
-//   複数本へ同時に按分/複製する仕様は GDD に無く、縮約では単一キューとするのが
-//   最も単純で、(B) の予測も常に 1 件になる(heap のイベントも 1 件)。
-//   プレイヤーが研究対象を選ぶ Command 経路は T5 のスコープ外。
+//   研究点が入るのは常に **1 本**である(複数本へ同時に按分/複製する仕様は GDD に
+//   無く、(B) の予測も 1 件で済む = heap のイベントも 1 件)。その 1 本の決め方が
+//   M50 で 2 段になった:
+//
+//     (1) `state.selectedResearchId`(GDD 5・`commands.ts` の `beginResearch`)が
+//         **有効な対象を指していれば、それ**。
+//     (2) 指していなければ従来どおり「未完了の research entity のうち ID 昇順で
+//         最初の 1 本」。
+//
+//   **(2) を残すことが「既存セーブ・既存 golden vector が 1 bit も動かない」
+//   ことの根拠**である(選択を持たない state では (1) が必ず素通りする)。
+//   「未選択なら研究点をどこにも入れない」という設計も採れるが、それは既存の
+//   全シナリオの観測挙動を変え(= algoVersion bump)、かつ「何も選んでいない
+//   72h 放置で研究点が丸ごと消える」という GDD 2.2(放置しても (A) は失われない)
+//   と噛み合わない挙動になるため採らない(M50 の★報告)。
+//
+//   選択が「有効」でなくなる条件(= (2) へ落ちる条件)は 3 つで、いずれも
+//   **state を書き換えずに判定できる**ようにしてある(選択の失効を state 遷移に
+//   すると (B) 完了イベントが「レート境界」から「状態遷移を持つ境界」へ変わり、
+//   分割不変性の再検証が要る・state.ts 不変条件 (k)):
+//     (a) 指す entity が無い(removeEntity が同時に選択も外すので通常起きない)
+//     (b) 完了済み(`completedTick !== null`)
+//     (c) (B) 一回性喪失(`isIrreversiblyLost`)
 // ---------------------------------------------------------------------------
 
 import { addFix, floorDivInt, mulFixInt, subFix, toRaw, type Fix } from "../fp";
 import {
   entitiesOfKind,
+  getEntity,
   requireEntity,
   type EntityId,
   type GameState,
@@ -41,8 +61,9 @@ import { isIrreversiblyLost } from "./techMemory";
 import { RulesError, requireTechDef, type EngineContent } from "./types";
 
 /**
- * 研究点が入る「現在の研究」= 未完了の research entity のうち ID 昇順で最初の 1 件
- * (§2)。全て完了済みなら undefined。
+ * 研究点が入る「現在の研究」(§2)。
+ * [M50] プレイヤーの選択が有効ならそれ、無ければ未完了の research entity のうち
+ * ID 昇順で最初の 1 件。どちらも無ければ undefined。
  *
  * [M13] (B) 一回性喪失した技術(GDD 7.4 `rareIrreversible`)は**対象から外す**。
  * 喪失時に `completedTick` は null へ戻る(= 解禁の取り消し)ので、外さないと
@@ -51,12 +72,31 @@ import { RulesError, requireTechDef, type EngineContent } from "./types";
  * (GDD 7.4「失っても必ず再取得可能」)。
  */
 export function currentResearch(state: GameState): ResearchState | undefined {
+  const selected = selectedResearch(state);
+  if (selected !== undefined) return selected;
   for (const research of entitiesOfKind(state, "research")) {
     if (research.completedTick !== null) continue;
     if (isIrreversiblyLost(research)) continue;
     return research;
   }
   return undefined;
+}
+
+/**
+ * [M50] `state.selectedResearchId` が指す**有効な**研究(§2 の (1))。
+ * 未選択・失効(不在 / 完了済み / (B) 永久喪失)なら undefined。
+ *
+ * `currentResearch` と分けてあるのは UI(⑤研究ツリー)が「選択そのもの」と
+ * 「いま点が入っている対象」を別々に見せられるようにするため。
+ */
+export function selectedResearch(state: GameState): ResearchState | undefined {
+  const selectedId = state.selectedResearchId;
+  if (selectedId === null) return undefined;
+  const entity = getEntity(state, selectedId);
+  if (entity === undefined || entity.kind !== "research") return undefined;
+  if (entity.completedTick !== null) return undefined;
+  if (isIrreversiblyLost(entity)) return undefined;
+  return entity;
 }
 
 /**

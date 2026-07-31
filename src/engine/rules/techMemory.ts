@@ -493,8 +493,17 @@ export interface TechLossResult {
   readonly lost: readonly TechLossOutcome[];
 }
 
-/** その techId の research entity(ID 昇順の先頭)。無ければ undefined。 */
-function researchEntityOfTech(state: GameState, techId: EntityId): ResearchState | undefined {
+/**
+ * その techId の research entity(ID 昇順の先頭)。無ければ undefined。
+ *
+ * **[M50] export した**: `commands.ts` の `beginResearch` が「その tech の
+ * research entity が既にあるか」を判定するのに同じ 1 本を使う(1 tech = 高々
+ * 1 entity という不変条件を、喪失判定と選択コマンドの両方が同じ関数で見る)。
+ */
+export function researchEntityOfTech(
+  state: GameState,
+  techId: EntityId,
+): ResearchState | undefined {
   for (const research of entitiesOfKind(state, "research")) {
     if (research.techId === techId) return research;
   }

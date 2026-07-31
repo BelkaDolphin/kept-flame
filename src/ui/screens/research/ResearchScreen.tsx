@@ -9,13 +9,12 @@
 //   (未着手/研究中/解禁済み/停滞喪失/一回性喪失)と前提関係を文章で表す。
 //
 // ===========================================================================
-// 2. 「研究を開始」ボタンは押せるが、現状は必ず拒否される(★ 要ユーザー判断)
+// 2. 「研究を開始」ボタンの判定は engine に委ねる
 // ===========================================================================
-//   `beginResearch` は engine に実装が無い(`commands.ts` の
-//   `RESERVED_COMMAND_OWNER_TASK.beginResearch = "M50(…)"`)。`docs/design/
-//   ui-spec.md` §7-4 が「M31 着手前に裁定が要る」と明記していた項目であり、
-//   本画面は**判定を画面に書かない**という architecture.md §6 の規律をそのまま
-//   適用して解決した: ボタンは常に活性・常に dispatch する。engine が
+//   [2026-08-01 M50 で結線済み] `beginResearch` は M50 が実装した(選択が
+//   有効ならそれ/無ければ従来の ID 昇順先頭、の2段)。本画面は M31 時点から
+//   **判定を画面に書かない**という architecture.md §6 の規律で組んであり、
+//   ボタンは常に活性・常に dispatch する。engine が
 //   `notImplemented`(担当 M50)で拒否するので、その理由を `RejectionBanner`
 //   でそのまま見せる。M50 が実装された瞬間、この画面は 1 行も変えずに
 //   実際に研究を開始できるようになる(FacilityScreen の増築ボタン・
@@ -173,11 +172,6 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-research-screen__title" id="kf-research-screen-title">
         研究ツリー
       </h2>
-      <p class="kf-research-screen__note">
-        現行の engine 実装では研究対象の選択(`beginResearch`)が未実装です(担当:
-        M50)。下のボタンは押せますが、実装されるまで拒否されます。
-      </p>
-
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
       {tree.length === 0 ? (

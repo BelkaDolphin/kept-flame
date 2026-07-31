@@ -155,7 +155,7 @@ M8 が作ったのは**ストア基盤だけ**である。以下は M8 の成果
 - 語彙と判定は **`src/engine/commands.ts` が全部持つ**。ストアにも画面にも「置けるか/払えるか」の判定を書かない(§6 の 7 箇条目)。
 - `command` には 1 個または**配列**(原子適用 = 1 つでも拒否したら全部捨てる)を渡せる。「解体してから同じセルへ建て直す」のように途中の state を見せたくない操作に使う。
 - 実装済み: `placeFacility` / `demolishFacility` / `upgradeFacility` / `assignResident` / `unassignResident` / `beginCodification` / `convertWasteToResearch`。
-- **語彙だけ予約**(呼ぶと `notImplemented` + 担当タスク名で拒否): `dispatchExpedition`(M21)/ `reclaimCell`(M18)/ `beginResearch`(担当未割当)。
+- **語彙だけ予約**(呼ぶと `notImplemented` + 担当タスク名で拒否): `dispatchExpedition`(M21)/ `reclaimCell`(M18)/ `beginResearch`(担当未割当)。**[2026-08-01追記]** 3つとも実装済みになり予約は0件(dispatchExpedition=M21・reclaimCell=M52・beginResearch=M50)。
 - 拒否は `{ ok:false, rejection:{ code, commandKind, commandIndex, subjectId, cellIndex, limit, actual, resourceId, requiredRaw, availableRaw, ownerTask, message } }`。**分岐は `code` で行い、`message` は表示のみ**に使うこと。
 - セーブへの結線は `saveScheduler.recordCommandOutcome(result)`(拒否は 1 件も数えない・§8)。
 
@@ -275,5 +275,5 @@ mount.dispose();                                  // 3. 購読を全部切る(AD
 2. **`src/ui/**` の lint 追加**。ADR リポ構成は `src/ui/` に「生 signal 直読み禁止(lint)」と注記している。M8 では **型(`ReadonlySignal` しか渡さない)+ §6 の規律**で代替し、`eslint.config.js` は触っていない(並行タスクとの競合回避)。画面が実在する M29 以降にルール化するかを要判断。
 3. ~~**`stateApplied` は暫定**(§7-2 で撤去)。engine コマンドの設計は未着手であり、ロードマップ上どのタスクが `src/engine/commands.ts` を作るかが明示されていない(M8 の発見事項)。~~ **[2026-07-29裁定] ロードマップに M49(engine コマンド層)を新設**。`stateApplied` の撤去は M49 の検収条件。**[2026-07-29] M49 完了・撤去済み**。
 5. **[M49] 建設/増築コストが content スキーマに無い**(GDD 12.1 の `facility(id, tags[], slots, lvCurve, overflowCapPolicy)`)。よって `placeFacility` / `upgradeFacility` は資源を 1 つも払わず、GDD 6.7 の廃材 3 出口(1)「施設増築コストの一部代替(最大20%)」は**呼び出し元が存在しない**。コスト項を facility スキーマへ足すか、balance 側に置くかは**要ユーザー判断**。
-6. **[M49] 研究対象の選択コマンド(`beginResearch`)の担当タスクがロードマップに無い**。engine の研究は「未完了 research entity の ID 昇順で先頭 1 本」という縮約(`rules/research.ts` §2)のままで、プレイヤーが選ぶ余地が無い。縮約の解消は golden vector が動く変更(= `algoVersion` bump)なので、担当と時期の裁定が要る。
+6. ~~**[M49] 研究対象の選択コマンド(`beginResearch`)の担当タスクがロードマップに無い**。engine の研究は「未完了 research entity の ID 昇順で先頭 1 本」という縮約(`rules/research.ts` §2)のままで、プレイヤーが選ぶ余地が無い。縮約の解消は golden vector が動く変更(= `algoVersion` bump)なので、担当と時期の裁定が要る。~~ **[2026-08-01 M50 で解消]** `beginResearch` 実装済み。「選択が有効ならそれ/無ければ従来の ID 昇順先頭」の2段構えにしたため既存 golden 73本は不変(bump 不発生)、新規ベクタ sc40 系で選択挙動を固定。
 4. **B3 の実測値は M35 で取り直す**。perf-boundaries.md §5 末尾が「実 UI ストアが入ったら #1 を取り直す」と明記しており、`hydrateFidelity: "placeholder"` の差し替えは M35 の担当。M8 の時点で B3 の中身(state → 根 signal 同期 + 派生値)は実物になった。

@@ -947,6 +947,166 @@
       "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts §6 (A)区間積分ブロック"],
       "observedBy": ["split-digest"],
       "note": "[M25] sc38-out-supply-split-alpha(splitTicks=[500])が固定。供給レートはresidentIds/拠点Lvが区間中に変化しない限り一定(rules/outpost.ts §1)なので生産(a-closed-form)と同型のtelescoping。反証: applyOutpostSupplyの呼び出し位置がrunScheduleの(A)積分ループの外に出る/区間境界で二重適用されるとsplit側の最終ダイジェストが一括実行と食い違い、golden:writeがGeneratorErrorで停止する"
+    },
+    {
+      "id": "codify-stage50-wired",
+      "title": "成文化(GDD 6.2)がscheduler段50(PIPELINE_STAGE.codify)へ結線され、advanceだけで作業が進み記録が完成する",
+      "refs": [
+        "GDD 6.2",
+        "GDD 11.1",
+        "GDD 11.7 段50",
+        "src/engine/scheduler.ts runSchedule (A)区間積分ブロック / codifyComplete",
+        "src/engine/rules/codify.ts applyCodifyProgress/completeCodification",
+        "src/engine/rules/production.ts ProductionRates.codifyLaborFix"
+      ],
+      "observedBy": ["digest", "counters"],
+      "note": "[M50] sc39-codify-queue-alphaが固定。M6以来「純関数はあるが呼ぶ箇所が1つも無い」状態だった積み残しの解消。学者1人(workbench就労)の寄与1.0/tickでcodifyAlpha(requiredWork 30)とcodifyBravo(45)が順に完成する。反証(2026-08-01実測): scheduler.tsのapplyCodifyProgress呼び出しとsyncCodifyCompletionEventを一時的に外すと、counters.rateChangeEventCountが2→0・counters.segmentCountが11→10・canonicalJsonLengthが746→736・stateDigestがbaabd9dc3ccfc1604802c142d36baf0c→5fbc00794b38709df302f44f02f68129へ動くことを確認しrevert(splitCounters.segmentCountも11→10)"
+    },
+    {
+      "id": "codify-complete-on-grid",
+      "title": "成文化完了tickが粗粒度ステップのグリッド上に乗る場合、同一tickで(C)抽選(段24)→成文化完了(段50)の順に処理される",
+      "refs": ["GDD 11.7 段24/段50", "src/engine/scheduler.ts §3 STAGE_BY_KIND"],
+      "observedBy": ["digest", "counters"],
+      "note": "[M50] sc39-codify-queue-alphaが固定。codifyAlphaはrequiredWork=30・レート1.0/tickなのでちょうどtick30(coarseTickMinutes=10のグリッド上)で完了する。b-research-on-gridの成文化版であり、段50が段24より後ろにあること(GDD 11.7の並び)を全順序で踏む"
+    },
+    {
+      "id": "codify-complete-off-grid",
+      "title": "成文化完了tickが粗粒度ステップのグリッド上に乗らない場合、その境界で区間が余分に1本切れる",
+      "refs": ["GDD 11.8(B)", "src/engine/scheduler.ts syncCodifyCompletionEvent"],
+      "observedBy": ["digest", "counters"],
+      "note": "[M50] sc39-codify-queue-alphaが固定。codifyBravoはcodifyAlpha完了(tick30)の後にrequiredWork=45ぶん進むのでtick75(グリッド外)で完了する。b-research-off-gridの成文化版で、segmentCountがグリッド境界の本数(10本)より多いことがその観測になる"
+    },
+    {
+      "id": "codify-queue-advance",
+      "title": "成文化キューは1本ずつ進み、先頭が完成すると次の未完了ジョブへ学者の作業が向き直る(空になれば完了予測を積まない)",
+      "refs": [
+        "src/engine/rules/codify.ts currentCodification",
+        "src/engine/scheduler.ts syncCodifyCompletionEvent"
+      ],
+      "observedBy": ["digest", "counters"],
+      "note": "[M50] sc39-codify-queue-alphaが固定。research.tsの単一キュー(b-research-queue-advance)と同型。tick75で2本目が完成した後、toTick=100までの区間には完了イベントが積まれない(rateChangeEventCountが2で止まる)ことが『キューが空になった状態』の観測である"
+    },
+    {
+      "id": "split-at-codify-completion-tick",
+      "title": "分割不変性: 成文化完了tickちょうどでadvanceを区切っても最終状態が一括実行と一致する(半開区間の規約)",
+      "refs": ["src/engine/scheduler.ts §2", "src/engine/rules/codify.ts ticksUntilCodifyComplete"],
+      "observedBy": ["split-digest"],
+      "note": "[M50] sc39-codify-queue-split-alpha(splitTicks=[30])が固定。split-at-completion-tick(研究)の成文化版。前半advanceはtick30の完了を処理せず『進行度が所要に達したが未完了』のstateを保存し、後半advanceが現在tickで完了させる(ticksUntilCodifyCompleteが残り0以下で0を返す規約)。これが壊れると記録が1枚永久に完成しないままになる"
+    },
+    {
+      "id": "research-select-target",
+      "title": "state.selectedResearchIdが指す研究へ研究点が入る(ID昇順先頭の縮約より優先される)",
+      "refs": [
+        "GDD 5",
+        "src/engine/rules/research.ts §2 currentResearch/selectedResearch",
+        "src/engine/commands.ts beginResearch"
+      ],
+      "observedBy": ["digest", "probe", "counters"],
+      "note": "[M50] sc40-research-select-alphaが固定。ID昇順先頭はresearchAlpha(techBasketWeaving・コスト24000)だが選択はresearchBravo(techFireStarting・コスト8000)。反証(2026-08-01実測): buildStateのselectedResearchId引数をnull(=従来の縮約)にするとprobe.researchCompletedCountが1→0・counters.rateChangeEventCountが1→0・canonicalJsonLengthが718→673(selectedResearchIdキーの省略と完了フィールドの差)・stateDigestがbc95fada84aa5a4eaf25bea8c1c2006a→4ec5510c9139a880ad0e60fa899162bcへ動くことを確認しrevert。『どちらが進むか』はprobe.researchProgressSumRawでは区別できない(合計が同じ20,000,000,000 rawになる)ため、完了件数とdigestが観測の担い手である"
+    },
+    {
+      "id": "research-select-expiry-fallback",
+      "title": "選択した研究が完了したら選択は失効し、以降はID昇順先頭の従来経路へ落ちる(state遷移を伴わない)",
+      "refs": [
+        "src/engine/rules/research.ts §2 (a)(b)(c)",
+        "src/engine/state/state.ts 不変条件 (k)"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M50] sc40-research-select-alphaが固定。researchBravoがtick100で完了した後、tick100〜250の150tickぶんの研究点(80/tick × 150 = 12000)がresearchAlphaへ入る。失効の判定はcurrentResearchの中だけで閉じており、完了イベント側にselectedResearchIdをnullへ戻す状態遷移を持たせていない(持たせると(B)完了境界が『状態遷移を持つ境界』へ変わり、想起困難の回復で踏んだ分割不変性バグと同型の危険が出る)。この設計が正しいことはsc40-research-select-split-alphaの分割不変性が示す"
+    },
+    {
+      "id": "research-select-serialize-roundtrip",
+      "title": "研究対象の選択がtoSerializable→JSON→fromSerializableの往復で保たれる(未選択はキーごと省略が正準形)",
+      "refs": [
+        "src/engine/state/serialize.ts §12",
+        "src/engine/state/update.ts requireValidSelectedResearch"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M50] sc40-research-select-alphaが固定(検収条件『研究選択がセーブ往復で保持される』のgolden側の担保)。tools/goldenVectorBuilder.tsがこの経路名を見て往復digest一致を確認する(rng-state-nonempty-roundtrip / foot-serialize-roundtripと同じ仕組み)。往復で選択が落ちると、復元後のstateは先頭のresearchAlphaへ点が向くので次のadvanceからdigestが食い違う"
+    },
+    {
+      "id": "split-at-research-select-expiry-tick",
+      "title": "分割不変性: 選択した研究が完了して選択が失効するtickちょうどでadvanceを区切っても最終状態が一括実行と一致する",
+      "refs": ["src/engine/advance.ts §3", "src/engine/rules/research.ts §2"],
+      "observedBy": ["split-digest"],
+      "note": "[M50] sc40-research-select-split-alpha(splitTicks=[100])が固定。選択の失効を『state遷移ではなくcurrentResearch内の判定』で表現したことの検証そのもの(想起困難の回復を状態遷移にすると分割不変性が壊れたT5の前例と同型の危険を、同じ形のテストで塞ぐ)"
+    },
+    {
+      "id": "cmd-facility-build-cost",
+      "title": "配置/増築コマンドが facility スキーマ側の建設/増築コスト(GDD 12.1 [2026-07-30裁定])を実際に払い、不足は機械可読rejectになる",
+      "refs": [
+        "GDD 12.1 [2026-07-30裁定]",
+        "src/engine/commands.ts applyPlaceFacility/applyUpgradeFacility/payFacilityCost",
+        "schema/facility.ts buildCost/upgradeCostCurve",
+        "schema/engineContent.ts toFacilityCost"
+      ],
+      "observedBy": ["unit-test", "loader-reject"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『建設 / 増築コストの支払い』が固定。golden vectorはコマンドを1つも実行しない(advanceだけを回す)ので、コマンド層の支払いは構造的にgoldenで観測できない——これが『FacilityDef.costを後から変えてもgolden vectorが動かない』ことの裏返しでもある。content側の欠落reject(『schemaでは省略可・ローダーでは必須』の二段構え)はtests/schema/engineContentCost.test.tsが担当。増築コストのindexはLv-1(upgradeByLevel[0]がLv1→Lv2)"
+    },
+    {
+      "id": "cmd-build-cost-waste-substitution",
+      "title": "廃材3出口(1): 建設/増築コストの最大20%(buildCostWasteSubstitutionMax)が廃材で代替される",
+      "refs": [
+        "GDD 6.7",
+        "GDD 6.7 [2026-07-28追補]",
+        "src/engine/commands.ts facilityCostWasteSubstitution",
+        "src/engine/rules/storage.ts substituteCostWithWaste"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『廃材 3 出口(1)』が固定。M49までは『代替すべきコストが存在しないので実装できない』(commands.ts §4の申し送り)状態で、substituteCostWithWasteの呼び出し元は成文化=出口(2)だけだった。本タスクで出口(1)の呼び出し元が接続され、3出口すべてに呼び出し元が揃った(出口(3)=convertWasteToResearchはM49で接続済み)。代替は建設と増築の両方へ適用する(GDD 6.7本文は『増築』・GDD 12.1裁定は『建設代替20%』と書いており、片方だけに効かせる読み方は両方の文言と噛み合わない・★要ユーザー判断)"
+    },
+    {
+      "id": "cmd-begin-research-guards",
+      "title": "beginResearchは1tech=高々1research entityを保ち、解禁済み/(B)永久喪失/前提未達を別々のcodeでrejectする",
+      "refs": [
+        "GDD 5",
+        "GDD 7.4",
+        "src/engine/commands.ts applyBeginResearch/firstUnmetPrereq",
+        "src/engine/rules/techMemory.ts researchEntityOfTech"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『beginResearch』が固定。既にresearch entityがあるtechは新規作成せず既存を選ぶ(同一techのentityが2つあるとisTechUnlocked/techHoldersOf/喪失判定が『どちらを見るか』で割れる)。コマンド層の分岐はgoldenで観測できないため単体テストが担保し、『選択が実際に効くこと』はsc40-research-select-alphaがgolden側で担保する分担"
+    },
+    {
+      "id": "cmd-cancel-codification",
+      "title": "成文化キューの取消は作業中のジョブだけを対象とし、完成した記録は拒否する(コストは戻らない)",
+      "refs": ["GDD 6.2", "src/engine/commands.ts applyCancelCodification"],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『cancelCodification』が固定。完成済み記録の破壊は焼失(event効果destroyRecords・M22/sc33)の領分でありプレイヤー操作ではない、という線引きを`codifyAlreadyCompleted`という別codeで機械可読にしてある。返金しないのは解体で建設費が戻らないのと同じ扱い(★要ユーザー判断)"
+    },
+    {
+      "id": "cmd-outpost-station-exclusive",
+      "title": "拠点の設置/駐在割当は『本拠就労・探索派遣・拠点常駐』の排他を1コマンドの中で保ち、assertNoDoubleStationedResidentsが通る",
+      "refs": [
+        "GDD 9.2",
+        "src/engine/commands.ts applyEstablishOutpost/applyStationResident/detachResidentFromPostsOrAbandon",
+        "src/engine/rules/outpost.ts §2 assertNoDoubleStationedResidents"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『衛星拠点の設置 / 放棄』『駐在割当 / 解除』が固定。assertNoDoubleStationedResidentsは供給レート計算のたびに走る(=破れたstateを作れば次のadvanceでRulesError)ので、コマンド層の責務は『破れたstateを作らない』ことに尽きる。手段はassignResidentと同じ『新しい場所へ入れる前に同じコマンドの中で古い場所から外す』。移動元が1人拠点なら0名の拠点は表現できない(update.tsのrequireValidOutpost)ためその場で放棄する"
+    },
+    {
+      "id": "cmd-outpost-resident-bounds",
+      "title": "拠点の常駐人数1〜4名(GDD 9.2)がコマンド層とstate不変条件で同じ定数を見て強制される",
+      "refs": [
+        "GDD 9.2",
+        "src/engine/state/state.ts OUTPOST_RESIDENTS_MIN/MAX",
+        "src/engine/state/update.ts requireValidOutpost",
+        "src/engine/commands.ts applyStationResident/applyUnstationResident"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.tsが固定。上限超過はoutpostSlotsFull、最後の1人の解除はoutpostWouldBeEmpty(放棄を案内)。定数の正本をstate.tsへ集約したのは『stateは許すがコマンドは拒む』/その逆の食い違いを構造的に消すため(commands.ts §5の分岐木上界と同じ流儀)"
+    },
+    {
+      "id": "cmd-selected-research-invariant",
+      "title": "selectedResearchIdは実在するresearch entityしか指せず、entityを取り除くと選択も外れる(state不変条件 (k))",
+      "refs": [
+        "src/engine/state/state.ts 不変条件 (k)",
+        "src/engine/state/update.ts requireValidSelectedResearch/setSelectedResearch/removeEntity",
+        "src/engine/state/serialize.ts §12"
+      ],
+      "observedBy": ["unit-test"],
+      "note": "[M50] tests/engine/commandsM50.test.ts『selectedResearchId の不変条件 (k)』が固定。ぶら下がり参照をロード時に止める(黙ってnullへ倒すと『選んだはずの研究に点が入らない』が本番へ出る)。直列化形でnullを明示した非正準形もrejectする(空terrain/既定progressionの明示を拒むのと同じ理屈)"
     }
   ]
 }

@@ -790,6 +790,19 @@ export const EMPTY_RENDERED_LOGS: RenderedLogState = { entries: [], foldedCount:
 //   Map(`outpostsById`)に持つ。
 
 /**
+ * [M24] 衛星拠点の常駐人数の下限(GDD 9.2「住民1〜4名常駐」)。
+ *
+ * **[M50] 正本をここへ集約した**: `update.ts` の `requireValidOutpost`(state 不変
+ * 条件)と `commands.ts` の駐在/解除コマンド(プレイヤー操作の reject)が同じ
+ * 値を見なければ、「state は許すがコマンドは拒む」あるいはその逆という食い違いが
+ * 起きる(commands.ts §5 の分岐木上界を 1 箇所に置いたのと同じ理由)。
+ */
+export const OUTPOST_RESIDENTS_MIN = 1;
+
+/** [M24] 衛星拠点の常駐人数の上限(GDD 9.2)。正本の置き場は上と同じ。 */
+export const OUTPOST_RESIDENTS_MAX = 4;
+
+/**
  * [M24] 衛星拠点 1 基(GDD 9.2「探索確保地点に住民1〜4名常駐」)。
  *
  * 供給/維持費/hazard の決定論 rules は `src/engine/rules/outpost.ts` が持つ
@@ -1020,6 +1033,9 @@ export interface GameStateMeta {
  *   (j) [M28] `progression.inheritTiers` は track の UTF-16 昇順・重複なし・
  *       各 tier は 1 以上の整数、`runCount` / `cumulativeInheritPoints` は
  *       0 以上の整数(維持責務は update.ts の createGameState / setProgression)
+ *   (k) [M50] `selectedResearchId` は null、または `entityStateById` に実在する
+ *       research entity の ID(維持責務は update.ts の createGameState /
+ *       setSelectedResearch / removeEntity)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -1111,6 +1127,25 @@ export interface GameState extends GameStateMeta {
    * 「既存 conformance シナリオに構造的に無影響」の実装上の根拠でもある。
    */
   readonly progression: ProgressionState;
+  /**
+   * [M50] プレイヤーが選んだ研究対象(GDD 5・`commands.ts` の `beginResearch`)。
+   * **null は「まだ選んでいない」**であり、そのとき研究点は従来どおり
+   * 「未完了 research entity の ID 昇順で先頭 1 本」へ入る
+   * (`rules/research.ts` の {@link currentResearch})。
+   *
+   * 不変条件 (k): 非 null なら、その ID の research entity が
+   * `entityStateById` に存在する(維持責務は update.ts の createGameState /
+   * setSelectedResearch)。**「存在するが完了済み / (B) 永久喪失」は許す** ——
+   * 完了時に選択を消す state 遷移を scheduler へ足すと、完了イベントが
+   * 「レート境界」から「状態遷移を持つ境界」へ変わり、想起困難の回復で一度
+   * 踏んだ分割不変性のバグ(rules/recall.ts 末尾)と同型の危険を作るためである。
+   * 選択が失効した場合の解釈は `currentResearch` の 1 箇所に閉じている。
+   *
+   * **null なら直列化形からキーごと省略される**(`terrain` / `progression` と
+   * 同じ規約)= M50 以前のセーブ・既存 golden vector 73 本のバイト列が
+   * 1 bit も動かないことの根拠(既存シナリオは 1 件も選択を持たない)。
+   */
+  readonly selectedResearchId: EntityId | null;
 }
 
 /**

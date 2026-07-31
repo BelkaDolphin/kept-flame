@@ -196,6 +196,8 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     terrain: state.terrain,
     // [M28] 同上(state.ts 不変条件 (j))。周回進行は既定のまま引き継ぐ。
     progression: state.progression,
+    // [M50] 同上(state.ts 不変条件 (k))。研究対象の選択は引き継ぐ。
+    selectedResearchId: state.selectedResearchId,
   };
 }
 
@@ -234,6 +236,8 @@ describe("assertCanonicalSnapshot", () => {
       terrain: BOARD.terrain,
       // [M28] 同上(state.ts 不変条件 (j))。
       progression: BOARD.progression,
+      // [M50] 同上(state.ts 不変条件 (k))。
+      selectedResearchId: BOARD.selectedResearchId,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);

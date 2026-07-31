@@ -1673,21 +1673,12 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
 // ===========================================================================
 // 1. 二重の正直な開示(★ 最終報告で必ず参照すること)
 // ===========================================================================
-//   (a) **`beginResearch` は engine に実装が無い**(`commands.ts` の
-//       `RESERVED_COMMAND_OWNER_TASK.beginResearch = "M50(…)"`)。⑤の「研究を
-//       始める」ボタンは dispatch はするが、現状は必ず `notImplemented` で
-//       拒否される(`RejectionBanner` にその旨が出る)。これは `docs/design/
-//       ui-spec.md` §7-4 が M31 着手前の裁定事項として明記済みの制約であり、
-//       本 UI は「M50 実装後に画面側を 1 行も変えずに動き出す」形にすることを
-//       選んだ(判定は engine に委ねる・architecture.md §6 の 7 箇条目のまま)。
-//   (b) **成文化の tick 結線が無い**(`scheduler.ts` の `PIPELINE_STAGE.codify`
-//       コメント「成文化完了(未実装)」・`applyCodifyProgress`/
-//       `completeCodification` を呼ぶ箇所が scheduler/advance に 1 つも無い
-//       ことを grep で確認済み)。よって⑥でキュー投入した記録は**進行度が
-//       0 のまま止まる**(完了しない)。捏造せずそのまま表示する。
-//   (c) **成文化キューの取消コマンドが無い**(`commands.ts` に cancel 系の型も
-//       予約も無い)。⑥に「取消」ボタンは置かない代わりに、その理由を画面に
-//       明記する(FacilityScreen の増築コスト非表示と同じ正直な開示の作法)。
+//   [2026-08-01 M50 で (a)(b)(c) すべて解消] (a) `beginResearch` は実装済み
+//       (選択が有効ならそれ/無ければ従来の ID 昇順先頭)。M31 の「M50 実装後
+//       に画面側を 1 行も変えずに動き出す」設計どおり、⑤は無変更で動いている。
+//       (b) 成文化の tick 結線も実装済み(`PIPELINE_STAGE.codify` 段50)。
+//       (c) 取消コマンド `cancelCodification` も新設済み——ただし⑥の取消
+//       ボタン自体は未設置(M50 は UI 非接触の縛り。次の UI タスクで接続)。
 //
 // ===========================================================================
 // 2. (A)/(B) の常時判別(GDD 7.4・M31 検収条件)

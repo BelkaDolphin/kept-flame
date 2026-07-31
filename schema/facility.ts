@@ -36,6 +36,26 @@
 //   storageCapacityCurve : GDD 6.7 / 12.1「施設側は上限値管理のみに役割限定」。
 //                          Lv 別の保管容量。省略時は容量を提供しない。
 //   storedResourceIds    : 容量の対象資源。省略/null は全資源(汎用倉庫)。
+//
+// ---------------------------------------------------------------------------
+// [M50] 追加フィールド `buildCost` / `upgradeCostCurve`(GDD 12.1 [2026-07-30裁定])
+// ---------------------------------------------------------------------------
+// 裁定本文: 「コスト項は **facility スキーマ側**に置く(施設ごとの値であり
+// `lvCurve` と同居が自然。`buildCost` と増築コストカーブを追加)。既存 content/
+// テストを壊さないため『schema では省略可・ローダーでは必須』の二段構え(T7 方式)」。
+// よって本ファイルは形式だけを見る(省略は null)。**欠落の reject は
+// `schema/engineContent.ts` の `toFacilityDef` が行う**(harshWork / output と同じ)。
+//
+//   buildCost        : Lv1 で建てるときに払う資源(1 種)と量。
+//   upgradeCostCurve : Lv 別の増築コスト。**index i = Lv(i+1) → Lv(i+2)** の費用で
+//                      あり、支払う資源は `buildCost.resourceId` と同じ(施設 1 基に
+//                      つきコスト資源は 1 種)。他の Lv 別カーブ(lvCurve /
+//                      storageCapacityCurve / bedCapacityCurve)と長さを揃えて
+//                      5 個にしてあるので、**最後の要素(Lv5 → Lv6)は読まれない**
+//                      (Lv5 が上限のため)。長さを 4 にしない理由は、Lv 別カーブが
+//                      1 本だけ別の長さになるとオーサリング側の検算(6桁 floor の
+//                      表計算・docs/measurements/authoring-procedure.md)が
+//                      施設ごとに 2 種類の列数を持つことになるためである。
 // ---------------------------------------------------------------------------
 
 import {
@@ -104,6 +124,18 @@ const CAPACITY_VALUE_RANGE = { min: 0, max: 1_000_000_000 };
 
 export type FacilityStatWeights = { readonly [K in ResidentStatKey]: number };
 
+/**
+ * [M50] 建設コスト(GDD 12.1 [2026-07-30裁定])。資源は施設 1 基につき 1 種で
+ * あり、増築コスト({@link FacilityContent.upgradeCostCurve})も同じ資源で払う。
+ */
+export interface FacilityBuildCost {
+  readonly resourceId: string;
+  readonly amount: number;
+}
+
+/** [M50] 建設/増築コストの値域。0(無料)も許す(バランス調整段の自由度)。 */
+const COST_VALUE_RANGE = { min: 0, max: 1_000_000_000 };
+
 export interface FacilityContent {
   readonly id: string;
   readonly tags: readonly FacilityTag[];
@@ -130,6 +162,16 @@ export interface FacilityContent {
   readonly harshWork: boolean | null;
   /** GDD 11.1 の産出先。JSON に無ければ null(同上)。 */
   readonly output: FacilityOutputContent | null;
+  /**
+   * [M50] Lv1 で建てるときのコスト(GDD 12.1 [2026-07-30裁定])。
+   * JSON に無ければ null(= engine へ写す段で reject。ファイル冒頭 [M50] の節)。
+   */
+  readonly buildCost: FacilityBuildCost | null;
+  /**
+   * [M50] Lv 別の増築コスト。**index i = Lv(i+1) → Lv(i+2)**(ファイル冒頭 [M50])。
+   * JSON に無ければ null(同上)。
+   */
+  readonly upgradeCostCurve: readonly number[] | null;
 }
 
 const SLOT_LEVEL_KEYS = ["lv1", "lv2", "lv3", "lv4", "lv5"] as const;
@@ -373,6 +415,58 @@ function validateStoredResourceIds(
   return ids;
 }
 
+/** [M50] `buildCost`(省略可)の検証。資源 ID + 非負の量。 */
+function validateBuildCost(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): FacilityBuildCost | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const resourceId = validateId(obj["resourceId"], `${path}.resourceId`, issues);
+  const amount = expectNumber(obj["amount"], `${path}.amount`, issues, COST_VALUE_RANGE);
+  if (resourceId === undefined || amount === undefined) return undefined;
+  return { resourceId, amount };
+}
+
+/**
+ * [M50] `upgradeCostCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負・**単調非減少**。
+ *
+ * 単調非減少を強制するのは「Lv を上げるほど増築が安くなる」設定ミスを止めるため
+ * ({@link validateBedCapacityCurve} が「Lv を上げて寝床が減らない」を強制するのと
+ * 同じ立場)。狭義増加にしないのは、無料段(0 が連続する)を許すため。
+ */
+function validateUpgradeCostCurve(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (arr.length !== LV_CURVE_LENGTH) {
+    issues.add(
+      path,
+      `upgradeCostCurve は長さ ${String(LV_CURVE_LENGTH)}(Lv1〜Lv5)が必須(実際: ${String(arr.length)})`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const n = expectNumber(arr[i], `${path}[${String(i)}]`, issues, COST_VALUE_RANGE);
+    if (n === undefined) return undefined;
+    const previous = values[i - 1];
+    if (previous !== undefined && n < previous) {
+      issues.add(
+        `${path}[${String(i)}]`,
+        `upgradeCostCurve は単調非減少が必須(Lv を上げて増築が安くならない)。${String(previous)} の次が ${String(n)}`,
+      );
+      return undefined;
+    }
+    values.push(n);
+  }
+  return values;
+}
+
 export function validateFacility(raw: unknown): ValidationResult<FacilityContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -420,6 +514,18 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
       ? null
       : (validateBedCapacityCurve(rawBedCapacityCurve, "$.bedCapacityCurve", issues) ?? undefined);
 
+  // [M50] 追加の省略可フィールド(GDD 12.1 [2026-07-30裁定]・ファイル冒頭 [M50])。
+  const rawBuildCost = obj["buildCost"];
+  const buildCost =
+    rawBuildCost === undefined
+      ? null
+      : (validateBuildCost(rawBuildCost, "$.buildCost", issues) ?? undefined);
+  const rawUpgradeCostCurve = obj["upgradeCostCurve"];
+  const upgradeCostCurve =
+    rawUpgradeCostCurve === undefined
+      ? null
+      : (validateUpgradeCostCurve(rawUpgradeCostCurve, "$.upgradeCostCurve", issues) ?? undefined);
+
   if (
     id === undefined ||
     tags === undefined ||
@@ -432,7 +538,9 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     statWeights === undefined ||
     storageCapacityCurve === undefined ||
     storedResourceIds === undefined ||
-    bedCapacityCurve === undefined
+    bedCapacityCurve === undefined ||
+    buildCost === undefined ||
+    upgradeCostCurve === undefined
   ) {
     return fail(issues.list());
   }
@@ -450,5 +558,7 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     storageCapacityCurve,
     storedResourceIds,
     bedCapacityCurve,
+    buildCost,
+    upgradeCostCurve,
   });
 }

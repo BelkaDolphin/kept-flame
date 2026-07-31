@@ -437,4 +437,42 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     ["out-split-at-supply-integration"],
     { splitTicks: [500] },
   ),
+
+  // --- sc39-codify-queue(M50: 成文化の scheduler 段50 結線・GDD 11.7 段50) ----
+  // research entity を持たない盤面なので (C) 判定ペアが 0 件 = rngState を一切
+  // 消費しない → worldSeed 非依存(sc17/sc18/sc19 と同じ理由で alpha 1 本のみ)。
+  plan("sc39-codify-queue-alpha", "sc39-codify-queue", SEEDS.alpha, 100, [
+    "codify-stage50-wired",
+    "codify-complete-on-grid",
+    "codify-complete-off-grid",
+    "codify-queue-advance",
+  ]),
+  plan(
+    "sc39-codify-queue-split-alpha",
+    "sc39-codify-queue",
+    SEEDS.alpha,
+    100,
+    ["split-at-codify-completion-tick"],
+    { splitTicks: [30] },
+  ),
+
+  // --- sc40-research-select(M50: 研究対象の選択・GDD 5) ----------------------
+  // 住民 1 名 × research 2 本の (C) 判定ペアがあるので rngState を消費する。
+  // ただし `rng-worldseed-variation` は sc01/sc06/sc11/sc24 が既に踏んでおり、
+  // 本シナリオの主張は選択の効き方(seed 非依存の分岐)なので alpha 1 本とする
+  // (C7 の 2 本義務に対する note: sc03-research と同一骨格の盤面であり、
+  //  seed 差の観測は sc06-recall-beta 系が担っている)。
+  plan("sc40-research-select-alpha", "sc40-research-select", SEEDS.alpha, 250, [
+    "research-select-target",
+    "research-select-expiry-fallback",
+    "research-select-serialize-roundtrip",
+  ]),
+  plan(
+    "sc40-research-select-split-alpha",
+    "sc40-research-select",
+    SEEDS.alpha,
+    250,
+    ["split-at-research-select-expiry-tick"],
+    { splitTicks: [100] },
+  ),
 ];

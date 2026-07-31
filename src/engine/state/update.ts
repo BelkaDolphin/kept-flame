@@ -73,6 +73,8 @@ import {
   EMPTY_TERRAIN,
   EntityLookupError,
   MAX_TRAITS_PER_RESIDENT,
+  OUTPOST_RESIDENTS_MAX,
+  OUTPOST_RESIDENTS_MIN,
   isEntityId,
   isInheritTrack,
   requireEntity,
@@ -305,9 +307,10 @@ function requireValidOutpost(outpost: OutpostState): void {
     );
   }
   const residentIds = outpost.residentIds;
-  if (residentIds.length < 1 || residentIds.length > 4) {
+  if (residentIds.length < OUTPOST_RESIDENTS_MIN || residentIds.length > OUTPOST_RESIDENTS_MAX) {
     throw new StateUpdateError(
-      `拠点 "${outpost.id}" の常駐人数 ${String(residentIds.length)} が 1〜4 名の範囲外(GDD 9.2)`,
+      `拠点 "${outpost.id}" の常駐人数 ${String(residentIds.length)} が ` +
+        `${String(OUTPOST_RESIDENTS_MIN)}〜${String(OUTPOST_RESIDENTS_MAX)} 名の範囲外(GDD 9.2)`,
     );
   }
   for (let i = 1; i < residentIds.length; i++) {
@@ -538,6 +541,7 @@ export function createGameState(
   outposts: readonly OutpostState[] = [],
   terrain: TerrainState = EMPTY_TERRAIN,
   progression: ProgressionState = EMPTY_PROGRESSION,
+  selectedResearchId: EntityId | null = null,
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -546,6 +550,7 @@ export function createGameState(
   }
   requireValidTerrain(terrain);
   requireValidProgression(progression);
+  requireValidSelectedResearch(entities, selectedResearchId);
   return {
     saveSchemaVersion: meta.saveSchemaVersion,
     contentVersion: meta.contentVersion,
@@ -561,7 +566,35 @@ export function createGameState(
     outpostsById: buildOutpostMap(outposts),
     terrain,
     progression,
+    selectedResearchId,
   };
+}
+
+/**
+ * [M50] 研究対象の選択が実在する research entity を指しているか(不変条件 (k))。
+ *
+ * ぶら下がり参照を**ロード時に**止めるのが目的である。黙って null へ倒すと、
+ * 手編集セーブや将来のマイグレーション不備で選択が消えたことに誰も気付かないまま
+ * 「選んだはずの研究に点が入らない」状態が本番へ出る。
+ *
+ * @throws {StateUpdateError} 指す entity が無い / research でない場合
+ */
+function requireValidSelectedResearch(
+  entities: readonly EntityState[],
+  selectedResearchId: EntityId | null,
+): void {
+  if (selectedResearchId === null) return;
+  for (const entity of entities) {
+    if (entity.id !== selectedResearchId) continue;
+    if (entity.kind === "research") return;
+    throw new StateUpdateError(
+      `selectedResearchId "${selectedResearchId}" が指す entity の種別が research でない` +
+        `(実際: ${entity.kind}・不変条件 (k))`,
+    );
+  }
+  throw new StateUpdateError(
+    `selectedResearchId "${selectedResearchId}" に対応する research entity が無い(不変条件 (k))`,
+  );
 }
 
 /**
@@ -799,7 +832,33 @@ export function removeEntity(state: GameState, id: EntityId): GameState {
   }
   const next = new Map(state.entityStateById);
   next.delete(id);
-  return setField(state, "entityStateById", next);
+  const removed = setField(state, "entityStateById", next);
+  // [M50] 不変条件 (k): 選択中の研究 entity を取り除いたら選択も外す
+  // (ぶら下がり参照を作らない・commands.ts の `detachWorkerFromAllFacilities` と
+  // 同じ「後始末を engine 側で完結させる」流儀)。
+  if (removed.selectedResearchId !== id) return removed;
+  return setField(removed, "selectedResearchId", null);
+}
+
+/**
+ * [M50] 研究対象の選択を差し替える(GDD 5・`commands.ts` の `beginResearch`)。
+ * 不変条件 (k)(state.ts)の維持責務はここにある。
+ *
+ * `null` は「選んでいない」= 従来どおり ID 昇順先頭が対象になる状態へ戻すこと。
+ *
+ * @throws {EntityLookupError} 指定 ID の research entity が存在しない場合
+ */
+export function setSelectedResearch(state: GameState, researchId: EntityId | null): GameState {
+  if (state.selectedResearchId === researchId) return state;
+  if (researchId !== null) {
+    const entity = state.entityStateById.get(researchId);
+    if (entity === undefined || entity.kind !== "research") {
+      throw new EntityLookupError(
+        `setSelectedResearch: research entity "${researchId}" が存在しない(不変条件 (k))`,
+      );
+    }
+  }
+  return setField(state, "selectedResearchId", researchId);
 }
 
 /**

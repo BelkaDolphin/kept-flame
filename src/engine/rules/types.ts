@@ -120,6 +120,41 @@ export interface FacilityDef {
    * この値を後から変えても動かない = golden vector に影響しない。
    */
   readonly footprint?: FacilityFootprint;
+  /**
+   * [M50] 建設 / 増築コスト(GDD 12.1 [2026-07-30裁定])。
+   *
+   * **省略時は無料**。省略を許すのは `workerSlotsByLevel` / `footprint` と同じ
+   * 理由(engine のテストフィクスチャのような縮約 facility 定義でも rules が
+   * 動くようにするため)で、**実 content は必ず値を持つ** ——
+   * `schema/engineContent.ts` の `toFacilityDef` が欠落を reject する
+   * (「schema では省略可・ローダーでは必須」の二段構え・GDD 12.1 の裁定本文)。
+   *
+   * 読むのは `commands.ts`(配置 / 増築の支払い)**だけ**である。tick ループは
+   * 一切読まないので、この値を後から変えても既存 state の未来 tick は動かない
+   * = golden vector に影響しない(`workerSlotsByLevel` と同じ性質)。
+   */
+  readonly cost?: FacilityCostDef;
+}
+
+/**
+ * [M50] 施設 1 基の建設 / 増築コスト(GDD 12.1 [2026-07-30裁定] / GDD 6.7 の
+ * 廃材 3 出口(1))。
+ *
+ * **支払う資源は施設 1 基につき 1 種**である。複数資源のレシピ形にしなかったのは、
+ * GDD 12.1 の裁定が facility 行へ `buildCost` と増築コストカーブの 2 項だけを
+ * 足すと定めており、多資源レシピの置き場は recipe カテゴリ(MVP 対象外)だから
+ * である。recipe が入る段でここを `ReadonlyMap<EntityId, Fix>` へ広げること。
+ */
+export interface FacilityCostDef {
+  /** コストを引き落とす resource 定義 ID。 */
+  readonly resourceId: EntityId;
+  /** Lv1 で建てるときのコスト。 */
+  readonly buildFix: Fix;
+  /**
+   * Lv 別の増築コスト。**index i = Lv(i+1) → Lv(i+2)**。長さは他の Lv 別カーブと
+   * 揃えてあるので最後の要素(Lv5 → Lv6)は読まれない(schema/facility.ts [M50])。
+   */
+  readonly upgradeByLevel: readonly Fix[];
 }
 
 /**

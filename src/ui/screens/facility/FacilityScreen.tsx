@@ -109,8 +109,8 @@ export function FacilityDetailPanel({ detail, onUpgrade }: FacilityDetailPanelPr
       </ul>
       <div class="kf-facility-detail__upgrade">
         <p class="kf-facility-detail__upgrade-cost">
-          増築コスト: 現行の engine 実装では資源を消費しません(コスト項が content
-          スキーマに未実装・要ユーザー判断)
+          増築コスト: content 定義の資源を消費します(M50 結線済み。不足時は増築 ボタンで engine
+          が拒否し、必要量が機械可読で表示されます)
         </p>
         <button type="button" class="kf-facility-detail__upgrade-button" onClick={onUpgrade}>
           Lv{detail.level + 1}へ増築

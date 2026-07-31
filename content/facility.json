@@ -7,7 +7,9 @@
     "overflowCapPolicy": "convertToWaste",
     "footprint": { "width": 1, "height": 1 },
     "harshWork": false,
-    "output": { "kind": "resource", "resourceId": "firewood" }
+    "output": { "kind": "resource", "resourceId": "firewood" },
+    "buildCost": { "resourceId": "firewood", "amount": 30 },
+    "upgradeCostCurve": [36, 43.2, 51.84, 62.208, 74.6496]
   },
   {
     "id": "forge",
@@ -24,7 +26,9 @@
       "fortitude": 0.3,
       "will": 0
     },
-    "output": { "kind": "resource", "resourceId": "iron" }
+    "output": { "kind": "resource", "resourceId": "iron" },
+    "buildCost": { "resourceId": "clay", "amount": 25 },
+    "upgradeCostCurve": [30, 36, 43.2, 51.84, 62.208]
   },
   {
     "id": "workbench",
@@ -41,6 +45,8 @@
       "fortitude": 0,
       "will": 0.1
     },
-    "output": { "kind": "research" }
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "firewood", "amount": 20 },
+    "upgradeCostCurve": [24, 28.8, 34.56, 41.472, 49.7664]
   }
 ]

@@ -42,6 +42,45 @@ function mergedRawBundle(): RawContentBundle {
   };
 }
 
+/**
+ * [M50] 計測サンプルの facility へ建設/増築コスト(GDD 12.1 [2026-07-30裁定])を
+ * **メモリ上でだけ**足す。
+ *
+ * `docs/measurements/authoring-samples/*.json` は先行計測 #12(エンティティ制作
+ * 素工数)の実測アーティファクトであり、**書き換えると計測の意味が変わる**
+ * (「その日の作業で書けた内容」が記録だから)。一方 M50 でローダーが
+ * `buildCost` / `upgradeCostCurve` を必須にしたので、素のままでは
+ * `loadEngineContent` を通らない。よってサンプル本体は 1 バイトも触らず、
+ * ローダーを通すためだけの最小値をテスト側で載せる。
+ *
+ * この上乗せは **schema 検証(`validateContentBundle`)のテストには使わない**
+ * —— schema 側は M50 でも省略可のままであり、サンプルは素のまま通るべきだから
+ * である(二段構えが実際に二段であることの確認を兼ねる)。
+ */
+function withM50Cost(facility: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...facility,
+    buildCost: { resourceId: "firewood", amount: 1 },
+    upgradeCostCurve: [1, 1, 1, 1, 1],
+  };
+}
+
+/** [M50] `loadEngineContent` を通すためのバンドル(サンプルにコストを載せた版)。 */
+function mergedRawBundleForLoad(): RawContentBundle {
+  return {
+    ...mergedRawBundle(),
+    facility: [...facilityJson, withM50Cost(facilitySample as Record<string, unknown>)],
+  };
+}
+
+/** [M50] 同上(再計測サンプル版)。 */
+function mergedRawBundleRetestForLoad(): RawContentBundle {
+  return {
+    ...mergedRawBundleRetest(),
+    facility: [...facilityJson, withM50Cost(facilitySampleRetest as Record<string, unknown>)],
+  };
+}
+
 describe("authoring-samples — tech.sample.json", () => {
   it("既存 content とマージして validateContentBundle を通る", () => {
     const result = validateContentBundle(mergedRawBundle());
@@ -55,7 +94,7 @@ describe("authoring-samples — tech.sample.json", () => {
   });
 
   it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
-    const bundleResult = validateContentBundle(mergedRawBundle());
+    const bundleResult = validateContentBundle(mergedRawBundleForLoad());
     expect(bundleResult.ok).toBe(true);
     if (!bundleResult.ok) return;
     const engineResult = loadEngineContent(bundleResult.value);
@@ -79,7 +118,7 @@ describe("authoring-samples — facility.sample.json", () => {
   });
 
   it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
-    const bundleResult = validateContentBundle(mergedRawBundle());
+    const bundleResult = validateContentBundle(mergedRawBundleForLoad());
     expect(bundleResult.ok).toBe(true);
     if (!bundleResult.ok) return;
     const engineResult = loadEngineContent(bundleResult.value);
@@ -146,7 +185,7 @@ describe("authoring-samples — tech.sample.retest-2026-07-27.json", () => {
   });
 
   it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
-    const bundleResult = validateContentBundle(mergedRawBundleRetest());
+    const bundleResult = validateContentBundle(mergedRawBundleRetestForLoad());
     expect(bundleResult.ok).toBe(true);
     if (!bundleResult.ok) return;
     const engineResult = loadEngineContent(bundleResult.value);
@@ -170,7 +209,7 @@ describe("authoring-samples — facility.sample.retest-2026-07-27.json", () => {
   });
 
   it("既存 content とマージして loadEngineContent(engine 内部表現ロード)を通る", () => {
-    const bundleResult = validateContentBundle(mergedRawBundleRetest());
+    const bundleResult = validateContentBundle(mergedRawBundleRetestForLoad());
     expect(bundleResult.ok).toBe(true);
     if (!bundleResult.ok) return;
     const engineResult = loadEngineContent(bundleResult.value);

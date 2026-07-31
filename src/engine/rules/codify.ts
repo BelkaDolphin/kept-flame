@@ -14,12 +14,19 @@
 //     applyCodifyProgress        ↔ applyResearchProgress    ((A) 区間の一括加算)
 //     completeCodification       ↔ completeResearch         ((B) 境界の状態遷移)
 //
-//   **M6 では tick ループへ結線しない。** scheduler / advance を触ると
+//   M6 では tick ループへ結線しなかった(scheduler / advance を触ると
 //   「レートを変える全状態変化が heap のイベントとして境界化されている」という
-//   中心不変条件(scheduler.ts §1)の再検証が要り、既存 golden vector 37 本の
-//   リスクも負う。M6 は「成文化が動く形」までを純関数で用意し、結線は住民/コマンド
-//   系(M13 以降)の担当とする。予測関数を research と同型にしてあるのは、
-//   結線側が新しい概念を持ち込まずに済むようにするため。
+//   中心不変条件(scheduler.ts §1)の再検証が要り、当時の golden vector 37 本の
+//   リスクも負うため)。**[M50] scheduler.ts の段50(`PIPELINE_STAGE.codify`)へ
+//   結線済み**: (A) 区間の積分は `applyCodifyProgress`、完了 tick の予測は
+//   `syncCodifyCompletionEvent`(研究完了と同型)。予測関数を research と同型に
+//   作っておいたおかげで、結線側は新しい概念を 1 つも持ち込んでいない。
+//
+//   1 tick あたりの作業量(= 学者の稼働寄与)は `rules/production.ts` の
+//   {@link ../rules/production.ProductionRates.codifyLaborFix} が持つ。既存 golden
+//   vector 73 本は codify entity を 1 つも**未完了で**持たないため、この結線
+//   それ自体では 1 バイトも動かない(`currentCodification` が undefined を返し、
+//   積分も完了予測も走らない)。
 //
 // ===========================================================================
 // 2. 媒体は engine 既知の 2 種固定(GDD 11.1 追補)

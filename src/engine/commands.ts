@@ -69,25 +69,34 @@
 // ===========================================================================
 //   実装 : 配置 / 解体 / 増築 / 住民割当 / 割当解除 / 成文化指示 /
 //          廃材→研究点変換(GDD 6.7 3出口(3))/ [M21] 探索派遣確定 /
-//          [M52] 瓦礫開墾(GDD 9.1)/ [M28] 大移動 + 継承ボーナス購入(GDD 10.2〜10.5)
-//   予約 : 研究対象の選択(M50)
+//          [M52] 瓦礫開墾(GDD 9.1)/ [M28] 大移動 + 継承ボーナス購入(GDD 10.2〜10.5)/
+//          [M50] 研究対象の選択 / 成文化キューの取消 /
+//          [M50] 衛星拠点の設置・放棄・駐在割当・駐在解除(GDD 9.2)
+//   予約 : (現在なし)
 //   予約分は語彙(型)と reject コード `notImplemented` + 担当タスク名だけを持ち、
 //   **それらしい名前で何もしないコマンドにはしない**(store.ts §1 と同じ規律)。
-//   {@link RESERVED_COMMAND_OWNER_TASK} が機械可読の正本である。
+//   {@link RESERVED_COMMAND_OWNER_TASK} が機械可読の正本であり、`applyOne` は
+//   switch より先にこのテーブルを引く(実装済みの case を消し忘れても
+//   「実装があるのに notImplemented」にならない・逆もない)。
 //
-//   **配置 / 増築が建設コストを払わない**のは content にコストが無いため
-//   (GDD 12.1 の facility スキーマは `(id, tags[], slots, lvCurve,
-//   overflowCapPolicy)` でコスト項が無い)。GDD 6.7 の廃材 3 出口(1)
-//   「施設増築コストの一部代替」も、代替すべきコストが存在しないので実装できない
-//   (`substituteCostWithWaste` は成文化 = 出口(2) からのみ呼ばれている)。
-//   これは M49 の手抜きではなく content スキーマ側の穴であり、要ユーザー判断
-//   (担当 = M50)。
+//   **[M50] 配置 / 増築は建設コストを払う**。M49 時点で払っていなかったのは
+//   content にコスト項が無かったためで、GDD 12.1 [2026-07-30裁定] が
+//   「コスト項は facility スキーマ側(`buildCost` と増築コストカーブ)」と定めた
+//   のを受けて M50 で結線した。GDD 6.7 の廃材 3 出口(1)「施設建設/増築コストの
+//   一部代替(最大20%)」も同時に接続してある(`facilityCostWasteSubstitution`)
+//   ので、`substituteCostWithWaste` の呼び出し元は成文化 = 出口(2) と
+//   建設/増築 = 出口(1) の 2 つになった。
 //
-//   **[M52] 開墾だけは資源を払う**。GDD 9.1 / 11.1 が開墾についてだけコスト式
+//   **[M52] 開墾も資源を払う**。GDD 9.1 / 11.1 が開墾についてだけコスト式
 //   (`base × 1.15^解放数` + cap)を正本として明記しており、コストの置き場も
-//   facility スキーマではなく `balance.reclaim` なので、上記の穴(建設コストを
-//   どこへ置くか)を先取りせずに実装できる。開墾へ廃材代替を効かせるかは
-//   GDD 6.7 の文言が建設/増築に限定されているため**適用しない**(要ユーザー判断)。
+//   facility スキーマではなく `balance.reclaim` である。開墾へ廃材代替を
+//   効かせるかは GDD 6.7 の文言が建設/増築に限定されているため**適用しない**
+//   (M50 でも据え置き・要ユーザー判断)。
+//
+//   **[M50] 設置コストを払わないのは衛星拠点だけ**である。GDD 9.2 は維持費
+//   (`upkeep`)と供給は式で定めているが、**設置そのものの費用を定めていない**。
+//   無い値を engine が発明すると、以後 content 側でそれを上書きできない
+//   (バランス調整が engine 改修になる)ので、M50 では払わない(要ユーザー判断)。
 // ---------------------------------------------------------------------------
 
 import { GRID_CELL_COUNT } from "./adjacency";
@@ -102,7 +111,7 @@ import {
   occupiedCells,
   occupiedCellsOfFacility,
 } from "./footprint";
-import { toRaw, type Fix } from "./fp";
+import { FIX_ZERO, addFix, toRaw, type Fix } from "./fp";
 import {
   beginCodification as beginCodificationRule,
   codifyWasteSubstitution,
@@ -126,12 +135,30 @@ import {
 } from "./rules/exploration";
 import { reclaimCell as reclaimCellRule, reclaimCostFix } from "./rules/reclaim";
 import { currentResearch } from "./rules/research";
-import { convertWasteToResearchPoints, wasteStockOf, wasteToResearchPoints } from "./rules/storage";
-import type { DistanceBand, EngineContent, FacilityDef, RecordMedium } from "./rules/types";
 import {
+  convertWasteToResearchPoints,
+  spendResources,
+  substituteCostWithWaste,
+  wasteStockOf,
+  wasteToResearchPoints,
+} from "./rules/storage";
+import { isIrreversiblyLost, isTechUnlocked, researchEntityOfTech } from "./rules/techMemory";
+import {
+  isDistanceBand,
+  prereqsOfTech,
+  type DistanceBand,
+  type EngineContent,
+  type FacilityDef,
+  type RecordMedium,
+} from "./rules/types";
+import {
+  OUTPOST_RESIDENTS_MAX,
+  OUTPOST_RESIDENTS_MIN,
+  allOutposts,
   entitiesOfKind,
   firstRubbleCellIn,
   getEntity,
+  getOutpost,
   inheritTierOf,
   isAliveResident,
   isInheritTrack,
@@ -142,13 +169,17 @@ import {
   type FacilityState,
   type GameState,
   type InheritTrack,
+  type OutpostState,
   type ResidentState,
 } from "./state/state";
 import {
   putEntity,
   removeEntity,
+  removeOutpost,
   setDispatchSnapshots,
   setField,
+  setOutpost,
+  setSelectedResearch,
   updateEntity,
 } from "./state/update";
 import { worldSeedToUint32 } from "./stochastic";
@@ -318,34 +349,118 @@ export interface PurchaseInheritBonusCommand {
 }
 
 /**
- * **型のみ予約**(担当未割当): 研究対象の選択。
+ * [M50] 研究対象を選ぶ(GDD 5)。
  *
- * 現 engine の研究は「未完了 research entity の ID 昇順で先頭 1 本」という縮約
- * (research.ts §2)であり、プレイヤーが選ぶ余地が無い。選択を入れるには縮約の
- * 解消(キューの明示的な順序 or 対象フラグ)が要り、それは golden vector が動く
- * 変更である。**どのタスクが持つかがロードマップに無い**ため、語彙だけ予約して
- * 報告する(M8 が `commands.ts` の担当不在を見つけたのと同じ形の穴)。
+ * **2 つの役割を 1 コマンドで持つ**:
+ *   (a) その tech の research entity がまだ無ければ `researchId` で新しく作る
+ *   (b) 作ったもの / 既にあるものを `state.selectedResearchId` へ据える
+ *
+ * (b) だけの「選び直し」も同じコマンドで行える。**既に research entity がある
+ * tech に対して `researchId` が食い違っていても reject しない** —— 既存 entity を
+ * そのまま選ぶ(§4 の [M50] 節)。呼び出し側(UI ⑤)は tech ID から機械的に
+ * 採番した ID を毎回渡すだけでよく、「もう作ってあるか」を画面が覚えなくて済む。
  */
 export interface BeginResearchCommand {
   readonly kind: "beginResearch";
-  /** 新しく作る research entity の ID。 */
+  /**
+   * その tech の research entity がまだ無いときに**新しく作る** entity の ID。
+   * 既にあるときは使われない(既存 entity が選ばれる)。
+   */
   readonly researchId: EntityId;
   readonly techId: EntityId;
 }
 
+/**
+ * [M50] 成文化キューのジョブを取り消す(GDD 6.2 の成文化キュー)。
+ *
+ * **作業中の記録だけ**が対象であり、完成した記録は取り消せない(それは記録の
+ * 破壊 = `destroyRecords`(M22)の領分であり、プレイヤー操作ではない)。
+ *
+ * **払ったコストは戻らない**。`beginCodification` は着手時に資源を全額支払う
+ * (rules/codify.ts §4)ので、返金するなら「どこまで進んだか」に応じた按分
+ * 規則が要るが、GDD にその規定は無い。解体で建設費が戻らないのと同じ扱いに
+ * 揃えてある(要ユーザー判断として M50 の★報告に記載)。
+ */
+export interface CancelCodificationCommand {
+  readonly kind: "cancelCodification";
+  readonly codifyId: EntityId;
+}
+
+/**
+ * [M50] 衛星拠点を設置する(GDD 9.2「探索確保地点に住民1〜4名常駐」)。
+ *
+ * 常駐者を**同時に**指定するのは state 側の不変条件が「常駐 1〜4 名」を要求する
+ * (update.ts の `requireValidOutpost`)ためで、0 名の拠点という中間状態は
+ * 作れない。GDD 9.2 に設置コストの規定が無いので**資源は払わない**
+ * (要ユーザー判断として M50 の★報告に記載)。
+ */
+export interface EstablishOutpostCommand {
+  readonly kind: "establishOutpost";
+  /** 新しく作る拠点の ID(既存 entity / 既存拠点と衝突したら reject)。 */
+  readonly outpostId: EntityId;
+  /** content の outpostType 定義 ID。 */
+  readonly outpostTypeId: EntityId;
+  /** 距離帯(維持費の距離帯係数・GDD 9.2)。 */
+  readonly band: DistanceBand;
+  /** 常駐させる住民(1〜4 名・順不同でよく、engine が ID 昇順へ正規化する)。 */
+  readonly residentIds: readonly EntityId[];
+}
+
+/**
+ * [M50] 衛星拠点を放棄する(GDD 9.2「放棄/移設可」)。
+ * 常駐者は**engine 側で**全員本拠へ戻す(無配属)。資源は戻らない。
+ */
+export interface AbandonOutpostCommand {
+  readonly kind: "abandonOutpost";
+  readonly outpostId: EntityId;
+}
+
+/**
+ * [M50] 住民を衛星拠点へ駐在させる(GDD 9.2)。
+ *
+ * `assignResident`(本拠の就労)と**同じ形**で、別の場所に居るなら同じコマンドの
+ * 中で外す。外し先が本拠の施設でも別の拠点でもよい —— 二重計上の検査
+ * (`rules/outpost.ts` の `assertNoDoubleStationedResidents`)は「本拠就労 /
+ * 探索派遣 / 拠点常駐」を排他にすることを要求しており、途中の state で
+ * それが破れて見えてはならない。
+ */
+export interface StationResidentCommand {
+  readonly kind: "stationResident";
+  readonly residentId: EntityId;
+  readonly outpostId: EntityId;
+}
+
+/**
+ * [M50] 住民の拠点駐在を解除する(本拠へ戻して無配属にする)。
+ *
+ * **最後の 1 人は解除できない**(`outpostWouldBeEmpty`)。GDD 9.2 の「1〜4名常駐」
+ * を state 不変条件として持っている(update.ts の `requireValidOutpost`)ため、
+ * 0 名の拠点は表現できない。空にしたいなら `abandonOutpost` を使う、という
+ * 案内を reject の `message` に載せてある。
+ */
+export interface UnstationResidentCommand {
+  readonly kind: "unstationResident";
+  readonly residentId: EntityId;
+}
+
 /** プレイヤー操作の全語彙。 */
 export type Command =
+  | AbandonOutpostCommand
   | AssignResidentCommand
   | BeginCodificationCommand
   | BeginResearchCommand
+  | CancelCodificationCommand
   | ConvertWasteToResearchCommand
   | DemolishFacilityCommand
   | DispatchExpeditionCommand
+  | EstablishOutpostCommand
   | ExecuteExodusCommand
   | PlaceFacilityCommand
   | PurchaseInheritBonusCommand
   | ReclaimCellCommand
+  | StationResidentCommand
   | UnassignResidentCommand
+  | UnstationResidentCommand
   | UpgradeFacilityCommand;
 
 export type CommandKind = Command["kind"];
@@ -361,26 +476,34 @@ export type CommandInput = Command | readonly Command[];
 
 /** 実装済みコマンドの種別(UTF-16 昇順・機械可読の正本)。 */
 export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
+  "abandonOutpost",
   "assignResident",
   "beginCodification",
+  "beginResearch",
+  "cancelCodification",
   "convertWasteToResearch",
   "demolishFacility",
   "dispatchExpedition",
+  "establishOutpost",
   "executeExodus",
   "placeFacility",
   "purchaseInheritBonus",
   "reclaimCell",
+  "stationResident",
   "unassignResident",
+  "unstationResident",
   "upgradeFacility",
 ];
 
 /**
  * 語彙だけ予約してあるコマンドと、その実装を持つ担当タスク(§4)。
  * `apply` は `notImplemented` で reject し、この文字列を `ownerTask` に載せる。
+ *
+ * **[M50] 現在このテーブルは空である**(唯一の予約だった `beginResearch` を
+ * M50 が実装した)。型と `rejectReserved` を残してあるのは、次に語彙だけ先に
+ * 決めたいコマンドが出たときに同じ形で書けるようにするため。
  */
-export const RESERVED_COMMAND_OWNER_TASK: { readonly [K in CommandKind]?: string } = {
-  beginResearch: "M50(研究の単一キュー縮約の解消が前提・research.ts §2)",
-};
+export const RESERVED_COMMAND_OWNER_TASK: { readonly [K in CommandKind]?: string } = {};
 
 /** その種別が実装済みか(予約語彙なら false)。 */
 export function isImplementedCommandKind(kind: CommandKind): boolean {
@@ -471,6 +594,33 @@ export const COMMAND_REJECTION_CODES = [
   "inheritTierAtMax",
   /** [M28] 継承点の残高が足りない(GDD 10.3 の購入コスト)。 */
   "insufficientInheritPoints",
+  /**
+   * [M50] その tech は既に解禁済み(research entity が完了している)。
+   * `duplicateRecord` と分けてあるのは、UI の文言(「もう研究済みです」)と
+   * sim の統計が「重複投入」と別の事象として数える必要があるため(§3(c))。
+   */
+  "researchAlreadyCompleted",
+  /**
+   * [M50] その tech は (B) 一回性喪失で永久に失われている(GDD 7.4
+   * `rareIrreversible`)ので再研究できない。`researchAlreadyCompleted` の
+   * 裏返しではなく**取り返しがつかない**ことを名指しする別事象である。
+   */
+  "researchIrreversiblyLost",
+  /** [M50] 前提テック(GDD 5 / 12.1 `tech.prereqs`)が未解禁。 */
+  "prereqNotMet",
+  /** [M50] その記録は既に完成しているので成文化キューから取り消せない。 */
+  "codifyAlreadyCompleted",
+  /** [M50] 拠点の常駐枠が埋まっている(GDD 9.2「住民1〜4名」)。 */
+  "outpostSlotsFull",
+  /**
+   * [M50] 常駐を解除すると拠点が 0 名になる(GDD 9.2 は 1〜4 名)。
+   * 空にしたい場合は `abandonOutpost`(放棄)を使う。
+   */
+  "outpostWouldBeEmpty",
+  /** [M50] その住民はどの拠点にも駐在していないので解除できない。 */
+  "notStationed",
+  /** [M50] その住民は既にその拠点に駐在している。 */
+  "alreadyStationed",
 ] as const;
 
 export type CommandRejectionCode = (typeof COMMAND_REJECTION_CODES)[number];
@@ -685,6 +835,165 @@ function isListedAsWorker(state: GameState, residentId: EntityId): boolean {
   return false;
 }
 
+// --- 3b. [M50] 資源コストの支払い(GDD 12.1 [2026-07-30裁定] / GDD 6.7) -----
+//
+//   支払いは必ず 2 段である:
+//     (1) {@link rejectIfUnaffordable} で**在庫が足りるかを先に確かめる**
+//     (2) `rules/storage.ts` の `spendResources` で引く
+//   `spendResources` は在庫不足を RulesError にする(= 事前検査を通ったのに
+//   落ちたら実装バグ)ので、プレイヤーが普通に起こす「足りない」を値の reject
+//   にするには (1) が要る(§3)。これは M6 の成文化(`checkCodifyAffordable`)が
+//   採った形そのものであり、M50 で建設/増築/開墾からも使えるよう共通化した。
+
+/**
+ * [M50] コスト表(resource 定義 ID → 必要量の raw)に対し、在庫が足りなければ
+ * **不足している最初の 1 件**を reject にして返す。足りていれば null。
+ *
+ * 走査順は `costs` の挿入順(呼び出し側が「本命の資源 → 廃材」の順で積む)で
+ * あり、どの資源から報告されるかが決定論的に決まる。
+ */
+function rejectIfUnaffordable(
+  state: GameState,
+  costs: ReadonlyMap<EntityId, number>,
+  kind: CommandKind,
+  index: number,
+  subjectId?: EntityId,
+): CommandRejected | null {
+  const stockByResourceId = new Map<EntityId, number>();
+  for (const resource of entitiesOfKind(state, "resource")) {
+    stockByResourceId.set(resource.resourceId, toRaw(resource.stock));
+  }
+  for (const [resourceId, required] of costs) {
+    if (required <= 0) continue;
+    const available = stockByResourceId.get(resourceId) ?? 0;
+    if (available >= required) continue;
+    const message = stockByResourceId.has(resourceId)
+      ? `資源 "${resourceId}" が不足(必要 ${String(required)} / 在庫 ${String(available)})`
+      : `資源 "${resourceId}" の在庫が state に無い(コストの受け皿が不在)`;
+    // exactOptionalPropertyTypes ゆえ `subjectId: undefined` と書けず、ADR-028(1) が
+    // オブジェクトの生スプレッドを禁じているので、分岐で 2 つのリテラルを書き分ける
+    // (schema/engineContent.ts の `toFacilityDef` と同じ形)。
+    if (subjectId === undefined) {
+      return rejected(kind, index, {
+        code: "insufficientResource",
+        resourceId,
+        requiredRaw: required,
+        availableRaw: available,
+        message,
+      });
+    }
+    return rejected(kind, index, {
+      code: "insufficientResource",
+      subjectId,
+      resourceId,
+      requiredRaw: required,
+      availableRaw: available,
+      message,
+    });
+  }
+  return null;
+}
+
+/**
+ * [M50] コスト 1 件を廃材で一部代替した結果(GDD 6.7 の 3 出口(1)
+ * 「施設建設/増築コストの一部代替(最大20%)」)。
+ *
+ * 代替率の上限は `balance.storage.buildCostWasteSubstitutionMax`(= 0.2・
+ * GDD 6.7 [2026-07-28追補])であり、**建設と増築の両方**へ適用する。GDD 6.7 の
+ * 本文が「施設増築コストの一部代替」、GDD 12.1 [2026-07-30裁定] が「建設代替
+ * 20% の呼び出し元接続」と書いており、パラメータ名も `buildCost…` なので、
+ * どちらか一方だけに効かせる読み方は両方の文言と噛み合わない
+ * (要ユーザー判断として M50 の★報告に記載)。
+ *
+ * `storage` ブロックが無い / 廃材資源が未定義の content では代替 0 を返すだけで
+ * 例外にしない(建設そのものは可能。`codifyWasteSubstitution` と同じ縮退)。
+ */
+function facilityCostWasteSubstitution(
+  state: GameState,
+  content: EngineContent,
+  costFix: Fix,
+): { readonly wasteSpentFix: Fix; readonly remainingCostFix: Fix } {
+  const storage = content.storage;
+  if (storage === undefined || storage.wasteResourceId === null) {
+    return { wasteSpentFix: FIX_ZERO, remainingCostFix: costFix };
+  }
+  return substituteCostWithWaste(
+    costFix,
+    wasteStockOf(state, content),
+    storage.buildCostWasteSubstitutionMaxFix,
+  );
+}
+
+/**
+ * [M50] 建設 / 増築コストの支払い(§3b)。事前検査に落ちたら
+ * {@link CommandRejected}、通ったら支払い済みの state を返す。
+ *
+ * コスト定義を持たない facility 定義(engine のテストフィクスチャ)では
+ * `def.cost === undefined` なので**無料**である。実 content は
+ * `schema/engineContent.ts` が欠落を reject するので、この経路は本番に無い
+ * (rules/types.ts の `FacilityDef.cost` の doc)。
+ */
+function payFacilityCost(
+  state: GameState,
+  content: EngineContent,
+  costFix: Fix | undefined,
+  costResourceId: EntityId | undefined,
+  kind: CommandKind,
+  index: number,
+  subjectId: EntityId,
+): CommandRejected | { readonly state: GameState } {
+  if (costFix === undefined || costResourceId === undefined || toRaw(costFix) <= 0) {
+    return { state };
+  }
+  const substitution = facilityCostWasteSubstitution(state, content, costFix);
+  const wasteResourceId = content.storage?.wasteResourceId ?? null;
+
+  // 挿入順 = 「本命の資源 → 廃材」。不足の報告順が決定論的に決まる(§3b)。
+  const costs = new Map<EntityId, number>();
+  const remaining = toRaw(substitution.remainingCostFix);
+  if (remaining > 0) costs.set(costResourceId, remaining);
+  const wasteSpent = toRaw(substitution.wasteSpentFix);
+  if (wasteSpent > 0 && wasteResourceId !== null) {
+    costs.set(wasteResourceId, (costs.get(wasteResourceId) ?? 0) + wasteSpent);
+  }
+
+  const unaffordable = rejectIfUnaffordable(state, costs, kind, index, subjectId);
+  if (unaffordable !== null) return unaffordable;
+
+  const costFixes = new Map<EntityId, Fix>();
+  if (remaining > 0) costFixes.set(costResourceId, substitution.remainingCostFix);
+  if (wasteSpent > 0 && wasteResourceId !== null) {
+    costFixes.set(
+      wasteResourceId,
+      addFix(costFixes.get(wasteResourceId) ?? FIX_ZERO, substitution.wasteSpentFix),
+    );
+  }
+  return { state: spendResources(state, costFixes) };
+}
+
+/**
+ * [M50] その施設定義を Lv1 で建てるコスト。定義が無ければ undefined(無料)。
+ */
+export function facilityBuildCostFix(def: FacilityDef): Fix | undefined {
+  return def.cost?.buildFix;
+}
+
+/**
+ * [M50] `fromLevel` → `fromLevel + 1` の増築コスト。定義が無ければ undefined
+ * (無料)。`upgradeByLevel` の index は Lv-1(rules/types.ts の
+ * `FacilityCostDef.upgradeByLevel`)。
+ *
+ * Lv が配列より大きい場合は**最後の段の値**を使う(`facilityWorkerSlots` と
+ * 同じ規約 = 定義の欠落を「無料」という緩和方向へ解釈しない)。
+ */
+export function facilityUpgradeCostFix(def: FacilityDef, fromLevel: number): Fix | undefined {
+  const cost = def.cost;
+  if (cost === undefined) return undefined;
+  const curve = cost.upgradeByLevel;
+  if (curve.length === 0) return undefined;
+  return curve[fromLevel - 1] ?? curve[curve.length - 1];
+}
+
 // --- 4. 個別コマンドの適用 -------------------------------------------------
 
 function applyPlaceFacility(
@@ -781,6 +1090,20 @@ function applyPlaceFacility(
     });
   }
 
+  // [M50] 建設コスト(GDD 12.1 [2026-07-30裁定])。**構造検査を全て通ってから**
+  // 払う —— 置けない場所を指しているのに「資源が足りない」と報告すると、
+  // プレイヤーは資源を集めてからもう一度同じ失敗を踏む。
+  const paid = payFacilityCost(
+    state,
+    content,
+    facilityBuildCostFix(def),
+    def.cost?.resourceId,
+    "placeFacility",
+    index,
+    command.defId,
+  );
+  if ("ok" in paid) return paid;
+
   // 1×1 は footprint キーを持たせない(省略 ⇔ 1×1 の正準形・footprint.ts §2)。
   // content 由来のオブジェクトを共有せず値を写すのは、state を content から
   // 独立させておく(content が動いても既存盤面が動かない)ため。
@@ -802,8 +1125,8 @@ function applyPlaceFacility(
         workerIds: [],
         footprint: { width: footprint.width, height: footprint.height },
       };
-  const next = putEntity(state, placed);
-  return { ok: true, state: next, changed: next !== state, commandCount: 1 };
+  const next = putEntity(paid.state, placed);
+  return { ok: true, state: next, changed: true, commandCount: 1 };
 }
 
 function applyDemolishFacility(
@@ -881,10 +1204,23 @@ function applyUpgradeFacility(
     });
   }
 
-  const next = updateEntity(state, facility.id, "facility", (f) =>
+  // [M50] 増築コスト(GDD 12.1 [2026-07-30裁定])。上限 Lv の検査より**後**に
+  // 払うのは配置と同じ理由(構造的に不可能な操作を資源不足として報告しない)。
+  const paid = payFacilityCost(
+    state,
+    content,
+    facilityUpgradeCostFix(def, facility.level),
+    def.cost?.resourceId,
+    "upgradeFacility",
+    index,
+    facility.id,
+  );
+  if ("ok" in paid) return paid;
+
+  const next = updateEntity(paid.state, facility.id, "facility", (f) =>
     setField(f, "level", f.level + 1),
   );
-  return { ok: true, state: next, changed: next !== state, commandCount: 1 };
+  return { ok: true, state: next, changed: true, commandCount: 1 };
 }
 
 function applyAssignResident(
@@ -1019,32 +1355,8 @@ function checkCodifyAffordable(
     costs.set(wasteResourceId, (costs.get(wasteResourceId) ?? 0) + wasteSpent);
   }
 
-  const stockByResourceId = new Map<EntityId, number>();
-  for (const resource of entitiesOfKind(state, "resource")) {
-    stockByResourceId.set(resource.resourceId, toRaw(resource.stock));
-  }
-  for (const [resourceId, required] of costs) {
-    const available = stockByResourceId.get(resourceId);
-    if (available === undefined) {
-      return rejected("beginCodification", index, {
-        code: "insufficientResource",
-        resourceId,
-        requiredRaw: required,
-        availableRaw: 0,
-        message: `資源 "${resourceId}" の在庫が state に無い(成文化コストの受け皿が不在)`,
-      });
-    }
-    if (available < required) {
-      return rejected("beginCodification", index, {
-        code: "insufficientResource",
-        resourceId,
-        requiredRaw: required,
-        availableRaw: available,
-        message: `資源 "${resourceId}" が不足(必要 ${String(required)} / 在庫 ${String(available)})`,
-      });
-    }
-  }
-  return null;
+  // [M50] 在庫の突き合わせは建設/増築と共通(§3b)。
+  return rejectIfUnaffordable(state, costs, "beginCodification", index);
 }
 
 function applyBeginCodification(
@@ -1537,6 +1849,428 @@ function applyPurchaseInheritBonus(
   };
 }
 
+/**
+ * [M50] 研究対象の選択(GDD 5)。
+ *
+ * 検査の順序は「tech 定義 → 既存 research entity → 前提 → 新規 ID」で、
+ * どれか 1 つでも落ちれば state は 1 bit も動かない(§3)。
+ *
+ * **既に research entity がある tech は、それを選ぶだけ**である(新規作成しない)。
+ * 同一 tech の research entity を 2 つ作ると `isTechUnlocked` / `techHoldersOf` /
+ * 喪失判定が「どちらの entity を見るか」で割れるので、1 tech = 高々 1 entity を
+ * このコマンドが構造的に保証する。
+ */
+function applyBeginResearch(
+  state: GameState,
+  content: EngineContent,
+  command: BeginResearchCommand,
+  index: number,
+): CommandResult {
+  if (content.techDefs.get(command.techId) === undefined) {
+    return rejected("beginResearch", index, {
+      code: "unknownContentDef",
+      subjectId: command.techId,
+      message: `tech 定義 "${command.techId}" が content に無い`,
+    });
+  }
+
+  const existing = researchEntityOfTech(state, command.techId);
+  if (existing !== undefined) {
+    if (existing.completedTick !== null) {
+      return rejected("beginResearch", index, {
+        code: "researchAlreadyCompleted",
+        subjectId: existing.id,
+        message:
+          `tech "${command.techId}" は既に tick ${String(existing.completedTick)} で解禁済み` +
+          "(研究対象にはできない)",
+      });
+    }
+    if (isIrreversiblyLost(existing)) {
+      return rejected("beginResearch", index, {
+        code: "researchIrreversiblyLost",
+        subjectId: existing.id,
+        message:
+          `tech "${command.techId}" は (B) 一回性喪失(GDD 7.4 rareIrreversible)で` +
+          "永久に失われているので再研究できない",
+      });
+    }
+    // 既に作業中の研究を選び直すだけ。`command.researchId` は使わない
+    // (BeginResearchCommand の doc)。
+    const next = setSelectedResearch(state, existing.id);
+    return { ok: true, state: next, changed: next !== state, commandCount: 1 };
+  }
+
+  const missingPrereq = firstUnmetPrereq(state, content, command.techId);
+  if (missingPrereq !== null) {
+    return rejected("beginResearch", index, {
+      code: "prereqNotMet",
+      subjectId: missingPrereq,
+      message:
+        `tech "${command.techId}" の前提テック "${missingPrereq}" がまだ解禁されていない` +
+        "(GDD 5 / 12.1 tech.prereqs)",
+    });
+  }
+  if (state.entityStateById.has(command.researchId)) {
+    return rejected("beginResearch", index, {
+      code: "entityIdInUse",
+      subjectId: command.researchId,
+      message: `entity ID "${command.researchId}" は既に使われている`,
+    });
+  }
+
+  const created = putEntity(state, {
+    kind: "research",
+    id: command.researchId,
+    techId: command.techId,
+    progress: FIX_ZERO,
+    completedTick: null,
+  });
+  return {
+    ok: true,
+    state: setSelectedResearch(created, command.researchId),
+    changed: true,
+    commandCount: 1,
+  };
+}
+
+/**
+ * [M50] 未解禁の前提テックのうち **ID 昇順で最初の 1 本**(GDD 5 / 12.1)。
+ * 全て解禁済みなら null。走査順を固定してあるので、同じ state・同じ content なら
+ * 常に同じ 1 本が報告される(§1 の決定論)。
+ */
+function firstUnmetPrereq(
+  state: GameState,
+  content: EngineContent,
+  techId: EntityId,
+): EntityId | null {
+  for (const prereqId of prereqsOfTech(content, techId)) {
+    if (!isTechUnlocked(state, prereqId)) return prereqId;
+  }
+  return null;
+}
+
+/** [M50] 成文化キューの取消(GDD 6.2)。完成済みの記録は対象外(§4 の [M50])。 */
+function applyCancelCodification(
+  state: GameState,
+  command: CancelCodificationCommand,
+  index: number,
+): CommandResult {
+  const entity = getEntity(state, command.codifyId);
+  if (entity === undefined || entity.kind !== "codify") {
+    return rejected("cancelCodification", index, {
+      code: "entityNotFound",
+      subjectId: command.codifyId,
+      message: `成文化ジョブ "${command.codifyId}" が state に無い(codify entity ではない)`,
+    });
+  }
+  if (entity.completedTick !== null) {
+    return rejected("cancelCodification", index, {
+      code: "codifyAlreadyCompleted",
+      subjectId: entity.id,
+      message:
+        `記録 "${entity.id}" は tick ${String(entity.completedTick)} に完成しているので` +
+        "成文化キューから取り消せない(完成した記録を消すのは焼失 = event 効果の領分)",
+    });
+  }
+  return { ok: true, state: removeEntity(state, command.codifyId), changed: true, commandCount: 1 };
+}
+
+// --- 4b. [M50] 衛星拠点の操作(GDD 9.2) ------------------------------------
+//
+//   二重計上の防止(rules/outpost.ts §2)は「本拠就労 / 探索派遣 / 拠点常駐」を
+//   排他にすることであり、その検査 `assertNoDoubleStationedResidents` は
+//   **供給レートを計算するたび**に走る(= 破れた state を作ったら次の advance で
+//   RulesError になる)。よってコマンド層の責務は「破れた state を作らない」で
+//   あり、その手段は `assignResident` と全く同じ —— 新しい場所へ入れる前に
+//   **同じコマンドの中で**古い場所から外す。
+
+/** その住民が常駐している拠点(居なければ undefined)。走査は拠点 ID 昇順。 */
+function outpostOfResident(state: GameState, residentId: EntityId): OutpostState | undefined {
+  for (const outpost of allOutposts(state)) {
+    for (const id of outpost.residentIds) {
+      if (id === residentId) return outpost;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * [M50] その住民を本拠の就労と拠点常駐の**両方**から外す(探索派遣は外さない
+ * = 派遣中の住民はそもそも駐在も就労もできない)。
+ *
+ * 戻り値は「外した後の state」。`detachWorkerFromAllFacilities` の拠点版を
+ * 束ねただけであり、駐在の解除で拠点が 0 名になる場合は**呼び出し側が先に
+ * 弾いている**(`outpostWouldBeEmpty`)。
+ */
+function detachResidentFromPosts(state: GameState, residentId: EntityId): GameState {
+  let next = detachWorkerFromAllFacilities(state, residentId);
+  const outpost = outpostOfResident(next, residentId);
+  if (outpost === undefined) return next;
+  const residentIds = outpost.residentIds.filter((id) => id !== residentId);
+  next = setOutpost(next, setField(outpost, "residentIds", residentIds));
+  return next;
+}
+
+/**
+ * [M50] 住民 1 人が拠点へ入れる状態か(死亡 / 探索派遣中でないか)を確かめる。
+ * 使えないなら reject、使えるなら null。
+ */
+function rejectIfResidentUnavailable(
+  state: GameState,
+  residentId: EntityId,
+  kind: CommandKind,
+  index: number,
+): CommandRejected | null {
+  const resident = residentOf(state, residentId);
+  if (resident === undefined) {
+    return rejected(kind, index, {
+      code: "entityNotFound",
+      subjectId: residentId,
+      message: `住民 "${residentId}" が state に無い`,
+    });
+  }
+  if (!isAliveResident(resident)) {
+    return rejected(kind, index, {
+      code: "residentUnavailable",
+      subjectId: residentId,
+      message: `住民 "${residentId}" は死亡している(GDD 7.5 の tombstone)`,
+    });
+  }
+  if (resident.dispatched || isResidentOnDispatch(state, residentId)) {
+    return rejected(kind, index, {
+      code: "residentUnavailable",
+      subjectId: residentId,
+      message:
+        `住民 "${residentId}" は探索派遣中なので衛星拠点に駐在できない` +
+        "(本拠就労 / 探索派遣 / 拠点常駐は排他・GDD 9.2 / rules/outpost.ts §2)",
+    });
+  }
+  return null;
+}
+
+/** [M50] 衛星拠点の設置(GDD 9.2)。 */
+function applyEstablishOutpost(
+  state: GameState,
+  content: EngineContent,
+  command: EstablishOutpostCommand,
+  index: number,
+): CommandResult {
+  if (content.outpostTypeDefs?.get(command.outpostTypeId) === undefined) {
+    return rejected("establishOutpost", index, {
+      code: "unknownContentDef",
+      subjectId: command.outpostTypeId,
+      message: `outpostType 定義 "${command.outpostTypeId}" が content に無い(GDD 9.2 / 12.1)`,
+    });
+  }
+  if (!isDistanceBand(command.band)) {
+    return rejected("establishOutpost", index, {
+      code: "invalidArgument",
+      message: `距離帯 "${String(command.band)}" はレジストリ(DISTANCE_BANDS)に無い(裁定 B7)`,
+    });
+  }
+  const members = command.residentIds;
+  if (members.length < OUTPOST_RESIDENTS_MIN || members.length > OUTPOST_RESIDENTS_MAX) {
+    return rejected("establishOutpost", index, {
+      code: "invalidArgument",
+      limit: OUTPOST_RESIDENTS_MAX,
+      actual: members.length,
+      message:
+        `常駐は ${String(OUTPOST_RESIDENTS_MIN)}〜${String(OUTPOST_RESIDENTS_MAX)} 名` +
+        `(GDD 9.2。実際 ${String(members.length)} 名)`,
+    });
+  }
+  if (
+    state.entityStateById.has(command.outpostId) ||
+    getOutpost(state, command.outpostId) !== undefined
+  ) {
+    return rejected("establishOutpost", index, {
+      code: "entityIdInUse",
+      subjectId: command.outpostId,
+      message: `ID "${command.outpostId}" は既に使われている(entity または既存の拠点)`,
+    });
+  }
+
+  // ID 昇順・重複なしへ正規化する(state.ts 不変条件 (h) / GDD 11.7)。
+  const residentIds = [...members].sort(compareUtf16);
+  for (let i = 1; i < residentIds.length; i++) {
+    const current = residentIds[i];
+    if (current === undefined || current !== residentIds[i - 1]) continue;
+    return rejected("establishOutpost", index, {
+      code: "invalidArgument",
+      subjectId: current,
+      message: `住民 "${current}" が常駐者に重複している`,
+    });
+  }
+  for (const residentId of residentIds) {
+    const unavailable = rejectIfResidentUnavailable(state, residentId, "establishOutpost", index);
+    if (unavailable !== null) return unavailable;
+  }
+
+  // 全員を本拠の就労 / 他拠点の常駐から外してから据える(§4b)。
+  let next = state;
+  for (const residentId of residentIds) {
+    next = detachResidentFromPostsOrAbandon(next, residentId);
+    next = updateEntity(next, residentId, "resident", (r) =>
+      setField(r, "assignedFacilityId", null),
+    );
+  }
+  next = setOutpost(next, {
+    id: command.outpostId,
+    outpostTypeId: command.outpostTypeId,
+    level: 1,
+    band: command.band,
+    residentIds,
+    establishedTick: state.tick,
+  });
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
+/**
+ * [M50] 住民を今の持ち場から外す。**外した結果 0 名になる拠点はその場で放棄**する
+ * (0 名の拠点は state 不変条件が許さない・update.ts の `requireValidOutpost`)。
+ *
+ * これが `unstationResident` の `outpostWouldBeEmpty` と矛盾しない理由:
+ * あちらは「解除だけを指示された」場合であり、放棄まで黙って行うと
+ * プレイヤーの意図(拠点は残したい)を engine が勝手に踏み越える。こちらは
+ * 「別の場所へ移す」という**明示の指示**の副作用なので、移動先が確定している
+ * 以上その拠点に人は戻らない。
+ */
+function detachResidentFromPostsOrAbandon(state: GameState, residentId: EntityId): GameState {
+  const outpost = outpostOfResident(state, residentId);
+  if (outpost !== undefined && outpost.residentIds.length === 1) {
+    return abandonOutpostState(detachWorkerFromAllFacilities(state, residentId), outpost);
+  }
+  return detachResidentFromPosts(state, residentId);
+}
+
+/** [M50] 拠点を取り除き、常駐者を本拠へ戻す(無配属)。 */
+function abandonOutpostState(state: GameState, outpost: OutpostState): GameState {
+  let next = state;
+  for (const residentId of outpost.residentIds) {
+    next = updateEntity(next, residentId, "resident", (r) =>
+      setField(r, "assignedFacilityId", null),
+    );
+  }
+  return removeOutpost(next, outpost.id);
+}
+
+/** [M50] 衛星拠点の放棄(GDD 9.2「放棄/移設可」)。 */
+function applyAbandonOutpost(
+  state: GameState,
+  command: AbandonOutpostCommand,
+  index: number,
+): CommandResult {
+  const outpost = getOutpost(state, command.outpostId);
+  if (outpost === undefined) {
+    return rejected("abandonOutpost", index, {
+      code: "entityNotFound",
+      subjectId: command.outpostId,
+      message: `衛星拠点 "${command.outpostId}" が state に無い`,
+    });
+  }
+  return { ok: true, state: abandonOutpostState(state, outpost), changed: true, commandCount: 1 };
+}
+
+/** [M50] 住民を衛星拠点へ駐在させる(GDD 9.2)。 */
+function applyStationResident(
+  state: GameState,
+  command: StationResidentCommand,
+  index: number,
+): CommandResult {
+  const outpost = getOutpost(state, command.outpostId);
+  if (outpost === undefined) {
+    return rejected("stationResident", index, {
+      code: "entityNotFound",
+      subjectId: command.outpostId,
+      message: `衛星拠点 "${command.outpostId}" が state に無い`,
+    });
+  }
+  const unavailable = rejectIfResidentUnavailable(
+    state,
+    command.residentId,
+    "stationResident",
+    index,
+  );
+  if (unavailable !== null) return unavailable;
+
+  for (const id of outpost.residentIds) {
+    if (id !== command.residentId) continue;
+    return rejected("stationResident", index, {
+      code: "alreadyStationed",
+      subjectId: command.residentId,
+      message: `住民 "${command.residentId}" は既に拠点 "${outpost.id}" に駐在している`,
+    });
+  }
+  if (outpost.residentIds.length >= OUTPOST_RESIDENTS_MAX) {
+    return rejected("stationResident", index, {
+      code: "outpostSlotsFull",
+      subjectId: outpost.id,
+      limit: OUTPOST_RESIDENTS_MAX,
+      actual: outpost.residentIds.length,
+      message:
+        `拠点 "${outpost.id}" の常駐枠は ${String(OUTPOST_RESIDENTS_MAX)} 名まで` +
+        `(現在 ${String(outpost.residentIds.length)} 名・GDD 9.2)`,
+    });
+  }
+
+  // 古い持ち場から外す → 新しい拠点へ入れる、を 1 コマンドで(§4b)。
+  let next = detachResidentFromPostsOrAbandon(state, command.residentId);
+  next = updateEntity(next, command.residentId, "resident", (r) =>
+    setField(r, "assignedFacilityId", null),
+  );
+  // 外す過程で拠点そのものが放棄されている可能性がある(移動元 = 移動先の
+  // 1 人拠点は上の `alreadyStationed` で弾いてあるので、ここへ来る拠点は必ず残る)。
+  const target = getOutpost(next, command.outpostId);
+  if (target === undefined) {
+    throw new CommandError(
+      `stationResident: 駐在先の拠点 "${command.outpostId}" が消えた(実装バグ)`,
+    );
+  }
+  next = setOutpost(
+    next,
+    setField(target, "residentIds", withWorkerAdded(target.residentIds, command.residentId)),
+  );
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
+/** [M50] 住民の拠点駐在を解除する(GDD 9.2)。 */
+function applyUnstationResident(
+  state: GameState,
+  command: UnstationResidentCommand,
+  index: number,
+): CommandResult {
+  if (residentOf(state, command.residentId) === undefined) {
+    return rejected("unstationResident", index, {
+      code: "entityNotFound",
+      subjectId: command.residentId,
+      message: `住民 "${command.residentId}" が state に無い`,
+    });
+  }
+  const outpost = outpostOfResident(state, command.residentId);
+  if (outpost === undefined) {
+    return rejected("unstationResident", index, {
+      code: "notStationed",
+      subjectId: command.residentId,
+      message: `住民 "${command.residentId}" はどの衛星拠点にも駐在していない`,
+    });
+  }
+  if (outpost.residentIds.length <= OUTPOST_RESIDENTS_MIN) {
+    return rejected("unstationResident", index, {
+      code: "outpostWouldBeEmpty",
+      subjectId: outpost.id,
+      limit: OUTPOST_RESIDENTS_MIN,
+      actual: outpost.residentIds.length,
+      message:
+        `拠点 "${outpost.id}" の常駐は最低 ${String(OUTPOST_RESIDENTS_MIN)} 名` +
+        "(GDD 9.2)。最後の 1 人を外したいなら拠点ごと放棄すること(abandonOutpost)",
+    });
+  }
+
+  const residentIds = outpost.residentIds.filter((id) => id !== command.residentId);
+  const next = setOutpost(state, setField(outpost, "residentIds", residentIds));
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
 /** その派遣 ID が未帰還一覧で既に使われているか。 */
 function activeDispatchIdInUse(state: GameState, command: DispatchExpeditionCommand): boolean {
   for (const snapshot of state.dispatchSnapshots) {
@@ -1610,6 +2344,12 @@ function applyOne(
   command: Command,
   index: number,
 ): CommandResult {
+  // [M50] 予約語彙(§4)は switch より**先**に弾く。以前は switch の 1 case として
+  // 書いていたが、実装が入るたびに「テーブルからは消したが case を消し忘れた」
+  // 形の食い違いが作れてしまう。テーブルを唯一の正本にすればその余地が消える。
+  if (RESERVED_COMMAND_OWNER_TASK[command.kind] !== undefined) {
+    return rejectReserved(command.kind, index);
+  }
   switch (command.kind) {
     case "placeFacility":
       return applyPlaceFacility(state, content, command, index);
@@ -1634,7 +2374,17 @@ function applyOne(
     case "purchaseInheritBonus":
       return applyPurchaseInheritBonus(state, content, command, index);
     case "beginResearch":
-      return rejectReserved(command.kind, index);
+      return applyBeginResearch(state, content, command, index);
+    case "cancelCodification":
+      return applyCancelCodification(state, command, index);
+    case "establishOutpost":
+      return applyEstablishOutpost(state, content, command, index);
+    case "abandonOutpost":
+      return applyAbandonOutpost(state, command, index);
+    case "stationResident":
+      return applyStationResident(state, command, index);
+    case "unstationResident":
+      return applyUnstationResident(state, command, index);
     default: {
       const unhandled: never = command;
       throw new CommandError(`未知のコマンド ${JSON.stringify(unhandled)}`);

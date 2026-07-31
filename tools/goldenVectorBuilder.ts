@@ -171,9 +171,12 @@ export function buildVectorFromResolvedInputs(
   // を要求する。前者は rngState、後者は facility.footprint(GDD 6.1
   // [2026-07-30裁定]・§7 の 1×1 省略正準形)の往復不変性を主張する経路であり、
   // 対象フィールドが違うだけで検証ロジックは共通なので 1 箇所にまとめる。
+  // [M50] `research-select-serialize-roundtrip` も同じ検証を要求する
+  // (`selectedResearchId` は未選択ならキーごと省略される正準形・serialize.ts §12)。
   if (
     plan.paths.includes("rng-state-nonempty-roundtrip") ||
-    plan.paths.includes("foot-serialize-roundtrip")
+    plan.paths.includes("foot-serialize-roundtrip") ||
+    plan.paths.includes("research-select-serialize-roundtrip")
   ) {
     const roundTripped = fromSerializable(
       JSON.parse(JSON.stringify(toSerializable(oneShotReport.state))),

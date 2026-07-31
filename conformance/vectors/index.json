@@ -45,7 +45,9 @@
     "sc35-exp-rescue-alpha",
     "sc35-exp-rescue-beta",
     "sc36-exp-all-lost-alpha",
-    "sc36-exp-all-lost-split-alpha"
+    "sc36-exp-all-lost-split-alpha",
+    "sc39-codify-queue-alpha",
+    "sc39-codify-queue-split-alpha"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -145,6 +147,13 @@
     { "file": "sc36-exp-all-lost-split-alpha.json", "vectorId": "sc36-exp-all-lost-split-alpha" },
     { "file": "sc37-exp-reward-overflow-alpha.json", "vectorId": "sc37-exp-reward-overflow-alpha" },
     { "file": "sc38-out-supply-alpha.json", "vectorId": "sc38-out-supply-alpha" },
-    { "file": "sc38-out-supply-split-alpha.json", "vectorId": "sc38-out-supply-split-alpha" }
+    { "file": "sc38-out-supply-split-alpha.json", "vectorId": "sc38-out-supply-split-alpha" },
+    { "file": "sc39-codify-queue-alpha.json", "vectorId": "sc39-codify-queue-alpha" },
+    { "file": "sc39-codify-queue-split-alpha.json", "vectorId": "sc39-codify-queue-split-alpha" },
+    { "file": "sc40-research-select-alpha.json", "vectorId": "sc40-research-select-alpha" },
+    {
+      "file": "sc40-research-select-split-alpha.json",
+      "vectorId": "sc40-research-select-split-alpha"
+    }
   ]
 }

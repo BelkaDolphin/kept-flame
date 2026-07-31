@@ -36,6 +36,14 @@
 //   どちらも「レート × 区間長」の閉形式であり、節目(bond)の記録 tick は区間内の
 //   **解析的な到達 tick**を使うので分割不変(rules/bond.ts の crossingsInInterval)。
 //
+//   **[M50] 成文化を結線したが、新しい種類の境界は増えていない**: 成文化の作業は
+//   研究と同じ「レート × 区間長」の (A) 積分(`applyCodifyProgress`)で、完了は
+//   研究完了と同じ**レート依存の解析的予測**(`syncCodifyCompletionEvent`)である。
+//   よってレートを変える状態変化の一覧に「成文化完了(学者の作業が次のジョブへ
+//   向く)」が 1 つ増えただけで、区間分類の構造は変わらない。
+//   衛星供給([M25] 段80)と違って離散事象が要るのは、完了が**在庫ではなく
+//   キューの先頭を差し替える**からである(= レートの向き先が変わる)。
+//
 //   段階2(逆 CDF で次発生 tick を一発サンプリングして (C) 区間も飛ばす)は
 //   ADR-018(3) のとおり MVP 後。段階1 のステップ境界は「(C) がある限り
 //   coarseTickMinutes ごとに必ず区間が切れる」ことを意味するので、72h catch-up の
@@ -97,12 +105,20 @@ import {
   isAliveResident,
   requireEntity,
   techMemoryKeys,
+  type CodifyState,
   type EntityId,
   type GameState,
   type ResearchState,
 } from "./state/state";
 import { setField } from "./state/update";
 import { applyBondProgress, applyPartnerLossEffects, computeBondRates } from "./rules/bond";
+import {
+  applyCodifyProgress,
+  codifyRemaining,
+  completeCodification,
+  currentCodification,
+  ticksUntilCodifyComplete,
+} from "./rules/codify";
 import { resolveExpedition } from "./rules/exploration";
 import { deathTickOf } from "./rules/lifespan";
 import { recordDeathMemoir } from "./rules/memoir";
@@ -172,7 +188,15 @@ export const PIPELINE_STAGE = {
   production: 30,
   /** 研究完了(T5)。 */
   research: 40,
-  /** 成文化完了(未実装)。 */
+  /**
+   * 成文化完了([M50] 結線済み・GDD 11.7 段50)。
+   *
+   * 研究完了(段40)と**完全に同型**である: 区間の進行は (A) の閉形式
+   * (`rules/codify.ts` の `applyCodifyProgress`)で積分し、完了 tick は現在の
+   * レートから解析的に予測して heap の離散事象にする(`syncCodifyCompletionEvent`)。
+   * よって新しい概念は 1 つも増えていない —— M6 が予測関数を research と同型に
+   * 作っておいた狙い(rules/codify.ts §1)がここで効く。
+   */
   codify: 50,
   /** 探索解決([M21] 派遣の帰還・GDD 8.2 / 11.7 段60)。 */
   exploration: 60,
@@ -200,8 +224,9 @@ export const PIPELINE_STAGE = {
   dust: 90,
 } as const;
 
-/** 離散事象の種類(T5 の 3 種 + M11 の 2 種 + M21 の 1 種)。 */
+/** 離散事象の種類(T5 の 3 種 + M11 の 2 種 + M21 の 1 種 + M50 の 1 種)。 */
 export type SchedulerEventKind =
+  | "codifyComplete"
   | "expeditionReturn"
   | "recallRecover"
   | "residentArrival"
@@ -210,6 +235,7 @@ export type SchedulerEventKind =
   | "researchComplete";
 
 const STAGE_BY_KIND: { readonly [K in SchedulerEventKind]: number } = {
+  codifyComplete: PIPELINE_STAGE.codify,
   expeditionReturn: PIPELINE_STAGE.exploration,
   recallRecover: PIPELINE_STAGE.recallRecover,
   residentArrival: PIPELINE_STAGE.arrival,
@@ -239,6 +265,9 @@ export function classifyEventBoundary(kind: SchedulerEventKind): BoundaryClass {
     // どちらも次の区間の生産レートを変える = (B) レート変化イベントである。
     // [M21] `expeditionReturn` は派遣者を本拠へ戻し(dispatchW が外れ、就労可能に
     // なる)報酬を在庫へ入れるので、同じく (B) レート変化イベントである。
+    // [M50] `codifyComplete` は成文化キューの先頭を次のジョブへ進める(= 学者の
+    // 作業が向かう先が変わる)ので、`researchComplete` と同じ (B) である。
+    case "codifyComplete":
     case "expeditionReturn":
     case "recallRecover":
     case "researchComplete":
@@ -624,6 +653,45 @@ export function syncResearchCompletionEvent(
   }
 }
 
+/**
+ * [M50] 成文化完了 (B) の予測イベントを現在レートに合わせて同期する。
+ *
+ * {@link syncResearchCompletionEvent} と**同じ構造・同じ規約**である
+ * (rules/codify.ts §1 が予測関数を research と同型に作ってある狙い):
+ *   - 予測 tick が変わっていたら古いイベントを取り除いて積み直す
+ *   - レート 0(学者が 1 人も稼働していない)/ キューが空なら取り除くだけ
+ *   - 予測がカーソルと同 tick になる場合があるので `push`(`pushAfter` ではない)
+ *
+ * `buildEventQueue` で積まない理由も研究完了と同じ: 完了 tick は**レート依存**
+ * であり、区間ごとに作り直さなければ「学者が想起困難で落ちた」等でレートが
+ * 変わったときに予測が古いまま残る。
+ */
+export function syncCodifyCompletionEvent(
+  queue: EventQueue,
+  codify: CodifyState | undefined,
+  rates: ProductionRates,
+  cursorTick: number,
+): void {
+  let desiredTick: number | null = null;
+  if (codify !== undefined) {
+    const ticks = ticksUntilCodifyComplete(codifyRemaining(codify), rates.codifyLaborFix);
+    if (ticks !== null) desiredTick = cursorTick + ticks;
+  }
+
+  const existing = queue.findByKind("codifyComplete");
+  if (
+    existing !== undefined &&
+    existing.tick === desiredTick &&
+    existing.entityId === (codify?.id ?? null)
+  ) {
+    return;
+  }
+  if (existing !== undefined) queue.remove("codifyComplete", existing.entityId);
+  if (desiredTick !== null && codify !== undefined) {
+    queue.push({ tick: desiredTick, kind: "codifyComplete", entityId: codify.id });
+  }
+}
+
 // --- 5. 区間の記録 ---------------------------------------------------------
 
 /** 1 つの (A) 区間の記録(区間分類の可視化・計測・テスト用)。 */
@@ -673,6 +741,13 @@ export interface ScheduleReport {
   readonly explorationCasualtyCount: number;
   /** [M21] 探索での保護で加入した人数(GDD 7.7・晴天漂着とは別口)。 */
   readonly explorationRescueCount: number;
+  /**
+   * [M50] 完成した記録の枚数(GDD 11.7 段50)。golden vector のカウンタ 5 種には
+   * **入れない**(`conformance/goldenVector.ts` の `countersOfReport` は固定 5
+   * フィールド・`techLossCount` と同じ扱い)。観測は単体テストと、完成が
+   * `rateChangeEventCount` を 1 増やすことによる既存カウンタ経由。
+   */
+  readonly codificationCompleteCount: number;
   /** `collectSegments` を有効にしたときだけ非空。 */
   readonly segments: readonly SegmentRecord[];
 }
@@ -732,6 +807,7 @@ export function runSchedule(
   let expeditionReturnCount = 0;
   let explorationCasualtyCount = 0;
   let explorationRescueCount = 0;
+  let codificationCompleteCount = 0;
 
   if (toTick === state.tick) {
     return {
@@ -749,6 +825,7 @@ export function runSchedule(
       expeditionReturnCount,
       explorationCasualtyCount,
       explorationRescueCount,
+      codificationCompleteCount,
       segments,
     };
   }
@@ -771,7 +848,11 @@ export function runSchedule(
     // 変わらない(このタスクは scheduler 内に配置/常駐コマンドを持たない)ので、
     // production と同じく区間内で変化しない = 境界イベントを新設する必要がない。
     const outpostRates = computeOutpostSupplyRates(next, ctx.content);
+    // [M50] 成文化(GDD 11.7 段50)。研究と同じ「区間の入口でレート確定 →
+    // (B) 予測を同期」の 2 段(rules/codify.ts §1)。
+    const codifyTarget = currentCodification(next);
     syncResearchCompletionEvent(queue, ctx, researchTarget, rates, cursor);
+    syncCodifyCompletionEvent(queue, codifyTarget, rates, cursor);
 
     // 3. 境界の決定。イベントが toTick 以降なら地平線で切る。
     const eventTick = queue.peekTick();
@@ -783,6 +864,13 @@ export function runSchedule(
       next = applyProduction(next, rates, delta);
       if (researchTarget !== undefined) {
         next = applyResearchProgress(next, researchTarget.id, rates.researchRateFix, delta);
+      }
+      // [M50] 成文化の作業進行(GDD 11.1「学者作業時間」)。生産・研究と同じ
+      // 「レート × 区間長」の閉形式(rules/codify.ts の applyCodifyProgress)で
+      // あり、離散イベントは完了(段50)だけである。キューが空 = 記録を 1 枚も
+      // 作っていない盤面では no-op(既存 golden シナリオはすべてこれ)。
+      if (codifyTarget !== undefined) {
+        next = applyCodifyProgress(next, codifyTarget.id, rates.codifyLaborFix, delta);
       }
       // [M12] bond の蓄積と節目の記録(GDD 7.3)。節目の記録 tick は区間内の
       // **解析的な到達 tick** なので分割不変(rules/bond.ts の crossingsInInterval)。
@@ -848,6 +936,17 @@ export function runSchedule(
         case "researchComplete": {
           next = completeResearch(next, ctx.content, requireEventEntityId(event), cursor);
           rateChangeEventCount++;
+          break;
+        }
+        case "codifyComplete": {
+          // [M50] 記録 1 枚の完成(GDD 11.7 段50)。研究完了と同じく**この tick 以降
+          // の区間から**次のジョブへレートが向く。完成した記録は
+          // `isCodified`(rules/codify.ts §3)を通じて技術喪失判定(GDD 7.4 /
+          // 11.1 追補の焼失セマンティクス)へ効くが、それは段70(死亡)側が
+          // 都度読む値なので、ここで追加の状態遷移は要らない。
+          next = completeCodification(next, requireEventEntityId(event), cursor);
+          rateChangeEventCount++;
+          codificationCompleteCount++;
           break;
         }
         case "residentArrival": {
@@ -989,6 +1088,7 @@ export function runSchedule(
     expeditionReturnCount,
     explorationCasualtyCount,
     explorationRescueCount,
+    codificationCompleteCount,
     segments,
   };
 }
