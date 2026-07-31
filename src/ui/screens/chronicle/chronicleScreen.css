@@ -6,17 +6,17 @@
  */
 
 .kf-chronicle-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
 .kf-chronicle-screen__subtitle {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   margin: 0.7rem 0 0.3rem;
 }
 
 .kf-chronicle-screen__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: #5b534b;
 }
 
@@ -35,19 +35,19 @@
   border-radius: 4px;
   padding: 0.4rem 0.55rem;
   background: #ffffff;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
 }
 
 .kf-chronicle__log-tick {
   display: block;
-  font-size: 0.72rem;
+  font-size: var(--kf-fs-micro);
   color: #5b534b;
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.15rem;
 }
 
 .kf-chronicle__folded {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.6rem;
 }
@@ -57,7 +57,7 @@
   border-radius: 4px;
   padding: 0.35rem 0.55rem;
   background: #faf8f5;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
@@ -65,7 +65,7 @@
 }
 
 .kf-chronicle__memoir-tick {
-  font-size: 0.72rem;
+  font-size: var(--kf-fs-micro);
   color: #5b534b;
   font-variant-numeric: tabular-nums;
 }
@@ -85,7 +85,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

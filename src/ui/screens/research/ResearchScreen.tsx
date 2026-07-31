@@ -77,23 +77,32 @@ export interface ResearchTechRowProps {
   readonly onBeginResearch: (techId: EntityId) => void;
 }
 
+/**
+ * 1 行 = 見出し行(名前 + (A)/(B) バッジ + 開始ボタン)+ 状態 + 前提/コスト。
+ *
+ * **[束A/M-3] 5 段組(名前/状態/前提/コスト/ボタン)を 3 段へ畳んだ**。
+ * 24 本 × 150px で 4640px あった画面高を詰めるための変更であり、出す情報は
+ * 1 つも減らしていない(前提とコストを同じ行に並べただけ)。
+ */
 export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps) {
   return (
     <li class="kf-research-row" data-tech-id={entry.techId} data-status={entry.status}>
       <div class="kf-research-row__head">
         <span class="kf-research-row__name">{techLabel(entry.techId)}</span>
         <LossClassBadge lossClass={entry.lossClass} />
+        <button
+          type="button"
+          class="kf-research-row__start-button"
+          onClick={() => onBeginResearch(entry.techId)}
+        >
+          研究を開始
+        </button>
       </div>
       <p class="kf-research-row__status">{statusText(entry)}</p>
-      <p class="kf-research-row__prereqs">{prereqText(entry)}</p>
-      <p class="kf-research-row__cost">研究コスト: {entry.researchCostApprox.toFixed(1)}</p>
-      <button
-        type="button"
-        class="kf-research-row__start-button"
-        onClick={() => onBeginResearch(entry.techId)}
-      >
-        研究を開始
-      </button>
+      <p class="kf-research-row__prereqs">
+        {prereqText(entry)}
+        <span class="kf-research-row__cost">研究コスト: {entry.researchCostApprox.toFixed(1)}</span>
+      </p>
     </li>
   );
 }
@@ -124,21 +133,56 @@ export function groupResearchTreeByEra(
   return groups;
 }
 
+/**
+ * [束A/M-3] 既定で開くエラを決める。
+ *
+ * M31 の実装は 24 本を全部開いたまま積んでいたため画面高が 4640px になり、
+ * 「今どこまで進んでいるか」を見るのに 7 画面ぶんスクロールが要った
+ * (UX プレイテスト M-3)。開くのは
+ *   (a) 研究中の tech を含むエラ(今まさに進んでいる場所)と
+ *   (b) 未解禁が残る最初のエラ(次に手を付ける場所)
+ * だけにする。全エラ解禁済みなら最後のエラを開く(空っぽの画面にしない)。
+ *
+ * hooks を使わない純関数なので直接テストできる。
+ */
+export function eraOpenFlags(groups: readonly ResearchEraGroup[]): readonly boolean[] {
+  let frontier = groups.findIndex((group) =>
+    group.entries.some((entry) => entry.status !== "completed"),
+  );
+  if (frontier === -1) frontier = groups.length - 1;
+  return groups.map(
+    (group, index) =>
+      index === frontier || group.entries.some((entry) => entry.status === "researching"),
+  );
+}
+
 export interface ResearchEraSectionProps {
   readonly group: ResearchEraGroup;
   readonly onBeginResearch: (techId: EntityId) => void;
+  /** 既定で開くか(`eraOpenFlags`)。開閉そのものは details 要素の状態に任せる。 */
+  readonly defaultOpen?: boolean;
 }
 
-export function ResearchEraSection({ group, onBeginResearch }: ResearchEraSectionProps) {
+export function ResearchEraSection({
+  group,
+  onBeginResearch,
+  defaultOpen = false,
+}: ResearchEraSectionProps) {
+  const completed = group.entries.filter((entry) => entry.status === "completed").length;
   return (
-    <section class="kf-research-era" aria-label={eraLabel(group.eraId)}>
-      <h3 class="kf-research-era__title">{eraLabel(group.eraId)}</h3>
+    <details class="kf-research-era" open={defaultOpen}>
+      <summary class="kf-research-era__summary">
+        <span class="kf-research-era__title">{eraLabel(group.eraId)}</span>
+        <span class="kf-research-era__count">
+          解禁 {completed}/{group.entries.length}
+        </span>
+      </summary>
       <ul class="kf-research-era__list">
         {group.entries.map((entry) => (
           <ResearchTechRow key={entry.techId} entry={entry} onBeginResearch={onBeginResearch} />
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 
@@ -166,6 +210,7 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
   }
 
   const groups = groupResearchTreeByEra(tree);
+  const openFlags = eraOpenFlags(groups);
 
   return (
     <section class="kf-research-screen" aria-labelledby="kf-research-screen-title">
@@ -177,11 +222,12 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
       {tree.length === 0 ? (
         <p class="kf-research-screen__empty">tech 定義がありません。</p>
       ) : (
-        groups.map((group) => (
+        groups.map((group, index) => (
           <ResearchEraSection
             key={group.eraId ?? "unknownEra"}
             group={group}
             onBeginResearch={handleBeginResearch}
+            defaultOpen={openFlags[index] ?? false}
           />
         ))
       )}

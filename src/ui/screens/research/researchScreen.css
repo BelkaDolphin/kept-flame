@@ -6,12 +6,12 @@
  */
 
 .kf-research-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
 .kf-research-screen__note {
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   padding: 0.5rem 0.6rem;
   margin: 0 0 0.6rem;
@@ -21,25 +21,44 @@
 }
 
 .kf-research-screen__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: #5b534b;
 }
 
+/* [束A/M-3] エラごとのアコーディオン。既定で開くのは進行中/次のエラだけ
+   (判定は ResearchScreen.tsx の eraOpenFlags)。 */
 .kf-research-era {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.5rem;
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #faf8f5;
+}
+
+.kf-research-era__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  cursor: pointer;
 }
 
 .kf-research-era__title {
-  font-size: 0.9rem;
-  margin: 0 0 0.4rem;
-  padding-bottom: 0.2rem;
-  border-bottom: 1px solid #8a857d;
+  font-size: var(--kf-fs-body);
+  font-weight: 600;
+}
+
+.kf-research-era__count {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
 }
 
 .kf-research-era__list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0.5rem 0.5rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -48,36 +67,42 @@
 .kf-research-row {
   border: 1px solid #c9c3b8;
   border-radius: 4px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.3rem 0.6rem 0.4rem;
   background: #ffffff;
 }
 
+/* [束A/M-3] 開始ボタンは見出し行の右端へ寄せる(1 行ぶん縦が縮む)。 */
 .kf-research-row__head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 0 0 0.3rem;
+  margin: 0;
 }
 
 .kf-research-row__name {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
 }
 
 .kf-research-row__status,
-.kf-research-row__prereqs,
-.kf-research-row__cost {
-  font-size: 0.78rem;
+.kf-research-row__prereqs {
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
-  margin: 0 0 0.3rem;
+  margin: 0;
   font-variant-numeric: tabular-nums;
 }
 
+.kf-research-row__cost {
+  margin-left: 0.6em;
+}
+
 .kf-research-row__start-button {
+  margin-left: auto;
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -97,7 +122,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

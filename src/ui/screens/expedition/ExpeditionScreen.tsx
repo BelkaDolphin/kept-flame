@@ -426,14 +426,18 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       <h3 class="kf-expedition-screen__subtitle">派遣前 ROI(GDD 8.6)</h3>
       <RoiPanel report={roiReport} rewardResourceId={rewardResourceId} />
 
-      <button
-        type="button"
-        class="kf-expedition__dispatch-button"
-        onClick={handleDispatch}
-        disabled={selectedMemberIds.length < DISPATCH_TEAM_MIN}
-      >
-        派遣する
-      </button>
+      {/* [束A/M-3] 確定操作(派遣する)は画面下部の sticky バーへ。候補一覧が
+          長くても、選びながら常に押せる位置に留まる(ナビの直上に固定)。 */}
+      <div class="kf-sticky-actions">
+        <button
+          type="button"
+          class="kf-expedition__dispatch-button"
+          onClick={handleDispatch}
+          disabled={selectedMemberIds.length < DISPATCH_TEAM_MIN}
+        >
+          派遣する({selectedMemberIds.length}/{DISPATCH_TEAM_MAX}名)
+        </button>
+      </div>
 
       <h3 class="kf-expedition-screen__subtitle">未帰還の派遣</h3>
       {dispatches.length === 0 ? (

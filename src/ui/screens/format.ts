@@ -34,6 +34,24 @@ export function formatGameClock(tick: number): string {
 }
 
 /**
+ * [束A] 資源在庫の桁整形(ヘッダの資源HUD)。
+ *
+ * **1e6 固定小数点からの換算はここでやらない**。引数は `derived.ts` が
+ * `toApproxNumber`(engine の `fp.ts`)で人間可読値へ直した `stockApprox` で
+ * あり、ここが持つのは「チップに入る桁数へ丸める」表示上の都合だけである。
+ * 小数第 1 位まで(整数なら小数点を出さない)。
+ *
+ * @throws {RangeError} 有限数でない場合
+ */
+export function formatResourceAmount(approx: number): string {
+  if (!Number.isFinite(approx)) {
+    throw new RangeError(`資源量 ${String(approx)} が有限数でない`);
+  }
+  const rounded = Math.round(approx * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/**
  * 経過 tick を「○日○時間」形式にする(⑫帰還ダイジェストの不在時間)。
  * 1 時間未満は「○分」。
  *

@@ -6,12 +6,12 @@
  */
 
 .kf-facility-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.5rem;
 }
 
 .kf-facility-screen__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: #5b534b;
   padding: 0.6rem;
   border: 1px solid #c9c3b8;
@@ -28,7 +28,7 @@
 }
 
 .kf-facility-detail__name {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.4rem;
 }
 
@@ -43,7 +43,7 @@
 .kf-facility-detail__level,
 .kf-facility-detail__output,
 .kf-facility-detail__slots {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.3rem;
 }
@@ -61,7 +61,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.4rem;
   border: 1px solid #c9c3b8;
   border-radius: 4px;
@@ -76,12 +76,12 @@
 }
 
 .kf-facility-detail__no-workers {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
 }
 
 .kf-facility-detail__upgrade-cost {
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.4rem;
 }
@@ -90,7 +90,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -110,7 +110,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

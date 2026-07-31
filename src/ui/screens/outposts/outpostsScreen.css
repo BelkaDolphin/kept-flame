@@ -6,7 +6,7 @@
  */
 
 .kf-outposts-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
@@ -23,14 +23,14 @@
 .kf-outposts-screen__network-upkeep,
 .kf-outposts-screen__network-net,
 .kf-outposts-screen__network-roi {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.25rem;
 }
 
 /* [M32] GDD 8.6 を援用した拠点網の (B) 喪失リスク項。検収条件なので目立たせる。 */
 .kf-outposts-screen__network-loss {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #a11334;
@@ -38,13 +38,13 @@
 }
 
 .kf-outposts-screen__note {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.6rem;
 }
 
 .kf-outposts-screen__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: #5b534b;
 }
 
@@ -65,7 +65,7 @@
 }
 
 .kf-outpost-card__title {
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
   margin: 0 0 0.35rem;
 }
 
@@ -76,7 +76,7 @@
 .kf-outpost-card__net,
 .kf-outpost-card__hazard,
 .kf-outpost-card__roi {
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.25rem;
   color: #5b534b;
@@ -84,7 +84,7 @@
 
 /* [M32] GDD 8.6 を援用した拠点個別の (B) 喪失リスク項。検収条件。 */
 .kf-outpost-card__loss {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #a11334;
@@ -101,7 +101,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

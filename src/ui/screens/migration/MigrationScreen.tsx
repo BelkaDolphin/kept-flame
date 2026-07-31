@@ -425,39 +425,43 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
         />
       </label>
 
-      {!confirming ? (
-        <button
-          type="button"
-          class="kf-migration-screen__execute-button"
-          onClick={handleExecuteClick}
-          disabled={!exodusActive}
-        >
-          大移動を実行
-        </button>
-      ) : (
-        <section class="kf-migration__confirm" role="alertdialog" aria-label="大移動の確認">
-          <p class="kf-migration__confirm-message">
-            本当によろしいですか。この操作は取り消せません。上のプレビューに表示された内容(落ちるもの・
-            永久喪失する技術・獲得予定の継承点)で確定します。
-          </p>
-          <div class="kf-migration__confirm-actions">
-            <button
-              type="button"
-              class="kf-migration__confirm-execute-button"
-              onClick={handleConfirm}
-            >
-              実行する(取り消せません)
-            </button>
-            <button
-              type="button"
-              class="kf-migration__confirm-cancel-button"
-              onClick={handleCancel}
-            >
-              キャンセル
-            </button>
-          </div>
-        </section>
-      )}
+      {/* [束A/M-3] 確定操作(大移動を実行 → 確認)は画面下部の sticky バーへ。
+          記録/乗員の一覧が長くても、選びながら常に押せる位置に留まる。 */}
+      <div class="kf-sticky-actions">
+        {!confirming ? (
+          <button
+            type="button"
+            class="kf-migration-screen__execute-button"
+            onClick={handleExecuteClick}
+            disabled={!exodusActive}
+          >
+            大移動を実行
+          </button>
+        ) : (
+          <section class="kf-migration__confirm" role="alertdialog" aria-label="大移動の確認">
+            <p class="kf-migration__confirm-message">
+              本当によろしいですか。この操作は取り消せません。上のプレビューに表示された内容(落ちるもの・
+              永久喪失する技術・獲得予定の継承点)で確定します。
+            </p>
+            <div class="kf-migration__confirm-actions">
+              <button
+                type="button"
+                class="kf-migration__confirm-execute-button"
+                onClick={handleConfirm}
+              >
+                実行する(取り消せません)
+              </button>
+              <button
+                type="button"
+                class="kf-migration__confirm-cancel-button"
+                onClick={handleCancel}
+              >
+                キャンセル
+              </button>
+            </div>
+          </section>
+        )}
+      </div>
 
       <div class="kf-migration-screen__nav">
         <button

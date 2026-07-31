@@ -14,7 +14,25 @@
  *     記号 + 日本語ラベル + 件数を併記すること。
  *
  * GDD 6.6: 最小タップ領域 44px 角。ボタン類はすべて min-height/min-width で担保。
+ *
+ * [束A/M-1] タイポグラフィトークン。**px 直書きを src/ui/**\/*.css から追放し、
+ * 最小 12px を床にする**(UX プレイテスト M-1: 9〜11px が可読域を下回っていた)。
+ * `.kf-app` ではなく `:root` に置くのは、bench/gridMount.html のように
+ * appShell.css を読まずに GridBoard だけをマウントするページでも
+ * `var(--kf-fs-*, <既定>)` のフォールバックで壊れないようにするため
+ * (gridBoard.css 側はフォールバック付きで参照する)。
  */
+
+:root {
+  --kf-fs-title: 17px;
+  --kf-fs-body: 15px;
+  --kf-fs-sub: 13px;
+  --kf-fs-micro: 12px;
+
+  /* [束A/F-5] sticky ナビの実効高さ。画面内の sticky アクションバー
+     (`.kf-sticky-actions`)がナビの上に重ならないための唯一の出典。 */
+  --kf-nav-height: 60px;
+}
 
 .kf-app {
   --kf-surface-page: #ffffff;
@@ -49,76 +67,154 @@
     "Yu Gothic UI",
     Meiryo,
     sans-serif;
+  font-size: var(--kf-fs-body);
   line-height: 1.6;
 }
 
-/* --- ヘッダ(現在画面名 + ゲーム内時計) ---------------------------------- */
+/* --- ヘッダ(現在画面名 + 資源HUD + ゲーム内時計・[束A] F-5/F-3) ------------
+   sticky にして**どの画面のどこまでスクロールしても資源と時刻が見える**ように
+   する。高さは 56px 以内(1 段。チップ列は横スクロールで逃がし、2 段に太らせ
+   ない)。position:sticky は fixed と違って自分のぶんの場所を流れの中に確保する
+   ので、本文が下に潜り込まない。 */
 
 .kf-app__header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.6rem;
+  padding: 0.3rem 0.6rem;
   border-bottom: 1px solid var(--kf-line-grid);
+  /* 不透明であること(下の本文が透けるとスクロール中に読めなくなる)。 */
   background: var(--kf-surface-panel);
 }
 
 .kf-app__title {
+  /* 資源チップ列(伸びる側)に押し潰されないよう縮小を止め、代わりに
+     上限幅で頭打ちにする(長い画面名は ellipsis で省く)。 */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 38%;
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--kf-fs-body);
   font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* ゲーム名は識別のためだけの装飾なので、狭い画面では資源チップに場所を譲る。 */
 .kf-app__title-sub {
-  display: block;
-  font-size: 0.72rem;
+  display: none;
+  font-size: var(--kf-fs-micro);
   font-weight: 400;
   color: var(--kf-ink-muted);
 }
 
-.kf-clock {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.9rem;
+/* --- 資源HUD(ヘッダ常設・[束A] F-3) --------------------------------------
+   1e6 固定小数点 → 人間可読値の換算は derived.ts の `toApproxNumber`(engine の
+   fp.ts)が済ませた `stockApprox` を使い、ここでは桁の整形だけを行う
+   (`formatResourceAmount`)。狭い画面ではこの帯だけが横スクロールする。 */
+
+.kf-app__hud {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* iOS の慣性スクロール中にヘッダ全体が動かないようにする。 */
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.kf-app__hud-list {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-hud__chip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 999px;
+  background: var(--kf-surface-page);
   white-space: nowrap;
 }
 
-.kf-clock__label {
-  display: block;
-  font-size: 0.68rem;
+.kf-hud__chip-label {
+  font-size: var(--kf-fs-micro);
   color: var(--kf-ink-muted);
+}
+
+.kf-hud__chip-value {
+  font-size: var(--kf-fs-sub);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-clock {
+  flex: 0 0 auto;
 }
 
 /* --- 画面本体 -------------------------------------------------------------- */
 
 .kf-app__screen {
   flex: 1 1 auto;
+  width: 100%;
+  /* [束A/m-5] 広い画面で 1 行が伸びきらないよう本文幅を止めて中央寄せする。 */
+  max-width: 1100px;
+  margin: 0 auto;
   padding: 0.75rem;
+  box-sizing: border-box;
 }
 
-/* --- ナビゲーション(12画面 + 設定) --------------------------------------- */
+/* --- ナビゲーション(5グループ集約・[束A] F-5) -----------------------------
+   13 タブ全掲(2 段に折り返して 100px 超を占有していた)をやめ、
+   拠点/研究/探索/周回/設定の 5 グループへ集約したうえで sticky bottom へ固定する。
+   グループをタップするとバーの**上に**サブ項目のポップオーバーが開く
+   (`position:absolute; bottom:100%` = バー自身の高さは変わらない)。 */
 
 .kf-nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
   border-top: 1px solid var(--kf-line-grid);
   background: var(--kf-surface-sunken);
-  padding: 0.5rem;
+  padding: 0.35rem 0.4rem;
+  /* サブ項目ポップオーバー(position:absolute)の位置基準。 */
 }
 
 .kf-nav__list {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.kf-nav__list > li {
+  flex: 1 1 0;
+  display: flex;
+}
+
 .kf-nav__button {
+  flex: 1 1 auto;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   min-height: 44px;
   min-width: 44px;
-  padding: 0.25rem 0.6rem;
+  padding: 0.25rem 0.3rem;
   border: 1px solid var(--kf-line-soft);
   border-radius: 4px;
   background: var(--kf-surface-page);
@@ -126,16 +222,81 @@
   cursor: pointer;
 }
 
-.kf-nav__button[aria-current="page"] {
+/* 現在画面が属するグループの強調(色だけに頼らず枠幅と太字も変える)。 */
+.kf-nav__button[aria-current="page"],
+.kf-nav__button[aria-current="true"] {
   border-color: var(--kf-ink-body);
   border-width: 2px;
   background: #fcefd0;
   font-weight: 600;
 }
 
-.kf-nav__order {
+.kf-nav__button[aria-expanded="true"] {
+  border-color: var(--kf-ink-body);
+  border-width: 2px;
+}
+
+.kf-nav__caret {
+  margin-left: 0.2em;
   color: var(--kf-ink-muted);
-  margin-right: 0.2em;
+}
+
+.kf-nav__submenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.35rem 0.4rem;
+  list-style: none;
+  border-top: 1px solid var(--kf-line-grid);
+  border-bottom: 1px solid var(--kf-line-grid);
+  background: var(--kf-surface-panel);
+  box-shadow: 0 -2px 6px rgb(36 32 28 / 12%);
+}
+
+.kf-nav__sub-button {
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
+.kf-nav__sub-button[aria-current="page"] {
+  border-color: var(--kf-ink-body);
+  border-width: 2px;
+  background: #fcefd0;
+  font-weight: 600;
+}
+
+/* --- 画面内の sticky アクションバー([束A] M-3) -----------------------------
+   「派遣する」「大移動を実行」のような**その画面の確定操作**を、長い一覧を
+   スクロールしても押せる位置に留める。ナビ(sticky bottom:0)の直上に置く。 */
+
+.kf-sticky-actions {
+  position: sticky;
+  bottom: var(--kf-nav-height);
+  z-index: 10;
+  margin: 0.6rem 0;
+  padding: 0.4rem 0;
+  background: var(--kf-surface-page);
+  border-top: 1px solid var(--kf-line-soft);
+}
+
+@media (min-width: 900px) {
+  .kf-app__title-sub {
+    display: inline;
+    margin-left: 0.5em;
+  }
 }
 
 /* --- 緊急度バッジ(GDD 2.2 / 4.1(a)・ui-spec §3) --------------------------- */
@@ -157,7 +318,7 @@
   min-height: 44px;
   padding: 0.4rem 0.6rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   text-align: left;
   border: 1px solid var(--kf-line-soft);
   border-radius: 4px;
@@ -174,7 +335,7 @@
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -208,7 +369,7 @@
 
 .kf-badge__hint {
   display: block;
-  font-size: 0.72rem;
+  font-size: var(--kf-fs-micro);
   color: var(--kf-ink-muted);
 }
 
@@ -226,7 +387,7 @@
 /* --- ホームハブ ------------------------------------------------------------ */
 
 .kf-home__section-title {
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
   margin: 0 0 0.4rem;
 }
 
@@ -236,7 +397,7 @@
   border: 1px solid var(--kf-line-soft);
   border-radius: 4px;
   background: var(--kf-surface-panel);
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
 }
 
 .kf-stats {
@@ -258,12 +419,12 @@
 
 .kf-stats__label {
   display: block;
-  font-size: 0.7rem;
+  font-size: var(--kf-fs-micro);
   color: var(--kf-ink-muted);
 }
 
 .kf-stats__value {
-  font-size: 1.05rem;
+  font-size: var(--kf-fs-title);
   font-variant-numeric: tabular-nums;
 }
 
@@ -289,17 +450,17 @@
 
 .kf-digest__lead-title {
   margin: 0 0 0.3rem;
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
 }
 
 .kf-digest__lead-body {
   margin: 0 0 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
 }
 
 .kf-digest__meta {
   margin: 0 0 0.75rem;
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: var(--kf-ink-muted);
 }
 
@@ -320,7 +481,7 @@
   min-height: 44px;
   padding: 0.35rem 0.6rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   text-align: left;
   border: 1px solid var(--kf-line-soft);
   border-radius: 4px;
@@ -359,7 +520,7 @@
 
 .kf-digest__log {
   padding: 0.4rem 0.6rem;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   border-bottom: 1px solid var(--kf-line-soft);
 }
 
@@ -369,14 +530,14 @@
 
 .kf-digest__log-tick {
   display: block;
-  font-size: 0.7rem;
+  font-size: var(--kf-fs-micro);
   color: var(--kf-ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .kf-digest__folded {
   margin: 0 0 1rem;
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   color: var(--kf-ink-muted);
 }
 
@@ -391,17 +552,17 @@
 
 .kf-placeholder__title {
   margin: 0 0 0.4rem;
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
 }
 
 .kf-placeholder__task {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: var(--kf-ink-muted);
 }
 
 .kf-placeholder__back {
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   min-height: 44px;
   min-width: 44px;
   margin-top: 0.75rem;
@@ -426,13 +587,13 @@
 
 .kf-promo-banner__title {
   margin: 0 0 0.3rem;
-  font-size: 0.88rem;
+  font-size: var(--kf-fs-body);
   font-weight: 600;
 }
 
 .kf-promo-banner__body {
   margin: 0 0 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   color: var(--kf-ink-muted);
 }
 
@@ -444,7 +605,7 @@
 
 .kf-promo-banner__button {
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   min-height: 44px;
   padding: 0.3rem 0.8rem;
   border: 1px solid var(--kf-line-grid);
@@ -470,5 +631,5 @@
   border-radius: 4px;
   background: #f7ecea;
   color: var(--kf-urgency-critical-line);
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
 }

@@ -88,7 +88,7 @@ export function FacilityCatalogPanel({
 }: FacilityCatalogPanelProps) {
   return (
     <section class="kf-catalog" aria-label="施設カタログ">
-      <h3 class="kf-catalog__title">何を建てるか選び、空きセルをタップする</h3>
+      <h3 class="kf-catalog__title">建てるものを選び、空きセルをタップ</h3>
       <ul class="kf-catalog__list">
         {catalog.map((entry) => (
           <FacilityCatalogButton
@@ -213,50 +213,69 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
 
   return (
     <section class="kf-grid-screen" aria-labelledby="kf-grid-screen-title">
-      <h2 class="kf-grid-screen__title" id="kf-grid-screen-title">
-        格子ビュー
-      </h2>
-      <p class="kf-grid-screen__summary">
-        設置 {summary.occupiedCellCount}/{GRID_CELL_COUNT}セル・過密{" "}
-        {summary.overcrowdedFacilityCount}件
-      </p>
-
-      <FacilityCatalogPanel
-        catalog={catalog}
-        pendingDefId={pendingDefId}
-        onPick={pickCatalogEntry}
-        onCancel={cancelPending}
-      />
+      {/* [束A/F-4] 見出しと集計は 1 行に畳む(fold 内へ盤面と内訳を入れるため)。 */}
+      <div class="kf-grid-screen__head">
+        <h2 class="kf-grid-screen__title" id="kf-grid-screen-title">
+          格子ビュー
+        </h2>
+        <p class="kf-grid-screen__summary">
+          設置 {summary.occupiedCellCount}/{GRID_CELL_COUNT}セル・過密{" "}
+          {summary.overcrowdedFacilityCount}件
+        </p>
+      </div>
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
-      <GridBoard
-        store={store}
-        pendingPlacement={pendingPlacement}
-        onPlacementResult={handlePlacementResult}
-      />
+      {/* [束A/F-4] 3 ブロックの並べ替えは CSS(gridBoard.css の grid-template-areas)
+          の担当。ここは「カタログ → 盤面 → 内訳/凡例」というソース順だけを持つ:
+          狭い画面はこの順に積み、広い画面は盤面を左カラムへ回す。 */}
+      <div class="kf-grid-screen__layout">
+        <div class="kf-grid-screen__catalog-area">
+          <FacilityCatalogPanel
+            catalog={catalog}
+            pendingDefId={pendingDefId}
+            onPick={pickCatalogEntry}
+            onCancel={cancelPending}
+          />
+        </div>
 
-      <LegendPanel overcrowd={overcrowd} includeIconDefs={false} />
+        <div class="kf-grid-screen__board-area">
+          <GridBoard
+            store={store}
+            pendingPlacement={pendingPlacement}
+            onPlacementResult={handlePlacementResult}
+          />
+        </div>
 
-      {selectedCell !== null && selectedCell.isRubble ? (
-        <ReclaimPanel cell={selectedCell} info={reclaimInfo} onReclaim={handleReclaim} />
-      ) : (
-        <CellBreakdownView
-          cellId={selectedCell?.cellId ?? null}
-          breakdown={breakdown}
-          includeIconDefs={false}
-        />
-      )}
+        <div class="kf-grid-screen__detail-area">
+          {selectedCell !== null && selectedCell.isRubble ? (
+            <ReclaimPanel cell={selectedCell} info={reclaimInfo} onReclaim={handleReclaim} />
+          ) : (
+            <CellBreakdownView
+              cellId={selectedCell?.cellId ?? null}
+              breakdown={breakdown}
+              includeIconDefs={false}
+            />
+          )}
 
-      {selectedCell !== null && selectedCell.occupied && (
-        <button
-          type="button"
-          class="kf-grid-screen__to-facility"
-          onClick={() => onNavigate("facility")}
-        >
-          この施設の詳細/増築へ
-        </button>
-      )}
+          {selectedCell !== null && selectedCell.occupied && (
+            <button
+              type="button"
+              class="kf-grid-screen__to-facility"
+              onClick={() => onNavigate("facility")}
+            >
+              この施設の詳細/増築へ
+            </button>
+          )}
+
+          {/* 凡例は初見のための参照情報であり、毎回見るものではない
+              (M19 の実装は無条件に 495px を消費していた)。既定は畳む。 */}
+          <details class="kf-legend-fold">
+            <summary class="kf-legend-fold__summary">タグ凡例(色+記号+パターン+数値)</summary>
+            <LegendPanel overcrowd={overcrowd} includeIconDefs={false} />
+          </details>
+        </div>
+      </div>
     </section>
   );
 }

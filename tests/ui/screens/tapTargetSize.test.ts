@@ -66,6 +66,7 @@ import type {
 import { UrgencyBadge } from "../../../src/ui/screens/home/HomeHub";
 import { RejectionBanner } from "../../../src/ui/screens/RejectionBanner";
 import { ScreenNav } from "../../../src/ui/AppShell";
+import { NAV_GROUPS } from "../../../src/ui/navGroups";
 import { ResearchTechRow } from "../../../src/ui/screens/research/ResearchScreen";
 import { CodifySuggestionPanel, CodifyTechRow } from "../../../src/ui/screens/codify/CodifyScreen";
 import {
@@ -94,9 +95,15 @@ interface CssDeclarations {
 
 /**
  * 単純な `セレクタ { プロパティ: 値; ... }` の並びだけを想定した最小パーサ。
- * このプロジェクトの CSS には `@media`/`@supports`/ネストが 1 つも無い
- * (grep で確認済み・ダークモード分岐禁止の帰結)ので、これで足りる。
  * 同じセレクタが複数回出てくる場合は**後勝ち**(実際の CSS のカスケードと同じ)。
+ *
+ * **[束A 追記]** レスポンシブ化(F-4 の 2 カラム / F-5 のヘッダ)で `@media` が
+ * 入ったので前提が 1 つ変わった: ネストした `@media { .foo { … } }` に対しては、
+ * 外側の `@media` 行はセレクタとして解釈されず(閉じ括弧が合わないため
+ * マッチしない)、**内側の `.foo` だけが後勝ちで取り込まれる**。したがって
+ * 「メディアクエリの中で 44px を下回る上書きをしたら検出される」側に倒れる
+ * (見逃しではなく過検出側)ので、この検査器の保証は弱くならない。
+ * `@supports`/CSS ネストは今も 1 つも無い。
  */
 function parseCss(cssText: string): ReadonlyMap<string, CssDeclarations> {
   const withoutComments = cssText.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -272,6 +279,8 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
   const INTERACTIVE_SELECTORS = [
     // M29(既存・前例)
     ".kf-nav__button",
+    // [束A] グループ展開時のサブ項目(5グループ集約・F-5)
+    ".kf-nav__sub-button",
     ".kf-badge",
     ".kf-digest__row",
     ".kf-placeholder__back",
@@ -727,10 +736,28 @@ describe("44px 最小タップ領域 — 既存コンポーネント(M18/M29)の
     assertMinTapTarget(".kf-placeholder__back");
   });
 
-  it("ScreenNav(12画面+設定のナビ全ボタン)", () => {
+  // [束A] 13 タブ全掲 → 5 グループ + 展開(F-5)。ボタンの総数は減ったが
+  // 「ナビから到達できる全ボタンが 44px を満たす」という検査の意味は同じなので、
+  // 畳んだ状態(グループ 5 個)と全グループ展開状態の両方を通す。
+  it("ScreenNav(グループバー)", () => {
     const vnode = ScreenNav({ current: "home", onNavigate: () => undefined });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
-    expect(found.length).toBeGreaterThanOrEqual(13);
+    expect(found.length).toBe(NAV_GROUPS.length);
+  });
+
+  it("ScreenNav(展開したサブ項目も 44px を満たす・全グループ)", () => {
+    let subButtonCount = 0;
+    for (const group of NAV_GROUPS) {
+      const vnode = ScreenNav({
+        current: "home",
+        onNavigate: () => undefined,
+        openGroupId: group.id,
+      });
+      const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+      subButtonCount += found.filter((e) => e.class.includes("kf-nav__sub-button")).length;
+    }
+    // 単独グループ(設定)はサブ項目を持たない = 12画面ぶんが展開対象。
+    expect(subButtonCount).toBe(12);
   });
 
   it("GridCell(占有セル)の CSS 下限フォールバックが 44px", () => {

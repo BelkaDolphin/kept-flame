@@ -6,12 +6,12 @@
  */
 
 .kf-codify-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
 .kf-codify-screen__note {
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   padding: 0.5rem 0.6rem;
   margin: 0 0 0.6rem;
@@ -21,7 +21,7 @@
 }
 
 .kf-codify-screen__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   color: #5b534b;
 }
 
@@ -50,13 +50,13 @@
 
 .kf-codify-row__name {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
 }
 
 .kf-codify-row__holders,
 .kf-codify-row__risk,
 .kf-codify-row__recorded {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.25rem;
   font-variant-numeric: tabular-nums;
@@ -66,7 +66,7 @@
   list-style: none;
   margin: 0 0 0.4rem;
   padding: 0;
-  font-size: 0.76rem;
+  font-size: var(--kf-fs-sub);
   color: #8c290b;
 }
 
@@ -74,7 +74,7 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   margin: 0 0 0.4rem;
 }
 
@@ -82,7 +82,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.2rem 0.4rem;
   border: 1px solid #8a857d;
   border-radius: 4px;
@@ -94,7 +94,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -112,19 +112,19 @@
 }
 
 .kf-codify-assist__title {
-  font-size: 0.88rem;
+  font-size: var(--kf-fs-body);
   margin: 0 0 0.4rem;
 }
 
 .kf-codify-assist__empty {
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
 }
 
 .kf-codify-assist__list {
   margin: 0 0 0.5rem;
   padding-left: 1.2rem;
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #24201c;
   font-variant-numeric: tabular-nums;
 }
@@ -137,7 +137,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -147,7 +147,7 @@
 }
 
 .kf-codify-assist__outcome {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0.4rem 0 0;
 }
@@ -162,7 +162,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

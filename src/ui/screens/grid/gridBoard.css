@@ -18,10 +18,19 @@
 .kf-grid-viewport {
   position: relative;
   overflow: hidden;
-  width: 100%;
-  /* 6×8 のアスペクト比(幅:高さ = 6:8)をコンテナの高さの既定値にしておく。
-     実際の表示サイズは呼び出し側(M30)がコンテナへ CSS で与える。 */
-  aspect-ratio: 6 / 8;
+  /* [束A/F-4] 箱を「セル実寸」と「利用可能幅 / 55vh」の**小さい方**でキャップする。
+     --kf-board-width / --kf-board-height は GridBoard.tsx がインラインで渡す
+     (6×CELL_SIZE_PX / 8×CELL_SIZE_PX。数値の出典は gridConstants.ts 1 箇所)。
+     フォールバック値は bench/gridMount.html のように変数を渡さない
+     マウント経路のためだけに置いてある。
+     幅と高さを別々に min() するので(aspect-ratio は使わない)、
+     375px 幅では盤面の**横は丸ごと**入り、縦だけがパンで補われる。
+     `width: min(100%, …)` と書くと、内在サイズで決まるグリッドトラック
+     (2 カラム時の左カラム = `auto`)の中で % が循環参照になり箱が潰れるので、
+     **幅は実寸で与えて max-width で狭い画面に合わせる**形にしてある。 */
+  width: var(--kf-board-width, 336px);
+  max-width: 100%;
+  height: min(var(--kf-board-height, 448px), 55vh);
   background: #f4f2ee;
   border: 1px solid #8a857d;
   /* ブラウザ既定のスクロール/ピンチズームと自前ジェスチャが競合しないように
@@ -49,7 +58,7 @@
   min-width: 44px;
   min-height: 44px;
   border: 1px solid #c9c3b8;
-  font-size: 0.7rem;
+  font-size: var(--kf-fs-micro, 12px);
   overflow: hidden;
   color: #24201c;
 }
@@ -74,12 +83,12 @@
 }
 
 .kf-cell__rubble-symbol {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title, 17px);
   line-height: 1;
 }
 
 .kf-cell__rubble-label {
-  font-size: 0.62rem;
+  font-size: var(--kf-fs-micro, 12px);
 }
 
 .kf-cell--connected {
@@ -102,7 +111,7 @@
 }
 
 .kf-cell__placeholder {
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub, 13px);
 }
 
 .kf-cell__tag {
@@ -114,7 +123,7 @@
 }
 
 .kf-cell__badge {
-  font-size: 0.62rem;
+  font-size: var(--kf-fs-micro, 12px);
   color: #5b534b;
 }
 
@@ -145,7 +154,7 @@
 }
 
 .kf-cell__marker-overflow {
-  font-size: 0.6rem;
+  font-size: var(--kf-fs-micro, 12px);
   font-weight: 700;
   color: #24201c;
   margin-left: 2px;
@@ -164,7 +173,7 @@
   border: 1px solid #8a857d;
   border-radius: 2px;
   background: #ffffff;
-  font-size: 9px;
+  font-size: var(--kf-fs-micro, 12px);
   font-weight: 700;
   line-height: 1;
   box-sizing: border-box;
@@ -177,14 +186,14 @@
 }
 
 .kf-cell__preview-symbol {
-  font-size: 1.1rem;
+  font-size: var(--kf-fs-title, 17px);
   font-weight: 700;
   line-height: 1;
   color: #24201c;
 }
 
 .kf-cell__preview-value {
-  font-size: 0.62rem;
+  font-size: var(--kf-fs-micro, 12px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #24201c;
@@ -230,7 +239,7 @@
   bottom: 2px;
   border-radius: 3px;
   padding: 0 2px;
-  font-size: 13px;
+  font-size: var(--kf-fs-sub, 13px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
@@ -244,7 +253,7 @@
 }
 
 .kf-legend__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title, 17px);
   margin: 0 0 0.5rem;
 }
 
@@ -264,12 +273,12 @@
 }
 
 .kf-legend__label {
-  font-size: 13px;
+  font-size: var(--kf-fs-sub, 13px);
   font-weight: 500;
 }
 
 .kf-legend__note {
-  font-size: 12px;
+  font-size: var(--kf-fs-micro, 12px);
   font-weight: 400;
   color: #5b534b;
   margin: 0.4rem 0 0;
@@ -283,18 +292,18 @@
 }
 
 .kf-breakdown__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title, 17px);
   margin: 0 0 0.5rem;
 }
 
 .kf-breakdown__summary {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body, 15px);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.5rem;
 }
 
 .kf-breakdown__empty {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body, 15px);
   color: #5b534b;
 }
 
@@ -311,7 +320,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body, 15px);
 }
 
 .kf-breakdown__contributions {
@@ -324,7 +333,7 @@
 }
 
 .kf-breakdown__contribution {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub, 13px);
   font-variant-numeric: tabular-nums;
   color: #5b534b;
 }
@@ -335,25 +344,103 @@
 
 /* --- [M30] ②格子ビュー画面の合成(施設カタログ/拒否バナー/瓦礫開墾/遷移) --- */
 
+/* [束A/F-4] 画面の再編:
+   狭い画面 = 1 列(カタログ → 盤面 → 内訳/開墾 → 凡例)。**内訳が盤面の直下**に
+   来るので、セルを選んだ結果を見るためにページ末尾まで飛ばなくてよい。
+   広い画面(>=900px)= 盤面を左に固定幅で置き、カタログ/内訳/凡例を右へ回して
+   盤面右の空白を潰す。 */
+.kf-grid-screen__layout {
+  display: grid;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .kf-grid-screen__layout {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "board catalog"
+      "board detail";
+    column-gap: 1rem;
+  }
+
+  .kf-grid-screen__board-area {
+    grid-area: board;
+  }
+
+  .kf-grid-screen__catalog-area {
+    grid-area: catalog;
+  }
+
+  .kf-grid-screen__detail-area {
+    grid-area: detail;
+  }
+}
+
+/* [束A/F-4] 凡例は既定で畳む(常時 495px を無条件に消費していた)。
+   details/summary なので JS 状態を増やさない。 */
+.kf-legend-fold {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #ffffff;
+  padding: 0 0.6rem;
+}
+
+.kf-legend-fold__summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-size: var(--kf-fs-sub, 13px);
+  cursor: pointer;
+}
+
+.kf-legend-fold[open] .kf-legend-fold__summary {
+  border-bottom: 1px solid #c9c3b8;
+}
+
+.kf-legend-fold .kf-legend {
+  padding: 0.5rem 0 0.6rem;
+}
+
+/* 折り畳みの中では凡例自身の見出しは summary と重複するので出さない。 */
+.kf-legend-fold .kf-legend__title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.kf-grid-screen__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+}
+
 .kf-grid-screen__title {
-  font-size: 1rem;
-  margin: 0 0 0.3rem;
+  font-size: var(--kf-fs-title, 17px);
+  margin: 0;
 }
 
 .kf-grid-screen__summary {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub, 13px);
   color: #5b534b;
-  margin: 0 0 0.6rem;
+  margin: 0;
 }
 
 .kf-catalog {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.4rem;
 }
 
 .kf-catalog__title {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-sub, 13px);
   font-weight: 500;
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.3rem;
 }
 
 .kf-catalog__list {
@@ -365,17 +452,18 @@
   padding: 0;
 }
 
+/* [束A/F-4] 1 行に畳んで縦を詰める(旧: ラベルと寸法の 2 段組で 60px 超)。 */
 .kf-catalog__button {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 0.15rem;
+  gap: 0.35rem;
   min-width: 44px;
   min-height: 44px;
   padding: 0.3rem 0.6rem;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub, 13px);
   border: 1px solid #c9c3b8;
   border-radius: 4px;
   background: #ffffff;
@@ -391,7 +479,7 @@
 }
 
 .kf-catalog__footprint {
-  font-size: 0.68rem;
+  font-size: var(--kf-fs-micro, 12px);
   color: #5b534b;
 }
 
@@ -399,7 +487,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub, 13px);
   padding: 0.3rem 0.75rem;
   border: 1px solid #8a857d;
   border-radius: 4px;
@@ -417,18 +505,18 @@
 }
 
 .kf-reclaim__title {
-  font-size: 0.95rem;
+  font-size: var(--kf-fs-title, 17px);
   margin: 0 0 0.4rem;
 }
 
 .kf-reclaim__inactive {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub, 13px);
   color: #5b534b;
 }
 
 .kf-reclaim__cost,
 .kf-reclaim__stock {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub, 13px);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.3rem;
 }
@@ -437,7 +525,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body, 15px);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -452,7 +540,7 @@
   min-height: 44px;
   margin-top: 0.6rem;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body, 15px);
   padding: 0.3rem 0.75rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

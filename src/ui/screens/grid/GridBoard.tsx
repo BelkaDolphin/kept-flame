@@ -449,6 +449,21 @@ const FALLBACK_BOUNDS: ViewportBounds = {
   height: GRID_CONTENT_HEIGHT * DEFAULT_SCALE,
 };
 
+/**
+ * [束A/F-4] 盤面の実寸(倍率 1.0)を CSS 側へ**カスタムプロパティとして**渡す。
+ *
+ * `.kf-grid-viewport` は M30 まで `width:100%` + `aspect-ratio:6/8` だったため、
+ * PC 幅では箱が 1264×1685px まで膨らみ、中身(336×448px)との差 92.8% が
+ * 空白になっていた(UX プレイテスト F-4)。箱の上限を「セル実寸」に合わせる
+ * には CSS 側が 6×56 / 8×56 を知る必要があるが、gridBoard.css に数値を
+ * 書くと `gridConstants.ts` が単一の出典であるという規律(ファイル冒頭コメント)
+ * を壊す。よって**値は TS から流し込み、CSS は変数を読むだけ**にする。
+ * ジェスチャのロジック(gridGeometry.ts の純関数群)には一切触れていない。
+ */
+const VIEWPORT_SIZE_STYLE =
+  `--kf-board-width:${String(GRID_CONTENT_WIDTH)}px;` +
+  `--kf-board-height:${String(GRID_CONTENT_HEIGHT)}px;`;
+
 export function GridBoard({
   store,
   pendingPlacement = null,
@@ -570,6 +585,7 @@ export function GridBoard({
   return (
     <div
       class="kf-grid-viewport"
+      style={VIEWPORT_SIZE_STYLE}
       ref={containerRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

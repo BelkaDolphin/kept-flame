@@ -29,17 +29,34 @@
 // ===========================================================================
 //   tick は毎分変わるので、`ColonyClock` という**それだけを購読する小さな
 //   コンポーネント**に隔離する。ヘッダやバッジ列を巻き込んで再描画しない。
+//   資源HUD(`ResourceHud`・§4)も同じ理由で別コンポーネントにしてある——
+//   在庫は毎 tick 動くが、シェルの他の部分(タイトル・ナビ)を巻き込まない。
+//
+// ===========================================================================
+// 4. [束A] sticky ヘッダ(資源HUD 常設)+ sticky グループナビ
+// ===========================================================================
+//   UX プレイテストで出た構造問題 F-3(資源が①ホームハブでしか見えない)と
+//   F-5(ナビが本文末尾・13 タブ全掲)への対応:
+//     - ヘッダを `position:sticky; top:0` にし、資源チップ列を常設する
+//       (どの画面でも「今いくつあるか」を見ながら操作できる)。
+//     - ナビを `position:sticky; bottom:0` の 1 段バーにし、13 画面を
+//       5 グループ(`navGroups.ts`)へ畳む。グループをタップするとバーの上に
+//       サブ項目が開く。
+//   どちらも意匠は CSS 側(appShell.css)にあり、ここが持つのは構造と状態だけ。
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from "preact/hooks";
 
 import "./appShell.css";
 import { InstallPromotionBanner } from "./InstallPromotionBanner";
+import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
-import { formatGameClock } from "./screens/format";
-import { SCREEN_META, SCREEN_IDS, type ScreenId } from "./screens";
+import { resourceLabel } from "./screens/contentLabels";
+import { formatGameClock, formatResourceAmount } from "./screens/format";
+import { SCREEN_META, type ScreenId } from "./screens";
 import { SCREEN_REGISTRY } from "./screens/registry";
 import { useSignalValue } from "./screens/useStoreSignal";
+import type { ResourceView } from "./derived";
 import type { ShellSession } from "./shellSession";
 import type { GameStore } from "./store";
 
@@ -52,37 +69,143 @@ export interface ColonyClockProps {
 export function ColonyClock({ store }: ColonyClockProps) {
   const tick = useSignalValue(store.derived.tick);
   return (
-    <div class="kf-clock">
-      <span class="kf-clock__label">コロニー時刻</span>
-      {formatGameClock(tick)}
+    <div class="kf-hud__chip kf-clock">
+      <span class="kf-hud__chip-label">時刻</span>
+      <span class="kf-hud__chip-value">{formatGameClock(tick)}</span>
     </div>
   );
 }
 
-// --- 2. ナビゲーション(12画面 + 設定) --------------------------------------
+// --- 1-2. 資源HUD(ヘッダ常設・[束A] F-3) -----------------------------------
+
+/**
+ * チップの並び順(GDD 6.7 / 9.1 / 11.1 が資源を挙げる順 = 薪/鉄/粘土/紙/廃材)。
+ * `store.derived.resources` は state の entity 順であり、その順序は engine の
+ * 都合(生成順)なので、**表示順だけ**をここで決める。表に無い資源(content 追加
+ * で増えたもの)は末尾へ ID 昇順で回し、捨てない。
+ */
+export const HUD_RESOURCE_ORDER: readonly string[] = ["firewood", "iron", "clay", "paper", "waste"];
+
+/** 表示順の解決(hooks 不使用の純関数なので直接テストできる)。 */
+export function orderHudResources(resources: readonly ResourceView[]): readonly ResourceView[] {
+  const rank = (view: ResourceView): number => {
+    const index = HUD_RESOURCE_ORDER.indexOf(view.resourceId);
+    return index === -1 ? HUD_RESOURCE_ORDER.length : index;
+  };
+  return [...resources].sort((a, b) => {
+    const diff = rank(a) - rank(b);
+    if (diff !== 0) return diff;
+    return a.resourceId < b.resourceId ? -1 : a.resourceId > b.resourceId ? 1 : 0;
+  });
+}
+
+export interface ResourceHudProps {
+  readonly store: GameStore;
+}
+
+/**
+ * 全資源の在庫チップ。1e6 固定小数点 → 人間可読値の換算は
+ * `derived.ts` が `toApproxNumber`(engine の fp.ts)で済ませた `stockApprox`
+ * を使う(UI 側で固定小数点の割り算を発明しない)。桁の整形だけ
+ * `formatResourceAmount`(screens/format.ts)が持つ。
+ */
+export function ResourceHud({ store }: ResourceHudProps) {
+  const resources = useSignalValue(store.derived.resources);
+  if (resources.length === 0) return null;
+  return (
+    <ul class="kf-app__hud-list" aria-label="資源在庫">
+      {orderHudResources(resources).map((resource) => (
+        <li key={resource.entityId} class="kf-hud__chip" data-resource-id={resource.resourceId}>
+          <span class="kf-hud__chip-label">{resourceLabel(resource.resourceId)}</span>
+          <span class="kf-hud__chip-value">{formatResourceAmount(resource.stockApprox)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// --- 2. ナビゲーション(5グループ・[束A] F-5) -------------------------------
 
 export interface ScreenNavProps {
   readonly current: ScreenId;
   readonly onNavigate: (screen: ScreenId) => void;
+  /** 展開中のグループ(未指定 / null なら全部畳んだ状態)。状態はシェルが持つ。 */
+  readonly openGroupId?: NavGroupId | null;
+  /** グループ見出しのタップ(展開/折り畳みのトグル)。 */
+  readonly onToggleGroup?: (groupId: NavGroupId) => void;
 }
 
-export function ScreenNav({ current, onNavigate }: ScreenNavProps) {
+/**
+ * グループバー + 展開中グループのサブ項目。
+ *
+ * **hooks を持たない**(展開状態は `AppShell` が持って props で渡す)ので、
+ * M29 から続く「ナビは vnode を直接呼んでテストできる」性質を保つ。
+ * 画面 1 個だけのグループ(設定)は展開せず直接遷移する——1 タップで済むものを
+ * 2 タップにしない。
+ */
+export function ScreenNav({
+  current,
+  onNavigate,
+  openGroupId = null,
+  onToggleGroup,
+}: ScreenNavProps) {
+  const currentGroup = navGroupOfScreen(current);
+  // 単独グループ(設定)は展開の概念を持たない(タップ = 直接遷移)。
+  const openGroup =
+    NAV_GROUPS.find((group) => group.id === openGroupId && group.screens.length > 1) ?? null;
   return (
     <nav class="kf-nav" aria-label="画面切り替え">
-      <ul class="kf-nav__list">
-        {SCREEN_IDS.map((id) => {
-          const meta = SCREEN_META[id];
-          return (
+      {openGroup !== null && (
+        <ul class="kf-nav__submenu" aria-label={`${openGroup.label}の画面`}>
+          {openGroup.screens.map((id) => (
             <li key={id}>
               <button
                 type="button"
-                class="kf-nav__button"
+                class="kf-nav__sub-button"
                 data-screen-id={id}
                 aria-current={id === current ? "page" : undefined}
                 onClick={() => onNavigate(id)}
               >
-                {meta.order === null ? null : <span class="kf-nav__order">{meta.order}</span>}
-                {meta.label}
+                {SCREEN_META[id].label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ul class="kf-nav__list">
+        {NAV_GROUPS.map((group) => {
+          const soleScreen = group.screens.length === 1 ? group.screens[0] : undefined;
+          const isCurrentGroup = group.id === currentGroup.id;
+          const expanded = group.id === openGroupId;
+          return (
+            <li key={group.id}>
+              <button
+                type="button"
+                class="kf-nav__button"
+                data-nav-group={group.id}
+                data-screen-id={soleScreen}
+                aria-current={
+                  soleScreen !== undefined && soleScreen === current
+                    ? "page"
+                    : isCurrentGroup
+                      ? "true"
+                      : undefined
+                }
+                aria-expanded={soleScreen === undefined ? expanded : undefined}
+                onClick={() => {
+                  if (soleScreen !== undefined) {
+                    onNavigate(soleScreen);
+                    return;
+                  }
+                  onToggleGroup?.(group.id);
+                }}
+              >
+                {group.label}
+                {soleScreen === undefined && (
+                  <span class="kf-nav__caret" aria-hidden="true">
+                    {expanded ? "▾" : "▴"}
+                  </span>
+                )}
               </button>
             </li>
           );
@@ -155,23 +278,41 @@ export function AppShell({
   const [screenId, setScreenId] = useState<ScreenId>(() => session.screen());
   const [installBannerClosed, setInstallBannerClosed] = useState(false);
   const [notificationBannerClosed, setNotificationBannerClosed] = useState(false);
+  // ナビの展開状態は**セーブにも URL にも載らない揮発 UI 状態**(バナーの
+  // 閉鎖状態と同じ扱い)。現在地の権威はあくまでルータ側にある。
+  const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
 
   useEffect(() => {
     // 購読を張る前にルータが動いていた可能性があるので、まず現在地へ揃える。
     setScreenId(session.screen());
-    return session.subscribe(setScreenId);
+    // 現在地が変わったらナビのポップオーバーは畳む。**ブラウザの戻る/進むや
+    // 外部からのハッシュ変更でも畳む**必要があるので、`navigate()` 側だけでなく
+    // ここ(現在地の唯一の権威であるルータの購読)でも閉じる。
+    return session.subscribe((screen) => {
+      setScreenId(screen);
+      setOpenGroupId(null);
+    });
   }, [session]);
 
   const meta = SCREEN_META[screenId];
+
+  function navigate(screen: ScreenId): void {
+    // 遷移したらポップオーバーは畳む(開きっぱなしだと本文の下端を隠す)。
+    setOpenGroupId(null);
+    session.navigate(screen);
+  }
 
   return (
     <div class="kf-app">
       <header class="kf-app__header">
         <h1 class="kf-app__title">
-          {meta.order === null ? meta.label : `${String(meta.order)}. ${meta.label}`}
+          {meta.label}
           <span class="kf-app__title-sub">継ぐ火 -Kept Flame-</span>
         </h1>
-        <ColonyClock store={store} />
+        <div class="kf-app__hud">
+          <ColonyClock store={store} />
+          <ResourceHud store={store} />
+        </div>
       </header>
       {installPromotion && (
         <InstallPromotionBanner
@@ -188,13 +329,15 @@ export function AppShell({
           onClose={() => setNotificationBannerClosed(true)}
         />
       )}
-      <ScreenHost
-        screenId={screenId}
-        store={store}
-        bootTick={bootTick}
-        onNavigate={session.navigate}
+      <ScreenHost screenId={screenId} store={store} bootTick={bootTick} onNavigate={navigate} />
+      <ScreenNav
+        current={screenId}
+        onNavigate={navigate}
+        openGroupId={openGroupId}
+        onToggleGroup={(groupId) => {
+          setOpenGroupId((open) => (open === groupId ? null : groupId));
+        }}
       />
-      <ScreenNav current={screenId} onNavigate={session.navigate} />
     </div>
   );
 }

@@ -17,6 +17,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ScreenHost, ScreenNav } from "../../../src/ui/AppShell";
+import {
+  NAV_GROUPS,
+  navGroupScreenIds,
+  navGroupsCoverAllScreens,
+  type NavGroupId,
+} from "../../../src/ui/navGroups";
 import { NUMBERED_SCREEN_COUNT, SCREEN_IDS, SCREEN_META } from "../../../src/ui/screens";
 import { ChronicleScreen } from "../../../src/ui/screens/chronicle/ChronicleScreen";
 import { CodifyScreen } from "../../../src/ui/screens/codify/CodifyScreen";
@@ -139,51 +145,110 @@ describe("ScreenHost(非アクティブ画面は物理アンマウント・ADR-0
   });
 });
 
-describe("ScreenNav(12画面 + 設定へのワンタップ遷移)", () => {
-  function navButtons(current: Parameters<typeof ScreenNav>[0]["current"], onNavigate = vi.fn()) {
-    const vnode = ScreenNav({ current, onNavigate });
-    const list = vnode.props.children as { readonly props: { readonly children: unknown[] } };
-    const items = list.props.children;
-    return {
-      onNavigate,
-      buttons: items.map(
-        (item) =>
-          (item as { readonly props: { readonly children: unknown } }).props.children as {
-            readonly props: {
-              readonly "data-screen-id": string;
-              readonly "aria-current"?: string;
-              readonly onClick: () => void;
-            };
-          },
-      ),
-    };
+// [束A] ナビは「13 タブ全掲」から「5 グループ + 展開」へ変わった(UX プレイテスト
+// F-5)。DOM 構造が変わったので、下のヘルパは vnode ツリーから button を再帰的に
+// 拾う形へ書き換えてある(検証している性質——全画面へ到達できる / 現在地が
+// aria-current で分かる / 表示名は screens.ts が出典——は M29 のまま)。
+interface NavButton {
+  readonly props: {
+    readonly "data-screen-id"?: string;
+    readonly "data-nav-group"?: string;
+    readonly "aria-current"?: string;
+    readonly "aria-expanded"?: boolean;
+    readonly onClick: () => void;
+  };
+}
+
+function collectButtons(node: unknown, out: NavButton[]): void {
+  if (Array.isArray(node)) {
+    for (const child of node) collectButtons(child, out);
+    return;
+  }
+  if (node === null || node === undefined || typeof node !== "object") return;
+  const vnode = node as { readonly type?: unknown; readonly props?: { children?: unknown } };
+  if (vnode.type === "button") out.push(node as NavButton);
+  collectButtons(vnode.props?.children, out);
+}
+
+describe("ScreenNav([束A] 5グループ集約 + サブ項目展開)", () => {
+  function navButtons(
+    current: Parameters<typeof ScreenNav>[0]["current"],
+    openGroupId: NavGroupId | null = null,
+    onNavigate = vi.fn(),
+  ) {
+    const vnode = ScreenNav({ current, onNavigate, openGroupId, onToggleGroup: () => undefined });
+    const buttons: NavButton[] = [];
+    collectButtons(vnode, buttons);
+    return { onNavigate, buttons };
   }
 
-  it("全画面ぶんのボタンが出る", () => {
+  it("畳んだ状態ではグループぶん(5個)のボタンだけが出る", () => {
     const { buttons } = navButtons("home");
-    expect(buttons.map((button) => button.props["data-screen-id"])).toEqual([...SCREEN_IDS]);
+    expect(buttons.map((button) => button.props["data-nav-group"])).toEqual([
+      ...NAV_GROUPS.map((group) => group.id),
+    ]);
   });
 
-  it("現在地だけ aria-current='page'", () => {
-    const { buttons } = navButtons("codify");
+  it("グループの和は 12画面 + 設定の全件(漏れも重複も無い)", () => {
+    expect(navGroupsCoverAllScreens()).toBe(true);
+    expect([...navGroupScreenIds()].sort()).toEqual([...SCREEN_IDS].sort());
+  });
+
+  it("展開するとそのグループの画面ぶんのサブ項目が出る", () => {
+    const { buttons } = navButtons("home", "expedition");
+    const subScreenIds = buttons
+      .filter((button) => button.props["data-nav-group"] === undefined)
+      .map((button) => button.props["data-screen-id"]);
+    expect(subScreenIds).toEqual(["expedition", "chronicle", "outposts"]);
+  });
+
+  it("現在地のサブ項目だけ aria-current='page'、その所属グループは 'true'", () => {
+    const { buttons } = navButtons("codify", "knowledge");
     for (const button of buttons) {
-      const expected = button.props["data-screen-id"] === "codify" ? "page" : undefined;
-      expect(button.props["aria-current"]).toBe(expected);
+      const screenId = button.props["data-screen-id"];
+      const groupId = button.props["data-nav-group"];
+      if (groupId === undefined) {
+        expect(button.props["aria-current"]).toBe(screenId === "codify" ? "page" : undefined);
+      } else {
+        expect(button.props["aria-current"]).toBe(groupId === "knowledge" ? "true" : undefined);
+      }
     }
   });
 
-  it("押すとその画面 ID で onNavigate が呼ばれる", () => {
-    const { buttons, onNavigate } = navButtons("home");
-    const target = buttons.find((button) => button.props["data-screen-id"] === "expedition");
+  it("サブ項目を押すとその画面 ID で onNavigate が呼ばれる", () => {
+    const { buttons, onNavigate } = navButtons("home", "expedition");
+    const target = buttons.find(
+      (button) =>
+        button.props["data-screen-id"] === "chronicle" &&
+        button.props["data-nav-group"] === undefined,
+    );
     target?.props.onClick();
-    expect(onNavigate).toHaveBeenCalledWith("expedition");
+    expect(onNavigate).toHaveBeenCalledWith("chronicle");
   });
 
-  it("表示名は screens.ts(GDD 6.6 の表記)をそのまま使う", () => {
-    const vnode = ScreenNav({ current: "home", onNavigate: () => undefined });
-    const text = JSON.stringify(vnode);
-    for (const id of SCREEN_IDS) {
-      expect(text).toContain(SCREEN_META[id].label);
+  it("画面 1 個だけのグループ(設定)は展開せず直接遷移する", () => {
+    const { buttons, onNavigate } = navButtons("home");
+    const settings = buttons.find((button) => button.props["data-nav-group"] === "system");
+    expect(settings?.props["aria-expanded"]).toBeUndefined();
+    settings?.props.onClick();
+    expect(onNavigate).toHaveBeenCalledWith("settings");
+  });
+
+  it("サブ項目の表示名は screens.ts(GDD 6.6 の表記)をそのまま使う(番号は出さない)", () => {
+    for (const group of NAV_GROUPS) {
+      // 単独グループ(設定)はサブ項目を持たず、バー上のグループ名だけで足りる。
+      if (group.screens.length === 1) continue;
+      const vnode = ScreenNav({
+        current: "home",
+        onNavigate: () => undefined,
+        openGroupId: group.id,
+      });
+      const text = JSON.stringify(vnode);
+      for (const id of group.screens) {
+        expect(text).toContain(SCREEN_META[id].label);
+        // 仕様書番号(「1.」等)はラベルから外した(UX プレイテスト F-5)。
+        expect(text).not.toContain(`${String(SCREEN_META[id].order ?? "")}. `);
+      }
     }
   });
 });

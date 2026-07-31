@@ -6,7 +6,7 @@
  */
 
 .kf-settings-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
@@ -20,7 +20,7 @@
 
 .kf-settings__seed,
 .kf-settings__capacity {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   font-variant-numeric: tabular-nums;
   color: #5b534b;
   margin: 0 0 0.25rem;
@@ -42,12 +42,12 @@
 }
 
 .kf-settings__section-title {
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
   margin: 0 0 0.3rem;
 }
 
 .kf-settings__section-note {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.5rem;
 }
@@ -57,7 +57,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.9rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -81,7 +81,7 @@
   width: 100%;
   min-height: 88px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   font-family: monospace;
   padding: 0.4rem 0.5rem;
   border: 1px solid #8a857d;
@@ -96,7 +96,7 @@
 }
 
 .kf-settings__import-outcome {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   margin: 0.5rem 0 0;
 }
 
@@ -119,7 +119,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;

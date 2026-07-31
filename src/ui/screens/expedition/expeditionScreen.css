@@ -9,24 +9,24 @@
  */
 
 .kf-expedition-screen__title {
-  font-size: 1rem;
+  font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
 }
 
 .kf-expedition-screen__slots {
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   margin: 0 0 0.6rem;
 }
 
 .kf-expedition-screen__subtitle {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   margin: 0.7rem 0 0.3rem;
 }
 
 .kf-expedition-screen__no-candidates,
 .kf-expedition-screen__no-dispatches {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
 }
 
@@ -49,7 +49,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.6rem;
   border: 1px solid #8a857d;
   border-radius: 4px;
@@ -85,7 +85,7 @@
   align-items: center;
   gap: 0.5rem;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.4rem 0.6rem;
   border: 1px solid #8a857d;
   border-radius: 4px;
@@ -113,7 +113,7 @@
 .kf-expedition__candidate-power,
 .kf-expedition__candidate-morale,
 .kf-expedition__candidate-traits {
-  font-size: 0.75rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
   font-variant-numeric: tabular-nums;
 }
@@ -131,7 +131,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.7rem;
   border: 1px solid #24201c;
   border-radius: 4px;
@@ -141,13 +141,13 @@
 }
 
 .kf-expedition__template-unfulfilled {
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
   color: #8c290b;
   margin: 0.4rem 0;
 }
 
 .kf-expedition__template-members {
-  font-size: 0.8rem;
+  font-size: var(--kf-fs-sub);
   font-variant-numeric: tabular-nums;
   margin: 0.4rem 0;
 }
@@ -161,7 +161,7 @@
 }
 
 .kf-expedition__roi-inactive {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   color: #5b534b;
 }
 
@@ -169,14 +169,14 @@
 .kf-expedition__roi-forgone,
 .kf-expedition__roi-value,
 .kf-expedition__roi-travel {
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   font-variant-numeric: tabular-nums;
   margin: 0 0 0.3rem;
 }
 
 /* [M32] GDD 8.6 の (B) 喪失リスク項。検収条件なので視覚的にも目立たせる。 */
 .kf-expedition__roi-loss {
-  font-size: 0.85rem;
+  font-size: var(--kf-fs-body);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #a11334;
@@ -187,7 +187,7 @@
   width: 100%;
   min-height: 44px;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--kf-fs-body);
   font-weight: 600;
   padding: 0.5rem;
   border: 1px solid #24201c;
@@ -217,7 +217,7 @@
   border-radius: 4px;
   padding: 0.4rem 0.6rem;
   background: #ffffff;
-  font-size: 0.78rem;
+  font-size: var(--kf-fs-sub);
 }
 
 .kf-expedition__dispatch-head {
@@ -247,7 +247,7 @@
   min-width: 44px;
   min-height: 44px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--kf-fs-sub);
   padding: 0.3rem 0.5rem;
   border: 1px solid #8a857d;
   border-radius: 4px;
