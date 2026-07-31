@@ -20,16 +20,21 @@ import { buildVector, diffVectors, loadStoredVector } from "../../tools/genGolde
 const registry = coverageJson as CoverageRegistry;
 
 describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
-  it("ベクタ計画が spec §6 + M10/M15/M20/M22 拡張のとおり 64 本ある", () => {
+  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25 拡張のとおり 73 本ある", () => {
     // 37 → 40: M10 で sc17-prod-full-alpha / sc18-sto-overflow-alpha /
     // sc18-sto-overflow-split-alpha の 3 本を追加(spec §9・conformance 拡張 #1)。
     // 40 → 56: M15 で住民系(sc19〜sc27・16 本)を追加(conformance 拡張 #2)。
     // 56 → 62: M20 で footprint / 過密(sc28〜sc32・6 本)を追加(conformance 拡張 #3)。
-    // 62 → 64: M22 で event 効果プリミティブ(sc33・2 本)を追加。**拡張 #4(M25)の
-    //   先取りではなく**、ロードマップ M22 行の「destroyRecords を conformance ベクタで
-    //   挙動固定」を満たすための最小追加である(spec §9.2(5) の探索/event 系統の
-    //   本体 8〜12 本は引き続き M25 の担当)。
-    expect(VECTOR_PLANS.length).toBe(64);
+    // 62 → 64: M22 で event 効果プリミティブ(sc33・2 本)を追加(拡張 #4 の先取りではなく
+    //   ロードマップ M22 行の「destroyRecords を conformance ベクタで挙動固定」を満たす
+    //   ための最小追加)。
+    // 64 → 73: M25 で探索/event/outpost 系統(conformance 拡張 #4・spec §9.2(5))を
+    //   追加(sc34-exp-two-slot-order ×2 / sc35-exp-rescue ×2 / sc36-exp-all-lost ×2 /
+    //   sc37-exp-reward-overflow ×1 / sc38-out-supply ×2 = 9 本)。既存ベクタの
+    //   expected/splitCounters は 1 バイトも変えていない(このコミットで動いたのは
+    //   algoVersion 2→3 bump に伴う sc24 系 3 本のみ・別コミット扱いの理由は
+    //   MEMORY.md の bump 束ね裁定を参照)。
+    expect(VECTOR_PLANS.length).toBe(73);
   });
 
   it("vectorId に重複が無い", () => {

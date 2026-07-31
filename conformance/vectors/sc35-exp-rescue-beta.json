@@ -2,35 +2,35 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1936,
+    "canonicalJsonLength": 1119,
     "counters": {
-      "rateChangeEventCount": 3,
+      "rateChangeEventCount": 1,
       "recallOccurrenceCount": 0,
-      "segmentCount": 26,
-      "stochasticStepCount": 25,
+      "segmentCount": 10,
+      "stochasticStepCount": 10,
       "stochasticTrialCount": 0
     },
     "probe": {
-      "entityCount": 9,
+      "entityCount": 3,
       "recallImpairedResidentCount": 0,
       "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 20000000000,
+      "resourceStockSumRaw": 0,
       "rngStateDomainCount": 0,
       "rngStateWordsXor": 0,
-      "tick": 250
+      "tick": 100
     },
-    "stateDigest": "5ede495d1938b3116e08197fd5bf132d"
+    "stateDigest": "28c0863c98d0ad68672f690e121af9cc"
   },
   "formatVersion": 1,
   "fromTick": 0,
   "paths": ["rng-worldseed-variation"],
-  "scenarioId": "sc24-pop-floor-resolved",
+  "scenarioId": "sc35-exp-rescue",
   "splitCounters": null,
   "splitTicks": [],
-  "toTick": 250,
-  "vectorId": "sc24-pop-floor-resolved-beta",
+  "toTick": 100,
+  "vectorId": "sc35-exp-rescue-beta",
   "worldSeed": "seedBeta",
   "worldSeedU32": 350207966
 }

@@ -839,6 +839,114 @@
       "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts expeditionReturn"],
       "observedBy": ["split-digest"],
       "note": "[M22] sc33-ev-destroy-records-split(splitTicks=[100])が固定。C6(分割不変性)を帰還+効果適用の境界イベントに対して踏む。反証: 効果の適用が区間境界で二重に走る/落ちると split 側の最終ダイジェストが一括実行と食い違い、golden:write が GeneratorError で停止する"
+    },
+    {
+      "id": "exp-two-slot-tie-order",
+      "title": "同一tickに帰還する派遣枠2本の解決順は派遣IDのUTF-16昇順(entityId tie-break)で決まる",
+      "refs": [
+        "GDD 8.1",
+        "GDD 11.7(tick, パイプライン段, entityId)",
+        "src/engine/scheduler.ts buildEventQueue(expeditionReturn の entityId=snapshot.id)"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc34-exp-two-slot-order-alpha が固定。dispatchAaa(near)/dispatchZzz(deep)が同一tick(50)に帰還し、帰還ログ(renderedLogs.entries)へ追記される順が \"Aaa\" < \"Zzz\" のID昇順で確定する。反証(2026-07-31実測): near/deepの内容(band・報酬)を保ったまま dispatchAaa と dispatchZzz のID文字列だけを入れ替える(帰還順が逆になる)と、stateDigestが df51821df1101169a998f92f82352ccd → 9e86cb59cd3132f5a5e41cab0677df89 へ動くことを確認しrevert"
+    },
+    {
+      "id": "exp-band-label-rendered",
+      "title": "距離帯(near/far/deep)のラベルが帰還ログのレンダリング済み文字列へ実際に反映される",
+      "refs": [
+        "GDD 8.1",
+        "src/engine/rules/exploration.ts BAND_LABEL",
+        "src/engine/rules/exploration.ts renderReturnLog"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M25] sc34-exp-two-slot-order-alpha(near/deep)+ sc35-exp-rescue-alpha(far)+ sc36-exp-all-lost-alpha(far)で3帯とも踏む。DispatchNode.logText は分岐時の確定文字列(2段目)だが、帰還ログ1行目の要約(renderReturnLog)は毎回 `BAND_LABEL[snapshot.band]` を snapshot.band から直接引く(exploration.ts §5)。反証(2026-07-31実測): sc34のdispatchZzzのbandをdeep→nearへ書き換えるとstateDigestが df51821df1101169a998f92f82352ccd → 69a23abfbdb6f72b4c2b2c0d8aeab02f へ動くことを確認しrevert"
+    },
+    {
+      "id": "exp-reward-basic-credit",
+      "title": "探索報酬(上限設定なし)が本拠の対応する resource 在庫へそのまま加算される",
+      "refs": ["GDD 8.4", "src/engine/rules/exploration.ts applyExpeditionReward"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc34-exp-two-slot-order-alpha が固定(dispatchAaa 500 + dispatchZzz 300 = firewood 800 = probe.resourceStockSumRaw 800,000,000 raw)。sc33(M22)は rewardFix=0 の盤面だったため、この経路は M25 が初めて golden で踏む。反証(2026-07-31実測): dispatchZzz の rewardHuman を 300→0 にすると probe.resourceStockSumRaw が 800,000,000 → 500,000,000 raw へ(dispatchAaa の 500 分のみ)動き、canonicalJsonLength 768→766・stateDigest も動くことを確認しrevert"
+    },
+    {
+      "id": "exp-split-at-return-tick",
+      "title": "分割不変性: 効果を持たない(destroyRecordsを伴わない)通常の帰還tickちょうどでadvanceを区切っても最終状態が一括実行と一致する",
+      "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts expeditionReturn"],
+      "observedBy": ["split-digest"],
+      "note": "[M25] sc34-exp-two-slot-order-split-alpha(splitTicks=[50])が固定。ev-split-at-return-tick(sc33)は destroyRecords 効果を伴う経路の分割不変性であるのに対し、こちらは報酬付与+帰還ログ+tie-breakだけの経路を踏む(区別する理由: 効果適用のstep(2b)を経由しない)。反証: 帰還処理が区間境界で二重に走る/落ちるとsplit側の最終ダイジェストが一括実行と食い違い、golden:writeがGeneratorErrorで停止する"
+    },
+    {
+      "id": "exp-rescue-join-memoir",
+      "title": "GDD 7.7の探索での保護が実際に住民を加入させ、保護した側のmemoirLogにexplorationRescueが記録される",
+      "refs": [
+        "GDD 7.7",
+        "GDD 7.3",
+        "src/engine/rules/exploration.ts joinRescuedResident/resolveExpedition §(3)"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc35-exp-rescue-alpha/betaが固定。dispatchRescueの帰還(tick40)でresidentGusのmemoirLogへexplorationRescueが追記され、新規住民(rescueResidentIdOf形式のID)がentityCountを2→3に増やす。joinRescuedResidentはcreateResidentLife(worldSeedU32依存)を呼ぶためalpha(worldSeedU32=3047884336)/beta間でstateDigestが異なる(rescued住民のlifespanTickが変わるため・C7対象)。反証(2026-07-31実測): nodeのrescueをtrue→falseにすると加入が起きずentityCount 3→2・canonicalJsonLength 1120→510・stateDigest be7611090441a785beaec87b1c0b9199→06ccf2db8996cb8fbb5acbc1c6e1a26bへ動くことを確認しrevert"
+    },
+    {
+      "id": "exp-casualty-death-gate",
+      "title": "探索での脱落者(casualtyMemberIds)は資源exploration.tsが自分で殺さず段70の死亡ゲートへ渡され、実際に死亡が成立する",
+      "refs": [
+        "GDD 8.5",
+        "GDD 7.6",
+        "src/engine/rules/exploration.ts §4",
+        "src/engine/scheduler.ts expeditionReturn処理のcasualtyIds→residentDeath push"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc36-exp-all-lost-alphaが固定。dispatchWipeの帰還(tick50)でresidentGigi/residentHugoの両名が段70でresidentDeathイベントとして処理され、life.diedTick=50が両名に立つ(全滅・GDD 8.5)。counters.rateChangeEventCount=3(帰還1+死亡2)。townParamsはあるがbunkhouseが無いため人口下限floor=0で即時死亡が成立(延期なし)。反証(2026-07-31実測): snapshotのcasualtyMemberIdsを空にすると誰も死なずrateChangeEventCount 3→1・canonicalJsonLength 943→808・stateDigest 77e9654331aff27f5c473e712fe01873→a12a31b041bb6cdc9ed6edfaee5f4c40へ動くことを確認しrevert"
+    },
+    {
+      "id": "exp-split-at-casualty-death-tick",
+      "title": "分割不変性: 探索由来の全滅(段60帰還→段70死亡ゲート、同一tick2件)のtickちょうどでadvanceを区切っても最終状態が一括実行と一致する",
+      "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts §3 段60/段70"],
+      "observedBy": ["split-digest"],
+      "note": "[M25] sc36-exp-all-lost-split-alpha(splitTicks=[50])が固定。帰還(段60)と死亡2件(段70)が同一tickに重なる境界での分割不変性を確認する(sc27の死亡+memoir consequence orderの分割不変版はsc15/sc23で別途踏んでいるが、探索起因の同tick複数死亡は本ベクタが初)。反証: 二重死亡処理/取りこぼしがあるとsplit側の最終ダイジェストが一括実行と食い違い、golden:writeがGeneratorErrorで停止する"
+    },
+    {
+      "id": "exp-reward-overflow-clamp",
+      "title": "balance.exploration.rewardOverflowが設定されていれば探索報酬も保管上限でクランプされ超過分は方策どおり処理される",
+      "refs": [
+        "GDD 12.1",
+        "GDD 6.7",
+        "src/engine/rules/exploration.ts applyExpeditionReward",
+        "src/engine/rules/storage.ts applyOverflowPolicy"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc37-exp-reward-overflow-alphaが固定。初期在庫200+報酬2000(policy=discard・capacity=1000)がcapacity1000でクランプされprobe.resourceStockSumRaw=1,000,000,000 rawになる(素の加算なら2,200,000,000 raw相当)。反証(2026-07-31実測): contentPatchをnull(rewardOverflowブロック無し)に戻すとprobe.resourceStockSumRawが1,000,000,000→2,200,000,000 raw(クランプなしの素の合計)へ動き、stateDigestも動くことを確認しrevert"
+    },
+    {
+      "id": "out-supply-stage80-wired",
+      "title": "衛星拠点の供給(GDD 9.2)がscheduler段80(PIPELINE_STAGE.satellite)へ結線され、実際にadvanceで本拠在庫が増える",
+      "refs": [
+        "GDD 9.2",
+        "GDD 11.7 段80",
+        "src/engine/scheduler.ts runSchedule (A)区間積分ブロック",
+        "src/engine/rules/outpost.ts applyOutpostSupply/computeOutpostSupplyRates"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25・裁定台帳v2 必-1] sc38-out-supply-alphaが固定。outpostForestActive(near・常駐2名)の供給がtick1000ぶん本拠のfirewood在庫へ加算される(M24完了時点では『scheduler無変更』が申し送りだったが、本タスクでrunSchedule内の(A)区間積分ブロック(生産・研究・bond・masteryと並ぶ)へ畳み込んだ)。反証(2026-07-31実測): scheduler.tsのapplyOutpostSupply呼び出しを一時的にコメントアウトしgolden:writeを実行→probe.resourceStockSumRawが200,000,000,000→100,000,000,000 raw(拠点供給ぶんちょうど半減=本拠hearth産出のみ)・stateDigestも動くことを確認しrevert"
+    },
+    {
+      "id": "out-supply-no-double-count",
+      "title": "本拠生産(facility.workerIds)と衛星拠点常駐(outpost.residentIds)は別集合であり、同一resourceIdへ供給しても二重計上が起きない",
+      "refs": [
+        "GDD 9.2",
+        "src/engine/rules/outpost.ts §2 assertNoDoubleStationedResidents",
+        "src/engine/rules/outpost.ts computeOutpostSupplyRates"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M25] sc38-out-supply-alphaが固定(検分観点そのもの)。facilityHearthHome(residentHome)産出のfirewoodとoutpostForestActive(residentOutpostA/B)供給のfirewoodが同一resource entityへ加算され、最終在庫probe.resourceStockSumRaw=200,000,000,000 rawが『本拠生産100,000,000,000 raw(out-supply-stage80-wiredの反証で実測)+拠点供給100,000,000,000 rawの単純和』であることを実測固定(tests/engine/outpost.test.tsの段80結線版unit testと同一構造をgolden側でも確認)。residentIds の重複があれば assertNoDoubleStationedResidents がRulesErrorで止まる(unit-testで別途固定済み・本ベクタは正常系の和が正しいことの担当)"
+    },
+    {
+      "id": "out-split-at-supply-integration",
+      "title": "分割不変性: 衛星供給(段80の区間積分)を任意tickで区切っても最終状態が一括実行と一致する(M25/M5/M11前例)",
+      "refs": ["src/engine/advance.ts §3", "src/engine/scheduler.ts §6 (A)区間積分ブロック"],
+      "observedBy": ["split-digest"],
+      "note": "[M25] sc38-out-supply-split-alpha(splitTicks=[500])が固定。供給レートはresidentIds/拠点Lvが区間中に変化しない限り一定(rules/outpost.ts §1)なので生産(a-closed-form)と同型のtelescoping。反証: applyOutpostSupplyの呼び出し位置がrunScheduleの(A)積分ループの外に出る/区間境界で二重適用されるとsplit側の最終ダイジェストが一括実行と食い違い、golden:writeがGeneratorErrorで停止する"
     }
   ]
 }

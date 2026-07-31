@@ -382,4 +382,59 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     ["ev-split-at-return-tick"],
     { splitTicks: [100] },
   ),
+
+  // --- sc34〜sc38: 探索 / event / outpost(M25: conformance 拡張 #4) -------------------
+
+  // --- sc34-exp-two-slot-order(GDD 8.1 派遣枠2の同時解決順 + 距離帯ラベル) ------------
+  plan("sc34-exp-two-slot-order-alpha", "sc34-exp-two-slot-order", SEEDS.alpha, 100, [
+    "exp-two-slot-tie-order",
+    "exp-band-label-rendered",
+    "exp-reward-basic-credit",
+  ]),
+  plan(
+    "sc34-exp-two-slot-order-split-alpha",
+    "sc34-exp-two-slot-order",
+    SEEDS.alpha,
+    100,
+    ["exp-split-at-return-tick"],
+    { splitTicks: [50] },
+  ),
+
+  // --- sc35-exp-rescue(GDD 7.7 探索での保護) ------------------------------------------
+  // joinRescuedResident が createResidentLife(worldSeedU32 依存)を呼ぶので
+  // sc24 と同じ理由で alpha/beta の 2 本(C7 対象)。
+  plan("sc35-exp-rescue-alpha", "sc35-exp-rescue", SEEDS.alpha, 100, ["exp-rescue-join-memoir"]),
+  plan("sc35-exp-rescue-beta", "sc35-exp-rescue", SEEDS.beta, 100, ["rng-worldseed-variation"]),
+
+  // --- sc36-exp-all-lost(GDD 8.5 全滅・段70死亡ゲートへの委譲) ------------------------
+  plan("sc36-exp-all-lost-alpha", "sc36-exp-all-lost", SEEDS.alpha, 100, [
+    "exp-casualty-death-gate",
+  ]),
+  plan(
+    "sc36-exp-all-lost-split-alpha",
+    "sc36-exp-all-lost",
+    SEEDS.alpha,
+    100,
+    ["exp-split-at-casualty-death-tick"],
+    { splitTicks: [50] },
+  ),
+
+  // --- sc37-exp-reward-overflow(GDD 12.1 item overflow・探索報酬の上限クランプ) ------
+  plan("sc37-exp-reward-overflow-alpha", "sc37-exp-reward-overflow", SEEDS.alpha, 60, [
+    "exp-reward-overflow-clamp",
+  ]),
+
+  // --- sc38-out-supply(GDD 9.2 衛星供給・scheduler段80結線・二重計上なし) -----------
+  plan("sc38-out-supply-alpha", "sc38-out-supply", SEEDS.alpha, 1000, [
+    "out-supply-stage80-wired",
+    "out-supply-no-double-count",
+  ]),
+  plan(
+    "sc38-out-supply-split-alpha",
+    "sc38-out-supply",
+    SEEDS.alpha,
+    1000,
+    ["out-split-at-supply-integration"],
+    { splitTicks: [500] },
+  ),
 ];

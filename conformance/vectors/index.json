@@ -1,5 +1,5 @@
 {
-  "algoVersion": 2,
+  "algoVersion": 3,
   "baseContentVectorIds": [
     "sc01-clamp-exact",
     "sc01-clamp-over",
@@ -39,7 +39,13 @@
     "sc30-foot-neighbor-dedup-alpha",
     "sc32-foot-board-edge-alpha",
     "sc33-ev-destroy-records-alpha",
-    "sc33-ev-destroy-records-split"
+    "sc33-ev-destroy-records-split",
+    "sc34-exp-two-slot-order-alpha",
+    "sc34-exp-two-slot-order-split-alpha",
+    "sc35-exp-rescue-alpha",
+    "sc35-exp-rescue-beta",
+    "sc36-exp-all-lost-alpha",
+    "sc36-exp-all-lost-split-alpha"
   ],
   "formatVersion": 1,
   "vectors": [
@@ -127,6 +133,18 @@
     },
     { "file": "sc32-foot-board-edge-alpha.json", "vectorId": "sc32-foot-board-edge-alpha" },
     { "file": "sc33-ev-destroy-records-alpha.json", "vectorId": "sc33-ev-destroy-records-alpha" },
-    { "file": "sc33-ev-destroy-records-split.json", "vectorId": "sc33-ev-destroy-records-split" }
+    { "file": "sc33-ev-destroy-records-split.json", "vectorId": "sc33-ev-destroy-records-split" },
+    { "file": "sc34-exp-two-slot-order-alpha.json", "vectorId": "sc34-exp-two-slot-order-alpha" },
+    {
+      "file": "sc34-exp-two-slot-order-split-alpha.json",
+      "vectorId": "sc34-exp-two-slot-order-split-alpha"
+    },
+    { "file": "sc35-exp-rescue-alpha.json", "vectorId": "sc35-exp-rescue-alpha" },
+    { "file": "sc35-exp-rescue-beta.json", "vectorId": "sc35-exp-rescue-beta" },
+    { "file": "sc36-exp-all-lost-alpha.json", "vectorId": "sc36-exp-all-lost-alpha" },
+    { "file": "sc36-exp-all-lost-split-alpha.json", "vectorId": "sc36-exp-all-lost-split-alpha" },
+    { "file": "sc37-exp-reward-overflow-alpha.json", "vectorId": "sc37-exp-reward-overflow-alpha" },
+    { "file": "sc38-out-supply-alpha.json", "vectorId": "sc38-out-supply-alpha" },
+    { "file": "sc38-out-supply-split-alpha.json", "vectorId": "sc38-out-supply-split-alpha" }
   ]
 }

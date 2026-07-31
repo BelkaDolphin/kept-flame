@@ -2,39 +2,35 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1937,
+    "canonicalJsonLength": 521,
     "counters": {
-      "rateChangeEventCount": 4,
+      "rateChangeEventCount": 1,
       "recallOccurrenceCount": 0,
-      "segmentCount": 27,
-      "stochasticStepCount": 25,
+      "segmentCount": 6,
+      "stochasticStepCount": 6,
       "stochasticTrialCount": 0
     },
     "probe": {
-      "entityCount": 9,
+      "entityCount": 2,
       "recallImpairedResidentCount": 0,
       "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 20000000000,
+      "resourceStockSumRaw": 1000000000,
       "rngStateDomainCount": 0,
       "rngStateWordsXor": 0,
-      "tick": 250
+      "tick": 60
     },
-    "stateDigest": "a18836e7e09121db001801696aa203d7"
+    "stateDigest": "ecd8a1add4184ad93125ca47cc7c29fd"
   },
   "formatVersion": 1,
   "fromTick": 0,
-  "paths": [
-    "life-population-floor-death-gate",
-    "life-sunny-drift-arrival",
-    "tie-arrival-before-death"
-  ],
-  "scenarioId": "sc24-pop-floor-resolved",
+  "paths": ["exp-reward-overflow-clamp"],
+  "scenarioId": "sc37-exp-reward-overflow",
   "splitCounters": null,
   "splitTicks": [],
-  "toTick": 250,
-  "vectorId": "sc24-pop-floor-resolved-alpha",
+  "toTick": 60,
+  "vectorId": "sc37-exp-reward-overflow-alpha",
   "worldSeed": "seedAlpha",
   "worldSeedU32": 3047884336
 }

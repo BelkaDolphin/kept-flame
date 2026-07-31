@@ -106,6 +106,7 @@ import { applyBondProgress, applyPartnerLossEffects, computeBondRates } from "./
 import { resolveExpedition } from "./rules/exploration";
 import { deathTickOf } from "./rules/lifespan";
 import { recordDeathMemoir } from "./rules/memoir";
+import { applyOutpostSupply, computeOutpostSupplyRates } from "./rules/outpost";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
 import { applyProduction, computeProductionRates, type ProductionRates } from "./rules/production";
 import { applyMasteryProgress, applyTechLossOnDeath } from "./rules/techMemory";
@@ -187,7 +188,13 @@ export const PIPELINE_STAGE = {
   arrival: 65,
   /** 死亡/全滅判定([M11] 寿命死・GDD 11.7 段70)。 */
   death: 70,
-  /** 衛星供給(未実装)。 */
+  /**
+   * [M25] 衛星供給(GDD 9.2 / 11.7 段80)。`rules/outpost.ts` の
+   * `applyOutpostSupply` は生産(段30)と同じく**区間の閉形式積分**であって
+   * 離散イベントではないので、`SchedulerEventKind` は増やさず §6 の (A) 区間
+   * 積分ブロックへ生産・研究・bond・mastery と並べて畳み込む(下記 §6 参照)。
+   * この定数は「同一 tick 内優先順位における位置」の予約番号として残す。
+   */
   satellite: 80,
   /** 幕塵メーター更新(未実装)。 */
   dust: 90,
@@ -758,6 +765,12 @@ export function runSchedule(
     // [M12/M13] bond(共働の絆)も同じ (A) 区間のレートである。生産と同じ位置で
     // 1 回だけ確定させる(区間中に共働の顔ぶれが変わらないことが (A) の前提)。
     const bondRates = computeBondRates(next, cursor);
+    // [M25] 衛星供給(GDD 9.2 / 11.7 段80・PIPELINE_STAGE.satellite)も同じ (A)
+    // 区間のレートである。翳り率は幕塵メーター(段90)が未実装のため既定の
+    // FIX_ZERO(rules/outpost.ts §3)。常駐人数/拠点Lvは Command 経由でしか
+    // 変わらない(このタスクは scheduler 内に配置/常駐コマンドを持たない)ので、
+    // production と同じく区間内で変化しない = 境界イベントを新設する必要がない。
+    const outpostRates = computeOutpostSupplyRates(next, ctx.content);
     syncResearchCompletionEvent(queue, ctx, researchTarget, rates, cursor);
 
     // 3. 境界の決定。イベントが toTick 以降なら地平線で切る。
@@ -776,6 +789,10 @@ export function runSchedule(
       next = applyBondProgress(next, bondRates, delta, boundary);
       // [M13] 実地稼働による定着度の蓄積(GDD 11.2 / 4)。生産と同じレート×区間長。
       next = applyMasteryProgress(next, ctx.content, rates.masteryGains, delta);
+      // [M25] 衛星供給(GDD 9.2 / 11.7 段80)。生産と同じ「レート × 区間長」の
+      // 閉形式(rules/outpost.ts の applyOutpostSupply)。既存 golden シナリオは
+      // 拠点ゼロなので outpostRates.resourceRateByResourceId は常に空 = no-op。
+      next = applyOutpostSupply(next, outpostRates, delta);
       next = setField(next, "tick", boundary);
       cursor = boundary;
       segmentCount++;

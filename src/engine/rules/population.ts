@@ -79,6 +79,7 @@ import {
 } from "../state/state";
 import { putEntity, setField, updateEntity } from "../state/update";
 import { createResidentLife } from "./lifespan";
+import { initializeResidentMemoir } from "./memoir";
 import { RulesError, requireFacilityDef, type AdvanceContext, type EngineContent } from "./types";
 
 /**
@@ -216,9 +217,14 @@ export interface ArrivalResult {
  * 晴天漂着を 1 回判定する(GDD 7.7)。寝床上限に空きがあるときだけ 1 人増える。
  *
  * 生成される住民は**中立値**(士気 50 / mastery 0 / trait なし / ステータス未設定
- * = 全て基準 50)で、生涯だけが seed 決定論生成される。人物像(memoirLog・
- * ステータスの振り分け・trait 抽選)は M12 以降の担当であり、ここで先取りすると
- * 「生成規則が二重に存在する」状態になるため意図的に持たせていない。
+ * = 全て基準 50)で、生涯だけが seed 決定論生成される。ステータスの振り分け・
+ * trait 抽選は未実装のまま(意図的に持たせていない)だが、**[M25] memoirLog の
+ * bio 3 件(出自/口癖/恐れ)+加入記録は `initializeResidentMemoir` で結線済み**
+ * (裁定 v1必-2 / coverage.json `mem-bio-arrival-unwired` の解消。探索での保護
+ * (`rules/exploration.ts` の `joinRescuedResident`)が既に同じ関数を呼んでいたのと
+ * 同じ生成規則を晴天漂着へも揃えた。「生成規則が二重に存在する」ことにはならない
+ * ——bio の実際の文言(日本語プロース)は今も未実装で、持つのはテンプレ ID +
+ * 決定論パラメータだけである・memoir.ts §1)。
  *
  * @throws {RulesError} 生成 ID が既に state にある場合(1 tick 1 人の不変条件違反)
  */
@@ -249,7 +255,10 @@ export function applyArrival(state: GameState, ctx: AdvanceContext, tick: number
     recallImpairedUntilTick: 0,
     life: createResidentLife(ctx.worldSeedU32, id, tick, town),
   };
-  return { state: putEntity(state, resident), arrivedId: id };
+  return {
+    state: initializeResidentMemoir(putEntity(state, resident), ctx.worldSeedU32, id, tick),
+    arrivedId: id,
+  };
 }
 
 // --- 3. 死亡と人口下限ゲート(GDD 7.6 / 11.7 段70)-------------------------

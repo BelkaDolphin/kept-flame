@@ -27,17 +27,19 @@ import type { TechContent } from "../schema/tech";
 import { fixFromInt, fixFromRaw, type Fix } from "../src/engine/fp";
 import type { ResidentStats } from "../src/engine/rules/stats";
 import { techMemoryKeyOf } from "../src/engine/rules/techMemory";
-import type { EngineContent } from "../src/engine/rules/types";
+import type { DistanceBand, EngineContent } from "../src/engine/rules/types";
 import {
   entityIdFromString,
   type CodifyState,
   type DispatchNode,
   type DispatchSnapshot,
+  type DispatchStance,
   type EntityState,
   type FacilityFootprint,
   type FacilityState,
   type GameState,
   type GameStateMeta,
+  type OutpostState,
   type ResearchState,
   type ResidentLife,
   type ResidentState,
@@ -560,23 +562,102 @@ function mkDispatchSnapshot(args: {
   readonly returnTick: number;
   readonly nodes: readonly DispatchNode[];
   readonly eventId?: string;
+  /** [M25] 距離帯(既定 "near")。GDD 8.1 の 3 帯(near/far/deep)を golden で踏むための口。 */
+  readonly band?: DistanceBand;
+  /** [M25] 派遣方針(既定 "cautious")。 */
+  readonly stance?: DispatchStance;
+  /** [M25] 派遣を確定した tick(既定 0)。 */
+  readonly dispatchTick?: number;
+  /** [M25] 帰還時の総報酬(人間単位・既定 0)。 */
+  readonly rewardHuman?: number;
+  /** [M25] 報酬を受け取る resource 定義 ID(既定 "firewood")。 */
+  readonly rewardResourceId?: string;
+  /** [M25] 段70 の死亡ゲートへ渡す脱落者(ID 昇順であること・既定なし)。 */
+  readonly casualtyMemberIds?: readonly string[];
 }): DispatchSnapshot {
   const base: DispatchSnapshot = {
     id: eid(args.id),
     destinationId: eid(args.destinationId),
-    band: "near",
-    stance: "cautious",
+    band: args.band ?? "near",
+    stance: args.stance ?? "cautious",
     memberIds: args.memberIds.map(eid),
-    dispatchTick: 0,
+    dispatchTick: args.dispatchTick ?? 0,
     returnTick: args.returnTick,
     teamPowerFix: fixFromInt(150),
     nodes: args.nodes,
     withdrawn: false,
-    rewardFix: fixFromInt(0),
-    rewardResourceId: eid("firewood"),
-    casualtyMemberIds: [],
+    rewardFix: fixFromInt(args.rewardHuman ?? 0),
+    rewardResourceId: eid(args.rewardResourceId ?? "firewood"),
+    casualtyMemberIds: (args.casualtyMemberIds ?? []).map(eid),
   };
   return args.eventId === undefined ? base : { ...base, eventId: eid(args.eventId) };
+}
+
+/**
+ * [M25] 衛星拠点 1 基を直接組み立てる(`createGameState` の `outposts` 引数へ渡す)。
+ * `mkDispatchSnapshot` と同じ考え方 —— コマンド層(拠点設置)を持たない golden
+ * シナリオが、コマンドが作ったのと同じ確定値を直接置くための口。
+ */
+function mkOutpost(
+  name: string,
+  outpostTypeId: string,
+  band: DistanceBand,
+  residentIds: readonly string[],
+  overrides: { readonly level?: number; readonly establishedTick?: number } = {},
+): OutpostState {
+  return {
+    id: eid(name),
+    outpostTypeId: eid(outpostTypeId),
+    level: overrides.level ?? 1,
+    band,
+    residentIds: residentIds.map(eid),
+    establishedTick: overrides.establishedTick ?? 0,
+  };
+}
+
+/**
+ * [M25] `content/outpostType.json`(M24 の実 content・鉱山/農園/林の3タイプ)を
+ * そのまま raw バンドルへ足す。base content には未投入(M24 完了時点の申し送り
+ * どおり)なので、拠点系シナリオは全て本 patch を要する。`balance.outpost`
+ * (distanceBandUpkeepMul)は base content に既にあるので触らない。
+ */
+function patchAddOutpostType(): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => ({
+    ...raw,
+    outpostType: readContentJson("outpostType.json") as readonly unknown[],
+  });
+}
+
+/**
+ * [M25] 探索報酬のオーバーフロー方策(GDD 12.1 `item.overflow`・M22)を
+ * `balance.exploration.rewardOverflow` へ追加する。base content には無い
+ * (M22 完了時点で「ブロックが無ければ上限なし」のまま・schema/balance.ts の doc)。
+ */
+function patchExplorationRewardOverflow(options: {
+  readonly capacity: number;
+  readonly policy: "discard" | "convert";
+  readonly convertTo?: string;
+  readonly ratio?: number;
+}): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    const exploration = clone(balance["exploration"]) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: {
+        ...balance,
+        exploration: {
+          ...exploration,
+          rewardOverflow: {
+            policy: options.policy,
+            capacity: options.capacity,
+            convertTo: options.convertTo ?? null,
+            ratio: options.ratio ?? 0,
+          },
+        },
+      },
+    };
+  };
 }
 
 // ===========================================================================
@@ -1319,6 +1400,254 @@ function sc33BuildState(worldSeed: string): GameState {
   );
 }
 
+// ===========================================================================
+// 8. M25: conformance 拡張 #4(探索 / event / outpost ぶん)
+// ===========================================================================
+//   探索(M21)・衛星拠点(M24 + 今回の段80結線)の系統には golden vector が
+//   1本も無かった(coverage.json に `exp-`/`out-` 経路がゼロ)。sc33 と同じ
+//   考え方(`buildDispatchSnapshot`/`buildState` はコマンド層を経由しないため、
+//   派遣は `mkDispatchSnapshot` で確定値を直接置く)を踏襲する。
+
+// --- sc34-exp-two-slot-order(派遣枠2の同時解決順 + 距離帯ラベル) -----------------
+
+/**
+ * [M25] 同一 tick(50)に帰還する 2 本の派遣(`dispatchAaa`/`dispatchZzz`)。
+ * どちらも成功・報酬ありで、帰還ログ(`renderedLogs.entries`)へ追記される。
+ * tie-break(scheduler.ts §3: tick → パイプライン段 → entityId)の entityId は
+ * **派遣 ID**(`buildEventQueue` が `entityId: snapshot.id` で積むため)なので、
+ * "dispatchAaa" < "dispatchZzz"(UTF-16 昇順)で Aaa が必ず先に解決される
+ * = renderedLogs は [Aaa の文, Zzz の文] の順で固定される。
+ * band は near(Aaa)/deep(Zzz)を使い、GDD 8.1 の距離帯ラベル(BAND_LABEL)が
+ * 帰還ログの文言へ実際に反映されることも同時に固定する(far は sc36 で踏む)。
+ * RNG を一切引かない(節点は確定値・rescue なし)ので worldSeed 非依存
+ * = C7 対象外(sc33 と同じ理由)。
+ */
+function sc34BuildState(worldSeed: string): GameState {
+  const nodeNear: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(50),
+    success: true,
+    rewardFix: fixFromInt(500),
+    injuryFix: fixFromInt(0),
+    rescue: false,
+    logText: "近郊で薪をいくらか集めた。",
+  };
+  const nodeDeep: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(50),
+    success: true,
+    rewardFix: fixFromInt(300),
+    injuryFix: fixFromInt(0),
+    rescue: false,
+    logText: "深部の遺構で書物を見つけた。",
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentEve", { dispatched: true }),
+      mkResident("residentFin", { dispatched: true }),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchAaa",
+        destinationId: "destNear",
+        band: "near",
+        memberIds: ["residentEve"],
+        returnTick: 50,
+        nodes: [nodeNear],
+        rewardHuman: 500,
+      }),
+      mkDispatchSnapshot({
+        id: "dispatchZzz",
+        destinationId: "destDeep",
+        band: "deep",
+        memberIds: ["residentFin"],
+        returnTick: 50,
+        nodes: [nodeDeep],
+        rewardHuman: 300,
+      }),
+    ],
+  );
+}
+
+// --- sc35-exp-rescue(GDD 7.7 探索での保護 + memoir explorationRescue) -----------
+
+/**
+ * [M25] 1 本の派遣(far域)が保護(rescue)を伴って帰還する。
+ * `joinRescuedResident`(rules/exploration.ts §5)が呼ぶ `createResidentLife`
+ * は worldSeedU32 を読む(lifespan 分位表の hash draw)ので、この経路は
+ * **seed 依存(C7 対象)** —— sc24 と同じ理由で alpha/beta の 2 本を用意する
+ * (vectorPlans.ts 側)。`content.town`(townParams)は base content に既にある
+ * ので contentPatch は不要(寝床上限は探索での保護に無関係・rules/exploration.ts
+ * §5 の doc)。
+ */
+function sc35BuildState(worldSeed: string): GameState {
+  const node: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(60),
+    success: true,
+    rewardFix: fixFromInt(0),
+    injuryFix: fixFromInt(0),
+    rescue: true,
+    logText: "遠隔地で行き倒れの一人を助け起こした。",
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentGus", { dispatched: true }),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchRescue",
+        destinationId: "destFar",
+        band: "far",
+        memberIds: ["residentGus"],
+        returnTick: 40,
+        nodes: [node],
+      }),
+    ],
+  );
+}
+
+// --- sc36-exp-all-lost(GDD 8.5 全滅・段70死亡ゲートへの委譲) --------------------
+
+/**
+ * [M25] 2 名チームの派遣が far域で全滅する(`casualtyMemberIds` に両名)。
+ * `resolveExpedition` は脱落者を自分で殺さず**段70(死亡/全滅判定)へ渡す**
+ * (rules/exploration.ts §4)ので、実際に人口下限ゲート(rules/population.ts)
+ * を通って死亡することを固定する。`life` は `lifeDyingAt` で寿命死が run の
+ * 地平線内に来ないよう遠い未来へ固定してある(寿命死と探索脱落の死を混同しない
+ * ため・sc27 の作り方と同じ設計判断)。townParams はあるが寝床(bunkhouse)を
+ * 足していないので人口下限は 0(floor 不活性・rules/population.ts §1)= 両名とも
+ * 即座に死亡が成立する。RNG を引かない(casualtyMemberIds は確定値)ので
+ * worldSeed 非依存 = C7 対象外。
+ */
+function sc36BuildState(worldSeed: string): GameState {
+  const node: DispatchNode = {
+    difficultyFix: fixFromInt(200),
+    rollFix: fixFromInt(10),
+    success: false,
+    rewardFix: fixFromInt(0),
+    injuryFix: fixFromInt(999),
+    rescue: false,
+    logText: "深部より遠い地で壊滅的な被害を受けた。",
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentGigi", { dispatched: true, life: lifeDyingAt(999_999, 999_999) }),
+      mkResident("residentHugo", { dispatched: true, life: lifeDyingAt(999_999, 999_999) }),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchWipe",
+        destinationId: "destFarWipe",
+        band: "far",
+        memberIds: ["residentGigi", "residentHugo"],
+        returnTick: 50,
+        nodes: [node],
+        casualtyMemberIds: ["residentGigi", "residentHugo"],
+      }),
+    ],
+  );
+}
+
+// --- sc37-exp-reward-overflow(GDD 12.1 item overflow・探索報酬の上限クランプ) --
+
+/**
+ * [M25] `balance.exploration.rewardOverflow`(policy=discard・capacity=1000)を
+ * 足し、初期在庫200 + 報酬2000 が上限1000で頭打ちになることを固定する
+ * (`applyExpeditionReward` の overflow 分岐・rules/exploration.ts)。
+ * RNG を引かない(節点は確定値)ので worldSeed 非依存 = C7 対象外。
+ */
+function sc37BuildState(worldSeed: string): GameState {
+  const node: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(80),
+    success: true,
+    rewardFix: fixFromInt(2000),
+    injuryFix: fixFromInt(0),
+    rescue: false,
+    logText: "近郊で薪を大量に持ち帰った。",
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentIvy", { dispatched: true }),
+      mkResource("resourceFirewood", "firewood", 200),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchHaul",
+        destinationId: "destNearHaul",
+        band: "near",
+        memberIds: ["residentIvy"],
+        returnTick: 30,
+        nodes: [node],
+        rewardHuman: 2000,
+      }),
+    ],
+  );
+}
+
+// --- sc38-out-supply(GDD 9.2 衛星供給・scheduler段80結線・二重計上なし) --------
+
+/**
+ * [M25] 本拠 hearth(WOOD=firewood 産出)+ 衛星拠点1基(outpostForest・
+ * resourceId=firewood・near・常駐2名)が同一 resource entity へ供給する盤面。
+ * `assertNoDoubleStationedResidents`(rules/outpost.ts §5)が「本拠就労」と
+ * 「拠点常駐」を別集合として検査するので、本拠と拠点の二重計上が無いことも
+ * 構造的に固定される。供給レートは常駐人数/拠点Lvのみに依存し RNG を一切
+ * 引かない(rules/outpost.ts §1)ので worldSeed 非依存 = C7 対象外
+ * (footprint 系・sc28〜32 と同じ理由)。
+ *
+ * **C1(不発)は本シナリオ内には作らない**: `OutpostState.residentIds` は
+ * GDD 9.2「住民1〜4名常駐」により state 層(`update.ts` の
+ * `requireValidOutpost`)が 0 名の拠点そのものを reject する(実地検証済み)。
+ * つまり「拠点はあるが供給ゼロ」という state は構造的に作れず、不発側は
+ * 「拠点が 1 つも無い」でしか表現できない —— それは既存 61 本の golden vector
+ * すべてが既に示している(spec §9.2(2) の「該当しない軸は note に理由」に該当。
+ * `out-supply-zero-rate-idle` は登録しない)。
+ */
+function sc38BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentHome", { assignedFacilityId: "facilityHearthHome" }),
+      mkResident("residentOutpostA"),
+      mkResident("residentOutpostB"),
+      mkFacility("facilityHearthHome", "hearth", 0, ["residentHome"], 1),
+      mkResource("resourceFirewood", "firewood", 0),
+    ],
+    [],
+    [],
+    [],
+    [],
+    undefined,
+    [
+      mkOutpost("outpostForestActive", "outpostForest", "near", [
+        "residentOutpostA",
+        "residentOutpostB",
+      ]),
+    ],
+  );
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -1416,6 +1745,15 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   { id: "sc32-foot-board-edge", contentPatch: null, buildState: sc32BuildState },
   { id: "sc33-ev-destroy-records", contentPatch: null, buildState: sc33BuildState },
+  { id: "sc34-exp-two-slot-order", contentPatch: null, buildState: sc34BuildState },
+  { id: "sc35-exp-rescue", contentPatch: null, buildState: sc35BuildState },
+  { id: "sc36-exp-all-lost", contentPatch: null, buildState: sc36BuildState },
+  {
+    id: "sc37-exp-reward-overflow",
+    contentPatch: patchExplorationRewardOverflow({ capacity: 1000, policy: "discard" }),
+    buildState: sc37BuildState,
+  },
+  { id: "sc38-out-supply", contentPatch: patchAddOutpostType(), buildState: sc38BuildState },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

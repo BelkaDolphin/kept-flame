@@ -2,41 +2,41 @@
   "coarseTickMinutes": 10,
   "elapsedMonotonicMs": null,
   "expected": {
-    "canonicalJsonLength": 1937,
+    "canonicalJsonLength": 943,
     "counters": {
-      "rateChangeEventCount": 4,
+      "rateChangeEventCount": 3,
       "recallOccurrenceCount": 0,
-      "segmentCount": 27,
-      "stochasticStepCount": 25,
+      "segmentCount": 10,
+      "stochasticStepCount": 10,
       "stochasticTrialCount": 0
     },
     "probe": {
-      "entityCount": 9,
+      "entityCount": 3,
       "recallImpairedResidentCount": 0,
       "recallImpairedUntilTickSum": 0,
       "researchCompletedCount": 0,
       "researchProgressSumRaw": 0,
-      "resourceStockSumRaw": 20000000000,
+      "resourceStockSumRaw": 0,
       "rngStateDomainCount": 0,
       "rngStateWordsXor": 0,
-      "tick": 250
+      "tick": 100
     },
-    "stateDigest": "a18836e7e09121db001801696aa203d7"
+    "stateDigest": "77e9654331aff27f5c473e712fe01873"
   },
   "formatVersion": 1,
   "fromTick": 0,
-  "paths": ["split-at-arrival-retry-tick"],
-  "scenarioId": "sc24-pop-floor-resolved",
+  "paths": ["exp-split-at-casualty-death-tick"],
+  "scenarioId": "sc36-exp-all-lost",
   "splitCounters": {
-    "rateChangeEventCount": 4,
+    "rateChangeEventCount": 3,
     "recallOccurrenceCount": 0,
-    "segmentCount": 27,
-    "stochasticStepCount": 25,
+    "segmentCount": 10,
+    "stochasticStepCount": 10,
     "stochasticTrialCount": 0
   },
-  "splitTicks": [200],
-  "toTick": 250,
-  "vectorId": "sc24-pop-floor-resolved-split-alpha",
+  "splitTicks": [50],
+  "toTick": 100,
+  "vectorId": "sc36-exp-all-lost-split-alpha",
   "worldSeed": "seedAlpha",
   "worldSeedU32": 3047884336
 }

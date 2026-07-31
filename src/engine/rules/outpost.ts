@@ -2,21 +2,25 @@
 // 継ぐ火 -Kept Flame- 衛星拠点(供給/維持費/hazard/ROI)— GDD 9.2 / 8.6 / 11.4-7 / M24
 //
 // ===========================================================================
-// 1. スコープ: データ層(state・決定論 rules・ROI 算出)まで。scheduler 無変更
+// 1. スコープ: データ層(state・決定論 rules・ROI 算出)+ scheduler 段80 結線
 // ===========================================================================
-//   本タスクの検収は「拠点網 ROI のテスト」と「本拠と拠点で資源系の二重計上が
-//   無いこと」であり、UI 画面(拠点カード・ネット収益表示・放棄推奨)は M32 の
-//   担当(タスク指示)。したがって本モジュールは
+//   本タスク(M24)の検収は「拠点網 ROI のテスト」と「本拠と拠点で資源系の
+//   二重計上が無いこと」であり、UI 画面(拠点カード・ネット収益表示・放棄推奨)は
+//   M32 の担当(タスク指示)。本モジュールは
 //     - 拠点 state(state.ts の OutpostState)
 //     - 供給/維持費/hazard の純関数(このファイル)
 //     - 拠点網 ROI の算出(このファイル)
-//   までを実装し、**scheduler.ts は一切変更しない**。GDD 9.2「決定論tickで
-//   本拠在庫へ自動供給」を成立させる {@link applyOutpostSupply} は用意するが、
-//   scheduler の段80(衛星供給・PIPELINE_STAGE.satellite)へ結線するのは別タスク
-//   (rules/codify.ts が M6 で「tick ループ結線は M13 以降」としたのと同じ判断。
-//   本ファイル冒頭のこの注記が申し送りである)。scheduler を触らない設計は
-//   既存 golden vector 64 本への影響をゼロにする(盤面に拠点 entity が 1 つも
-//   無いため、新しい state.outpostsById は常に空 = 直列化からもキーごと省略)。
+//   を実装する。GDD 9.2「決定論tickで本拠在庫へ自動供給」を成立させる
+//   {@link applyOutpostSupply} は、当初(M24)は用意のみで scheduler.ts への
+//   結線を見送っていたが(rules/codify.ts が M6 で「tick ループ結線は M13 以降」
+//   としたのと同じ判断)、**[M25・裁定台帳v2 必-1] scheduler.ts の段80
+//   (`PIPELINE_STAGE.satellite`)へ結線済み**。生産(段30)と同じ「レート ×
+//   区間長」の閉形式なので離散イベントは増やさず、`runSchedule` の (A) 区間
+//   積分ブロックへ生産・研究・bond・mastery と並べて畳み込んだ
+//   (scheduler.ts §6 参照)。既存 golden vector 64 本は盤面に拠点 entity が
+//   1 つも無い(state.outpostsById が常に空)ため、この結線それ自体では
+//   1 バイトも動かない ——`computeOutpostSupplyRates` が空 Map を返し
+//   `applyOutpostSupply` が no-op で早期 return するため。
 //
 // ===========================================================================
 // 2. 二重計上の防止(検分観点)
@@ -262,12 +266,15 @@ export function computeOutpostSupplyRates(
  * 区間長。`rules/production.ts` の `applyProduction` と同型)。
  *
  * **意図的な簡略化**: 保管上限/オーバーフロー会計(GDD 6.7・rules/storage.ts)は
- * 通さない(素直に加算するだけ)。scheduler へ結線していない現状では
- * 「区間ごとに何回適用されるか」が定まらず、上限判定を含めると telescoping の
- * 前提(区間分割不変性)を保てないため、結線タスクで storage.ts と組み合わせて
- * 設計すること(rules/exploration.ts の報酬が同じ理由でオーバーフロー会計を
- * 通さないのと同種の判断)。**同じ resource entity(resourceId で解決)へ書く**
- * ことが二重計上しようがない構造の根拠(§2)であり、この省略はそれとは独立。
+ * 通さない(素直に加算するだけ)。**[M25]** scheduler.ts の段80 へ結線した後も
+ * この簡略化は据え置く——`applyProduction` は本拠生産ぶんの上限判定を既に
+ * 単独で担っており、拠点供給ぶんにも同じ上限判定を通す設計(廃材スポンジ・
+ * 3出口の会計を拠点供給分だけ経路分岐させる必要が出る)は M25 のスコープ外
+ * (段80 結線そのものが目的)。**同じ resource entity(resourceId で解決)へ書く**
+ * ことが二重計上しようがない構造の根拠(§2)であり、この省略はそれとは独立
+ * (rules/exploration.ts の報酬が同じ理由でオーバーフロー会計を通さないのと
+ * 同種の判断)。上限判定を足すタスクでは telescoping の前提(区間分割不変性)を
+ * 保ったまま storage.ts と組み合わせて設計すること。
  *
  * @throws {RulesError} deltaTicks が 1 以上の整数でない / 供給先の resource
  *   entity が state に無い場合

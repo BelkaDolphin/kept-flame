@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createAdvanceContext } from "../../src/engine/advance";
+import { advance, createAdvanceContext } from "../../src/engine/advance";
 import { FIX_ONE, FIX_ZERO, fixFromInt, fixFromRaw, toRaw, type Fix } from "../../src/engine/fp";
 import {
   applyOutpostSupply,
@@ -23,7 +23,8 @@ import {
   type OutpostParams,
   type OutpostTypeDef,
 } from "../../src/engine/rules/types";
-import { entitiesOfKind, type OutpostState } from "../../src/engine/state/state";
+import { toSerializable } from "../../src/engine/state/serialize";
+import { entitiesOfKind, requireEntity, type OutpostState } from "../../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../../src/engine/stochastic";
 
 import { HEARTH, WOOD, content, facility, id, resident, resource, stateOf } from "./fixtures";
@@ -394,5 +395,92 @@ describe("outpostRoi / outpostNetworkRoi(GDD 11.4-7 拠点網ROI)", () => {
     // outpostTypeDefs だけを足した(outpost ブロックを持たない)content を組む。
     const noParams: EngineContent = { ...content(), outpostTypeDefs: new Map([[MINE.id, MINE]]) };
     expect(() => outpostRoi(state, noParams, outpost, 0)).toThrow(RulesError);
+  });
+});
+
+// --- 7. [M25] scheduler 段80 結線(裁定台帳v2 必-1)------------------------------
+
+describe("scheduler 段80(衛星供給)結線(裁定台帳v2 必-1)", () => {
+  /**
+   * 本拠生産(hearth・WOOD)+ 拠点供給(oMine・2 人常駐・WOOD)が同一 resource
+   * entity へ向かう盤面。`assertNoDoubleStationedResidents` が検査する
+   * 「本拠就労と拠点常駐は別集合」を保ったまま、`advance` を通した full
+   * pipeline で二重計上が無いことを確認する(rules/outpost.ts §2 の unit test を
+   * scheduler 経由へ拡張)。
+   */
+  function supplyBoardState() {
+    let state = stateOf([
+      resident("rHome"),
+      resident("rOutpostA"),
+      resident("rOutpostB"),
+      facility("fHearth", HEARTH.id, 0, [id("rHome")]),
+      resource("wStock", WOOD, 0),
+    ]);
+    state = {
+      ...state,
+      outpostsById: new Map([
+        [id("oMine"), outpostOf("oMine", "near", [id("rOutpostA"), id("rOutpostB")])],
+      ]),
+    };
+    return state;
+  }
+
+  it("advance を通しても本拠生産 + 拠点供給の単純和になる(二重計上なし)", () => {
+    const state = supplyBoardState();
+    const engineContent = contentWithOutpost();
+    const ctx = createAdvanceContext(state, engineContent);
+
+    const productionRates = computeProductionRates(state, ctx);
+    const outpostRates = computeOutpostSupplyRates(state, engineContent);
+    const productionGain = productionRates.resourceRateByResourceId.get(WOOD);
+    const outpostGain = outpostRates.resourceRateByResourceId.get(WOOD);
+    if (productionGain === undefined || outpostGain === undefined) {
+      throw new Error("レートが取れていない(テスト前提)");
+    }
+
+    const toTick = 500;
+    const advanced = advance(state, ctx, toTick);
+    const expectedStock = (toRaw(productionGain) + toRaw(outpostGain)) * toTick;
+    expect(toRaw(requireEntity(advanced, id("wStock"), "resource").stock)).toBe(expectedStock);
+
+    // 既存の拠点ゼロ盤面と同じ「二重計上が無い」構造の直接確認:
+    // WOOD の resource entity は依然として 1 個だけ。
+    const woodEntities = entitiesOfKind(advanced, "resource").filter((r) => r.resourceId === WOOD);
+    expect(woodEntities).toHaveLength(1);
+  });
+
+  it("分割不変性: advance(0→T2) == advance(0→T1)+advance(T1→T2)(M5/M11 前例)", () => {
+    const state = supplyBoardState();
+    const ctx = createAdvanceContext(state, contentWithOutpost());
+    const json = (s: typeof state) => JSON.stringify(toSerializable(s));
+
+    const whole = advance(state, ctx, 1000);
+    for (const splits of [[1], [37], [250, 500], [1, 2, 3], [999]]) {
+      let partial = state;
+      for (const at of splits) partial = advance(partial, ctx, at);
+      partial = advance(partial, ctx, 1000);
+      expect(json(partial)).toBe(json(whole));
+    }
+  });
+
+  it("拠点が無い盤面では段80 結線の前後で挙動が変わらない(既存 golden 不変の根拠と同型)", () => {
+    // outpostsById が空(既存シナリオと同型)なら computeOutpostSupplyRates は
+    // 空 Map を返し、applyOutpostSupply は no-op で早期 return する
+    // (rules/outpost.ts §6)。advance を通しても本拠生産だけの結果と一致する。
+    const state = stateOf([
+      resident("rHome"),
+      facility("fHearth", HEARTH.id, 0, [id("rHome")]),
+      resource("wStock", WOOD, 0),
+    ]);
+    const engineContent = contentWithOutpost();
+    const ctx = createAdvanceContext(state, engineContent);
+    const advanced = advance(state, ctx, 500);
+
+    const productionRates = computeProductionRates(state, ctx);
+    const productionGain = productionRates.resourceRateByResourceId.get(WOOD);
+    if (productionGain === undefined) throw new Error("レートが取れていない(テスト前提)");
+    expect(toRaw(requireEntity(advanced, id("wStock"), "resource").stock)).toBe(
+      toRaw(productionGain) * 500,
+    );
   });
 });
