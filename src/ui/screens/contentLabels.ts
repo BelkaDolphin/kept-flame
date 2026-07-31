@@ -51,6 +51,55 @@ const TRAIT_LABELS: { readonly [key: string]: string } = {
   traitStrongArm: "怪力",
 };
 
+/**
+ * [M31] tech(`content/tech.json` の 24 本)の日本語名。
+ *
+ * 出典は 2 種混在(facility と同じ「捏造しないための出典」規律): GDD 5.2 の
+ * 表が代表テック/壁テックとして直接名指ししている 18 本は**その名前をそのまま**
+ * 使う(コメントに "GDD5.2" と明記)。表に無い残り 6 本(横展開の葉テック:
+ * techBasketWeaving/techIrrigation/techMetalCasting/techLens、および壁テック
+ * 自体では無いが同名で言及される techPottery/techStorage の内訳)は facility の
+ * hearth→かまど と同じ「ID の literal 直訳」(コメントに "直訳" と明記)。
+ * GDD 5.1 の gate 対応は `content/balance.json` の `eras[].gateTechId` で確認済み
+ * (e1=techStorage / e2=techSmelting / e3=techSteamEngine)。
+ */
+const TECH_LABELS: { readonly [key: string]: string } = {
+  // E1(GDD5.2: 代表「火起こし/石器/水汲み/採集小屋/簡易寝床」・壁「土器と貯蔵」)
+  techFireStarting: "火起こし", // GDD5.2
+  techStoneTools: "石器", // GDD5.2
+  techWaterDrawing: "水汲み", // GDD5.2
+  techGatheringHut: "採集小屋", // GDD5.2
+  techBedding: "簡易寝床", // GDD5.2
+  techPottery: "土器", // GDD5.2(壁テック「土器と貯蔵」の前段)
+  techStorage: "貯蔵", // GDD5.2(壁テック「土器と貯蔵」・era e1 の gateTechId)
+  techBasketWeaving: "編みかご", // 直訳(GDD5.2に名指し無し・recipeBasket由来)
+  // E2(GDD5.2: 代表「炭焼き窯/農耕/製陶/骨皮加工/基礎医術」・壁「製錬(銅→青銅)」)
+  techCharcoalKiln: "炭焼き窯", // GDD5.2
+  techAgriculture: "農耕", // GDD5.2
+  techCeramics: "製陶", // GDD5.2
+  techBoneHideWorking: "骨皮加工", // GDD5.2
+  techBasicMedicine: "基礎医術", // GDD5.2
+  techSmelting: "製錬", // GDD5.2(era e2 の gateTechId)
+  techIrrigation: "灌漑", // 直訳(GDD5.2に名指し無し・recipeChannelDitch由来)
+  // E3(GDD5.2: 代表「高炉/鍛冶/機械部品/水車動力/ガラス/簡易印刷」・壁「蒸気機関」)
+  techBlastFurnace: "高炉", // GDD5.2
+  techBlacksmithing: "鍛冶", // GDD5.2
+  techMachineParts: "機械部品", // GDD5.2
+  techWaterWheel: "水車動力", // GDD5.2
+  techGlass: "ガラス", // GDD5.2
+  techPrinting: "簡易印刷", // GDD5.2
+  techSteamEngine: "蒸気機関", // GDD5.2(era e3 の gateTechId)
+  techMetalCasting: "鋳造", // 直訳(GDD5.2に名指し無し・recipeCastMold由来)
+  techLens: "研磨レンズ", // 直訳(GDD5.2に名指し無し・recipeGroundLens由来。lossClass=rareIrreversible)
+};
+
+/** [M31] エラ(`content/balance.json` の `eras[].id`)の日本語名(GDD 5.2 の表そのまま)。 */
+const ERA_LABELS: { readonly [key: string]: string } = {
+  e1: "灰の時代",
+  e2: "窯と畑の時代",
+  e3: "鉄と歯車の時代",
+};
+
 function labelOf(table: { readonly [key: string]: string }, entityId: EntityId): string {
   return table[entityId] ?? entityId;
 }
@@ -65,4 +114,15 @@ export function resourceLabel(resourceId: EntityId): string {
 
 export function traitLabel(traitId: EntityId): string {
   return labelOf(TRAIT_LABELS, traitId);
+}
+
+/** [M31] 未登録の tech ID は raw ID をそのまま返す(facility/resource/trait と同じ方針)。 */
+export function techLabel(techId: EntityId): string {
+  return labelOf(TECH_LABELS, techId);
+}
+
+/** [M31] `eraId` が null/未登録なら raw ID(または "?")をそのまま返す。 */
+export function eraLabel(eraId: string | null): string {
+  if (eraId === null) return "?";
+  return ERA_LABELS[eraId] ?? eraId;
 }

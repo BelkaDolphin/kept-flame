@@ -24,15 +24,36 @@ import {
   toApproxNumber,
   toRaw,
 } from "../../src/engine/fp";
+import { CODIFY_NO_DEADLINE_TICKS, suggestCodification } from "../../src/engine/assist/codify";
 import { activeLaborFix, facilityOutputPerTick } from "../../src/engine/rules/production";
+import { recallRiskPerDay } from "../../src/engine/rules/recall";
 import { reclaimCostFix } from "../../src/engine/rules/reclaim";
+import { techMemoryKeyOf } from "../../src/engine/rules/techMemory";
 import type { TraitDef } from "../../src/engine/rules/stats";
-import type { EngineContent, ReclaimParams } from "../../src/engine/rules/types";
-import { entitiesOfKind, requireEntity } from "../../src/engine/state/state";
-import { createGameState, setField, updateEntity } from "../../src/engine/state/update";
+import type {
+  EngineContent,
+  EraDef,
+  ReclaimParams,
+  RecordMediaParams,
+  TechDef,
+} from "../../src/engine/rules/types";
+import {
+  entitiesOfKind,
+  requireEntity,
+  type EntityState,
+  type ResearchState,
+  type ResidentState,
+  type TechMemoryState,
+} from "../../src/engine/state/state";
+import {
+  createGameState,
+  setField,
+  setTechMemories,
+  updateEntity,
+} from "../../src/engine/state/update";
 import { computePlacementPreview } from "../../src/ui/derived";
 import { createGameStore } from "../../src/ui/store";
-import { FORGE, META } from "../engine/fixtures";
+import { FORGE, META, research, stateOf } from "../engine/fixtures";
 import {
   CELL_CENTER,
   CELL_EAST,
@@ -828,5 +849,450 @@ describe("[M30] reclaimInfo(②瓦礫開墾の現況・GDD 9.1)", () => {
     expect(info.availableStockApprox).toBe(
       toApproxNumber(requireEntity(state, id("wStock"), "resource").stock),
     );
+  });
+});
+
+// --- [M31] ⑤研究ツリー / ⑥成文化キュー -------------------------------------
+//
+// `boardState()`(tests/ui/fixtures.ts)の既定 research entity "rBronze" は
+// techBronze(基底 content 由来)を指しており、本節の tech とは無関係なうえ、
+// ID 昇順で `currentResearch` の対象を奪いうる。よって本節は `boardState` を
+// 使わず `stateOf` で entity を最初から自分で組む(§0 のとおり)。
+
+const TECH_ALPHA: TechDef = {
+  id: id("techAlpha"),
+  researchCostFix: fixFromInt(30),
+  eraId: "e1",
+  lossClass: "criticalRecoverable",
+  prereqs: [],
+  fieldFacilityId: HEARTH.id,
+};
+const TECH_BETA: TechDef = {
+  id: id("techBeta"),
+  researchCostFix: fixFromInt(50),
+  eraId: "e1",
+  lossClass: "criticalRecoverable",
+  prereqs: [TECH_ALPHA.id],
+};
+const TECH_GAMMA: TechDef = {
+  id: id("techGamma"),
+  researchCostFix: fixFromInt(20),
+  eraId: "e1",
+  lossClass: "criticalRecoverable",
+};
+const TECH_RARE: TechDef = {
+  id: id("techRare"),
+  researchCostFix: fixFromInt(60),
+  eraId: "e1",
+  lossClass: "rareIrreversible",
+};
+
+const ERA_E1: EraDef = {
+  id: "e1",
+  order: 1,
+  baseEraFix: fixFromInt(30),
+  multiplierFix: FIX_ONE,
+  gateTechId: TECH_BETA.id,
+  criticalPathMax: 4,
+};
+
+/** assistCodify.test.ts と同型の縮約 recordMedia(石板=×1.0/40tick・紙=×0.5/20tick)。 */
+const CODIFY_CLAY = id("codifyClay");
+const CODIFY_PAPER_RESOURCE = id("codifyPaperResource");
+const RECORD_MEDIA_PARAMS: RecordMediaParams = {
+  baseCostFix: fixFromInt(10),
+  baseDurationTicks: 40,
+  printingTechId: null,
+  printingCostMulFix: fixFromRaw(500_000),
+  printingTimeMulFix: fixFromRaw(500_000),
+  byMedium: {
+    paper: {
+      costMulFix: fixFromRaw(500_000),
+      timeMulFix: fixFromRaw(500_000),
+      caravanWeightFix: fixFromRaw(250_000),
+      flammable: true,
+      costResourceId: CODIFY_PAPER_RESOURCE,
+    },
+    stoneTablet: {
+      costMulFix: FIX_ONE,
+      timeMulFix: FIX_ONE,
+      caravanWeightFix: FIX_ONE,
+      flammable: false,
+      costResourceId: CODIFY_CLAY,
+    },
+  },
+};
+
+function researchTreeContent(overrides: Partial<EngineContent> = {}): EngineContent {
+  const base = boardContent();
+  return {
+    facilityDefs: base.facilityDefs,
+    techDefs: new Map([
+      [TECH_ALPHA.id, TECH_ALPHA],
+      [TECH_BETA.id, TECH_BETA],
+      [TECH_GAMMA.id, TECH_GAMMA],
+      [TECH_RARE.id, TECH_RARE],
+    ]),
+    adjacency: base.adjacency,
+    recallRisk: base.recallRisk,
+    coarseTickMinutes: base.coarseTickMinutes,
+    eraDefs: new Map([[ERA_E1.id, ERA_E1]]),
+    recordMedia: RECORD_MEDIA_PARAMS,
+    ...overrides,
+  };
+}
+
+describe("[M31] researchTree(⑤研究ツリー・GDD 5/7.4)", () => {
+  it("(A)/(B) を状態に関わらず常に持ち、未着手/研究中/解禁済み/停滞喪失/一回性喪失を反映する", () => {
+    const testContent = researchTreeContent();
+    const entities: EntityState[] = [
+      resident("aTest"),
+      // techAlpha: 未着手(research entity 無し)
+      // techBeta: 研究中(進行度 10/50)。prereq(techAlpha)は未解禁 = prereqsMet false。
+      research("rBeta", TECH_BETA.id, 10),
+      // techGamma: 停滞喪失(A) — completedTick は null へ戻り loss.irreversible=false。
+      {
+        kind: "research",
+        id: id("rGamma"),
+        techId: TECH_GAMMA.id,
+        progress: fixFromInt(0),
+        completedTick: null,
+        loss: { tick: 20, irreversible: false },
+      } satisfies ResearchState,
+      // techRare: 一回性喪失(B) — currentResearch の対象からも外れる。
+      {
+        kind: "research",
+        id: id("rRare"),
+        techId: TECH_RARE.id,
+        progress: fixFromInt(0),
+        completedTick: null,
+        loss: { tick: 30, irreversible: true },
+      } satisfies ResearchState,
+    ];
+    const state = stateOf(entities, META);
+    const store = createGameStore({ state, content: testContent });
+    const tree = store.derived.researchTree.value;
+
+    const alpha = tree.find((e) => e.techId === TECH_ALPHA.id);
+    expect(alpha?.status).toBe("notStarted");
+    expect(alpha?.lossClass).toBe("criticalRecoverable");
+    expect(alpha?.progressApprox).toBeNull();
+
+    const beta = tree.find((e) => e.techId === TECH_BETA.id);
+    expect(beta?.status).toBe("researching");
+    expect(beta?.progressApprox).toBe(10);
+    expect(beta?.prereqTechIds).toEqual([TECH_ALPHA.id]);
+    expect(beta?.prereqsMet).toBe(false); // techAlpha はまだ解禁されていない
+    // 単一キュー(research.ts §2)の先頭はID昇順の rBeta 1 本だけなので対象。
+    expect(beta?.isCurrentResearchTarget).toBe(true);
+
+    const gamma = tree.find((e) => e.techId === TECH_GAMMA.id);
+    expect(gamma?.status).toBe("lostRecoverable");
+    expect(gamma?.lossClass).toBe("criticalRecoverable");
+
+    const rare = tree.find((e) => e.techId === TECH_RARE.id);
+    expect(rare?.status).toBe("lostIrreversible");
+    expect(rare?.lossClass).toBe("rareIrreversible");
+    // (B) は currentResearch の対象から外れる(rules/research.ts の isIrreversiblyLost)。
+    expect(rare?.isCurrentResearchTarget).toBe(false);
+  });
+
+  it("解禁済みは completed、前提を満たすと prereqsMet が true になる", () => {
+    const testContent = researchTreeContent();
+    const entities: EntityState[] = [
+      resident("aTest"),
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+      research("rBeta", TECH_BETA.id, 0),
+    ];
+    const state = stateOf(entities, META);
+    const store = createGameStore({ state, content: testContent });
+    const tree = store.derived.researchTree.value;
+
+    expect(tree.find((e) => e.techId === TECH_ALPHA.id)?.status).toBe("completed");
+    expect(tree.find((e) => e.techId === TECH_BETA.id)?.prereqsMet).toBe(true);
+  });
+
+  it("表示順はエラ順×エラ内ID昇順(ID の辞書順そのままではない)", () => {
+    const earlyIdButLateEra: TechDef = {
+      id: id("techAAAEarlyIdButEra2"),
+      researchCostFix: fixFromInt(10),
+      eraId: "e2",
+    };
+    const lateIdButEarlyEra: TechDef = {
+      id: id("techZZZLateIdButEra1"),
+      researchCostFix: fixFromInt(10),
+      eraId: "e1",
+    };
+    const eraE2: EraDef = {
+      id: "e2",
+      order: 2,
+      baseEraFix: fixFromInt(60),
+      multiplierFix: fixFromInt(2),
+      gateTechId: earlyIdButLateEra.id,
+      criticalPathMax: 1,
+    };
+    const testContent: EngineContent = {
+      ...researchTreeContent(),
+      techDefs: new Map([
+        [earlyIdButLateEra.id, earlyIdButLateEra],
+        [lateIdButEarlyEra.id, lateIdButEarlyEra],
+      ]),
+      eraDefs: new Map([
+        [ERA_E1.id, { ...ERA_E1, gateTechId: lateIdButEarlyEra.id }],
+        [eraE2.id, eraE2],
+      ]),
+    };
+    const state = stateOf([resident("aTest")], META);
+    const store = createGameStore({ state, content: testContent });
+    const ids = store.derived.researchTree.value.map((e) => e.techId);
+    // ID の辞書順なら techAAA... が先だが、エラ順(e1=order1 → e2=order2)が勝つ。
+    expect(ids).toEqual([lateIdButEarlyEra.id, earlyIdButLateEra.id]);
+  });
+});
+
+describe("[M31] codifyTechs(⑥成文化キュー対象・GDD 7.4/7.5/11.1追補)", () => {
+  const HOLDER_A = id("holderA");
+  const HOLDER_B = id("holderB");
+
+  function codifyState(
+    entities: readonly EntityState[],
+    techMemory: readonly (readonly [string, TechMemoryState])[],
+  ) {
+    const base = stateOf(entities, META);
+    return setTechMemories(base, techMemory);
+  }
+
+  it("解禁済みの tech だけを並べる(未解禁は対象外)", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf(
+      [
+        resident("aTest"),
+        research("rAlpha", TECH_ALPHA.id, 0), // 未解禁(completedTick null)
+        {
+          kind: "research",
+          id: id("rBeta"),
+          techId: TECH_BETA.id,
+          progress: fixFromInt(50),
+          completedTick: 10,
+        } satisfies ResearchState,
+      ],
+      META,
+    );
+    const store = createGameStore({ state, content: testContent });
+    const techIds = store.derived.codifyTechs.value.map((e) => e.techId);
+    expect(techIds).toEqual([TECH_BETA.id]);
+  });
+
+  it("保持者数・唯一保持・記録済み媒体・作業中の記録を反映する", () => {
+    const testContent = researchTreeContent();
+    const entities: EntityState[] = [
+      resident(HOLDER_A, { assignedFacilityId: null }),
+      resident(HOLDER_B, { assignedFacilityId: null }),
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+      {
+        kind: "research",
+        id: id("rBeta"),
+        techId: TECH_BETA.id,
+        progress: fixFromInt(50),
+        completedTick: 10,
+      } satisfies ResearchState,
+      // techBeta は完成済み記録(紙)+作業中の記録(石板)を両方持つ。
+      {
+        kind: "codify",
+        id: id("cBetaPaper"),
+        techId: TECH_BETA.id,
+        medium: "paper",
+        requiredWork: fixFromInt(20),
+        progress: fixFromInt(20),
+        completedTick: 8,
+      },
+      {
+        kind: "codify",
+        id: id("cBetaStone"),
+        techId: TECH_BETA.id,
+        medium: "stoneTablet",
+        requiredWork: fixFromInt(40),
+        progress: fixFromInt(0),
+        completedTick: null,
+      },
+    ];
+    const state = codifyState(entities, [
+      [
+        techMemoryKeyOf(HOLDER_A, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+      [
+        techMemoryKeyOf(HOLDER_A, TECH_BETA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+      [
+        techMemoryKeyOf(HOLDER_B, TECH_BETA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const techs = store.derived.codifyTechs.value;
+
+    const alpha = techs.find((e) => e.techId === TECH_ALPHA.id);
+    expect(alpha?.holderIds).toEqual([HOLDER_A]);
+    expect(alpha?.uniqueHolder).toBe(true);
+    expect(alpha?.isCodified).toBe(false);
+    expect(alpha?.recordedMedia).toEqual([]);
+    expect(alpha?.pendingRecords).toEqual([]);
+
+    const beta = techs.find((e) => e.techId === TECH_BETA.id);
+    expect(beta?.holderIds.slice().sort()).toEqual([HOLDER_A, HOLDER_B].sort());
+    expect(beta?.uniqueHolder).toBe(false);
+    expect(beta?.isCodified).toBe(true);
+    expect(beta?.recordedMedia).toEqual(["paper"]);
+    expect(beta?.pendingRecords).toHaveLength(1);
+    expect(beta?.pendingRecords[0]?.medium).toBe("stoneTablet");
+    expect(beta?.pendingRecords[0]?.progressApprox).toBe(0);
+    expect(beta?.pendingRecords[0]?.requiredWorkApprox).toBe(40);
+  });
+
+  it("残存想定tick(GDD 7.5)は life を持つ保持者だけが対象。持たなければ無期限", () => {
+    const testContent = researchTreeContent();
+    const withLife: ResidentState = {
+      ...resident(HOLDER_A),
+      life: { bornTick: 0, lifespanTick: 500, diedTick: null },
+    };
+    const entities: EntityState[] = [
+      withLife,
+      resident(HOLDER_B), // life 無し
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+      {
+        kind: "research",
+        id: id("rGamma"),
+        techId: TECH_GAMMA.id,
+        progress: fixFromInt(20),
+        completedTick: 3,
+      } satisfies ResearchState,
+    ];
+    const state = codifyState(entities, [
+      [
+        techMemoryKeyOf(HOLDER_A, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+      [
+        techMemoryKeyOf(HOLDER_B, TECH_GAMMA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const techs = store.derived.codifyTechs.value;
+
+    const alpha = techs.find((e) => e.techId === TECH_ALPHA.id);
+    expect(alpha?.hasDeadline).toBe(true);
+    expect(alpha?.residualTick).toBe(500); // lifespanTick(500) - ageTick(0) at tick 0
+
+    const gamma = techs.find((e) => e.techId === TECH_GAMMA.id);
+    expect(gamma?.hasDeadline).toBe(false);
+    expect(gamma?.residualTick).toBe(CODIFY_NO_DEADLINE_TICKS);
+  });
+
+  it("想起リスク(%)は engine の recallRiskPerDay と一致する(congruence)", () => {
+    const testContent = researchTreeContent();
+    const holder = resident(HOLDER_A, { morale: fixFromInt(50) });
+    const entities: EntityState[] = [
+      holder,
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+    ];
+    const state = codifyState(entities, [
+      [
+        techMemoryKeyOf(HOLDER_A, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const alpha = store.derived.codifyTechs.value.find((e) => e.techId === TECH_ALPHA.id);
+    const storedHolder = requireEntity(state, HOLDER_A, "resident");
+    const expectedRiskPercent =
+      toApproxNumber(recallRiskPerDay(state, testContent, storedHolder, TECH_ALPHA.id)) * 100;
+    expect(alpha?.maxRecallRiskPercentApprox).toBe(expectedRiskPercent);
+  });
+});
+
+const HOLDER_FOR_SUGGESTION = id("holderForSuggestion");
+
+describe("[M31] codifySuggestions(おまかせ成文化の提案・GDD 2.1)", () => {
+  it("content に recordMedia が無ければ空(例外を投げずに不活性・reclaimInfo と同じ作法)", () => {
+    // 既定の boardContent() は recordMedia を持たない(tests/engine/fixtures.ts)。
+    const { store } = createTestStore();
+    expect(store.derived.codifySuggestions.value).toEqual([]);
+  });
+
+  it("engine の suggestCodification と一致する(congruence)", () => {
+    const testContent = researchTreeContent();
+    const holder = resident(HOLDER_FOR_SUGGESTION);
+    const entities: EntityState[] = [
+      holder,
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+      {
+        kind: "research",
+        id: id("rGamma"),
+        techId: TECH_GAMMA.id,
+        progress: fixFromInt(20),
+        completedTick: 3,
+      } satisfies ResearchState,
+    ];
+    const state = setTechMemories(stateOf(entities, META), [
+      [
+        techMemoryKeyOf(HOLDER_FOR_SUGGESTION, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+      [
+        techMemoryKeyOf(HOLDER_FOR_SUGGESTION, TECH_GAMMA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const viewSuggestions = store.derived.codifySuggestions.value;
+    const expected = suggestCodification(state, testContent, state.tick);
+
+    expect(viewSuggestions).toHaveLength(expected.suggestions.length);
+    expect(viewSuggestions.length).toBeGreaterThan(0);
+    for (let i = 0; i < expected.suggestions.length; i++) {
+      const view = viewSuggestions[i];
+      const suggestion = expected.suggestions[i];
+      expect(view?.techId).toBe(suggestion?.techId);
+      expect(view?.medium).toBe(suggestion?.medium);
+      expect(view?.codifyId).toBe(suggestion?.codifyId);
+      expect(view?.residualTick).toBe(suggestion?.residualTick);
+      expect(view?.hasDeadline).toBe(suggestion?.residualTick !== CODIFY_NO_DEADLINE_TICKS);
+      expect(view?.durationTicks).toBe(suggestion?.durationTicks);
+      expect(view?.cumulativeTicks).toBe(suggestion?.cumulativeTicks);
+      expect(view?.onSchedule).toBe(suggestion?.onSchedule);
+    }
   });
 });

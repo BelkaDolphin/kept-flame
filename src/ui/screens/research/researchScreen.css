@@ -1,0 +1,107 @@
+/*
+ * 継ぐ火 -Kept Flame- ⑤研究ツリー(M31)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-research-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-research-screen__note {
+  font-size: 0.75rem;
+  color: #5b534b;
+  padding: 0.5rem 0.6rem;
+  margin: 0 0 0.6rem;
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #faf8f5;
+}
+
+.kf-research-screen__empty {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-research-era {
+  margin: 0 0 0.75rem;
+}
+
+.kf-research-era__title {
+  font-size: 0.9rem;
+  margin: 0 0 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid #8a857d;
+}
+
+.kf-research-era__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kf-research-row {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+}
+
+.kf-research-row__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-research-row__name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.kf-research-row__status,
+.kf-research-row__prereqs,
+.kf-research-row__cost {
+  font-size: 0.78rem;
+  color: #5b534b;
+  margin: 0 0 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-research-row__start-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-research-screen__nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.kf-research-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

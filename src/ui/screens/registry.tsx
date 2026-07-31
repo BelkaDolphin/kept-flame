@@ -7,7 +7,9 @@
 //
 // M29 の時点で中身があるのは①ホームハブと⑫帰還ダイジェストだけだった。
 // **[M30]** ②格子ビュー/③施設詳細・増築/④住民一覧・配置を実装済みに追加。
-// 残り(⑤〜⑪・設定)は {@link PlaceholderScreen}(画面名 + 「未実装(Mxx)」)
+// **[M31]** ⑤研究ツリー/⑥成文化キューを実装済みに追加(2 行の置き換えのみ・
+// M32 並行作業のため他画面の行/import 順は変更していない)。
+// 残り(⑦〜⑪・設定)は {@link PlaceholderScreen}(画面名 + 「未実装(Mxx)」)
 // である。**ルート自体は 12画面ぶん登録する**(タスク指示)ので、①のバッジ
 // からのワンタップ遷移も、URL 直打ちも、いま全部通る。
 // ---------------------------------------------------------------------------
@@ -15,10 +17,12 @@
 import type { VNode } from "preact";
 
 import { SCREEN_IDS, type ScreenId } from "../screens";
+import { CodifyScreen } from "./codify/CodifyScreen";
 import { FacilityScreen } from "./facility/FacilityScreen";
 import { GridScreen } from "./grid/GridScreen";
 import { HomeHub } from "./home/HomeHub";
 import { PlaceholderScreen } from "./PlaceholderScreen";
+import { ResearchScreen } from "./research/ResearchScreen";
 import { ResidentsScreen } from "./residents/ResidentsScreen";
 import { ReturnDigest } from "./digest/ReturnDigest";
 import type { ScreenProps } from "./screenProps";
@@ -51,8 +55,8 @@ export const SCREEN_REGISTRY: { readonly [K in ScreenId]: ScreenEntry } = {
     ownerTask: null,
     render: (props) => <ResidentsScreen {...props} />,
   },
-  research: placeholder("research", "M31"),
-  codify: placeholder("codify", "M31"),
+  research: { id: "research", ownerTask: null, render: (props) => <ResearchScreen {...props} /> },
+  codify: { id: "codify", ownerTask: null, render: (props) => <CodifyScreen {...props} /> },
   expedition: placeholder("expedition", "M32"),
   chronicle: placeholder("chronicle", "M32"),
   outposts: placeholder("outposts", "M32"),

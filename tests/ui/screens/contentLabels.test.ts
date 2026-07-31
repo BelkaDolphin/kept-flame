@@ -8,7 +8,13 @@
 import { describe, expect, it } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
-import { facilityLabel, resourceLabel, traitLabel } from "../../../src/ui/screens/contentLabels";
+import {
+  eraLabel,
+  facilityLabel,
+  resourceLabel,
+  techLabel,
+  traitLabel,
+} from "../../../src/ui/screens/contentLabels";
 
 const id = entityIdFromString;
 
@@ -37,6 +43,49 @@ describe("contentLabels: 既知 ID の日本語名", () => {
     expect(traitLabel(id("traitPessimist"))).toBe("悲観");
     expect(traitLabel(id("traitStrongArm"))).toBe("怪力");
   });
+
+  it("[M31] tech: content/tech.json の 24 本すべてが登録済み", () => {
+    const allTechIds = [
+      "techFireStarting",
+      "techPottery",
+      "techBasketWeaving",
+      "techStorage",
+      "techStoneTools",
+      "techWaterDrawing",
+      "techGatheringHut",
+      "techBedding",
+      "techCharcoalKiln",
+      "techCeramics",
+      "techSmelting",
+      "techAgriculture",
+      "techBoneHideWorking",
+      "techBasicMedicine",
+      "techIrrigation",
+      "techBlastFurnace",
+      "techBlacksmithing",
+      "techMachineParts",
+      "techSteamEngine",
+      "techGlass",
+      "techMetalCasting",
+      "techWaterWheel",
+      "techPrinting",
+      "techLens",
+    ] as const;
+    for (const techId of allTechIds) {
+      expect(techLabel(id(techId))).not.toBe(techId);
+    }
+    // GDD 5.2 が直接名指しする代表テック/壁テックの一部を実値まで固定する。
+    expect(techLabel(id("techFireStarting"))).toBe("火起こし");
+    expect(techLabel(id("techStorage"))).toBe("貯蔵"); // era e1 の gateTechId
+    expect(techLabel(id("techSmelting"))).toBe("製錬"); // era e2 の gateTechId
+    expect(techLabel(id("techSteamEngine"))).toBe("蒸気機関"); // era e3 の gateTechId
+  });
+
+  it("[M31] era: GDD 5.2 の 3 段(E1〜E3)", () => {
+    expect(eraLabel("e1")).toBe("灰の時代");
+    expect(eraLabel("e2")).toBe("窯と畑の時代");
+    expect(eraLabel("e3")).toBe("鉄と歯車の時代");
+  });
 });
 
 describe("contentLabels: 未登録 ID は捏造せず raw ID を返す", () => {
@@ -44,5 +93,11 @@ describe("contentLabels: 未登録 ID は捏造せず raw ID を返す", () => {
     expect(facilityLabel(id("granary"))).toBe("granary");
     expect(resourceLabel(id("stone"))).toBe("stone");
     expect(traitLabel(id("traitUnknown"))).toBe("traitUnknown");
+  });
+
+  it("[M31] tech/era も未登録なら ID そのまま(era は null なら '?')", () => {
+    expect(techLabel(id("techUnknown"))).toBe("techUnknown");
+    expect(eraLabel("e9")).toBe("e9");
+    expect(eraLabel(null)).toBe("?");
   });
 });

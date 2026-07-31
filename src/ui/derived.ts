@@ -64,17 +64,27 @@ import {
 } from "../engine/footprint";
 import { FIX_ONE, FIX_ZERO, mulFix, toApproxNumber, toRaw, type Fix } from "../engine/fp";
 import { compareUtf16 } from "../engine/canonicalize";
-import { isCodified } from "../engine/rules/codify";
+import {
+  CODIFY_NO_DEADLINE_TICKS,
+  codifyResidualTick,
+  suggestCodification,
+} from "../engine/assist/codify";
+import { isCodified, recordMediaOfTech } from "../engine/rules/codify";
 import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
+import { recallRiskPerDay } from "../engine/rules/recall";
+import { currentResearch } from "../engine/rules/research";
 import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
-import { techHoldersOf } from "../engine/rules/techMemory";
+import { erasInOrder, techsOfEra } from "../engine/rules/techTree";
+import { isTechUnlocked, techHoldersOf } from "../engine/rules/techMemory";
 import {
   lossClassOfTech,
+  prereqsOfTech,
   requireFacilityDef,
   type EngineContent,
   type FacilityDef,
   type RecordMedium,
+  type TechLossClass,
 } from "../engine/rules/types";
 import {
   entitiesOfKind,
@@ -86,6 +96,7 @@ import {
   type GameState,
   type MemoirEntry,
   type RenderedLogEntry,
+  type ResearchState,
   type ResidentState,
 } from "../engine/state/state";
 import type { ScreenId } from "./screens";
@@ -743,6 +754,25 @@ export interface StoreDerived {
    * セル局所ではなく全体の値として持つ。
    */
   readonly reclaimInfo: ReadonlyComputed<ReclaimInfo>;
+
+  /**
+   * [M31] ⑤研究ツリー(GDD 5 / 7.4)。content の tech 全件(ID 昇順)に対し、
+   * state 側の research entity から状態を重ね合わせる。state 直依存(§2 の
+   * 「値の派生」と同じ扱い・tech 数は MVP 24 本程度)。
+   */
+  readonly researchTree: ReadonlyComputed<readonly ResearchTreeEntry[]>;
+  /**
+   * [M31] ⑥成文化キューの対象(GDD 7.4/7.5/11.1追補)。解禁済み(`isTechUnlocked`)
+   * の tech だけを並べる(未解禁は成文化しようがない・喪失中は解禁が取り消されて
+   * いるので自然に外れる)。
+   */
+  readonly codifyTechs: ReadonlyComputed<readonly CodifyTechEntry[]>;
+  /**
+   * [M31] おまかせ成文化の提案(`engine/assist/codify.ts` の `suggestCodification`
+   * をそのまま呼ぶ・M27 のヒューリスティックを再実装しない)。画面は「適用」を
+   * 押すまで state を動かさない(提案は常に読み取り専用)。
+   */
+  readonly codifySuggestions: ReadonlyComputed<readonly CodifySuggestionView[]>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -1150,6 +1180,24 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "reclaimInfo" },
   );
 
+  // [M31] ⑤研究ツリー(GDD 5/7.4)。state 直依存(§2 の「値の派生」と同じ扱い)。
+  const researchTree = computed<readonly ResearchTreeEntry[]>(
+    () => buildResearchTree(sources.state.value, sources.content.value),
+    { name: "researchTree" },
+  );
+
+  // [M31] ⑥成文化キュー対象(GDD 7.4/7.5/11.1追補)。
+  const codifyTechs = computed<readonly CodifyTechEntry[]>(
+    () => buildCodifyTechs(sources.state.value, sources.content.value),
+    { name: "codifyTechs" },
+  );
+
+  // [M31] おまかせ成文化の提案(§7 参照)。
+  const codifySuggestions = computed<readonly CodifySuggestionView[]>(
+    () => buildCodifySuggestions(sources.state.value, sources.content.value),
+    { name: "codifySuggestions" },
+  );
+
   return {
     adjacencyMatrix,
     cellAdjacency,
@@ -1168,6 +1216,9 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     facilityRoster,
     selectedFacilityDetail,
     reclaimInfo,
+    researchTree,
+    codifyTechs,
+    codifySuggestions,
   };
 }
 
@@ -1561,4 +1612,269 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
     foldedLogCount: state.renderedLogs.foldedCount,
     hasNews: rows.length > 0 || lead.kind !== "none",
   };
+}
+
+// --- 7. ⑤研究ツリー / ⑥成文化キュー(M31)— GDD 5 / 7.4 / 7.5 / 11.1追補 / 2.1 ---
+//
+// ===========================================================================
+// 1. 二重の正直な開示(★ 最終報告で必ず参照すること)
+// ===========================================================================
+//   (a) **`beginResearch` は engine に実装が無い**(`commands.ts` の
+//       `RESERVED_COMMAND_OWNER_TASK.beginResearch = "M50(…)"`)。⑤の「研究を
+//       始める」ボタンは dispatch はするが、現状は必ず `notImplemented` で
+//       拒否される(`RejectionBanner` にその旨が出る)。これは `docs/design/
+//       ui-spec.md` §7-4 が M31 着手前の裁定事項として明記済みの制約であり、
+//       本 UI は「M50 実装後に画面側を 1 行も変えずに動き出す」形にすることを
+//       選んだ(判定は engine に委ねる・architecture.md §6 の 7 箇条目のまま)。
+//   (b) **成文化の tick 結線が無い**(`scheduler.ts` の `PIPELINE_STAGE.codify`
+//       コメント「成文化完了(未実装)」・`applyCodifyProgress`/
+//       `completeCodification` を呼ぶ箇所が scheduler/advance に 1 つも無い
+//       ことを grep で確認済み)。よって⑥でキュー投入した記録は**進行度が
+//       0 のまま止まる**(完了しない)。捏造せずそのまま表示する。
+//   (c) **成文化キューの取消コマンドが無い**(`commands.ts` に cancel 系の型も
+//       予約も無い)。⑥に「取消」ボタンは置かない代わりに、その理由を画面に
+//       明記する(FacilityScreen の増築コスト非表示と同じ正直な開示の作法)。
+//
+// ===========================================================================
+// 2. (A)/(B) の常時判別(GDD 7.4・M31 検収条件)
+// ===========================================================================
+//   `ResearchTreeEntry.lossClass` は状態に関わらず**全 tech で常に**持つ値。
+//   画面側はこれを毎行のバッジにする(喪失していなくても (A)/(B) が見える)。
+//   実際に一回性喪失した tech は `status: "lostIrreversible"` で追加の強い
+//   表現を出す(GDD 7.4「取り返しがつかない」の具体化)。
+// ---------------------------------------------------------------------------
+
+/** ⑤研究ツリー 1 行の状態(state.research + loss を状態機械へ写したもの)。 */
+export const RESEARCH_TREE_STATUSES = [
+  "notStarted",
+  "researching",
+  "completed",
+  "lostRecoverable",
+  "lostIrreversible",
+] as const;
+
+export type ResearchTreeStatus = (typeof RESEARCH_TREE_STATUSES)[number];
+
+/** ⑤研究ツリー 1 行(content の tech 定義 + state の research entity の重ね合わせ)。 */
+export interface ResearchTreeEntry {
+  readonly techId: EntityId;
+  /** `TechDef.eraId` 省略時は null(GDD 5.1 のエラ不明扱いと同じ)。 */
+  readonly eraId: string | null;
+  /** GDD 7.4 の二層。**状態に関わらず常に持つ**(§2)。 */
+  readonly lossClass: TechLossClass;
+  /** 前提 tech(ID 昇順・`prereqsOfTech` そのまま)。 */
+  readonly prereqTechIds: readonly EntityId[];
+  /** 前提が全て解禁済みか(表示専用の参考情報。ボタンの活性/非活性には使わない)。 */
+  readonly prereqsMet: boolean;
+  readonly researchCostApprox: number;
+  readonly status: ResearchTreeStatus;
+  /** `status` が `researching` のときだけ非 null。 */
+  readonly progressApprox: number | null;
+  /** 単一キュー(research.ts §2)の先頭 = 実際に研究点が入っている対象か。 */
+  readonly isCurrentResearchTarget: boolean;
+}
+
+/**
+ * tech の表示順(GDD 5.2「エラ別テック一覧」)= エラ順(`erasInOrder`) × エラ内
+ * ID 昇順(`techsOfEra` がそのまま返す順序)。エラ不明(`eraDefs` 省略 / tech の
+ * `eraId` が省略・content に存在しないエラを指す等)の tech は末尾へ ID 昇順で
+ * 追加する(GDD 5.1 の「エラ不明」扱いと同じ・techTree.ts の網羅から漏れる分の
+ * 受け皿)。`techTree.ts` の関数をそのまま使い、順序ロジックを画面側で複製しない。
+ */
+function orderedTechIds(content: EngineContent): readonly EntityId[] {
+  const result: EntityId[] = [];
+  const seen = new Set<EntityId>();
+  for (const era of erasInOrder(content)) {
+    for (const def of techsOfEra(content, era.id)) {
+      if (seen.has(def.id)) continue;
+      seen.add(def.id);
+      result.push(def.id);
+    }
+  }
+  for (const techId of [...content.techDefs.keys()].sort(compareUtf16)) {
+    if (!seen.has(techId)) result.push(techId);
+  }
+  return result;
+}
+
+/**
+ * ⑤研究ツリーの表示モデルを組み立てる。content の tech 全件(エラ順・§ 直前の
+ * `orderedTechIds`)を軸にし、state 側に research entity が無い tech は
+ * `notStarted` として並べる(`beginResearch` 未実装により、これらは engine
+ * 側の手段では現状增えないが、画面としては「まだ手を付けていない」を正直に
+ * 見せる)。
+ */
+function buildResearchTree(state: GameState, content: EngineContent): readonly ResearchTreeEntry[] {
+  const researchByTechId = new Map<EntityId, ResearchState>();
+  for (const entry of entitiesOfKind(state, "research")) {
+    // 同一 techId の research entity が複数あることは現行の生成経路では
+    // 起きないが、起きても「先に見つかった方」を表示専用として拾う
+    // (`currentResearch` と違い一意性を強制する場ではないため)。
+    if (!researchByTechId.has(entry.techId)) researchByTechId.set(entry.techId, entry);
+  }
+  const current = currentResearch(state);
+  const techIds = orderedTechIds(content);
+
+  const result: ResearchTreeEntry[] = [];
+  for (const techId of techIds) {
+    const def = content.techDefs.get(techId);
+    if (def === undefined) continue;
+    const research = researchByTechId.get(techId);
+    const prereqTechIds = prereqsOfTech(content, techId);
+    const prereqsMet = prereqTechIds.every((prereqId) => isTechUnlocked(state, prereqId));
+
+    let status: ResearchTreeStatus;
+    let progressApprox: number | null = null;
+    if (research === undefined) {
+      status = "notStarted";
+    } else if (research.completedTick !== null) {
+      status = "completed";
+    } else if (research.loss !== undefined) {
+      // GDD 7.4: completedTick は喪失時に null へ戻る。(A) は再研究可能な
+      // 「停滞」、(B) は `currentResearch` の対象からも外れる「一回性」。
+      status = research.loss.irreversible ? "lostIrreversible" : "lostRecoverable";
+    } else {
+      status = "researching";
+      progressApprox = toApproxNumber(research.progress);
+    }
+
+    result.push({
+      techId,
+      eraId: def.eraId ?? null,
+      lossClass: lossClassOfTech(content, techId),
+      prereqTechIds,
+      prereqsMet,
+      researchCostApprox: toApproxNumber(def.researchCostFix),
+      status,
+      progressApprox,
+      isCurrentResearchTarget: current !== undefined && current.techId === techId,
+    });
+  }
+  return result;
+}
+
+/** ⑥成文化キューの作業中(未完了)記録 1 件。 */
+export interface CodifyPendingRecordView {
+  readonly entityId: EntityId;
+  readonly medium: RecordMedium;
+  /** §1(b) のとおり、tick 結線が無いため現状は着手時の値のまま動かない。 */
+  readonly progressApprox: number;
+  readonly requiredWorkApprox: number;
+}
+
+/** ⑥成文化キュー 1 行(解禁済み tech 1 本ぶん)。 */
+export interface CodifyTechEntry {
+  readonly techId: EntityId;
+  readonly lossClass: TechLossClass;
+  /** 生存保持者(ID 昇順・`techHoldersOf` そのまま)。 */
+  readonly holderIds: readonly EntityId[];
+  readonly uniqueHolder: boolean;
+  /** 完了済み記録が 1 件以上あるか(`isCodified`)。 */
+  readonly isCodified: boolean;
+  /** 完了済み記録の媒体一覧(`recordMediaOfTech`・宣言順)。 */
+  readonly recordedMedia: readonly RecordMedium[];
+  /** 作業中(未完了)の記録一覧。 */
+  readonly pendingRecords: readonly CodifyPendingRecordView[];
+  /**
+   * [2026-07-31裁定=GDD 7.5] 生存保持者中の最小残存想定tick
+   * (`codifyResidualTick` そのまま)。`hasDeadline` が false のときは
+   * {@link CODIFY_NO_DEADLINE_TICKS}(寿命モデル不活性)であり、画面は
+   * この値をそのまま tick 数として表示しない。
+   */
+  readonly residualTick: number;
+  readonly hasDeadline: boolean;
+  /** 保持者のうち最大の 1 日あたり想起リスク(%表示用)。保持者 0 人は null。 */
+  readonly maxRecallRiskPercentApprox: number | null;
+}
+
+/**
+ * ⑥成文化キューの対象一覧を組み立てる。**解禁済み(`isTechUnlocked`)の tech
+ * だけ**を並べる(未解禁は成文化しようがなく、一回性喪失/停滞喪失中の tech は
+ * `completedTick` が null へ戻っていて `isTechUnlocked` が自然に false を返す
+ * ので、ここで重ねて除外条件を書く必要が無い)。
+ */
+function buildCodifyTechs(state: GameState, content: EngineContent): readonly CodifyTechEntry[] {
+  const techIds = [...content.techDefs.keys()].sort(compareUtf16);
+  const result: CodifyTechEntry[] = [];
+
+  for (const techId of techIds) {
+    if (!isTechUnlocked(state, techId)) continue;
+    const holderIds = techHoldersOf(state, techId);
+
+    const pendingRecords: CodifyPendingRecordView[] = [];
+    for (const job of entitiesOfKind(state, "codify")) {
+      if (job.techId !== techId || job.completedTick !== null) continue;
+      pendingRecords.push({
+        entityId: job.id,
+        medium: job.medium,
+        progressApprox: toApproxNumber(job.progress),
+        requiredWorkApprox: toApproxNumber(job.requiredWork),
+      });
+    }
+
+    let maxRecallRiskPercentApprox: number | null = null;
+    for (const holderId of holderIds) {
+      const holder = state.entityStateById.get(holderId);
+      if (holder === undefined || holder.kind !== "resident") continue;
+      const riskPercent = toApproxNumber(recallRiskPerDay(state, content, holder, techId)) * 100;
+      if (maxRecallRiskPercentApprox === null || riskPercent > maxRecallRiskPercentApprox) {
+        maxRecallRiskPercentApprox = riskPercent;
+      }
+    }
+
+    const residualTick = codifyResidualTick(state, techId, state.tick);
+    result.push({
+      techId,
+      lossClass: lossClassOfTech(content, techId),
+      holderIds,
+      uniqueHolder: holderIds.length === 1,
+      isCodified: isCodified(state, techId),
+      recordedMedia: recordMediaOfTech(state, techId),
+      pendingRecords,
+      residualTick,
+      hasDeadline: residualTick !== CODIFY_NO_DEADLINE_TICKS,
+      maxRecallRiskPercentApprox,
+    });
+  }
+  return result;
+}
+
+/** おまかせ成文化の提案 1 件(`CodificationSuggestion` の表示用ラップ)。 */
+export interface CodifySuggestionView {
+  readonly techId: EntityId;
+  readonly medium: RecordMedium;
+  /** `beginCodification` へそのまま渡せる entity ID(`codifyRecordId` 由来)。 */
+  readonly codifyId: EntityId;
+  readonly residualTick: number;
+  readonly hasDeadline: boolean;
+  readonly durationTicks: number;
+  readonly cumulativeTicks: number;
+  readonly onSchedule: boolean;
+}
+
+/**
+ * おまかせ成文化の提案(GDD 2.1「おまかせ成文化」)。**state を 1 バイトも
+ * 動かさない**(`suggestCodification` は読み取り専用・§1 と同じ立場)。
+ *
+ * `content.recordMedia` が無い content(engine のテストフィクスチャ等)では
+ * `suggestCodification` が候補到達時に例外を投げうる(`planCodification` が
+ * `recordMedia` を必須にするため)ので、ここで先に空へ倒す
+ * (`reclaimInfo`/`buildReclaimInfo` の「機構が無ければ不活性」と同じ作法)。
+ */
+function buildCodifySuggestions(
+  state: GameState,
+  content: EngineContent,
+): readonly CodifySuggestionView[] {
+  if (content.recordMedia === undefined) return [];
+  const plan = suggestCodification(state, content, state.tick);
+  return plan.suggestions.map((suggestion) => ({
+    techId: suggestion.techId,
+    medium: suggestion.medium,
+    codifyId: suggestion.codifyId,
+    residualTick: suggestion.residualTick,
+    hasDeadline: suggestion.residualTick !== CODIFY_NO_DEADLINE_TICKS,
+    durationTicks: suggestion.durationTicks,
+    cumulativeTicks: suggestion.cumulativeTicks,
+    onSchedule: suggestion.onSchedule,
+  }));
 }

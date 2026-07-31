@@ -1,0 +1,30 @@
+/*
+ * 継ぐ火 -Kept Flame- (A)/(B) 二層バッジ(M31)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。配色は appShell.css の
+ * `--kf-urgency-*` トークンをそのまま転用する(LossClassBadge.tsx 冒頭コメント
+ * 参照・新しい色を作らない)。
+ */
+
+.kf-lossclass-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid var(--kf-line-soft, #c9c3b8);
+}
+
+.kf-lossclass-badge--a {
+  background: var(--kf-urgency-info-fill, #eeece8);
+  color: var(--kf-urgency-info-ink, #5b534b);
+  border-color: var(--kf-urgency-info-line, #8a857d);
+}
+
+.kf-lossclass-badge--b {
+  background: var(--kf-urgency-critical-fill, #a11334);
+  color: var(--kf-urgency-critical-ink, #ffffff);
+  border-color: var(--kf-urgency-critical-line, #a11334);
+}

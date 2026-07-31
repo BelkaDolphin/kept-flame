@@ -55,10 +55,18 @@ import {
   FacilityWorkerRow,
 } from "../../../src/ui/screens/facility/FacilityScreen";
 import { ResidentRow } from "../../../src/ui/screens/residents/ResidentsScreen";
-import type { FacilityRosterEntry, ResidentView } from "../../../src/ui/derived";
+import type {
+  CodifySuggestionView,
+  CodifyTechEntry,
+  FacilityRosterEntry,
+  ResearchTreeEntry,
+  ResidentView,
+} from "../../../src/ui/derived";
 import { UrgencyBadge } from "../../../src/ui/screens/home/HomeHub";
 import { RejectionBanner } from "../../../src/ui/screens/RejectionBanner";
 import { ScreenNav } from "../../../src/ui/AppShell";
+import { ResearchTechRow } from "../../../src/ui/screens/research/ResearchScreen";
+import { CodifySuggestionPanel, CodifyTechRow } from "../../../src/ui/screens/codify/CodifyScreen";
 
 const id = entityIdFromString;
 
@@ -104,12 +112,15 @@ function readCss(relativePath: string): ReadonlyMap<string, CssDeclarations> {
   return parseCss(readFileSync(relativePath, "utf8"));
 }
 
-/** 4 つの stylesheet を 1 枚のセレクタ表へ統合する(このプロジェクトの CSS 全量)。 */
+/** stylesheet 一式を 1 枚のセレクタ表へ統合する(このプロジェクトの CSS 全量)。 */
 const ALL_RULES: ReadonlyMap<string, CssDeclarations> = new Map([
   ...readCss("src/ui/appShell.css"),
   ...readCss("src/ui/screens/grid/gridBoard.css"),
   ...readCss("src/ui/screens/facility/facilityScreen.css"),
   ...readCss("src/ui/screens/residents/residentsScreen.css"),
+  // [M31]
+  ...readCss("src/ui/screens/research/researchScreen.css"),
+  ...readCss("src/ui/screens/codify/codifyScreen.css"),
 ]);
 
 function pxValue(raw: string | undefined): number | null {
@@ -252,6 +263,13 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
     ".kf-facility-screen__nav-button",
     ".kf-residents-screen__nav-button",
     ".kf-resident-row__select",
+    // [M31] 新規
+    ".kf-research-row__start-button",
+    ".kf-research-screen__nav-button",
+    ".kf-codify-row__medium-select",
+    ".kf-codify-row__enqueue-button",
+    ".kf-codify-assist__apply-button",
+    ".kf-codify-screen__nav-button",
   ] as const;
 
   it.each(INTERACTIVE_SELECTORS)("%s は 44px 角を満たす", (selector) => {
@@ -422,6 +440,82 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
           message: "テスト",
         },
       }),
+      found,
+    );
+    expect(found).toHaveLength(0);
+  });
+});
+
+// --- 4-2. [M31] ⑤研究ツリー/⑥成文化キューの新規対話可能要素 ------------------
+
+describe("44px 最小タップ領域 — 実際にレンダーした vnode との突合せ([M31])", () => {
+  const researchEntry: ResearchTreeEntry = {
+    techId: id("techFireStarting"),
+    eraId: "e1",
+    lossClass: "criticalRecoverable",
+    prereqTechIds: [],
+    prereqsMet: true,
+    researchCostApprox: 30,
+    status: "notStarted",
+    progressApprox: null,
+    isCurrentResearchTarget: false,
+  };
+
+  it("ResearchTechRow(研究開始ボタン)", () => {
+    const vnode = ResearchTechRow({ entry: researchEntry, onBeginResearch: () => undefined });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-research-row__start-button"))).toBe(true);
+  });
+
+  const codifyEntry: CodifyTechEntry = {
+    techId: id("techFireStarting"),
+    lossClass: "criticalRecoverable",
+    holderIds: [id("aRui")],
+    uniqueHolder: true,
+    isCodified: false,
+    recordedMedia: [],
+    pendingRecords: [],
+    residualTick: 1000,
+    hasDeadline: true,
+    maxRecallRiskPercentApprox: 5,
+  };
+
+  it("CodifyTechRow(媒体セレクト+キュー投入ボタン)", () => {
+    const vnode = CodifyTechRow({
+      entry: codifyEntry,
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.tag === "select")).toBe(true);
+    expect(found.some((e) => e.class.includes("kf-codify-row__enqueue-button"))).toBe(true);
+  });
+
+  it("CodifySuggestionPanel(おまかせ成文化の適用ボタン)", () => {
+    const suggestion: CodifySuggestionView = {
+      techId: id("techFireStarting"),
+      medium: "stoneTablet",
+      codifyId: id("techFireStartingRecordStone"),
+      residualTick: 1000,
+      hasDeadline: true,
+      durationTicks: 40,
+      cumulativeTicks: 40,
+      onSchedule: true,
+    };
+    const vnode = CodifySuggestionPanel({
+      suggestions: [suggestion],
+      outcome: null,
+      onApply: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-codify-assist__apply-button"))).toBe(true);
+  });
+
+  it("CodifySuggestionPanel(提案 0 件は適用ボタンを出さない・捏造しない)", () => {
+    const found: InteractiveElement[] = [];
+    collectInteractive(
+      CodifySuggestionPanel({ suggestions: [], outcome: null, onApply: () => undefined }),
       found,
     );
     expect(found).toHaveLength(0);
