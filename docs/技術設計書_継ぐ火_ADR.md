@@ -729,7 +729,7 @@ kept-flame/
 
 ### バージョニング / マイグレーション(3軸)
 
-- **(a) saveSchemaVersion 差** → 純関数マイグレーション version 順連鎖。**[2026-07-30追記]** payload 軸の最初の実段 = M16 の v1→v2（facility footprint 追加。省略可フィールドでも「旧ビルドが新セーブを読むと盤面幾何が黙って潰れる」類の変更は版差で塞ぐ、が線引きの実例）。v2→v3 = M21（派遣スナップショット追加。旧ビルドは未帰還派遣を黙って捨て派遣中住民が永久拘束されるため同じ線引きで bump）。**[2026-07-31追記]** v3→v4 = M22（派遣スナップショットへの event 効果 `effects`/choice・branch 記録の追加。旧ビルドは効果を黙って落とし「燃えるはずの記録が燃えない」ため同じ線引きで bump）。
+- **(a) saveSchemaVersion 差** → 純関数マイグレーション version 順連鎖。**[2026-07-30追記]** payload 軸の最初の実段 = M16 の v1→v2（facility footprint 追加。省略可フィールドでも「旧ビルドが新セーブを読むと盤面幾何が黙って潰れる」類の変更は版差で塞ぐ、が線引きの実例）。v2→v3 = M21（派遣スナップショット追加。旧ビルドは未帰還派遣を黙って捨て派遣中住民が永久拘束されるため同じ線引きで bump）。**[2026-07-31追記]** v3→v4 = M22（派遣スナップショットへの event 効果 `effects`/choice・branch 記録の追加。旧ビルドは効果を黙って落とし「燃えるはずの記録が燃えない」ため同じ線引きで bump）。v4→v5 = M52（地形 `terrain{rubbleCells, reclaimedCount}` 追加。旧ビルドの往復で瓦礫配置と解放数が不可逆に消え、開墾コスト指数 `1.15^n` がリセットされる経済 exploit が成立するため bump。判断の両論は `migration.ts` の `migratePayloadV4ToV5` doc に記録）。
 - **(b) contentVersion 差** → additive-only・未知 ID グレースフル無視・tombstone=ソフト削除ゆえ逆参照/救済が機械実行可能・着手済みは `snapshottedParams` で完了継続/未着手はコスト返還。
 - **(c) algoVersion 差** → 旧セーブは生成時 algoVersion の決定論バンドル全体実装 registry で未来 tick 計算(ライブは直近3世代ハード上限・ADR-025)。sunset 到達版の実装はライブ HEAD から物理削除し Cloudflare Workers 静的アセットの個別 Worker(固定サブドメイン・[2026-07-25改訂] 旧 Cloudflare Pages イミュータブル凍結アーカイブデプロイから変更、詳細は ADR-025)へ退役、sunset 版セーブは現行ビルドが計算拒否し「凍結ビルドで継続/エクスポート or 同意して再シード移行」を提示(ADR-025)。
 

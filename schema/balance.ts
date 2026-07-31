@@ -293,6 +293,27 @@ export interface OutpostBalanceContent {
   readonly distanceBandUpkeepMul: { readonly [band: string]: number };
 }
 
+/**
+ * [M52] 瓦礫の開墾パラメータ(GDD 9.1)。**ブロックごと省略可**(欠落は null)。
+ * 省略時は engine 側で開墾コストが求まらず、`commands.ts` の `reclaimCell` が
+ * `contentUnsupported` で拒否する(= 開墾システム不活性)。
+ *
+ * `initialRubbleCells` は**新規ゲームの生成パラメータ**であって現在の盤面では
+ * ない(盤面の権威は state・src/engine/rules/reclaim.ts §1)。
+ */
+export interface ReclaimBalanceContent {
+  /** 解放数 0(最初の 1 枚)の開墾コスト。 */
+  readonly baseCost: number;
+  /** 逓増の底(GDD 9.1 の 1.15)。 */
+  readonly costGrowth: number;
+  /** GDD 9.1 の「最終セルでも到達可能な明示上限 cap」。 */
+  readonly costCap: number;
+  /** コストを引き落とす resource 定義 ID。 */
+  readonly costResourceId: string;
+  /** 新規ゲームの初期瓦礫セル(セル番号の昇順・重複なし・0〜47)。 */
+  readonly initialRubbleCells: readonly number[];
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -312,6 +333,8 @@ export interface BalanceContent {
   readonly exploration: ExplorationContent | null;
   /** [M24] GDD 9.2 の拠点網パラメータ。JSON に無ければ null(拠点の維持費が求まらない)。 */
   readonly outpost: OutpostBalanceContent | null;
+  /** [M52] GDD 9.1 の開墾パラメータ。JSON に無ければ null(開墾不可)。 */
+  readonly reclaim: ReclaimBalanceContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -1309,6 +1332,107 @@ function validateOutpostBalance(
   return { distanceBandUpkeepMul };
 }
 
+// --- [M52] reclaim(GDD 9.1)---------------------------------------------------
+
+/** 開墾コストの保守境界(資源量。lvCurve と同じ上限に揃える)。 */
+const RECLAIM_COST_RANGE: NumericRange = { min: 0, max: 1_000_000_000 };
+
+/**
+ * 逓増の底の許容レンジ。**下限 1.0** は engine 側の cap 打ち切りが依拠する単調性
+ * (src/engine/rules/reclaim.ts §2)の前提であり、片方だけ緩めないこと。
+ * 上限 2.0 は GDD 9.1 が「旧 1.6 は指数爆発ゆえ廃し 1.15 へ緩和」と定めた趣旨から、
+ * 旧値 1.6 を含みつつ明らかな爆発域を弾く保守境界とする。
+ */
+const RECLAIM_GROWTH_RANGE: NumericRange = { min: 1, max: 2 };
+
+/**
+ * 初期瓦礫セル番号の許容レンジ。**6×8 格子の通し番号 0〜47**
+ * (engine 側の権威は `src/engine/adjacency.ts` の GRID_CELL_COUNT。schema は
+ * engine を import できるが、ここは他の数値レンジと同じ書き方に揃えて定数で持ち、
+ * 突き合わせは `schema/engineContent.ts` の変換で行う ——
+ * `FOOTPRINT_DIMENSION_RANGE` と engine の `FOOTPRINT_DIM_MAX` の関係と同型)。
+ */
+const RUBBLE_CELL_INDEX_RANGE: NumericRange = { min: 0, max: 47 };
+
+function validateInitialRubbleCells(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const array = expectArray(raw, path, issues);
+  if (array === undefined) return undefined;
+
+  const cells: number[] = [];
+  let previous = -1;
+  let ok_ = true;
+  for (let i = 0; i < array.length; i++) {
+    const cell = expectInteger(array[i], `${path}[${String(i)}]`, issues, RUBBLE_CELL_INDEX_RANGE);
+    if (cell === undefined) {
+      ok_ = false;
+      continue;
+    }
+    if (cell <= previous) {
+      // 昇順・重複なしを schema で強制する。engine 側(state.ts 不変条件 (i))と
+      // 同じ正準形にしておかないと、content から作った初期盤面だけが
+      // `createGameState` の検査で落ちる = 起動できない content ができてしまう。
+      issues.add(
+        `${path}[${String(i)}]`,
+        `初期瓦礫セルはセル番号の昇順・重複なしが必須(${String(previous)} → ${String(cell)})`,
+      );
+      ok_ = false;
+      continue;
+    }
+    previous = cell;
+    cells.push(cell);
+  }
+  if (!ok_) return undefined;
+  return cells;
+}
+
+function validateReclaim(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): ReclaimBalanceContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const baseCost = expectNumber(obj["baseCost"], `${path}.baseCost`, issues, RECLAIM_COST_RANGE);
+  const costGrowth = expectNumber(
+    obj["costGrowth"],
+    `${path}.costGrowth`,
+    issues,
+    RECLAIM_GROWTH_RANGE,
+  );
+  const costCap = expectNumber(obj["costCap"], `${path}.costCap`, issues, RECLAIM_COST_RANGE);
+  const costResourceId = validateId(obj["costResourceId"], `${path}.costResourceId`, issues);
+  const initialRubbleCells = validateInitialRubbleCells(
+    obj["initialRubbleCells"] ?? [],
+    `${path}.initialRubbleCells`,
+    issues,
+  );
+
+  if (
+    baseCost === undefined ||
+    costGrowth === undefined ||
+    costCap === undefined ||
+    costResourceId === undefined ||
+    initialRubbleCells === undefined
+  ) {
+    return undefined;
+  }
+  if (costCap < baseCost) {
+    // cap が base を下回ると最初の 1 枚から cap 張り付き = 逓増が観測できない。
+    // GDD 9.1 の「最終セルでも到達可能な明示上限」の意図に反するので止める。
+    issues.add(
+      `${path}.costCap`,
+      `上限 ${String(costCap)} が基準コスト ${String(baseCost)} を下回る(GDD 9.1 の cap は逓増の頭打ち)`,
+    );
+    return undefined;
+  }
+  return { baseCost, costGrowth, costCap, costResourceId, initialRubbleCells };
+}
+
 export function validateBalance(raw: unknown): ValidationResult<BalanceContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -1367,6 +1491,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawOutpost === undefined
       ? null
       : (validateOutpostBalance(rawOutpost, "$.outpost", issues) ?? undefined);
+  const rawReclaim = obj["reclaim"];
+  const reclaim =
+    rawReclaim === undefined
+      ? null
+      : (validateReclaim(rawReclaim, "$.reclaim", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -1380,7 +1509,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     recordMedia === undefined ||
     townParams === undefined ||
     exploration === undefined ||
-    outpost === undefined
+    outpost === undefined ||
+    reclaim === undefined
   ) {
     return fail(issues.list());
   }
@@ -1398,5 +1528,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     townParams,
     exploration,
     outpost,
+    reclaim,
   });
 }

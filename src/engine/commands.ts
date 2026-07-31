@@ -67,18 +67,26 @@
 // 4. スコープ(M49 が実装するもの / 型だけ予約するもの)
 // ===========================================================================
 //   実装 : 配置 / 解体 / 増築 / 住民割当 / 割当解除 / 成文化指示 /
-//          廃材→研究点変換(GDD 6.7 3出口(3))/ [M21] 探索派遣確定
-//   予約 : 瓦礫開墾(M18)/ 研究対象の選択(M50)
+//          廃材→研究点変換(GDD 6.7 3出口(3))/ [M21] 探索派遣確定 /
+//          [M52] 瓦礫開墾(GDD 9.1)
+//   予約 : 研究対象の選択(M50)
 //   予約分は語彙(型)と reject コード `notImplemented` + 担当タスク名だけを持ち、
 //   **それらしい名前で何もしないコマンドにはしない**(store.ts §1 と同じ規律)。
 //   {@link RESERVED_COMMAND_OWNER_TASK} が機械可読の正本である。
 //
-//   実装済みコマンドが**建設コストを払わない**のは content にコストが無いため
+//   **配置 / 増築が建設コストを払わない**のは content にコストが無いため
 //   (GDD 12.1 の facility スキーマは `(id, tags[], slots, lvCurve,
 //   overflowCapPolicy)` でコスト項が無い)。GDD 6.7 の廃材 3 出口(1)
 //   「施設増築コストの一部代替」も、代替すべきコストが存在しないので実装できない
 //   (`substituteCostWithWaste` は成文化 = 出口(2) からのみ呼ばれている)。
-//   これは M49 の手抜きではなく content スキーマ側の穴であり、要ユーザー判断。
+//   これは M49 の手抜きではなく content スキーマ側の穴であり、要ユーザー判断
+//   (担当 = M50)。
+//
+//   **[M52] 開墾だけは資源を払う**。GDD 9.1 / 11.1 が開墾についてだけコスト式
+//   (`base × 1.15^解放数` + cap)を正本として明記しており、コストの置き場も
+//   facility スキーマではなく `balance.reclaim` なので、上記の穴(建設コストを
+//   どこへ置くか)を先取りせずに実装できる。開墾へ廃材代替を効かせるかは
+//   GDD 6.7 の文言が建設/増築に限定されているため**適用しない**(要ユーザー判断)。
 // ---------------------------------------------------------------------------
 
 import { GRID_CELL_COUNT } from "./adjacency";
@@ -91,6 +99,7 @@ import {
   isUnitFootprint,
   isValidFootprintDims,
   occupiedCells,
+  occupiedCellsOfFacility,
 } from "./footprint";
 import { toRaw, type Fix } from "./fp";
 import {
@@ -106,14 +115,17 @@ import {
   buildDispatchSnapshot,
   rewardResourceEntityIdOf,
 } from "./rules/exploration";
+import { reclaimCell as reclaimCellRule, reclaimCostFix } from "./rules/reclaim";
 import { currentResearch } from "./rules/research";
 import { convertWasteToResearchPoints, wasteStockOf, wasteToResearchPoints } from "./rules/storage";
 import type { DistanceBand, EngineContent, FacilityDef, RecordMedium } from "./rules/types";
 import {
   entitiesOfKind,
+  firstRubbleCellIn,
   getEntity,
   isAliveResident,
   isResidentOnDispatch,
+  isRubbleCell,
   type DispatchStance,
   type EntityId,
   type FacilityState,
@@ -238,15 +250,20 @@ export interface DispatchExpeditionCommand {
 }
 
 /**
- * **型のみ予約**(担当 M18): 瓦礫セルの開墾(GDD 9.1)。地形は state に無い。
+ * [M52] 瓦礫セルを 1 枚開墾する(GDD 9.1「本拠格子拡張」)。
  *
- * **[M16] 実装時の申し送り**: 瓦礫セルを state へ入れたら、`placeFacility` の
- * 検査に「**全占有セル**が開墾済みか」を足すこと(基準セルだけを見ると、2×2 の
- * 施設が瓦礫の上へ半分乗る)。占有セル集合は `footprint.ts` の `occupiedCells` で
- * 得られ、既に `cellOccupied` / `footprintOutOfGrid` は全占有セルを見ている。
+ * コストは `base × 1.15^解放数`(上限 cap)で、解放数は `state.terrain`
+ * `.reclaimedCount`(rules/reclaim.ts §2)。**大型施設と違い開墾は常に 1 セル
+ * 単位**である(GDD 9.1 に矩形での一括開墾は無い)。
+ *
+ * **[M16] の申し送りは本コマンドと同時に果たしてある**: `placeFacility` /
+ * `upgradeFacility` は**全占有セル**が開墾済みかを見る(基準セルだけを見ると、
+ * 2×2 の施設が瓦礫の上へ半分乗る)。占有セル集合は `footprint.ts` の
+ * `occupiedCells` から得ており、`cellOccupied` / `footprintOutOfGrid` と同じ集合。
  */
 export interface ReclaimCellCommand {
   readonly kind: "reclaimCell";
+  /** 6×8 格子の通し番号 0〜47。瓦礫でなければ `cellNotRubble` で拒否する。 */
   readonly cellIndex: number;
 }
 
@@ -298,6 +315,7 @@ export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
   "demolishFacility",
   "dispatchExpedition",
   "placeFacility",
+  "reclaimCell",
   "unassignResident",
   "upgradeFacility",
 ];
@@ -308,7 +326,6 @@ export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
  */
 export const RESERVED_COMMAND_OWNER_TASK: { readonly [K in CommandKind]?: string } = {
   beginResearch: "M50(研究の単一キュー縮約の解消が前提・research.ts §2)",
-  reclaimCell: "M18(瓦礫セルの state 化・GDD 9.1)",
 };
 
 /** その種別が実装済みか(予約語彙なら false)。 */
@@ -354,6 +371,19 @@ export const COMMAND_REJECTION_CODES = [
    * `rejection.cellIndex` には衝突したセルのうち最小のものが載る。
    */
   "cellOccupied",
+  /**
+   * [M52] そのセルは未開墾の瓦礫なので使えない(GDD 9.1)。配置 / 増築 の側の
+   * 拒否であり、`rejection.cellIndex` には瓦礫だった占有セルのうち最小のものが
+   * 載る(大型施設が瓦礫の上へ半分乗るのを防ぐ・`cellOccupied` と同じ形)。
+   */
+  "cellIsRubble",
+  /**
+   * [M52] そのセルは瓦礫ではないので開墾する対象が無い(GDD 9.1)。
+   * `cellIsRubble` と**逆向き**の拒否であり、`reclaimCell` 側で使う。
+   * 分けてあるのは UI の文言(「先に開墾が要ります」/「既に開墾済みです」)と
+   * sim の統計が別々の事象として数える必要があるため(§3(c))。
+   */
+  "cellNotRubble",
   /** これ以上増築できない(Lv 上限)。 */
   "levelAtMax",
   /** 就労スロットが埋まっている(GDD 7.7)。 */
@@ -660,6 +690,18 @@ function applyPlaceFacility(
   }
 
   const cells = occupiedCells(command.cellIndex, footprint);
+  // [M52] 全占有セルが開墾済みか(GDD 9.1・M16 の申し送り)。占有判定より**先**に
+  // 見るのは、瓦礫セルにはそもそも施設が建っていない(建てられない)ため
+  // 「瓦礫で拒否」の方が常に情報量の多い理由になるからである。
+  const rubble = firstRubbleCellIn(state, cells);
+  if (rubble !== null) {
+    return rejected("placeFacility", index, {
+      code: "cellIsRubble",
+      cellIndex: rubble,
+      subjectId: command.defId,
+      message: `セル ${String(rubble)} は未開墾の瓦礫なので施設を置けない(先に開墾する・GDD 9.1)`,
+    });
+  }
   const conflict = findOccupancyConflict(state, cells);
   if (conflict !== null) {
     return rejected("placeFacility", index, {
@@ -742,6 +784,21 @@ function applyUpgradeFacility(
       code: "unknownContentDef",
       subjectId: facility.defId,
       message: `facility 定義 "${facility.defId}" が content に無い`,
+    });
+  }
+  // [M52] 増築先が瓦礫の上に乗っていないか(GDD 9.1・検収条件「瓦礫セルへの
+  // 配置/増築が reject される」)。`placeFacility` が全占有セルを見るので通常の
+  // 経路ではこの状態は作れないが、(a) 手編集セーブ (b) 将来イベントで既存盤面へ
+  // 瓦礫を撒く拡張、の 2 つで到達しうる。そこへ資源を注ぎ込ませない。
+  const rubble = firstRubbleCellIn(state, occupiedCellsOfFacility(facility));
+  if (rubble !== null) {
+    return rejected("upgradeFacility", index, {
+      code: "cellIsRubble",
+      cellIndex: rubble,
+      subjectId: facility.id,
+      message:
+        `施設 "${facility.id}" は占有セル ${String(rubble)} が未開墾の瓦礫のまま置かれている` +
+        "(先に開墾する・GDD 9.1)",
     });
   }
   const maxLevel = facilityMaxLevel(def);
@@ -1166,6 +1223,90 @@ function applyDispatchExpedition(
   return { ok: true, state: next, changed: true, commandCount: 1 };
 }
 
+/**
+ * [M52] 瓦礫セルの開墾(GDD 9.1)。
+ *
+ * 検査の順序は「引数 → content の有無 → セルが瓦礫か → 資源」で、どれか 1 つでも
+ * 落ちれば state は 1 bit も動かない(§3)。
+ *
+ * **建設コストが content に無い(§4)ことと矛盾しない**理由: 開墾コストは
+ * facility スキーマではなく `balance.reclaim`(GDD 9.1 が式と cap を名指しで
+ * 定めている唯一のコスト)から来るので、M50 の「建設/増築コストをどこへ置くか」
+ * の裁定を先取りしていない。廃材 3 出口(1)(GDD 6.7「施設建設/増築コストの
+ * 一部代替」)も**開墾には適用しない** —— GDD 6.7 の文言が建設/増築に限定されて
+ * いるためで、開墾へ広げるかは要ユーザー判断(本タスクの★として報告)。
+ */
+function applyReclaimCell(
+  state: GameState,
+  content: EngineContent,
+  command: ReclaimCellCommand,
+  index: number,
+): CommandResult {
+  if (
+    !Number.isSafeInteger(command.cellIndex) ||
+    command.cellIndex < 0 ||
+    command.cellIndex >= GRID_CELL_COUNT
+  ) {
+    return rejected("reclaimCell", index, {
+      code: "cellOutOfRange",
+      cellIndex: command.cellIndex,
+      limit: GRID_CELL_COUNT - 1,
+      message: `セル番号 ${String(command.cellIndex)} が格子の範囲(0〜${String(GRID_CELL_COUNT - 1)})の外`,
+    });
+  }
+  const params = content.reclaim;
+  if (params === undefined) {
+    return rejected("reclaimCell", index, {
+      code: "contentUnsupported",
+      cellIndex: command.cellIndex,
+      message: "content に balance の reclaim ブロックが無いので開墾できない(GDD 9.1)",
+    });
+  }
+  if (!isRubbleCell(state, command.cellIndex)) {
+    return rejected("reclaimCell", index, {
+      code: "cellNotRubble",
+      cellIndex: command.cellIndex,
+      message: `セル ${String(command.cellIndex)} は瓦礫ではない(既に開墾済み・GDD 9.1)`,
+    });
+  }
+
+  const requiredRaw = toRaw(reclaimCostFix(params, state.terrain.reclaimedCount));
+  let availableRaw: number | null = null;
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId !== params.costResourceId) continue;
+    availableRaw = toRaw(resource.stock);
+    break;
+  }
+  if (availableRaw === null) {
+    // 受け皿の resource entity が無い state で `spendResources` を呼ぶと
+    // RulesError になる。プレイヤー操作の失敗として値で返す(§3)。
+    if (requiredRaw > 0) {
+      return rejected("reclaimCell", index, {
+        code: "insufficientResource",
+        cellIndex: command.cellIndex,
+        resourceId: params.costResourceId,
+        requiredRaw,
+        availableRaw: 0,
+        message: `資源 "${params.costResourceId}" の在庫が state に無い(開墾コストの受け皿が不在)`,
+      });
+    }
+  } else if (availableRaw < requiredRaw) {
+    return rejected("reclaimCell", index, {
+      code: "insufficientResource",
+      cellIndex: command.cellIndex,
+      resourceId: params.costResourceId,
+      requiredRaw,
+      availableRaw,
+      message:
+        `開墾コスト(解放数 ${String(state.terrain.reclaimedCount)} で ${String(requiredRaw)})に対し` +
+        `資源 "${params.costResourceId}" の在庫が ${String(availableRaw)} しかない(GDD 9.1)`,
+    });
+  }
+
+  const next = reclaimCellRule(state, content, command.cellIndex);
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
 /** その派遣 ID が未帰還一覧で既に使われているか。 */
 function activeDispatchIdInUse(state: GameState, command: DispatchExpeditionCommand): boolean {
   for (const snapshot of state.dispatchSnapshots) {
@@ -1256,8 +1397,9 @@ function applyOne(
       return applyConvertWasteToResearch(state, content, command, index);
     case "dispatchExpedition":
       return applyDispatchExpedition(state, content, command, index);
-    case "beginResearch":
     case "reclaimCell":
+      return applyReclaimCell(state, content, command, index);
+    case "beginResearch":
       return rejectReserved(command.kind, index);
     default: {
       const unhandled: never = command;

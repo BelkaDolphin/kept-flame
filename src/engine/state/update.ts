@@ -61,6 +61,7 @@
 //   `updateIn` の path に配列添字を混ぜた場合も内部で slice コピーになる。
 // ---------------------------------------------------------------------------
 
+import { GRID_CELL_COUNT } from "../adjacency";
 import { compareUtf16 } from "../canonicalize";
 import { FOOTPRINT_DIM_MAX, footprintFitsGrid, isValidFootprintDims } from "../footprint";
 import type { Fix } from "../fp";
@@ -68,6 +69,7 @@ import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   EMPTY_RENDERED_LOGS,
+  EMPTY_TERRAIN,
   EntityLookupError,
   MAX_TRAITS_PER_RESIDENT,
   isEntityId,
@@ -82,6 +84,7 @@ import {
   type OutpostState,
   type RenderedLogState,
   type TechMemoryState,
+  type TerrainState,
 } from "./state";
 
 /** 更新経路の使い方の誤り(空 path・ID 不整合・重複 ID など)。 */
@@ -338,6 +341,57 @@ function buildOutpostMap(outposts: readonly OutpostState[]): ReadonlyMap<EntityI
 }
 
 /**
+ * [M52] 地形の不変条件(state.ts 不変条件 (i))を強制する。
+ *
+ * ここで止めるのは、どちらの違反も**静かに間違った盤面を作る**からである:
+ *   - 昇順/重複の破れ : 直列化形が一意でなくなり、往復のバイト同一性
+ *                       (serialize.ts §1)が state 側から崩れる。重複は
+ *                       「1 回開墾したのにまだ瓦礫」という盤面も作る。
+ *   - 盤外のセル番号  : どの施設からも触れない瓦礫が residue として残り、
+ *                       開墾で消せない(= 到達不能な state)。
+ *   - 負の reclaimedCount : GDD 9.1 のコスト式の指数が負になり、
+ *                       `base × 1.15^n` が base より安くなる。
+ *
+ * `footprint` の検査(上記)と違って**常に走る**。瓦礫を持たない state では
+ * `rubbleCells` が空で loop が 0 回転するだけなので、M52 以前と挙動は変わらない。
+ */
+function requireValidTerrain(terrain: TerrainState): void {
+  if (!Number.isSafeInteger(terrain.reclaimedCount) || terrain.reclaimedCount < 0) {
+    throw new StateUpdateError(
+      `terrain.reclaimedCount ${String(terrain.reclaimedCount)} が 0 以上の整数でない(GDD 9.1 の解放数)`,
+    );
+  }
+  let previous = -1;
+  for (const cell of terrain.rubbleCells) {
+    if (!Number.isSafeInteger(cell) || cell < 0 || cell >= GRID_CELL_COUNT) {
+      throw new StateUpdateError(
+        `terrain.rubbleCells のセル番号 ${String(cell)} が格子の範囲` +
+          `(0〜${String(GRID_CELL_COUNT - 1)})の外(GDD 6.1)`,
+      );
+    }
+    if (cell <= previous) {
+      throw new StateUpdateError(
+        `terrain.rubbleCells がセル番号の昇順・重複なしでない` +
+          `(${String(previous)} → ${String(cell)})。直列化形の正準形が一意でなくなる`,
+      );
+    }
+    previous = cell;
+  }
+}
+
+/**
+ * [M52] 地形を差し替える(GDD 9.1)。不変条件 (i) の維持責務はここにある
+ * ({@link setRenderedLogs} と同型だが、こちらは検査を伴う)。
+ *
+ * @throws {StateUpdateError} 昇順/重複/値域/解放数の不変条件違反がある場合
+ */
+export function setTerrain(state: GameState, terrain: TerrainState): GameState {
+  if (Object.is(state.terrain, terrain)) return state;
+  requireValidTerrain(terrain);
+  return setField(state, "terrain", terrain);
+}
+
+/**
  * RNG ストリーム状態の Map を domainTag 昇順の正準順で作る(§3 / state.ts §4)。
  * 入力の並び順には依存しない。
  */
@@ -396,12 +450,17 @@ function buildTechMemoryMap(
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
  * `bondByPairKey`([M12])・`techMemoryByKey`([M13])も同じ規約(省略時は空)。
  * [M24] `outposts` も同じ規約(省略時は空 = 拠点なし)。
+ * [M52] `terrain` も同じ規約で、**省略時は瓦礫ゼロ = 全 48 セル開墾済み**
+ * (state.ts の `GameState.terrain` の doc)。初期盤面の瓦礫を撒くのは content を
+ * 読む `rules/reclaim.ts` の `initialTerrain` の役目であり、ここの既定値では
+ * ない —— 既定を瓦礫ありにすると既存 conformance シナリオの盤面が遡って変わる。
  *
  * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
  *   bond ペアキー重複 / [M13] techMemory キー重複 /
  *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)/
  *   [M16] 施設 footprint の値域違反・盤外はみ出し /
- *   [M24] 拠点 ID 重複・Lv/常駐人数レンジ違反・residentIds 不変条件違反 がある場合
+ *   [M24] 拠点 ID 重複・Lv/常駐人数レンジ違反・residentIds 不変条件違反 /
+ *   [M52] 地形の昇順/重複/値域/解放数の不変条件違反 がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
@@ -412,12 +471,14 @@ export function createGameState(
   dispatchSnapshots: readonly DispatchSnapshot[] = [],
   renderedLogs: RenderedLogState = EMPTY_RENDERED_LOGS,
   outposts: readonly OutpostState[] = [],
+  terrain: TerrainState = EMPTY_TERRAIN,
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
     requireValidResidentTraits(entity);
     requireValidFacilityFootprint(entity);
   }
+  requireValidTerrain(terrain);
   return {
     saveSchemaVersion: meta.saveSchemaVersion,
     contentVersion: meta.contentVersion,
@@ -431,6 +492,7 @@ export function createGameState(
     dispatchSnapshots: sortedDispatchSnapshots(dispatchSnapshots),
     renderedLogs,
     outpostsById: buildOutpostMap(outposts),
+    terrain,
   };
 }
 

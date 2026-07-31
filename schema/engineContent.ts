@@ -153,6 +153,7 @@ import type {
   OutpostUpkeepParams,
   OverflowPolicy,
   RecallRiskParams,
+  ReclaimParams,
   RecordMediaParams,
   RecordMediumParams,
   StorageParams,
@@ -171,6 +172,7 @@ import type {
   EraContent,
   ExplorationContent,
   OutpostBalanceContent,
+  ReclaimBalanceContent,
   RecordMediaContent,
   RecordMediumContent,
   RewardOverflowContent,
@@ -1921,6 +1923,40 @@ function toOutpostParams(
   return { distanceBandUpkeepMulFix: { near, far, deep } };
 }
 
+// --- 6g. reclaim(GDD 9.1)— M52 ---------------------------------------------
+
+/**
+ * [M52] `balance.reclaim` → engine の {@link ReclaimParams}(GDD 9.1 の
+ * `base × 1.15^解放数 + cap`)。
+ *
+ * コスト曲線を**配列へ展開しない**のは意図であり(facility の lvCurve / outpostType の
+ * capacityCurve と異なる)、理由は `src/engine/rules/types.ts` の
+ * {@link ReclaimParams} の doc にある。ここは 1e6 化と ID 化だけを行う。
+ *
+ * `initialRubbleCells` は**整数のまま**写す(セル番号は量ではなく添字なので Fix に
+ * しない。`ExplorationBandParams` のノード数と同じ扱い)。昇順・重複なし・値域は
+ * `schema/balance.ts` の `validateInitialRubbleCells` が既に強制している。
+ */
+function toReclaimParams(
+  content: ReclaimBalanceContent,
+  issues: IssueCollector,
+): ReclaimParams | undefined {
+  const path = "balance.reclaim";
+  const baseCostFix = toFix(content.baseCost, `${path}.baseCost`, issues, "開墾の基準コスト");
+  const costGrowthFix = toFix(content.costGrowth, `${path}.costGrowth`, issues, "開墾コストの底");
+  const costCapFix = toFix(content.costCap, `${path}.costCap`, issues, "開墾コストの上限");
+  if (baseCostFix === undefined || costGrowthFix === undefined || costCapFix === undefined) {
+    return undefined;
+  }
+  return {
+    baseCostFix,
+    costGrowthFix,
+    costCapFix,
+    costResourceId: entityIdFromString(content.costResourceId),
+    initialRubbleCells: [...content.initialRubbleCells],
+  };
+}
+
 // --- 7. 入口 ----------------------------------------------------------------
 
 /**
@@ -2005,6 +2041,12 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     bundle.balance.outpost === null
       ? null
       : (toOutpostParams(bundle.balance.outpost, issues) ?? undefined);
+  // [M52] 省略可。キー不在 = engine 側の「開墾できない」既定(瓦礫の**判定**は
+  //   state 権威なのでブロック不在でも効く・src/engine/rules/reclaim.ts §1)。
+  const reclaim =
+    bundle.balance.reclaim === null
+      ? null
+      : (toReclaimParams(bundle.balance.reclaim, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -2025,7 +2067,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     recordMedia === undefined ||
     town === undefined ||
     exploration === undefined ||
-    outpost === undefined
+    outpost === undefined ||
+    reclaim === undefined
   ) {
     return fail(issues.list());
   }
@@ -2052,7 +2095,9 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   // 十分表現できるため、event の「1 件以上あるときだけキーを持つ」規約と揃える)。
   const withOutpostTypes =
     outpostTypeDefs.size === 0 ? withEvents : { ...withEvents, outpostTypeDefs };
-  return ok(outpost === null ? withOutpostTypes : { ...withOutpostTypes, outpost });
+  const withOutpost = outpost === null ? withOutpostTypes : { ...withOutpostTypes, outpost };
+  // [M52] 開墾(GDD 9.1)。ブロック不在なら EngineContent へキーを足さない。
+  return ok(reclaim === null ? withOutpost : { ...withOutpost, reclaim });
 }
 
 /**

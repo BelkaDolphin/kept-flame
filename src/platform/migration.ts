@@ -295,7 +295,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 4([M22] event 効果の焼き込み導入)。
+ * payload の中身の版(ADR 3軸(a))。現行 = 5([M52] 地形/瓦礫の導入)。
  *
  * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
  * (= 現行ビルドが書くセーブの形)。
@@ -306,7 +306,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
  * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
  * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 4;
+export const SAVE_SCHEMA_VERSION = 5;
 
 /**
  * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
@@ -416,6 +416,58 @@ const migratePayloadV3ToV4: SaveMigrationStep = {
 };
 
 /**
+ * [M52] v4 → v5: 地形 / 瓦礫(payload の `terrain`)の導入。
+ *
+ * これまでの 3 段と同じく**構造の変換は無く、版だけを進める**(v4 のセーブは
+ * 瓦礫を 1 枚も持たず、v5 では「瓦礫ゼロ かつ 解放数 0」はキー省略が正準形・
+ * serialize.ts §10)。これが M52 検収条件「旧セーブが**全セル開墾済み**として
+ * 無損失ロードされる」の migration 側の実装である。
+ *
+ * **bump 要否の判断(ADR-012 [2026-07-30追記] の線引きへの当てはめ)**
+ *
+ * 線引きは「省略可フィールドでも、旧ビルドが新セーブを読むと**黙って壊れる**類の
+ * 変更は版差で塞ぐ」。両論を検討した結果、**塞ぐ側**と判断した。
+ *
+ *   (a) bump 不要側の論拠 — `terrain` が落ちても state は壊れない。瓦礫が消えて
+ *       「全セル開墾済み」になるだけで、例外も矛盾も起きず、UI も普通に動く。
+ *       M22 の `effects`(燃えるはずの記録が燃えない = 明白な機能欠落)とは
+ *       違って、失われるのは**制約**であって機能ではない。
+ *   (b) bump 必要側の論拠(採用) — 3 つある。
+ *       ① **静かにルールが緩む**: 旧ビルドでは瓦礫の上に施設が建つ。盤面の
+ *         広さが変わる = 産出も隣接乗数も別ゲームになる。M16 の footprint 脱落
+ *         (2×2 が黙って 1×1 になる)と**同じ「盤面幾何が黙って変わる」類**で
+ *         あり、あちらを版差で塞いだ以上こちらも塞ぐのが一貫している。
+ *       ② **書き戻しで不可逆に失われる**: 旧ビルドが読んで保存し直すと、瓦礫の
+ *         配置も解放数も永久に消える。読むだけで壊れないなら受容できるが、
+ *         `fromSerializable` → `toSerializable` の往復で落ちるフィールドは
+ *         セーブの破壊であり、これは M21 の未帰還派遣の脱落と同型である。
+ *       ③ **経済の exploit になる**: `reclaimedCount` が消えるとコスト式
+ *         `base × 1.15^解放数` の指数が 0 に戻る = 開墾コストが base まで
+ *         下がる。旧ビルドと新ビルドを往復させるだけで最安値の開墾を無限に
+ *         繰り返せる。
+ *   決め手は ②③ で、①だけなら「制約が緩むだけ」と見る余地があるが、
+ *   往復でデータが消えて経済が壊れる以上「読めない」を明示する版差が要る。
+ */
+const migratePayloadV4ToV5: SaveMigrationStep = {
+  from: 4,
+  to: 5,
+  summary:
+    "地形 / 瓦礫(terrain)を導入。v4 のセーブは瓦礫ゼロ = v5 の既定値(キー省略)" +
+    "なので構造変換は無く、saveSchemaVersion のみ 5 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v4 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 5;
+    return next;
+  },
+};
+
+/**
  * セーブスキーマ版の連鎖(`from` 昇順)。
  *
  * 段を足すときは `{from: N, to: N+1, migrate}` を末尾へ追加し
@@ -425,6 +477,7 @@ export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [
   migratePayloadV1ToV2,
   migratePayloadV2ToV3,
   migratePayloadV3ToV4,
+  migratePayloadV4ToV5,
 ];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");

@@ -831,6 +831,43 @@ export interface OutpostParams {
   readonly distanceBandUpkeepMulFix: { readonly [K in DistanceBand]: Fix };
 }
 
+/**
+ * [M52] 瓦礫の開墾パラメータ(`balance.json` の `reclaim` ブロック・GDD 9.1)。
+ * **ブロックごと省略可**(欠落は undefined)。省略時は `commands.ts` の
+ * `reclaimCell` が `contentUnsupported` で拒否する(= 開墾システムが不活性。
+ * storage / exploration / outpost と同じ「省略時は当該システム不活性」の形)。
+ *
+ * **コスト曲線を配列で持たない**のは、facility の `lvCurve` / outpostType の
+ * `capacityCurve`(どちらもオーサリング時に個別 FP 展開する規約)と意図的に
+ * 異なる。理由は 2 つ:
+ *   (a) 解放数の上限は盤面の瓦礫枚数で決まり、初期配置(content)と外周拡張
+ *       (GDD 9.1 の 6×8 → 8×10)で動く。段数が動く曲線を配列で持つと、
+ *       初期配置を 1 枚増やすたびに表の長さを直す必要が出る。
+ *   (b) GDD 9.1 / 11.1 はここだけ**式そのもの**(`base × 1.15^解放数 + cap`)を
+ *       正本として書いている。式を engine が持てば、cap 到達点のような性質を
+ *       テストで直接固定できる(rules/reclaim.ts §2)。
+ */
+export interface ReclaimParams {
+  /** 解放数 0(最初の 1 枚)の開墾コスト。 */
+  readonly baseCostFix: Fix;
+  /** 逓増の底(GDD 9.1 の 1.15)。1.0 以上。 */
+  readonly costGrowthFix: Fix;
+  /** GDD 9.1 の「最終セルでも到達可能な明示上限 cap」。 */
+  readonly costCapFix: Fix;
+  /** コストを引き落とす resource 定義 ID。 */
+  readonly costResourceId: EntityId;
+  /**
+   * 新規ゲームの初期瓦礫セル(**セル番号の昇順・重複なし**・GDD 6.1
+   * 「初期利用可は一部、残りは瓦礫」)。
+   *
+   * これは**生成パラメータ**であって現在の盤面ではない。読むのは
+   * `rules/reclaim.ts` の `initialTerrain` **だけ**であり、既存 state を
+   * 遡って書き換えることは無い(content の footprint を配置時にだけ読む
+   * M16 の規律と同じ・footprint.ts §1)。
+   */
+  readonly initialRubbleCells: readonly number[];
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -906,6 +943,14 @@ export interface EngineContent {
    * 求まらない**(rules/outpost.ts の維持費計算が RulesError)。
    */
   readonly outpost?: OutpostParams;
+  /**
+   * [M52] 瓦礫の開墾パラメータ(GDD 9.1)。**省略時は開墾できない**
+   * (`commands.ts` の `reclaimCell` が `contentUnsupported` で拒否)。
+   * 既に置かれた瓦礫の**配置判定**(`placeFacility` の拒否)はこのブロックが
+   * 無くても効く —— 瓦礫は state 権威であり、content はコストと初期配置しか
+   * 持たないためである。
+   */
+  readonly reclaim?: ReclaimParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------
@@ -1012,4 +1057,18 @@ export function requireOutpostParams(content: EngineContent): OutpostParams {
     );
   }
   return content.outpost;
+}
+
+/**
+ * [M52] 開墾パラメータを引く。
+ *
+ * @throws {RulesError} content に reclaim ブロックが無い場合
+ */
+export function requireReclaimParams(content: EngineContent): ReclaimParams {
+  if (content.reclaim === undefined) {
+    throw new RulesError(
+      "content に balance の reclaim ブロックが無いので開墾コストが求まらない(GDD 9.1)",
+    );
+  }
+  return content.reclaim;
 }

@@ -815,6 +815,59 @@ export interface OutpostState {
   readonly establishedTick: number;
 }
 
+// ===========================================================================
+// [M52] 地形 / 瓦礫(GDD 9.1「本拠格子拡張」/ GDD 6.1「初期利用可は一部」)
+// ===========================================================================
+//   GDD 6.1 は「初期 6×8 = 48 セル。初期利用可は一部、残りは瓦礫セル(開墾で
+//   解放)」と定める。state はこれを **「瓦礫セルの一覧」という例外集合**として
+//   持ち、**開墾済みを既定**とする。逆向き(開墾済みセルの一覧)にしない理由は
+//   縮約互換にある —— 瓦礫の概念を持たない既存セーブ・既存 golden vector 64 本は
+//   「例外ゼロ」= 全 48 セル開墾済み、として 1 bit も変えずに読める
+//   (serialize.ts §10。M52 検収条件「旧セーブが『全セル開墾済み』として無損失
+//   ロードされる」の実装上の根拠)。開墾済み側を列挙する表現にすると、キーの
+//   無い旧セーブが「1 セルも使えない盤面」に化ける。
+//
+//   `EntityKind` へ足さないのは M12 の memoir / M24 の outpost と同じ判断
+//   (新種別を足すと `src/ui/derived.ts` 等の既存の網羅 switch が壊れる)。
+//
+//   2 つの値を 1 オブジェクトにまとめてあるのは {@link ResidentLife} と同じ理由
+//   (独立した省略可フィールドにすると直列化の分岐が倍に増える・serialize.ts §5)。
+
+/**
+ * [M52] 本拠格子の地形(GDD 9.1)。`kind`/`id` を持たない**値オブジェクト**で
+ * ある(entity ではない)。
+ *
+ * 「地形」という広い名前にしてあるのは、GDD 9.1 が瓦礫のほかに「新資源露頭
+ * (鉄鉱脈セル等)」も同じ格子の属性として挙げているためで、そちらを足すときに
+ * GameState 直下のキーを増やさず本オブジェクトへ additive で足せる。
+ */
+export interface TerrainState {
+  /**
+   * 未開墾の瓦礫セル(**セル番号の昇順・重複なし**・各値は 0〜47)。
+   * **空 = 全セル開墾済み**であり、これが既定(= 旧セーブの解釈)である。
+   *
+   * 不変条件の強制は state/update.ts の `createGameState` / `setTerrain`
+   * (セーブ復元もそこを通るので、壊れたセーブは復元時点で停止する)。
+   */
+  readonly rubbleCells: readonly number[];
+  /**
+   * これまでに開墾したセル数。GDD 9.1 のコスト式 `base × 1.15^解放数` の
+   * **指数そのもの**であり、開墾 1 回ごとに +1 される。
+   *
+   * `rubbleCells` の長さからは導出できない —— 初期の瓦礫枚数は content 側の
+   * 生成パラメータ(`balance.reclaim.initialRubbleCells`)であって state には
+   * 残らないので、「何枚剥がしたか」は独立に数える必要がある。
+   */
+  readonly reclaimedCount: number;
+}
+
+/**
+ * [M52] 瓦礫が 1 枚も無い地形(正準形)。`GameState.terrain` の既定値であり、
+ * **直列化形ではキーごと省略される**({@link EMPTY_RENDERED_LOGS} と同じ規約・
+ * serialize.ts §10)。
+ */
+export const EMPTY_TERRAIN: TerrainState = { rubbleCells: [], reclaimedCount: 0 };
+
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
 export type EntityState =
   CodifyState | FacilityState | ResearchState | ResidentState | ResourceState;
@@ -864,6 +917,9 @@ export interface GameStateMeta {
  *       (entityStateById と同じ扱い。維持責務は update.ts の
  *       createGameState / setOutpost / setOutposts)。各 OutpostState の
  *       `residentIds` も ID 昇順・重複なし・1〜4 件(GDD 9.2)
+ *   (i) [M52] `terrain.rubbleCells` はセル番号の昇順・重複なし・全要素が
+ *       0〜`GRID_CELL_COUNT-1` の整数、`terrain.reclaimedCount` は 0 以上の整数
+ *       (維持責務は update.ts の createGameState / setTerrain)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -932,6 +988,18 @@ export interface GameState extends GameStateMeta {
    * ことの根拠(既存シナリオは 1 件も拠点を持たない)。
    */
   readonly outpostsById: ReadonlyMap<EntityId, OutpostState>;
+  /**
+   * [M52] 本拠格子の地形(GDD 9.1・不変条件 (i))。**既定は
+   * {@link EMPTY_TERRAIN} = 瓦礫ゼロ = 全 48 セル開墾済み**であり、空なら
+   * 直列化形からキーごと省略される(`renderedLogs` と同じ規約)= M52 以前の
+   * セーブ・既存 golden vector 64 本のバイト列が 1 bit も動かないことの根拠。
+   *
+   * 初期盤面の瓦礫は content(`balance.reclaim.initialRubbleCells`)から
+   * `rules/reclaim.ts` の `initialTerrain` が組み立てる **明示的な生成
+   * パラメータ**であり、`createGameState` の既定値ではない(既定を瓦礫ありに
+   * すると既存 conformance シナリオの盤面が遡って変わる)。
+   */
+  readonly terrain: TerrainState;
 }
 
 /**
@@ -1116,4 +1184,37 @@ export function getOutpost(state: GameState, outpostId: EntityId): OutpostState 
  */
 export function allOutposts(state: GameState): readonly OutpostState[] {
   return [...state.outpostsById.values()];
+}
+
+/**
+ * [M52] そのセルが未開墾の瓦礫か(GDD 9.1)。**瓦礫を持たない state では常に
+ * false** = 全セル開墾済み、という既定がここに 1 箇所だけある。
+ *
+ * 走査は昇順の配列を舐めるだけ(高々 48 件)。Set を作らないのは、地形の照会が
+ * 起きるのは配置/開墾コマンドの実行時だけであり(tick ループには乗らない)、
+ * Map/Set を state へ持たせると正準順の維持責務が 1 つ増えるためである。
+ */
+export function isRubbleCell(state: GameState, cellIndex: number): boolean {
+  for (const cell of state.terrain.rubbleCells) {
+    if (cell === cellIndex) return true;
+  }
+  return false;
+}
+
+/**
+ * [M52] 指定したセル集合のうち**瓦礫であるセル番号の最小値**を返す(無ければ
+ * null)。大型施設(footprint 2×1 / 2×2)の全占有セル検査に使う口であり、
+ * 「どのセルが瓦礫で引っかかったか」を reject に載せられるよう、真偽ではなく
+ * セル番号を返す。
+ *
+ * 入力の並び順に依存しない(明示的に最小を選ぶ)= 決定論。
+ * `footprint.ts` の `findOccupancyConflict` が「衝突セルの最小」を返すのと同型。
+ */
+export function firstRubbleCellIn(state: GameState, cells: readonly number[]): number | null {
+  let best: number | null = null;
+  for (const cell of cells) {
+    if (!isRubbleCell(state, cell)) continue;
+    if (best === null || cell < best) best = cell;
+  }
+  return best;
 }

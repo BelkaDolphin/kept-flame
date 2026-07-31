@@ -168,6 +168,29 @@
 //   帰還ログは memoirLog と違い**レンダリング済み文字列**を持つ。非対称なのは
 //   GDD 12.5-7 が帰還ログについてだけ「完成文字列保存(再参照禁止)」を
 //   求めているためである(理由は state.ts の RenderedLogEntry の doc)。
+//
+// ===========================================================================
+// 10. [M52] `terrain`(瓦礫)は §3 と同型 —— ただし「空 = 全セル開墾済み」
+// ===========================================================================
+//   地形(GDD 9.1)は GameState 直下の値オブジェクトであり、**瓦礫ゼロ かつ
+//   解放数 0 なら書き出さない**規約は rngState / renderedLogs / outpostsById と
+//   同一である。これが「既存セーブ・golden vector 64 本のバイト列が 1 bit も
+//   動かない」ことと「瓦礫フィールドを持たない旧セーブが**全セル開墾済み**として
+//   無損失でロードされる」ことを**同時に**満たす仕掛けである(M52 検収条件)。
+//
+//   §7(footprint)と同じく**書けてしまう非正準形**が 1 つある:
+//   `{"rubbleCells":[],"reclaimedCount":0}` を明示した形は読み込みで
+//   {@link EMPTY_TERRAIN} へ畳まれ、書き出しでキーが消えるため往復のバイト列が
+//   変わる。よって**空の terrain を明示した直列化形は reject** する
+//   (1×1 footprint の明示を reject するのと全く同じ理屈)。
+//   一方 `{"rubbleCells":[],"reclaimedCount":7}`(全部開墾し終えた盤面)は
+//   正準形である —— 解放数は次の開墾コストを決める生きた情報であり、空ではない。
+//
+//   セル番号の昇順・重複なし・値域(0〜47)と解放数の非負は
+//   `createGameState`(update.ts の `requireValidTerrain`)が復元時に強制する。
+//   これは §2 の「値域は schema 検証器の担当」と矛盾しない —— footprint の値域と
+//   同じく**セーブの表現能力そのもの**(順序が崩れた配列は正準形が一意でなくなり
+//   §1 の往復不変性が定理として成り立たなくなる)だからである。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
@@ -185,6 +208,7 @@ import { isDomainTag, type DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
   EMPTY_RENDERED_LOGS,
+  EMPTY_TERRAIN,
   entityIdFromString,
   isDispatchStance,
   isEntityId,
@@ -212,6 +236,7 @@ import {
   type ResourceState,
   type TechLossState,
   type TechMemoryState,
+  type TerrainState,
 } from "./state";
 import { createGameState, setField } from "./update";
 
@@ -400,6 +425,11 @@ export type SerializedGameState = {
    * 空なら `rngState` 等と同じ規約でキーごと省略される。
    */
   readonly outpostsById?: { readonly [id: string]: SerializedOutpost };
+  /**
+   * [M52] 地形 / 瓦礫(GDD 9.1・§10)。**瓦礫ゼロ かつ 解放数 0 なら
+   * キーごと省略**され、キー不在 = 全 48 セル開墾済みと解釈される。
+   */
+  readonly terrain?: SerializedTerrain;
 };
 
 /**
@@ -472,6 +502,17 @@ export type SerializedTechMemory = {
   readonly mastery: number;
   /** 想起困難が解ける tick(素の整数)。 */
   readonly impairedUntilTick: number;
+};
+
+/**
+ * [M52] 地形 / 瓦礫(state.ts の {@link TerrainState})。省略可フィールドは無い
+ * (「瓦礫ゼロ かつ 解放数 0」は**このオブジェクト自体を省略**することで表す・§10)。
+ */
+export type SerializedTerrain = {
+  /** 未開墾セル番号(昇順・重複なし・0〜47)。 */
+  readonly rubbleCells: readonly number[];
+  /** これまでに開墾したセル数(GDD 9.1 の解放数)。 */
+  readonly reclaimedCount: number;
 };
 
 /** [M24] 衛星拠点(state.ts の {@link OutpostState})。省略可フィールドは無い。 */
@@ -961,6 +1002,15 @@ export function toSerializable(state: GameState): SerializedGameState {
       outpostEntries.push([outpostId, serializeOutpost(outpost)]);
     }
     optional.push(["outpostsById", Object.fromEntries(outpostEntries)]);
+  }
+  // [M52] 地形(GDD 9.1・§10)。瓦礫ゼロ かつ 解放数 0 なら省略 = M52 以前の
+  // セーブとバイト同一(= 既存 golden vector 64 本が動かないことの根拠)。
+  const terrain = state.terrain;
+  if (terrain.rubbleCells.length > 0 || terrain.reclaimedCount > 0) {
+    optional.push([
+      "terrain",
+      { rubbleCells: [...terrain.rubbleCells], reclaimedCount: terrain.reclaimedCount },
+    ]);
   }
   const raw: SerializedGameState =
     optional.length === 0
@@ -1735,6 +1785,40 @@ function deserializeDispatchNode(node: Record<string, unknown>, p: string): Disp
   return effects.length === 0 ? result : setField(result, "effects", effects);
 }
 
+/**
+ * [M52] `terrain`(§10)を読む。**キーが無ければ瓦礫ゼロ**(= 全 48 セル
+ * 開墾済み)であり、これが「M52 以前の旧セーブが無損失でロードされる」経路
+ * そのものである。
+ *
+ * 空の terrain を明示した形は**非正準形として reject** する(§10。1×1 footprint の
+ * 明示を reject するのと同じ理屈で、往復のバイト同一性を定理として保つため)。
+ * 昇順・重複なし・値域は `createGameState` が強制するので、ここでは JSON として
+ * 型が合っているかだけを見る(§2 の層分け)。
+ */
+function deserializeTerrain(value: unknown): TerrainState {
+  if (value === undefined) return EMPTY_TERRAIN;
+  const o = requireObject(value, "$.terrain");
+  const rawCells = o["rubbleCells"];
+  if (!Array.isArray(rawCells)) {
+    throw new SerializeError(
+      `$.terrain.rubbleCells: 配列を期待したが ${describe(rawCells)} だった`,
+    );
+  }
+  const source = rawCells as readonly unknown[];
+  const rubbleCells: number[] = [];
+  for (let i = 0; i < source.length; i++) {
+    rubbleCells.push(requireNonNegativeInt(source[i], `$.terrain.rubbleCells[${String(i)}]`));
+  }
+  const reclaimedCount = requireNonNegativeInt(o["reclaimedCount"], "$.terrain.reclaimedCount");
+  if (rubbleCells.length === 0 && reclaimedCount === 0) {
+    throw new SerializeError(
+      "$.terrain: 瓦礫ゼロ かつ 解放数 0 の地形は**キーごと省略**が正準形" +
+        "(明示するとキー不在の旧セーブと同じ state が別のバイト列になる・§10)",
+    );
+  }
+  return { rubbleCells, reclaimedCount };
+}
+
 /** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */
 function deserializeRenderedLogs(value: unknown): RenderedLogState {
   if (value === undefined) return EMPTY_RENDERED_LOGS;
@@ -1800,5 +1884,6 @@ export function fromSerializable(input: unknown): GameState {
     deserializeDispatchSnapshots(root["dispatchSnapshots"]),
     deserializeRenderedLogs(root["renderedLogs"]),
     deserializeOutpostsById(root["outpostsById"]),
+    deserializeTerrain(root["terrain"]),
   );
 }

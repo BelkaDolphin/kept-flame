@@ -192,6 +192,8 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     // [M24] 新規必須フィールド。既存の合成テストが直接 GameState リテラルを
     // 組み立てているため typecheck 上不可避の追随(state.ts 不変条件 (h))。
     outpostsById: state.outpostsById,
+    // [M52] 同上(state.ts 不変条件 (i))。地形は瓦礫ゼロのまま引き継ぐ。
+    terrain: state.terrain,
   };
 }
 
@@ -226,6 +228,8 @@ describe("assertCanonicalSnapshot", () => {
       renderedLogs: BOARD.renderedLogs,
       // [M24] 新規必須フィールド(state.ts 不変条件 (h))。理由は上記 withEntityOrder と同じ。
       outpostsById: BOARD.outpostsById,
+      // [M52] 同上(state.ts 不変条件 (i))。
+      terrain: BOARD.terrain,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);

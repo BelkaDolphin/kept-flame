@@ -351,25 +351,27 @@ describe("migrateSavePayload", () => {
 //   固定するのは「版が進むこと」と「移行後のバイト列が現行ビルドの出力と同一で
 //   あること」の 2 点である。
 
-describe("v1 → v2 → v3 → v4(saveSchemaVersion・M16 / M21 / M22)", () => {
-  /** v1 のセーブ(= 現行より 3 つ古いスキーマ版を名乗る payload)。 */
+describe("v1 → v2 → v3 → v4 → v5(saveSchemaVersion・M16 / M21 / M22 / M52)", () => {
+  /** v1 のセーブ(= 現行より 4 つ古いスキーマ版を名乗る payload)。 */
   const V1_STATE = stateOf([...STATE.entityStateById.values()], { saveSchemaVersion: 1 });
 
-  it("現行版は 4 で、連鎖は v1→v2→v3→v4 の 3 段", () => {
-    expect(SAVE_SCHEMA_VERSION).toBe(4);
-    expect(PAYLOAD_MIGRATIONS).toHaveLength(3);
+  it("現行版は 5 で、連鎖は v1→v2→v3→v4→v5 の 4 段", () => {
+    expect(SAVE_SCHEMA_VERSION).toBe(5);
+    expect(PAYLOAD_MIGRATIONS).toHaveLength(4);
     expect(PAYLOAD_MIGRATIONS[0]?.from).toBe(1);
     expect(PAYLOAD_MIGRATIONS[0]?.to).toBe(2);
     expect(PAYLOAD_MIGRATIONS[1]?.from).toBe(2);
     expect(PAYLOAD_MIGRATIONS[1]?.to).toBe(3);
     expect(PAYLOAD_MIGRATIONS[2]?.from).toBe(3);
     expect(PAYLOAD_MIGRATIONS[2]?.to).toBe(4);
+    expect(PAYLOAD_MIGRATIONS[3]?.from).toBe(4);
+    expect(PAYLOAD_MIGRATIONS[3]?.to).toBe(5);
   });
 
-  it("v1 の payload は 3 段適用されて現行版を名乗る", () => {
+  it("v1 の payload は 4 段適用されて現行版を名乗る", () => {
     const result = migrateSavePayload(plainSerialized(V1_STATE));
     expect(result.fromVersion).toBe(1);
-    expect(result.appliedSteps).toHaveLength(3);
+    expect(result.appliedSteps).toHaveLength(4);
     expect((result.value as Record<string, unknown>)["saveSchemaVersion"]).toBe(
       SAVE_SCHEMA_VERSION,
     );
