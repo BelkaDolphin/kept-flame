@@ -360,6 +360,9 @@ export default tseslint.config(
       "test-results/**",
       "blob-report/**",
       "lancedb/**",
+      // 並行エージェントの worktree(gitignore 済み)。中の dist ビルド成果物が
+      // フルリポ lint に混入してノイズになるため除外(2026-07-31・engine 規則とは無関係)。
+      ".claude/**",
     ],
   },
 
