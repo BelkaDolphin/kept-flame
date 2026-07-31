@@ -295,7 +295,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 5([M52] 地形/瓦礫の導入)。
+ * payload の中身の版(ADR 3軸(a))。現行 = 6([M28] 周回 / 継承点の導入)。
  *
  * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
  * (= 現行ビルドが書くセーブの形)。
@@ -306,7 +306,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
  * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
  * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 5;
+export const SAVE_SCHEMA_VERSION = 6;
 
 /**
  * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
@@ -468,6 +468,57 @@ const migratePayloadV4ToV5: SaveMigrationStep = {
 };
 
 /**
+ * [M28] v5 → v6: 周回 / 継承点(payload の `progression`)の導入。
+ *
+ * これまでの 4 段と同じく**構造の変換は無く、版だけを進める**(v5 のセーブは
+ * 1 周目・継承点ゼロであり、v6 では「1 周目 かつ 累計 0 かつ 購入段ゼロ」は
+ * キー省略が正準形・serialize.ts §11)。
+ *
+ * **bump 要否の判断(ADR-012 [2026-07-30追記] の線引きへの当てはめ)**
+ *
+ * 線引きは「省略可フィールドでも、旧ビルドが新セーブを読むと**黙って壊れる**類の
+ * 変更は版差で塞ぐ」。両論を検討した結果、**塞ぐ側**と判断した。
+ *
+ *   (a) bump 不要側の論拠 — `progression` が落ちても例外は起きない。周回数と
+ *       継承点がゼロに見えるだけで、盤面(entity)は完全に読める。M52 の
+ *       `terrain` と違い**セル配置のような幾何が壊れるわけでもない**。
+ *   (b) bump 必要側の論拠(採用) — 3 つある。
+ *       ① **往復で不可逆に失われる**: 旧ビルドが読んで保存し直すと、累計継承点も
+ *         購入済みの段数も永久に消える。継承点は 1 周(数時間〜数日のプレイ)
+ *         あたり 84 点前後しか入らない meta 通貨であり、4〜5 周ぶんの蓄積
+ *         (GDD 10.3)が黙って消えるのは M21 の未帰還派遣の脱落と同型の破壊である。
+ *       ② **決定論が分岐する**: 次周の worldSeed は
+ *         `hash(前worldSeed, 周回回数, 累計継承点)`(GDD 10.5)であり、
+ *         `progression` を読めない旧ビルドは**同じセーブから別の世界**を導出する。
+ *         これは「黙って壊れる」の中でも最も検出しにくい形で、golden vector を
+ *         権威に置く本プロジェクト(ADR-016)が最も嫌う壊れ方である。
+ *       ③ **上限クランプが外れて見える**: 購入済み段数が消えると、上限まで
+ *         買った系統が「0 段」に見えて再購入できてしまう。残高(累計 − 消費)の
+ *         計算も同時に狂うので、旧/新ビルドを往復させるだけでボーナスを
+ *         上限超えで積める = GDD 11.4-6 の青天井禁止が実質破れる。
+ *   決め手は ②③ で、①だけでも M21/M52 の前例に照らせば塞ぐ側だが、
+ *   「同じセーブから別の世界が生える」時点で版差は必須である。
+ */
+const migratePayloadV5ToV6: SaveMigrationStep = {
+  from: 5,
+  to: 6,
+  summary:
+    "周回 / 継承点(progression)を導入。v5 のセーブは 1 周目・継承点ゼロ = v6 の既定値" +
+    "(キー省略)なので構造変換は無く、saveSchemaVersion のみ 6 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v5 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 6;
+    return next;
+  },
+};
+
+/**
  * セーブスキーマ版の連鎖(`from` 昇順)。
  *
  * 段を足すときは `{from: N, to: N+1, migrate}` を末尾へ追加し
@@ -478,6 +529,7 @@ export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [
   migratePayloadV2ToV3,
   migratePayloadV3ToV4,
   migratePayloadV4ToV5,
+  migratePayloadV5ToV6,
 ];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");

@@ -27,6 +27,13 @@
  *                    (GDD 6.4-2 単調解回避 / `adjacency.json` の seedOffsetRange)。
  *                    salt = (fnv1a32(tagPairKey))。worldSeed から決まる周回固定値で、
  *                    ストリーム状態を持たない(hash アドレス方式)。
+ *   exodus         : [M28] 周回シードの導出(GDD 10.5
+ *                    `新worldSeed = hash(前worldSeed, 周回回数, 累計継承点)`)。
+ *                    salt = (runCount, cumulativeInheritPoints)。**大移動 1 回につき
+ *                    1 度しか引かず**、結果は次周の `worldSeed` 文字列になる。
+ *                    hash アドレス方式 = ストリーム状態を持たない(GDD 10.5 の
+ *                    「周回時 RNG カウンタを全ドメイン 0 リセット」と両立する:
+ *                    リセットの対象になる状態をこのドメイン自身が持たない)。
  *   exploration    : 探索の分岐 RNG。salt = (dispatchId, nodeIndex, branchId, choiceKey)、
  *                    撤退枝/強行枝・慎重/大胆が各々独立の counter 起点を持つ(ADR-007)。
  *   joinAge        : [M11] 住民が加入した時点の年齢(GDD 7.7 晴天漂着・初期住民)。
@@ -57,6 +64,7 @@
  */
 const DOMAIN_TAG_LIST = [
   "adjacency",
+  "exodus",
   "exploration",
   "joinAge",
   "lifespan",

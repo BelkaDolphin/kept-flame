@@ -191,6 +191,29 @@
 //   これは §2 の「値域は schema 検証器の担当」と矛盾しない —— footprint の値域と
 //   同じく**セーブの表現能力そのもの**(順序が崩れた配列は正準形が一意でなくなり
 //   §1 の往復不変性が定理として成り立たなくなる)だからである。
+//
+// ===========================================================================
+// 11. [M28] `progression`(周回 / 継承点)は §10 と全く同じ形
+// ===========================================================================
+//   周回進行(GDD 10.2〜10.5)は GameState 直下の値オブジェクトであり、
+//   **1 周目 かつ 累計継承点 0 かつ 購入段ゼロ なら書き出さない**。既存セーブ・
+//   golden vector 73 本のバイト列が 1 bit も動かないことの根拠がここにある
+//   (既存シナリオは 1 件も大移動を実行しない)。
+//
+//   §10 と同じく**書けてしまう非正準形**が 1 つある:
+//   `{"runCount":0,"cumulativeInheritPoints":0,"inheritTiers":[]}` を明示した
+//   形は読み込みで {@link EMPTY_PROGRESSION} へ畳まれ、書き出しでキーが消える。
+//   よって**既定値を明示した直列化形は reject** する(空 terrain の明示・
+//   1×1 footprint の明示を reject するのと全く同じ理屈)。
+//
+//   `inheritTiers` は **`[]` を常に書く**(オブジェクト内で更に省略しない)。
+//   省略可の入れ子を作ると「progression は書くが inheritTiers は書かない」形と
+//   「両方書く」形の 2 通りが同じ state を表せてしまい、正準形が一意でなくなる。
+//   ADR「セーブフォーマット」が `runCount` / `cumulativeInheritPoints` を
+//   payload のトップレベルキーとして列挙しているのに対して 1 オブジェクトへ
+//   まとめてあるのは state.ts の [M28] 節に理由がある(要点: 3 つめの値
+//   `inheritTiers` が必要であること + 必須トップレベルキーは既存 73 本の
+//   バイト列を全て動かすこと)。
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
@@ -207,11 +230,13 @@ import {
 import { isDomainTag, type DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
+  EMPTY_PROGRESSION,
   EMPTY_RENDERED_LOGS,
   EMPTY_TERRAIN,
   entityIdFromString,
   isDispatchStance,
   isEntityId,
+  isInheritTrack,
   isMemoirEntryKind,
   type CodifyState,
   type DispatchEffect,
@@ -226,10 +251,12 @@ import {
   type FacilityState,
   type GameState,
   type GameStateMeta,
+  type InheritTierEntry,
   type MemoirEntry,
   type MemoirEntryKind,
   type MemoirLogState,
   type OutpostState,
+  type ProgressionState,
   type ResearchState,
   type ResidentLife,
   type ResidentState,
@@ -430,6 +457,12 @@ export type SerializedGameState = {
    * キーごと省略**され、キー不在 = 全 48 セル開墾済みと解釈される。
    */
   readonly terrain?: SerializedTerrain;
+  /**
+   * [M28] 周回 / 継承点(GDD 10.2〜10.5・§11)。**1 周目 かつ 累計 0 かつ
+   * 購入段ゼロならキーごと省略**され、キー不在 = まだ 1 度も大移動していないと
+   * 解釈される。
+   */
+  readonly progression?: SerializedProgression;
 };
 
 /**
@@ -513,6 +546,20 @@ export type SerializedTerrain = {
   readonly rubbleCells: readonly number[];
   /** これまでに開墾したセル数(GDD 9.1 の解放数)。 */
   readonly reclaimedCount: number;
+};
+
+/**
+ * [M28] 周回 / 継承点(state.ts の {@link ProgressionState})。省略可フィールドは
+ * 無い(「1 周目 かつ 累計 0 かつ 購入段ゼロ」は**このオブジェクト自体を省略**
+ * することで表す・§11)。
+ */
+export type SerializedProgression = {
+  /** 完了した大移動の回数(0 = 1 周目)。 */
+  readonly runCount: number;
+  /** 累計獲得した継承点(購入では減らない・GDD 10.5 のシード材料)。 */
+  readonly cumulativeInheritPoints: number;
+  /** 系統別の購入済み段数(track 昇順・重複なし・tier >= 1)。空でも書く。 */
+  readonly inheritTiers: readonly { readonly track: string; readonly tier: number }[];
 };
 
 /** [M24] 衛星拠点(state.ts の {@link OutpostState})。省略可フィールドは無い。 */
@@ -1010,6 +1057,26 @@ export function toSerializable(state: GameState): SerializedGameState {
     optional.push([
       "terrain",
       { rubbleCells: [...terrain.rubbleCells], reclaimedCount: terrain.reclaimedCount },
+    ]);
+  }
+  // [M28] 周回 / 継承点(GDD 10.2〜10.5・§11)。既定値なら省略 = M28 以前の
+  // セーブとバイト同一(= 既存 golden vector 73 本が動かないことの根拠)。
+  const progression = state.progression;
+  if (
+    progression.runCount > 0 ||
+    progression.cumulativeInheritPoints > 0 ||
+    progression.inheritTiers.length > 0
+  ) {
+    optional.push([
+      "progression",
+      {
+        runCount: progression.runCount,
+        cumulativeInheritPoints: progression.cumulativeInheritPoints,
+        inheritTiers: progression.inheritTiers.map((entry) => ({
+          track: entry.track,
+          tier: entry.tier,
+        })),
+      },
     ]);
   }
   const raw: SerializedGameState =
@@ -1819,6 +1886,53 @@ function deserializeTerrain(value: unknown): TerrainState {
   return { rubbleCells, reclaimedCount };
 }
 
+/**
+ * [M28] `progression`(§11)を読む。**キーが無ければ {@link EMPTY_PROGRESSION}**
+ * (= まだ 1 度も大移動していない)であり、これが「M28 以前の旧セーブが無損失で
+ * ロードされる」経路そのものである。
+ *
+ * 既定値を明示した形は**非正準形として reject** する(§11。空 terrain の明示を
+ * reject するのと同じ理屈)。track の昇順・重複なしと tier >= 1 は
+ * `createGameState`(update.ts の `requireValidProgression`)が強制するので、
+ * ここでは JSON として型が合っているかと**レジストリ整合**だけを見る
+ * (未登録の系統名は `rngState` の未登録 domainTag と同じ層で弾く)。
+ */
+function deserializeProgression(value: unknown): ProgressionState {
+  if (value === undefined) return EMPTY_PROGRESSION;
+  const o = requireObject(value, "$.progression");
+  const runCount = requireNonNegativeInt(o["runCount"], "$.progression.runCount");
+  const cumulativeInheritPoints = requireNonNegativeInt(
+    o["cumulativeInheritPoints"],
+    "$.progression.cumulativeInheritPoints",
+  );
+  const rawTiers = o["inheritTiers"];
+  if (!Array.isArray(rawTiers)) {
+    throw new SerializeError(
+      `$.progression.inheritTiers: 配列を期待したが ${describe(rawTiers)} だった`,
+    );
+  }
+  const source = rawTiers as readonly unknown[];
+  const inheritTiers: InheritTierEntry[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const path = `$.progression.inheritTiers[${String(i)}]`;
+    const entry = requireObject(source[i], path);
+    const track = requireString(entry["track"], `${path}.track`);
+    if (!isInheritTrack(track)) {
+      throw new SerializeError(
+        `${path}.track: 継承系統 "${track}" はレジストリ(INHERIT_TRACKS)に無い`,
+      );
+    }
+    inheritTiers.push({ track, tier: requireNonNegativeInt(entry["tier"], `${path}.tier`) });
+  }
+  if (runCount === 0 && cumulativeInheritPoints === 0 && inheritTiers.length === 0) {
+    throw new SerializeError(
+      "$.progression: 1 周目 かつ 累計継承点 0 かつ 購入段ゼロの進行は**キーごと省略**が正準形" +
+        "(明示するとキー不在の旧セーブと同じ state が別のバイト列になる・§11)",
+    );
+  }
+  return { runCount, cumulativeInheritPoints, inheritTiers };
+}
+
 /** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */
 function deserializeRenderedLogs(value: unknown): RenderedLogState {
   if (value === undefined) return EMPTY_RENDERED_LOGS;
@@ -1885,5 +1999,6 @@ export function fromSerializable(input: unknown): GameState {
     deserializeRenderedLogs(root["renderedLogs"]),
     deserializeOutpostsById(root["outpostsById"]),
     deserializeTerrain(root["terrain"]),
+    deserializeProgression(root["progression"]),
   );
 }

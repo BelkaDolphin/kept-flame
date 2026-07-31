@@ -314,6 +314,38 @@ export interface ReclaimBalanceContent {
   readonly initialRubbleCells: readonly number[];
 }
 
+/**
+ * [M28] 大移動 / 継承点のパラメータ(GDD 10.2〜10.5)。**ブロックごと省略可**
+ * (欠落は null)。省略時は engine 側で `commands.ts` の `executeExodus` /
+ * `purchaseInheritBonus` が `contentUnsupported` で拒否する(= 周回システム不活性)。
+ *
+ * `expectedTabletsByEra` は GDD 10.2 が明記する**静的テーブル値**であり、
+ * content の tech 本数から数えてはならない(週次葉テック追加で容量が動くと
+ * セーブ互換の前提が崩れる)。`inheritTierCosts` は GDD 10.3 の
+ * `cost(n) = 50 × 1.5^n` をオーサリング時に展開した列(50/75/113/169)で、
+ * **配列の長さがそのまま上限段数**= 青天井にならないことの構造的根拠になる。
+ */
+export interface ExodusBalanceContent {
+  /** GDD 10.2 のキャラバン容量比 0.35。 */
+  readonly caravanRatio: number;
+  /** GDD 10.2 の乗員定員比 0.5。 */
+  readonly crewRatio: number;
+  /** eraId → 想定石版総数(静的テーブル・GDD 10.2)。 */
+  readonly expectedTabletsByEra: { readonly [eraId: string]: number };
+  /** GDD 10.3 獲得式の `到達エラ × 10`。 */
+  readonly eraPoints: number;
+  /** GDD 10.3 獲得式の `成文化率(%) × 0.5`。 */
+  readonly codifyRatePoints: number;
+  /** GDD 10.3 獲得式の `生存住民数 × 2`。 */
+  readonly survivorPoints: number;
+  /** GDD 10.3 の段階コスト(展開済み・昇順・長さ = 上限段数)。 */
+  readonly inheritTierCosts: readonly number[];
+  /** 継承系統 → 1 段あたりのボーナス量。3 系統とも必須。 */
+  readonly inheritBonusPerTier: { readonly [track: string]: number };
+  /** `startingStock` 系統のボーナスが積まれる resource 定義 ID。 */
+  readonly startingStockResourceId: string;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -335,6 +367,8 @@ export interface BalanceContent {
   readonly outpost: OutpostBalanceContent | null;
   /** [M52] GDD 9.1 の開墾パラメータ。JSON に無ければ null(開墾不可)。 */
   readonly reclaim: ReclaimBalanceContent | null;
+  /** [M28] GDD 10.2〜10.5 の大移動 / 継承点。JSON に無ければ null(周回不可)。 */
+  readonly exodus: ExodusBalanceContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -1433,6 +1467,192 @@ function validateReclaim(
   return { baseCost, costGrowth, costCap, costResourceId, initialRubbleCells };
 }
 
+// --- [M28] exodus(GDD 10.2〜10.5)---------------------------------------------
+
+/** 想定石版総数(静的テーブル)の保守境界。盤面規模から見て 1000 本を上限とする。 */
+const EXPECTED_TABLETS_RANGE: NumericRange = { min: 0, max: 1000 };
+
+/** 継承点まわりの係数・コストの保守境界(点は整数スケール)。 */
+const INHERIT_POINT_RANGE: NumericRange = { min: 0, max: 1_000_000 };
+
+/** 1 段あたりのボーナス量の保守境界(枠・人数・在庫のいずれも小さい整数)。 */
+const INHERIT_BONUS_RANGE: NumericRange = { min: 0, max: 10_000 };
+
+/**
+ * GDD 10.3「各ボーナス上限 **4段**」に対する保守境界。1 段未満(= 買えない)と
+ * 極端な段数(= 実質青天井)を弾く。**この上限が effective に働くのは engine 側の
+ * `inheritTierMax`(段階コスト列の長さ)なので、ここは「列の長さの妥当域」だけを見る。
+ */
+const INHERIT_TIER_COUNT_RANGE: NumericRange = { min: 1, max: 20 };
+
+/** 継承系統の正本(engine の `INHERIT_TRACKS` と一致していること)。 */
+const INHERIT_TRACK_IDS: readonly string[] = ["caravanCapacity", "crewCapacity", "startingStock"];
+
+function validateExpectedTabletsByEra(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): { readonly [eraId: string]: number } | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const result: Record<string, number> = {};
+  const issuesBefore = issues.list().length;
+  for (const key of Object.keys(obj)) {
+    const eraId = validateId(key, `${path}.${key}`, issues);
+    const value = expectInteger(obj[key], `${path}.${key}`, issues, EXPECTED_TABLETS_RANGE);
+    if (eraId === undefined || value === undefined) continue;
+    result[eraId] = value;
+  }
+  return issues.list().length === issuesBefore ? result : undefined;
+}
+
+function validateInheritTierCosts(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const array = expectArray(raw, path, issues);
+  if (array === undefined) return undefined;
+  if (array.length < INHERIT_TIER_COUNT_RANGE.min || array.length > INHERIT_TIER_COUNT_RANGE.max) {
+    issues.add(
+      path,
+      `段階コスト列の長さ ${String(array.length)} が ${String(INHERIT_TIER_COUNT_RANGE.min)}〜` +
+        `${String(INHERIT_TIER_COUNT_RANGE.max)} の外(長さ = 上限段数・GDD 10.3 は 4 段)`,
+    );
+    return undefined;
+  }
+  const costs: number[] = [];
+  let previous = -1;
+  let valid = true;
+  for (let i = 0; i < array.length; i++) {
+    const cost = expectInteger(array[i], `${path}[${String(i)}]`, issues, INHERIT_POINT_RANGE);
+    if (cost === undefined) {
+      valid = false;
+      continue;
+    }
+    if (cost < previous) {
+      // `cost(n) = 50 × 1.5^n` は単調増加。逓減する列は「後の段ほど安い」= 上限
+      // クランプの意味(GDD 11.4-6 の青天井禁止)が崩れるので弾く。
+      issues.add(
+        `${path}[${String(i)}]`,
+        `段階コストが逓減している(${String(previous)} → ${String(cost)})。` +
+          "GDD 10.3 の cost(n) = 50 × 1.5^n は単調増加",
+      );
+      valid = false;
+      continue;
+    }
+    previous = cost;
+    costs.push(cost);
+  }
+  return valid ? costs : undefined;
+}
+
+function validateInheritBonusPerTier(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): { readonly [track: string]: number } | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const result: Record<string, number> = {};
+  let valid = true;
+  for (const track of INHERIT_TRACK_IDS) {
+    const value = expectInteger(obj[track], `${path}.${track}`, issues, INHERIT_BONUS_RANGE);
+    if (value === undefined) {
+      valid = false;
+      continue;
+    }
+    result[track] = value;
+  }
+  for (const key of Object.keys(obj)) {
+    if (INHERIT_TRACK_IDS.includes(key)) continue;
+    // 未知の系統を黙って捨てると「JSON には書いたのに効かない」になる。
+    issues.add(`${path}.${key}`, `継承系統 "${key}" は engine のレジストリ(3 系統)に無い`);
+    valid = false;
+  }
+  return valid ? result : undefined;
+}
+
+function validateExodus(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): ExodusBalanceContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+
+  const caravanRatio = expectNumber(
+    obj["caravanRatio"],
+    `${path}.caravanRatio`,
+    issues,
+    UNIT_RANGE,
+  );
+  const crewRatio = expectNumber(obj["crewRatio"], `${path}.crewRatio`, issues, UNIT_RANGE);
+  const expectedTabletsByEra = validateExpectedTabletsByEra(
+    obj["expectedTabletsByEra"] ?? {},
+    `${path}.expectedTabletsByEra`,
+    issues,
+  );
+  const eraPoints = expectNumber(
+    obj["eraPoints"],
+    `${path}.eraPoints`,
+    issues,
+    INHERIT_POINT_RANGE,
+  );
+  const codifyRatePoints = expectNumber(
+    obj["codifyRatePoints"],
+    `${path}.codifyRatePoints`,
+    issues,
+    INHERIT_POINT_RANGE,
+  );
+  const survivorPoints = expectNumber(
+    obj["survivorPoints"],
+    `${path}.survivorPoints`,
+    issues,
+    INHERIT_POINT_RANGE,
+  );
+  const inheritTierCosts = validateInheritTierCosts(
+    obj["inheritTierCosts"],
+    `${path}.inheritTierCosts`,
+    issues,
+  );
+  const inheritBonusPerTier = validateInheritBonusPerTier(
+    obj["inheritBonusPerTier"],
+    `${path}.inheritBonusPerTier`,
+    issues,
+  );
+  const startingStockResourceId = validateId(
+    obj["startingStockResourceId"],
+    `${path}.startingStockResourceId`,
+    issues,
+  );
+
+  if (
+    caravanRatio === undefined ||
+    crewRatio === undefined ||
+    expectedTabletsByEra === undefined ||
+    eraPoints === undefined ||
+    codifyRatePoints === undefined ||
+    survivorPoints === undefined ||
+    inheritTierCosts === undefined ||
+    inheritBonusPerTier === undefined ||
+    startingStockResourceId === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    caravanRatio,
+    crewRatio,
+    expectedTabletsByEra,
+    eraPoints,
+    codifyRatePoints,
+    survivorPoints,
+    inheritTierCosts,
+    inheritBonusPerTier,
+    startingStockResourceId,
+  };
+}
+
 export function validateBalance(raw: unknown): ValidationResult<BalanceContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -1496,6 +1716,9 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     rawReclaim === undefined
       ? null
       : (validateReclaim(rawReclaim, "$.reclaim", issues) ?? undefined);
+  const rawExodus = obj["exodus"];
+  const exodus =
+    rawExodus === undefined ? null : (validateExodus(rawExodus, "$.exodus", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -1510,7 +1733,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     townParams === undefined ||
     exploration === undefined ||
     outpost === undefined ||
-    reclaim === undefined
+    reclaim === undefined ||
+    exodus === undefined
   ) {
     return fail(issues.list());
   }
@@ -1529,5 +1753,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     exploration,
     outpost,
     reclaim,
+    exodus,
   });
 }

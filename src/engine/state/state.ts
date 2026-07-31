@@ -868,6 +868,103 @@ export interface TerrainState {
  */
 export const EMPTY_TERRAIN: TerrainState = { rubbleCells: [], reclaimedCount: 0 };
 
+// ===========================================================================
+// [M28] 周回進行 / 継承点(GDD 10.2〜10.5 / 10.3 / 11.4-6)
+// ===========================================================================
+//   ADR「セーブフォーマット」は `runCount` と `cumulativeInheritPoints` を
+//   payload の**トップレベルキー**として列挙しているが、本実装は 3 つの値を
+//   1 つの値オブジェクト {@link ProgressionState} にまとめ、GameState 直下の
+//   **省略可フィールド 1 つ**として持つ。理由は 2 つ:
+//
+//     (a) 継承点は「累計獲得」だけでは足りない —— GDD 10.3 の購入
+//         (`cost(n) = 50 × 1.5^n`)を表すには**系統別の購入済み段数**が要る。
+//         一方 GDD 10.5 の周回シード導出は「**累計**継承点」を材料にするので、
+//         購入で減る残高を累計に混ぜてはならない。よって
+//         「累計獲得(単調増加)」+「系統別段数(そこから残高を導出)」の
+//         2 本立てになり、フィールドが 3 つになる。
+//     (b) トップレベルの**必須**キーとして足すと、既存セーブ・既存 golden
+//         vector 73 本の JSON バイト列が全て動く(必須キーは常に書き出される)。
+//         `terrain`([M52])と同じ「既定値なら**キーごと省略**」規約に乗せる
+//         には 1 オブジェクトにまとめるのが最短で、直列化の分岐も増えない
+//         ({@link ResidentLife} と同じ理由・serialize.ts §5)。
+//
+//   `EntityKind` へ足さないのは memoir([M12])/ outpost([M24])/ terrain
+//   ([M52])と同じ判断(新種別は `src/ui/derived.ts` 等の網羅 switch を壊す)。
+
+/**
+ * [M28] 継承ボーナスの系統(GDD 10.3「各ボーナスに上限段階」「全3系統」)。
+ * **engine 既知の 3 種固定(enum)**であり content カテゴリではない
+ * (`RecordMedium` / `DistanceBand` と同じ扱い)。並びは UTF-16 昇順 =
+ * 集合演算の安定順序(GDD 11.7)。
+ *
+ *   caravanCapacity : 大移動キャラバンの石版換算枠 +N(GDD 10.2 の
+ *                     `容量 = ceil(想定石版総数 × 0.35) + 継承点ボーナス`)
+ *   crewCapacity    : 乗員定員 +N(同 `crewCap = ceil(生存人数 × 0.5) + 継承ボーナス`)
+ *   startingStock   : 新周回の初期在庫 +N(GDD 10.6-1 が周回変化の軸として
+ *                     「初期資源」を挙げているのに対応する恒久ボーナス側)
+ *
+ * 3 系統のうち GDD が式の中で名指ししているのは前 2 つだけであり、3 つめは
+ * 「全3系統」という本数だけが与えられている。`startingStock` を充てたのは
+ * **engine 内で完結して効果を出せる**(大移動が作る次周 state の資源在庫へ
+ * そのまま乗る)ためで、他候補(研究速度・幕塵後退速度)は tick ループや
+ * content 側の係数に手を入れる = golden vector を動かす変更になる。
+ */
+export const INHERIT_TRACKS = ["caravanCapacity", "crewCapacity", "startingStock"] as const;
+
+/** {@link INHERIT_TRACKS} のいずれか。 */
+export type InheritTrack = (typeof INHERIT_TRACKS)[number];
+
+/** 未知の文字列が継承系統のいずれかか(型ガード)。 */
+export function isInheritTrack(value: string): value is InheritTrack {
+  for (const track of INHERIT_TRACKS) {
+    if (track === value) return true;
+  }
+  return false;
+}
+
+/** [M28] 1 系統ぶんの購入済み段数。`kind`/`id` を持たない値オブジェクト。 */
+export interface InheritTierEntry {
+  readonly track: InheritTrack;
+  /** 購入済み段数。**1 以上**(0 段はエントリごと持たないのが正準形)。 */
+  readonly tier: number;
+}
+
+/**
+ * [M28] 周回の進行(GDD 10.2〜10.5)。`kind`/`id` を持たない**値オブジェクト**で
+ * ある(entity ではない)。
+ */
+export interface ProgressionState {
+  /**
+   * 完了した大移動の回数。**0 = 1 周目**(まだ 1 度も大移動していない)。
+   * GDD 10.5 の周回シード導出 `hash(前worldSeed, 周回回数, 累計継承点)` の
+   * 「周回回数」そのもの。
+   */
+  readonly runCount: number;
+  /**
+   * これまでに**獲得**した継承点の累計(GDD 10.3 の獲得式の総和)。
+   * **購入では減らない**(減らすと GDD 10.5 のシード材料が過去へ巻き戻り、
+   * 同じ周回で買い物をしただけで次周の世界が変わってしまう)。いま使える
+   * 残高は `累計 − Σ(購入済み段のコスト)` として `rules/exodus.ts` が導出する。
+   */
+  readonly cumulativeInheritPoints: number;
+  /**
+   * 系統別の購入済み段数(**track の UTF-16 昇順・重複なし・tier >= 1**)。
+   * 0 段の系統はエントリを持たない(= 遅延初期化。`bondByPairKey` と同じ規約)。
+   */
+  readonly inheritTiers: readonly InheritTierEntry[];
+}
+
+/**
+ * [M28] まだ 1 周もしておらず継承点も持たない進行(正準形)。
+ * `GameState.progression` の既定値であり、**直列化形ではキーごと省略される**
+ * ({@link EMPTY_TERRAIN} と同じ規約・serialize.ts §11)。
+ */
+export const EMPTY_PROGRESSION: ProgressionState = {
+  runCount: 0,
+  cumulativeInheritPoints: 0,
+  inheritTiers: [],
+};
+
 /** `entityStateById` に入る値の全体。`kind` で判別する。 */
 export type EntityState =
   CodifyState | FacilityState | ResearchState | ResidentState | ResourceState;
@@ -920,6 +1017,9 @@ export interface GameStateMeta {
  *   (i) [M52] `terrain.rubbleCells` はセル番号の昇順・重複なし・全要素が
  *       0〜`GRID_CELL_COUNT-1` の整数、`terrain.reclaimedCount` は 0 以上の整数
  *       (維持責務は update.ts の createGameState / setTerrain)
+ *   (j) [M28] `progression.inheritTiers` は track の UTF-16 昇順・重複なし・
+ *       各 tier は 1 以上の整数、`runCount` / `cumulativeInheritPoints` は
+ *       0 以上の整数(維持責務は update.ts の createGameState / setProgression)
  */
 export interface GameState extends GameStateMeta {
   readonly entityStateById: ReadonlyMap<EntityId, EntityState>;
@@ -1000,6 +1100,17 @@ export interface GameState extends GameStateMeta {
    * すると既存 conformance シナリオの盤面が遡って変わる)。
    */
   readonly terrain: TerrainState;
+  /**
+   * [M28] 周回の進行(GDD 10.2〜10.5・不変条件 (j))。**既定は
+   * {@link EMPTY_PROGRESSION} = 1 周目・継承点ゼロ**であり、既定なら
+   * 直列化形からキーごと省略される(`terrain` と同じ規約)= M28 以前の
+   * セーブ・既存 golden vector 73 本のバイト列が 1 bit も動かないことの根拠。
+   *
+   * 更新するのは `rules/exodus.ts`(大移動の実行と継承ボーナスの購入)だけで
+   * あり、tick ループ(advance / scheduler)からは一切触らない —— これが
+   * 「既存 conformance シナリオに構造的に無影響」の実装上の根拠でもある。
+   */
+  readonly progression: ProgressionState;
 }
 
 /**
@@ -1217,4 +1328,16 @@ export function firstRubbleCellIn(state: GameState, cells: readonly number[]): n
     if (best === null || cell < best) best = cell;
   }
   return best;
+}
+
+/**
+ * [M28] その系統の購入済み段数(GDD 10.3)。エントリを持たない系統は **0 段**
+ * (遅延初期化・`getBondValue` と同じ規約で「引いたことがあるか」は結果に
+ * 影響しない)。走査は昇順の配列を舐めるだけ(高々 3 件)。
+ */
+export function inheritTierOf(state: GameState, track: InheritTrack): number {
+  for (const entry of state.progression.inheritTiers) {
+    if (entry.track === track) return entry.tier;
+  }
+  return 0;
 }

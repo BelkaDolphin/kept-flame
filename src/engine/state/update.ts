@@ -68,11 +68,13 @@ import type { Fix } from "../fp";
 import type { DomainTag } from "../rng/domainTags";
 import type { Xoshiro128State } from "../rng/xoshiro128";
 import {
+  EMPTY_PROGRESSION,
   EMPTY_RENDERED_LOGS,
   EMPTY_TERRAIN,
   EntityLookupError,
   MAX_TRAITS_PER_RESIDENT,
   isEntityId,
+  isInheritTrack,
   requireEntity,
   type DispatchSnapshot,
   type EntityId,
@@ -82,6 +84,7 @@ import {
   type GameState,
   type GameStateMeta,
   type OutpostState,
+  type ProgressionState,
   type RenderedLogState,
   type TechMemoryState,
   type TerrainState,
@@ -392,6 +395,66 @@ export function setTerrain(state: GameState, terrain: TerrainState): GameState {
 }
 
 /**
+ * [M28] 周回進行の不変条件 (j)(state.ts)を強制する。`requireValidTerrain` と
+ * 同じく**常に走る**(既定 = {@link EMPTY_PROGRESSION} では loop が 0 回転する
+ * だけなので M28 以前と挙動は変わらない)。
+ *
+ * 昇順・重複なしを課すのは `terrain.rubbleCells` と同じ理由 —— 並びが崩れると
+ * 直列化形の正準形が一意でなくなり、serialize.ts §1 の往復バイト同一性が
+ * 定理として成り立たなくなる。tier >= 1 を課すのは「0 段はエントリごと持たない」
+ * が正準形だからである(0 段のエントリを許すと同じ state に 2 通りの表現ができる)。
+ */
+function requireValidProgression(progression: ProgressionState): void {
+  if (!Number.isSafeInteger(progression.runCount) || progression.runCount < 0) {
+    throw new StateUpdateError(
+      `progression.runCount ${String(progression.runCount)} が 0 以上の整数でない(GDD 10.5 の周回回数)`,
+    );
+  }
+  if (
+    !Number.isSafeInteger(progression.cumulativeInheritPoints) ||
+    progression.cumulativeInheritPoints < 0
+  ) {
+    throw new StateUpdateError(
+      `progression.cumulativeInheritPoints ${String(progression.cumulativeInheritPoints)} が` +
+        "0 以上の整数でない(GDD 10.3 の累計獲得。購入では減らない)",
+    );
+  }
+  let previous = "";
+  for (const entry of progression.inheritTiers) {
+    if (!isInheritTrack(entry.track)) {
+      throw new StateUpdateError(
+        `progression.inheritTiers の系統 "${entry.track}" はレジストリ(INHERIT_TRACKS)に無い`,
+      );
+    }
+    if (!Number.isSafeInteger(entry.tier) || entry.tier < 1) {
+      throw new StateUpdateError(
+        `progression.inheritTiers["${entry.track}"] の段数 ${String(entry.tier)} が 1 以上の整数でない` +
+          "(0 段はエントリごと持たないのが正準形)",
+      );
+    }
+    if (previous !== "" && compareUtf16(entry.track, previous) <= 0) {
+      throw new StateUpdateError(
+        `progression.inheritTiers が系統の昇順・重複なしでない(${previous} → ${entry.track})。` +
+          "直列化形の正準形が一意でなくなる",
+      );
+    }
+    previous = entry.track;
+  }
+}
+
+/**
+ * [M28] 周回進行を差し替える(GDD 10.2〜10.5)。不変条件 (j) の維持責務は
+ * ここにある({@link setTerrain} と同型)。
+ *
+ * @throws {StateUpdateError} 昇順/重複/段数/回数/累計点の不変条件違反がある場合
+ */
+export function setProgression(state: GameState, progression: ProgressionState): GameState {
+  if (Object.is(state.progression, progression)) return state;
+  requireValidProgression(progression);
+  return setField(state, "progression", progression);
+}
+
+/**
  * RNG ストリーム状態の Map を domainTag 昇順の正準順で作る(§3 / state.ts §4)。
  * 入力の並び順には依存しない。
  */
@@ -454,13 +517,15 @@ function buildTechMemoryMap(
  * (state.ts の `GameState.terrain` の doc)。初期盤面の瓦礫を撒くのは content を
  * 読む `rules/reclaim.ts` の `initialTerrain` の役目であり、ここの既定値では
  * ない —— 既定を瓦礫ありにすると既存 conformance シナリオの盤面が遡って変わる。
+ * [M28] `progression` も同じ規約で、**省略時は 1 周目・継承点ゼロ**。
  *
  * @throws {StateUpdateError} ID 規則違反 / ID 重複 / domainTag 重複 /
  *   bond ペアキー重複 / [M13] techMemory キー重複 /
  *   住民の trait 不変条件違反(上限 3 個・ID 昇順・重複なし)/
  *   [M16] 施設 footprint の値域違反・盤外はみ出し /
  *   [M24] 拠点 ID 重複・Lv/常駐人数レンジ違反・residentIds 不変条件違反 /
- *   [M52] 地形の昇順/重複/値域/解放数の不変条件違反 がある場合
+ *   [M52] 地形の昇順/重複/値域/解放数の不変条件違反 /
+ *   [M28] 周回進行の昇順/重複/段数/回数/累計点の不変条件違反 がある場合
  */
 export function createGameState(
   meta: GameStateMeta,
@@ -472,6 +537,7 @@ export function createGameState(
   renderedLogs: RenderedLogState = EMPTY_RENDERED_LOGS,
   outposts: readonly OutpostState[] = [],
   terrain: TerrainState = EMPTY_TERRAIN,
+  progression: ProgressionState = EMPTY_PROGRESSION,
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -479,6 +545,7 @@ export function createGameState(
     requireValidFacilityFootprint(entity);
   }
   requireValidTerrain(terrain);
+  requireValidProgression(progression);
   return {
     saveSchemaVersion: meta.saveSchemaVersion,
     contentVersion: meta.contentVersion,
@@ -493,6 +560,7 @@ export function createGameState(
     renderedLogs,
     outpostsById: buildOutpostMap(outposts),
     terrain,
+    progression,
   };
 }
 

@@ -166,5 +166,24 @@
       12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
       35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47
     ]
+  },
+  "exodus": {
+    "caravanRatio": 0.35,
+    "crewRatio": 0.5,
+    "expectedTabletsByEra": {
+      "e1": 8,
+      "e2": 15,
+      "e3": 24
+    },
+    "eraPoints": 10,
+    "codifyRatePoints": 0.5,
+    "survivorPoints": 2,
+    "inheritTierCosts": [50, 75, 113, 169],
+    "inheritBonusPerTier": {
+      "caravanCapacity": 2,
+      "crewCapacity": 1,
+      "startingStock": 25
+    },
+    "startingStockResourceId": "firewood"
   }
 }

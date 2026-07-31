@@ -194,6 +194,8 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     outpostsById: state.outpostsById,
     // [M52] 同上(state.ts 不変条件 (i))。地形は瓦礫ゼロのまま引き継ぐ。
     terrain: state.terrain,
+    // [M28] 同上(state.ts 不変条件 (j))。周回進行は既定のまま引き継ぐ。
+    progression: state.progression,
   };
 }
 
@@ -230,6 +232,8 @@ describe("assertCanonicalSnapshot", () => {
       outpostsById: BOARD.outpostsById,
       // [M52] 同上(state.ts 不変条件 (i))。
       terrain: BOARD.terrain,
+      // [M28] 同上(state.ts 不変条件 (j))。
+      progression: BOARD.progression,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);

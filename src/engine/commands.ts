@@ -22,9 +22,10 @@
 // 1. 決定論(ADR-006/007/026)
 // ===========================================================================
 //   コマンドの解決に使ってよい入力は **state(tick を含む)・content・引数** だけ。
-//   実時刻(Date/performance)は読まない。RNG を引くのは [M21] の探索派遣確定
-//   (`dispatchExpedition`)**だけ**であり、それも `hash(worldSeed, domainTag, …)`
-//   の hash アドレス方式(domainTag `exploration` はレジストリ登録済み)なので
+//   実時刻(Date/performance)は読まない。hash を引くのは [M21] の探索派遣確定
+//   (`dispatchExpedition`)と [M28] の大移動(`executeExodus` の周回シード導出)
+//   の 2 つだけであり、どちらも `hash(worldSeed, domainTag, …)` の hash アドレス
+//   方式(domainTag `exploration` / `exodus` はレジストリ登録済み)なので
 //   ストリーム状態を進めない = 同じ state・content・引数なら常に同じ結果になる。
 //   他のコマンドは 1 つも乱数を引かない(引く必要が無い操作しか無い)。
 //
@@ -68,7 +69,7 @@
 // ===========================================================================
 //   実装 : 配置 / 解体 / 増築 / 住民割当 / 割当解除 / 成文化指示 /
 //          廃材→研究点変換(GDD 6.7 3出口(3))/ [M21] 探索派遣確定 /
-//          [M52] 瓦礫開墾(GDD 9.1)
+//          [M52] 瓦礫開墾(GDD 9.1)/ [M28] 大移動 + 継承ボーナス購入(GDD 10.2〜10.5)
 //   予約 : 研究対象の選択(M50)
 //   予約分は語彙(型)と reject コード `notImplemented` + 担当タスク名だけを持ち、
 //   **それらしい名前で何もしないコマンドにはしない**(store.ts §1 と同じ規律)。
@@ -109,6 +110,14 @@ import {
   planCodification,
 } from "./rules/codify";
 import {
+  availableInheritPoints,
+  executeExodus as executeExodusRule,
+  inheritTierCost,
+  inheritTierMax,
+  purchaseInheritTier,
+  resolveExodusPlan,
+} from "./rules/exodus";
+import {
   DISPATCH_TEAM_MAX,
   DISPATCH_TEAM_MIN,
   bandParamsOf,
@@ -123,13 +132,16 @@ import {
   entitiesOfKind,
   firstRubbleCellIn,
   getEntity,
+  inheritTierOf,
   isAliveResident,
+  isInheritTrack,
   isResidentOnDispatch,
   isRubbleCell,
   type DispatchStance,
   type EntityId,
   type FacilityState,
   type GameState,
+  type InheritTrack,
   type ResidentState,
 } from "./state/state";
 import {
@@ -268,6 +280,44 @@ export interface ReclaimCellCommand {
 }
 
 /**
+ * [M28] 大移動(Exodus)の実行(GDD 10.2〜10.5)。
+ *
+ * **state を丸ごと次周のものへ差し替える唯一のコマンド**であり、他のコマンドと
+ * 違って「盤面の一部を動かす」のではなく「盤面を畳んで新しい盤面を作る」。
+ * 2 プールの解決規則(競合の解決順)は `rules/exodus.ts` §1 が正本。
+ *
+ * **超過選択は clamp せず拒否する**(`exodusCapacityExceeded`)。engine 側の
+ * 解決関数 `resolveExodusPlan` は超過分を落とすが、コマンド層でそれを黙って
+ * 受け入れると「押したのに一部だけ積まれた」が説明できない(§3(a))。UI は
+ * 同じ解決関数を先に呼んでプレビューを出せる。
+ */
+export interface ExecuteExodusCommand {
+  readonly kind: "executeExodus";
+  /** 積む記録(完了済み codify entity の ID)。順不同でよい。 */
+  readonly recordIds: readonly EntityId[];
+  /** 連れて行く住民の ID。順不同でよい。 */
+  readonly crewIds: readonly EntityId[];
+  /**
+   * 次周の worldSeed を明示指定する(GDD 10.5「UIで任意シード文字列入力も併設」)。
+   * **省略時は `hash(前worldSeed, 周回回数, 累計継承点)` から導出**する。
+   */
+  readonly worldSeedOverride?: string;
+}
+
+/**
+ * [M28] 継承ボーナスを 1 段購入する(GDD 10.3
+ * `cost(n) = 50 × 1.5^(購入済み段階n)`・各系統 4 段が上限)。
+ *
+ * 上限段に達していれば `inheritTierAtMax` で拒否する = **青天井にならない**
+ * (GDD 11.4-6)ことがコマンド層からも見える。
+ */
+export interface PurchaseInheritBonusCommand {
+  readonly kind: "purchaseInheritBonus";
+  /** 継承系統(engine 既知の 3 種・state.ts の `INHERIT_TRACKS`)。 */
+  readonly track: InheritTrack;
+}
+
+/**
  * **型のみ予約**(担当未割当): 研究対象の選択。
  *
  * 現 engine の研究は「未完了 research entity の ID 昇順で先頭 1 本」という縮約
@@ -291,7 +341,9 @@ export type Command =
   | ConvertWasteToResearchCommand
   | DemolishFacilityCommand
   | DispatchExpeditionCommand
+  | ExecuteExodusCommand
   | PlaceFacilityCommand
+  | PurchaseInheritBonusCommand
   | ReclaimCellCommand
   | UnassignResidentCommand
   | UpgradeFacilityCommand;
@@ -314,7 +366,9 @@ export const IMPLEMENTED_COMMAND_KINDS: readonly CommandKind[] = [
   "convertWasteToResearch",
   "demolishFacility",
   "dispatchExpedition",
+  "executeExodus",
   "placeFacility",
+  "purchaseInheritBonus",
   "reclaimCell",
   "unassignResident",
   "upgradeFacility",
@@ -402,6 +456,21 @@ export const COMMAND_REJECTION_CODES = [
   "insufficientResource",
   /** 研究点の受け皿(未完了の research)が無い。 */
   "noResearchTarget",
+  /**
+   * [M28] 大移動の持ち出し選択がキャラバン容量 / 乗員定員を超えている(GDD 10.2)。
+   * `rejection.limit` に容量(石版枠は raw)、`actual` に落ちた件数が載る。
+   * 超過分を黙って落とさず拒否する理由は本ファイル §3(a)。
+   */
+  "exodusCapacityExceeded",
+  /**
+   * [M28] 未帰還の探索派遣が残っているので大移動できない(GDD 8.2 のスナップ
+   * ショットは帰還先の盤面を前提にしており、次周へ持ち越せない)。
+   */
+  "dispatchInProgress",
+  /** [M28] その継承系統は既に上限段(GDD 10.3 / 11.4-6 の青天井禁止)。 */
+  "inheritTierAtMax",
+  /** [M28] 継承点の残高が足りない(GDD 10.3 の購入コスト)。 */
+  "insufficientInheritPoints",
 ] as const;
 
 export type CommandRejectionCode = (typeof COMMAND_REJECTION_CODES)[number];
@@ -1307,6 +1376,167 @@ function applyReclaimCell(
   return { ok: true, state: next, changed: true, commandCount: 1 };
 }
 
+/**
+ * [M28] 大移動の実行(GDD 10.2〜10.5)。
+ *
+ * 検査の順序は「content の有無 → 未帰還の派遣 → 参照の妥当性 → 容量/定員」で、
+ * どれか 1 つでも落ちれば state は 1 bit も動かない(§3)。参照の妥当性
+ * (未完了の記録・死亡した住民・種別違い)は `rules/exodus.ts` が RulesError に
+ * するので、**コマンド層で先に値の reject へ落とす**(§3 と同じ層分け)。
+ */
+function applyExecuteExodus(
+  state: GameState,
+  content: EngineContent,
+  command: ExecuteExodusCommand,
+  index: number,
+): CommandResult {
+  if (content.exodus === undefined) {
+    return rejected("executeExodus", index, {
+      code: "contentUnsupported",
+      message: "content に balance の exodus ブロックが無いので大移動できない(GDD 10.2〜10.5)",
+    });
+  }
+  if (content.recordMedia === undefined) {
+    return rejected("executeExodus", index, {
+      code: "contentUnsupported",
+      message:
+        "content に balance の recordMedia ブロックが無いので石版換算枠が求まらない" +
+        "(GDD 10.2 [2026-07-27追補])",
+    });
+  }
+  if (state.dispatchSnapshots.length > 0) {
+    return rejected("executeExodus", index, {
+      code: "dispatchInProgress",
+      actual: state.dispatchSnapshots.length,
+      message: `未帰還の探索派遣が ${String(state.dispatchSnapshots.length)} 本あるので大移動できない(GDD 8.2)`,
+    });
+  }
+  if (command.worldSeedOverride !== undefined && command.worldSeedOverride.length === 0) {
+    return rejected("executeExodus", index, {
+      code: "invalidArgument",
+      message: "worldSeedOverride が空文字列(GDD 10.5 の任意シード入力は 1 文字以上)",
+    });
+  }
+
+  for (const recordId of command.recordIds) {
+    const entity = getEntity(state, recordId);
+    if (entity === undefined || entity.kind !== "codify") {
+      return rejected("executeExodus", index, {
+        code: "entityNotFound",
+        subjectId: recordId,
+        message: `記録 "${recordId}" が state に無い(codify entity ではない)`,
+      });
+    }
+    if (entity.completedTick === null) {
+      return rejected("executeExodus", index, {
+        code: "invalidArgument",
+        subjectId: recordId,
+        message: `記録 "${recordId}" はまだ作業中なので積めない(GDD 10.2 は完成した記録のみ)`,
+      });
+    }
+  }
+  for (const residentId of command.crewIds) {
+    const resident = residentOf(state, residentId);
+    if (resident === undefined) {
+      return rejected("executeExodus", index, {
+        code: "entityNotFound",
+        subjectId: residentId,
+        message: `住民 "${residentId}" が state に無い`,
+      });
+    }
+    if (!isAliveResident(resident)) {
+      return rejected("executeExodus", index, {
+        code: "residentUnavailable",
+        subjectId: residentId,
+        message: `住民 "${residentId}" は死亡している(GDD 7.5 の tombstone)`,
+      });
+    }
+  }
+
+  // 解決関数(rules/exodus.ts §1)を先に回して「何が落ちるか」を得る。
+  // 1 つでも落ちるなら黙って積まずに拒否する(§3(a))。
+  const plan = { recordIds: command.recordIds, crewIds: command.crewIds };
+  const resolution = resolveExodusPlan(state, content, plan);
+  const droppedCrewId = resolution.droppedCrewIds[0];
+  if (droppedCrewId !== undefined) {
+    return rejected("executeExodus", index, {
+      code: "exodusCapacityExceeded",
+      subjectId: droppedCrewId,
+      limit: resolution.crewCapacity,
+      actual: resolution.droppedCrewIds.length,
+      message:
+        `乗員定員 ${String(resolution.crewCapacity)} 名に対し ` +
+        `${String(resolution.droppedCrewIds.length)} 名が入らない(GDD 10.2)`,
+    });
+  }
+  const droppedRecordId = resolution.droppedRecordIds[0];
+  if (droppedRecordId !== undefined) {
+    return rejected("executeExodus", index, {
+      code: "exodusCapacityExceeded",
+      subjectId: droppedRecordId,
+      limit: toRaw(resolution.caravanCapacityFix),
+      actual: resolution.droppedRecordIds.length,
+      message:
+        `キャラバン容量(石版換算枠 ${String(toRaw(resolution.caravanCapacityFix))} raw)に対し ` +
+        `${String(resolution.droppedRecordIds.length)} 枚が入らない(GDD 10.2)`,
+    });
+  }
+
+  const options =
+    command.worldSeedOverride === undefined ? {} : { worldSeedOverride: command.worldSeedOverride };
+  const next = executeExodusRule(state, content, plan, options);
+  return { ok: true, state: next, changed: true, commandCount: 1 };
+}
+
+/** [M28] 継承ボーナスの購入(GDD 10.3)。 */
+function applyPurchaseInheritBonus(
+  state: GameState,
+  content: EngineContent,
+  command: PurchaseInheritBonusCommand,
+  index: number,
+): CommandResult {
+  const params = content.exodus;
+  if (params === undefined) {
+    return rejected("purchaseInheritBonus", index, {
+      code: "contentUnsupported",
+      message: "content に balance の exodus ブロックが無いので継承ボーナスを買えない(GDD 10.3)",
+    });
+  }
+  if (!isInheritTrack(command.track)) {
+    return rejected("purchaseInheritBonus", index, {
+      code: "invalidArgument",
+      message: `継承系統 "${String(command.track)}" はレジストリ(INHERIT_TRACKS)に無い`,
+    });
+  }
+  const current = inheritTierOf(state, command.track);
+  const cost = inheritTierCost(params, current);
+  if (cost === null) {
+    return rejected("purchaseInheritBonus", index, {
+      code: "inheritTierAtMax",
+      limit: inheritTierMax(params),
+      actual: current,
+      message:
+        `系統 "${command.track}" は既に上限段(${String(inheritTierMax(params))} 段)` +
+        "に達している(GDD 10.3 / 11.4-6 の上限クランプ)",
+    });
+  }
+  const available = availableInheritPoints(state, content);
+  if (available < cost) {
+    return rejected("purchaseInheritBonus", index, {
+      code: "insufficientInheritPoints",
+      limit: cost,
+      actual: available,
+      message: `継承点が足りない(必要 ${String(cost)} / 残高 ${String(available)}・GDD 10.3)`,
+    });
+  }
+  return {
+    ok: true,
+    state: purchaseInheritTier(state, content, command.track),
+    changed: true,
+    commandCount: 1,
+  };
+}
+
 /** その派遣 ID が未帰還一覧で既に使われているか。 */
 function activeDispatchIdInUse(state: GameState, command: DispatchExpeditionCommand): boolean {
   for (const snapshot of state.dispatchSnapshots) {
@@ -1399,6 +1629,10 @@ function applyOne(
       return applyDispatchExpedition(state, content, command, index);
     case "reclaimCell":
       return applyReclaimCell(state, content, command, index);
+    case "executeExodus":
+      return applyExecuteExodus(state, content, command, index);
+    case "purchaseInheritBonus":
+      return applyPurchaseInheritBonus(state, content, command, index);
     case "beginResearch":
       return rejectReserved(command.kind, index);
     default: {

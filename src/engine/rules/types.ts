@@ -32,7 +32,7 @@
 
 import type { AdjacencyMatrix, Tag } from "../adjacency";
 import type { Fix } from "../fp";
-import type { EntityId, FacilityFootprint } from "../state/state";
+import type { EntityId, FacilityFootprint, InheritTrack } from "../state/state";
 import type { CondExpr } from "./cond";
 import type { StatWeights, TraitDef } from "./stats";
 
@@ -868,6 +868,64 @@ export interface ReclaimParams {
   readonly initialRubbleCells: readonly number[];
 }
 
+// --- 3h. exodus / 継承点(GDD 10.2〜10.5 / 11.4-6)— M28 ----------------------
+
+/**
+ * [M28] 大移動(Exodus)と継承点のパラメータ(`balance.json` の `exodus`
+ * ブロック・GDD 10.2〜10.5)。**ブロックごと省略可**(欠落は undefined)。
+ * 省略時は `commands.ts` の `executeExodus` / `purchaseInheritBonus` が
+ * `contentUnsupported` で拒否する(= 周回システム不活性。storage / exploration /
+ * outpost / reclaim と同じ「省略時は当該システム不活性」の形)。
+ *
+ * ===========================================================================
+ * 「想定石版総数(到達エラ)」を **静的テーブル**で持つ理由(GDD 10.2)
+ * ===========================================================================
+ * GDD 10.2 は容量式の第 1 項について「各エラのクリティカルパス＋標準想定葉テック
+ * 本数からなる**静的テーブル値**とし、週次葉テック追加では変動させない
+ * (セーブ互換単純化)」と明記している。よって engine は **content の tech 定義を
+ * 数えない**({@link expectedTabletsByEra} を引くだけ)。数えてしまうと、週次の
+ * additive な葉テック追加だけでキャラバン容量が動き、同じセーブの大移動結果が
+ * content 版で変わる = ADR 3軸(b)「additive-only で吸収」が破れる。
+ *
+ * ===========================================================================
+ * 段階コストを配列で持つ理由(GDD 10.3 の `cost(n) = 50 × 1.5^(購入済み段階n)`)
+ * ===========================================================================
+ * 実行時の非整数べき乗は ADR-006 の Math 許可リストで禁止であり、GDD 11.7 の
+ * 「非整数べき乗はオーサリング時に個別 FP 値へ展開」に従って **展開済みの
+ * 段階コスト列**({@link tierCosts} = GDD 10.3 の 50/75/113/169)を content が
+ * 持つ。配列の長さがそのまま「各ボーナスの上限段数」(GDD 10.3「各ボーナスに
+ * 上限段階」)= **青天井にならないことの構造的な根拠**(GDD 11.4-6)である。
+ * `rules/reclaim.ts` が `1.15^n` を mulFix 反復で作っているのと扱いが違うのは、
+ * あちらは段数の上限が盤面(瓦礫枚数)で動くのに対し、こちらは段数そのものが
+ * 仕様(4 段)だからである。
+ */
+export interface ExodusParams {
+  /** GDD 10.2 の `0.35`(`容量 = ceil(想定石版総数 × 0.35) + 継承点ボーナス`)。 */
+  readonly caravanRatioFix: Fix;
+  /**
+   * GDD 10.2「想定石版総数(到達エラ)」の静的テーブル(eraId → 本数)。
+   * 到達エラのエントリが無い content では容量の第 1 項が 0 になる。
+   */
+  readonly expectedTabletsByEra: ReadonlyMap<string, number>;
+  /** GDD 10.2 の `0.5`(`crewCap = ceil(生存人数 × 0.5) + 継承ボーナス`)。 */
+  readonly crewRatioFix: Fix;
+  /** GDD 10.3 獲得式の `到達エラ × 10` の 10。 */
+  readonly eraPointsFix: Fix;
+  /** GDD 10.3 獲得式の `成文化率(%) × 0.5` の 0.5(**% 1 点あたり**)。 */
+  readonly codifyRatePointsFix: Fix;
+  /** GDD 10.3 獲得式の `生存住民数 × 2` の 2。 */
+  readonly survivorPointsFix: Fix;
+  /**
+   * GDD 10.3 の段階コスト(展開済み・**昇順**)。`tierCosts[n]` = 購入済み n 段の
+   * 状態で次の 1 段を買うコスト。長さ = 上限段数(GDD 10.3 は 4 段 = 50/75/113/169)。
+   */
+  readonly tierCosts: readonly number[];
+  /** 系統 1 段あたりのボーナス量(整数)。3 系統とも必須。 */
+  readonly trackBonusPerTier: { readonly [K in InheritTrack]: number };
+  /** `startingStock` 系統のボーナスが積まれる resource 定義 ID。 */
+  readonly startingStockResourceId: EntityId;
+}
+
 // --- 4. content 全体 -------------------------------------------------------
 
 /**
@@ -951,6 +1009,12 @@ export interface EngineContent {
    * 持たないためである。
    */
   readonly reclaim?: ReclaimParams;
+  /**
+   * [M28] 大移動 / 継承点のパラメータ(GDD 10.2〜10.5)。**省略時は大移動も
+   * 継承ボーナス購入もできない**(`commands.ts` の `executeExodus` /
+   * `purchaseInheritBonus` が `contentUnsupported` で拒否)。
+   */
+  readonly exodus?: ExodusParams;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------
@@ -1071,4 +1135,18 @@ export function requireReclaimParams(content: EngineContent): ReclaimParams {
     );
   }
   return content.reclaim;
+}
+
+/**
+ * [M28] 大移動 / 継承点のパラメータを引く。
+ *
+ * @throws {RulesError} content に exodus ブロックが無い場合
+ */
+export function requireExodusParams(content: EngineContent): ExodusParams {
+  if (content.exodus === undefined) {
+    throw new RulesError(
+      "content に balance の exodus ブロックが無いので大移動と継承点が成立しない(GDD 10.2〜10.5)",
+    );
+  }
+  return content.exodus;
 }

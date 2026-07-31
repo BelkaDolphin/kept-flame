@@ -191,7 +191,7 @@ describe("コマンド語彙のレジストリ", () => {
       expect(isImplementedCommandKind(kind)).toBe(true);
       expect(RESERVED_COMMAND_OWNER_TASK[kind]).toBeUndefined();
     }
-    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(9);
+    expect(IMPLEMENTED_COMMAND_KINDS).toHaveLength(11);
   });
 
   it("実装済みの一覧は UTF-16 昇順(正準順)", () => {

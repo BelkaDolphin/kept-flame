@@ -142,6 +142,7 @@ import type {
   EventDef,
   EventNodeDef,
   EventResult,
+  ExodusParams,
   ExplorationBandParams,
   ExplorationParams,
   FacilityDef,
@@ -170,6 +171,7 @@ import type { AdjacencyContent, AdjacencyRule } from "./adjacency";
 import type {
   BalanceContent,
   EraContent,
+  ExodusBalanceContent,
   ExplorationContent,
   OutpostBalanceContent,
   ReclaimBalanceContent,
@@ -1957,6 +1959,87 @@ function toReclaimParams(
   };
 }
 
+// --- 6h. exodus(GDD 10.2〜10.5)— M28 -----------------------------------------
+
+/**
+ * [M28] `balance.exodus` → engine の {@link ExodusParams}(GDD 10.2〜10.5)。
+ *
+ * 比率と獲得係数だけを 1e6 化し、**継承点そのものは整数のまま**写す
+ * (点は量ではなく単位のない数え上げなので、`ExplorationBandParams` のノード数や
+ * `initialRubbleCells` と同じ扱い)。段階コスト列の長さ = 上限段数であり、
+ * これが GDD 11.4-6「青天井にならない」の構造的な根拠になる。
+ */
+function toExodusParams(
+  content: ExodusBalanceContent,
+  issues: IssueCollector,
+): ExodusParams | undefined {
+  const path = "balance.exodus";
+  const caravanRatioFix = toFix(
+    content.caravanRatio,
+    `${path}.caravanRatio`,
+    issues,
+    "キャラバン容量比",
+  );
+  const crewRatioFix = toFix(content.crewRatio, `${path}.crewRatio`, issues, "乗員定員比");
+  const eraPointsFix = toFix(content.eraPoints, `${path}.eraPoints`, issues, "到達エラ係数");
+  const codifyRatePointsFix = toFix(
+    content.codifyRatePoints,
+    `${path}.codifyRatePoints`,
+    issues,
+    "成文化率係数",
+  );
+  const survivorPointsFix = toFix(
+    content.survivorPoints,
+    `${path}.survivorPoints`,
+    issues,
+    "生存住民係数",
+  );
+  if (
+    caravanRatioFix === undefined ||
+    crewRatioFix === undefined ||
+    eraPointsFix === undefined ||
+    codifyRatePointsFix === undefined ||
+    survivorPointsFix === undefined
+  ) {
+    return undefined;
+  }
+
+  const expectedTabletsByEra = new Map<string, number>();
+  for (const eraId of Object.keys(content.expectedTabletsByEra).sort(compareUtf16)) {
+    const value = content.expectedTabletsByEra[eraId];
+    if (value !== undefined) expectedTabletsByEra.set(eraId, value);
+  }
+
+  // 3 系統は engine 既知の enum。schema 側(validateInheritBonusPerTier)が
+  // 3 つとも存在することを保証しているので、ここは欠落を既定で埋めず止める。
+  const caravanBonus = content.inheritBonusPerTier["caravanCapacity"];
+  const crewBonus = content.inheritBonusPerTier["crewCapacity"];
+  const stockBonus = content.inheritBonusPerTier["startingStock"];
+  if (caravanBonus === undefined || crewBonus === undefined || stockBonus === undefined) {
+    issues.add(
+      `${path}.inheritBonusPerTier`,
+      "継承系統 3 種(caravanCapacity / crewCapacity / startingStock)が揃っていない",
+    );
+    return undefined;
+  }
+
+  return {
+    caravanRatioFix,
+    expectedTabletsByEra,
+    crewRatioFix,
+    eraPointsFix,
+    codifyRatePointsFix,
+    survivorPointsFix,
+    tierCosts: [...content.inheritTierCosts],
+    trackBonusPerTier: {
+      caravanCapacity: caravanBonus,
+      crewCapacity: crewBonus,
+      startingStock: stockBonus,
+    },
+    startingStockResourceId: entityIdFromString(content.startingStockResourceId),
+  };
+}
+
 // --- 7. 入口 ----------------------------------------------------------------
 
 /**
@@ -2047,6 +2130,11 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     bundle.balance.reclaim === null
       ? null
       : (toReclaimParams(bundle.balance.reclaim, issues) ?? undefined);
+  // [M28] 省略可。キー不在 = engine 側の「大移動も継承ボーナス購入もできない」既定。
+  const exodus =
+    bundle.balance.exodus === null
+      ? null
+      : (toExodusParams(bundle.balance.exodus, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -2068,7 +2156,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     town === undefined ||
     exploration === undefined ||
     outpost === undefined ||
-    reclaim === undefined
+    reclaim === undefined ||
+    exodus === undefined
   ) {
     return fail(issues.list());
   }
@@ -2097,7 +2186,9 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     outpostTypeDefs.size === 0 ? withEvents : { ...withEvents, outpostTypeDefs };
   const withOutpost = outpost === null ? withOutpostTypes : { ...withOutpostTypes, outpost };
   // [M52] 開墾(GDD 9.1)。ブロック不在なら EngineContent へキーを足さない。
-  return ok(reclaim === null ? withOutpost : { ...withOutpost, reclaim });
+  const withReclaim = reclaim === null ? withOutpost : { ...withOutpost, reclaim };
+  // [M28] 大移動 / 継承点(GDD 10.2〜10.5)。同上。
+  return ok(exodus === null ? withReclaim : { ...withReclaim, exodus });
 }
 
 /**

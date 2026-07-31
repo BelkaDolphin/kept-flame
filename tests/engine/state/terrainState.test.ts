@@ -74,7 +74,8 @@ describe("既定の地形(縮約互換)", () => {
     const v4 = { ...(toSerializable(stateOf()) as unknown as Record<string, unknown>) };
     v4["saveSchemaVersion"] = 4;
     const migrated = migrateSavePayload(v4);
-    expect(migrated.appliedSteps).toHaveLength(1);
+    // [M28] v4→v5(地形)+ v5→v6(周回/継承点)の 2 段。
+    expect(migrated.appliedSteps).toHaveLength(2);
     const restored = fromSerializable(migrated.value);
     expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
     expect(restored.terrain).toEqual(EMPTY_TERRAIN);
