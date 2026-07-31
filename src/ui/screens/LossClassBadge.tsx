@@ -26,6 +26,10 @@ export interface LossClassBadgeProps {
  * 必ず併記・ui-spec §0-6 の「色だけで意味を運ばない」規約)。(B) のラベルは
  * 「取り返しがつかない」ことがテキストそのもので読み取れる文言にしてある
  * (GDD 7.4 の検収条件を色ではなく文章で満たす)。
+ *
+ * [束B/B-5] `title` 属性で(A)/(B) それぞれの意味を一言添える(ホバー/長押しで
+ * 読める補足)。初出画面(⑤研究ツリー)には別途 1 行の注記も置く
+ * (ResearchScreen.tsx)。
  */
 export function LossClassBadge({ lossClass }: LossClassBadgeProps) {
   const irreversible = lossClass === "rareIrreversible";
@@ -33,6 +37,11 @@ export function LossClassBadge({ lossClass }: LossClassBadgeProps) {
     <span
       class={`kf-lossclass-badge kf-lossclass-badge--${irreversible ? "b" : "a"}`}
       data-loss-class={lossClass}
+      title={
+        irreversible
+          ? "(B) 一度失うと、この周回では二度と取り戻せません"
+          : "(A) 失っても、条件が整えばもう一度取得できます"
+      }
     >
       <span aria-hidden="true">{irreversible ? "B" : "A"}</span>
       {irreversible ? "一回性喪失(取り返し不可)" : "再取得可能"}

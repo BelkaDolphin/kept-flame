@@ -99,6 +99,32 @@
   cursor: pointer;
 }
 
+/* --- [束B/m-1] 未選択時の施設一覧 ------------------------------------------ */
+
+.kf-facility-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.kf-facility-picker__button {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--kf-fs-body);
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
 .kf-facility-screen__nav {
   display: flex;
   gap: 0.5rem;

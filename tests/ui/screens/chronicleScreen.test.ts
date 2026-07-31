@@ -34,16 +34,16 @@ describe("memoirEntryText(GDD 7.3・事実だけの文言・網羅switch)", () =
     expect(memoirEntryText({ kind: "death", tick: 0 })).toBe("亡くなった。");
   });
 
-  it("絆節目/絆喪失(相手ID・節目段を含む)", () => {
+  it("絆節目/絆喪失(相手ID・節目段を含む・束B/B-3でresidentDisplayName経由)", () => {
     expect(
       memoirEntryText({ kind: "bondMilestone", tick: 0, partnerId: id("aKaya"), tier: 2 }),
-    ).toBe("aKaya との絆が深まった(節目2)。");
+    ).toBe("AKaya との絆が深まった(節目2)。");
     expect(memoirEntryText({ kind: "partnerLost", tick: 0, partnerId: id("aKaya") })).toBe(
-      "絆を結んでいた aKaya を喪った。",
+      "絆を結んでいた AKaya を喪った。",
     );
   });
 
-  it("探索での保護(距離帯・被保護者IDを含む)", () => {
+  it("探索での保護(距離帯・被保護者IDを含む・束B/B-3でresidentDisplayName経由)", () => {
     expect(
       memoirEntryText({
         kind: "explorationRescue",
@@ -51,7 +51,7 @@ describe("memoirEntryText(GDD 7.3・事実だけの文言・網羅switch)", () =
         rescuedId: id("aRescued"),
         band: "far",
       }),
-    ).toBe("遠隔探索で aRescued を保護した。");
+    ).toBe("遠隔探索で ARescued を保護した。");
   });
 
   it("bio 3種(候補番号のみ・実文言は捏造しない)", () => {
@@ -69,7 +69,8 @@ describe("MemoirRow(⑧住民memoir1件)", () => {
     };
     const vnode = MemoirRow({ feedEntry });
     const text = flattenText(vnode);
-    expect(text).toContain("aRui");
+    // [束B/B-3] residentDisplayName(先頭大文字化)を通して表示する。
+    expect(text).toContain("ARui");
     expect(text).toContain("加入した");
   });
 });

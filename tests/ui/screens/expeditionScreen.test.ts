@@ -64,25 +64,25 @@ describe("BandPicker(⑦目的地=距離帯)", () => {
   });
 });
 
-describe("DestinationPicker(⑦目的地=具体的な行き先)", () => {
-  it("procedural=true なら「この距離帯(手続き生成)」の1択を出す", () => {
+describe("DestinationPicker(⑦目的地=具体的な行き先・束B/B-3で和名化)", () => {
+  it("手続き生成フォールバック(ID末尾がProcedural)は「この距離帯のどこか」と表示する", () => {
     const vnode = DestinationPicker({
       options: [id("expeditionNearProcedural")],
       destinationId: id("expeditionNearProcedural"),
       onPick: () => undefined,
-      procedural: true,
     });
-    expect(flattenText(vnode)).toContain("この距離帯(手続き生成)");
+    expect(flattenText(vnode)).toContain("この距離帯のどこか");
   });
 
-  it("procedural=false なら raw ID をそのまま表示する(捏造しない)", () => {
+  it("named event は raw ID ではなく和名(eventLabel)を表示する", () => {
     const vnode = DestinationPicker({
       options: [id("eventNearRubbleSweep")],
       destinationId: id("eventNearRubbleSweep"),
       onPick: () => undefined,
-      procedural: false,
     });
-    expect(flattenText(vnode)).toContain("eventNearRubbleSweep");
+    const text = flattenText(vnode);
+    expect(text).toContain("瓦礫原の捜索");
+    expect(text).not.toContain("eventNearRubbleSweep");
   });
 });
 
@@ -111,8 +111,13 @@ describe("CandidateRow(⑦派遣候補1名)", () => {
 });
 
 describe("RoiPanel(GDD 8.6・検収条件=(B)損失リスク項が画面に出ているか)", () => {
+  it("[束B/m-8] チーム0人なら「住民を選ぶと予測を表示します」に差し替える", () => {
+    const vnode = RoiPanel({ report: null, rewardResourceId: null, teamSize: 0 });
+    expect(flattenText(vnode)).toContain("住民を選ぶと予測を表示します");
+  });
+
   it("content に exploration が無ければ不活性メッセージ", () => {
-    const vnode = RoiPanel({ report: null, rewardResourceId: null });
+    const vnode = RoiPanel({ report: null, rewardResourceId: null, teamSize: 1 });
     expect(flattenText(vnode)).toContain("算出できません");
   });
 
@@ -122,7 +127,7 @@ describe("RoiPanel(GDD 8.6・検収条件=(B)損失リスク項が画面に出�
     const content = m32Content();
     const report = previewExplorationRoi(state, content, "near", [member.id]);
     if (report === null) throw new Error("report が null(フィクスチャの exploration ブロック欠落)");
-    const vnode = RoiPanel({ report, rewardResourceId: id("wood") });
+    const vnode = RoiPanel({ report, rewardResourceId: id("wood"), teamSize: 1 });
     const text = flattenText(vnode);
     expect(text).toContain("期待報酬");
     expect(text).toContain("逸失生産");
@@ -151,10 +156,13 @@ describe("DispatchRow(⑦/⑧未帰還派遣1件)", () => {
     const vnode = DispatchRow({ dispatch });
     const text = flattenText(vnode);
     expect(text).toContain("近郊");
-    expect(text).toContain("eventNearRubbleSweep");
+    // [束B/B-3] 目的地は raw event ID ではなく和名(eventLabel)で表示する。
+    expect(text).toContain("瓦礫原の捜索");
+    expect(text).not.toContain("eventNearRubbleSweep");
     expect(text).toContain("強行");
-    expect(text).toContain("aRui");
-    expect(text).toContain("aKaya");
+    // [束B/B-3] 隊員も residentDisplayName(先頭大文字化)を通す。
+    expect(text).toContain("ARui");
+    expect(text).toContain("AKaya");
   });
 
   it("脱落見込みがあれば表示する", () => {

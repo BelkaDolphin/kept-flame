@@ -68,6 +68,7 @@ import {
   type PlacementPreviewCell,
 } from "../../derived";
 import type { GameStore } from "../../store";
+import { resourceStockApprox } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./gridBoard.css";
 import { CELL_SIZE_PX, DEFAULT_SCALE, MIN_TAP_TARGET_PX } from "./gridConstants";
@@ -325,7 +326,7 @@ export function GridCell({ cell, selected, zoom, preview = null }: GridCellProps
         <span
           class="kf-cell__overcrowd-badge"
           style={`width:${String(NON_SCALING_MIN_PX.overcrowdBadge)}px;height:${String(NON_SCALING_MIN_PX.overcrowdBadge)}px;transform:scale(${String(counterScale)});color:${TAG_VISUALS[badgeTag].ink};`}
-          title="過密警告(常時表示・GDD 6.5)"
+          title="過密警告(近くに同じタグの施設が多すぎて、隣接ボーナスの一部が無効化されています)"
           aria-label="過密警告"
         >
           !
@@ -391,12 +392,27 @@ function surfaceStyle(viewport: Viewport): string {
 
 // --- 6. Preact コンポーネント本体(hooks を持つのはここだけ) ----------------
 
+/**
+ * [束B/B-4] 建設成功トースト用の差分情報(GridScreen が文言を組み立てる)。
+ * `beforeStockApprox`/`afterStockApprox` は建設コストが無い(`def.cost`
+ * 省略)施設では両方 null になる。
+ */
+export interface PlacementSuccessInfo {
+  readonly defId: EntityId;
+  readonly facilityId: EntityId;
+  readonly resourceId: EntityId | null;
+  readonly beforeStockApprox: number | null;
+  readonly afterStockApprox: number | null;
+}
+
 export interface GridBoardProps {
   readonly store: GameStore;
   /** 配置待ちの施設(未指定ならタップは常に「選択」)。M30(施設カタログ)が渡す。 */
   readonly pendingPlacement?: PendingPlacement | null;
   /** `placeFacility` を dispatch した結果(拒否も含む)を親へ知らせる。 */
   readonly onPlacementResult?: (result: CommandResult) => void;
+  /** [束B/B-4] `placeFacility` が成功したときだけ呼ぶ(成功トースト用)。 */
+  readonly onPlacementSuccess?: (info: PlacementSuccessInfo) => void;
   /**
    * タグ記号 SVG スプライト(`TagIconDefs`)をこのコンポーネントが自前で
    * マウントするか(既定 true)。凡例パネル/内訳ビューと同一画面に組む場合
@@ -468,6 +484,7 @@ export function GridBoard({
   store,
   pendingPlacement = null,
   onPlacementResult,
+  onPlacementSuccess,
   includeIconDefs = true,
 }: GridBoardProps) {
   const cells = useGridCells(store);
@@ -523,10 +540,28 @@ export function GridBoard({
         store.dispatch({ type: "cellSelected", cellIndex: action.cellIndex });
         return;
       case "place": {
+        // [束B/B-4] 成功トースト用に、投入前のコスト資源の在庫を控えておく
+        // (`def.cost` が無い施設は resourceId=null のまま=差分を出さない)。
+        const costResourceId =
+          store.peekContent().facilityDefs.get(action.command.defId)?.cost?.resourceId ?? null;
+        const beforeStockApprox =
+          costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+
         const result = store.dispatch({ type: "commandApplied", command: action.command });
         // commandApplied を dispatch した直後は DispatchResult.command が
         // 必ず非 null になる(store.ts の applyCommand)。
         if (result.command !== null) onPlacementResult?.(result.command);
+        if (result.command !== null && result.command.ok && onPlacementSuccess !== undefined) {
+          const afterStockApprox =
+            costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+          onPlacementSuccess({
+            defId: action.command.defId,
+            facilityId: action.command.facilityId,
+            resourceId: costResourceId,
+            beforeStockApprox,
+            afterStockApprox,
+          });
+        }
         return;
       }
       case "none":

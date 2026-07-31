@@ -58,9 +58,16 @@ export interface InheritTrackRowProps {
   readonly bonusPerTier: number;
   /** `null` = 上限段に達していて次の段が無い。 */
   readonly nextCost: number | null;
+  /** [束B/B-4] 残高不足で確実に失敗するか(判定ではなく表示上の目印)。 */
+  readonly insufficientBalance: boolean;
   readonly onPurchase: (track: InheritTrack) => void;
 }
 
+/**
+ * [束B/B-4] 上限段(`nextCost === null`)は構造的事実なので従来どおり
+ * `disabled` で非活性にする。**残高不足はそうではない**(先読みしない方針・
+ * §2)ので、非活性にはせず淡色化 + aria-disabled + 理由の併記に留める。
+ */
 export function InheritTrackRow({
   track,
   currentTier,
@@ -68,9 +75,11 @@ export function InheritTrackRow({
   currentBonus,
   bonusPerTier,
   nextCost,
+  insufficientBalance,
   onPurchase,
 }: InheritTrackRowProps) {
   const atMax = nextCost === null;
+  const willFail = !atMax && insufficientBalance;
   return (
     <li class="kf-inherit-row" data-track={track}>
       <h3 class="kf-inherit-row__title">{inheritTrackLabel(track)}</h3>
@@ -78,12 +87,22 @@ export function InheritTrackRow({
         段階 {currentTier}/{maxTier}(現在ボーナス +{currentBonus}・1段あたり +{bonusPerTier})
       </p>
       <p class="kf-inherit-row__cost">
-        {atMax ? "上限段に達しています(GDD 11.4-6 の青天井禁止)" : `次の1段のコスト: ${nextCost}点`}
+        {atMax
+          ? "上限段に達しています(これ以上は購入できません)"
+          : `次の1段のコスト: ${nextCost}点`}
       </p>
+      {willFail && (
+        <p class="kf-inherit-row__insufficient">残高が足りません。押しても購入できません。</p>
+      )}
       <button
         type="button"
-        class="kf-inherit-row__button"
+        class={
+          willFail
+            ? "kf-inherit-row__button kf-inherit-row__button--unlikely"
+            : "kf-inherit-row__button"
+        }
         disabled={atMax}
+        aria-disabled={willFail}
         onClick={() => onPurchase(track)}
       >
         {atMax ? "上限" : "購入する"}
@@ -108,9 +127,7 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
         <h2 class="kf-inheritance-screen__title" id="kf-inheritance-screen-title">
           継承点購入
         </h2>
-        <p class="kf-inheritance-screen__inactive">
-          content に exodus ブロックが無いので継承点購入は実行できません。
-        </p>
+        <p class="kf-inheritance-screen__inactive">現在のデータでは継承点購入は使えません。</p>
         <div class="kf-inheritance-screen__nav">
           <button
             type="button"
@@ -150,8 +167,11 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-inheritance-screen__title" id="kf-inheritance-screen-title">
         継承点購入
       </h2>
+      <p class="kf-screen-intro">
+        大移動で得た継承点を使い、次の周回を有利にするボーナスを買います。
+      </p>
       <p class="kf-inheritance-screen__balance">
-        累計獲得: {cumulative}点・使用済み: {spent}点・残高: {available}点(GDD 10.3)
+        累計獲得: {cumulative}点・使用済み: {spent}点・残高: {available}点
       </p>
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
@@ -162,18 +182,22 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
       )}
 
       <ul class="kf-inheritance-screen__list">
-        {INHERIT_TRACKS.map((track) => (
-          <InheritTrackRow
-            key={track}
-            track={track}
-            currentTier={inheritTierOf(state, track)}
-            maxTier={maxTier}
-            currentBonus={inheritBonusOf(state, content, track)}
-            bonusPerTier={params.trackBonusPerTier[track]}
-            nextCost={inheritTierCost(params, inheritTierOf(state, track))}
-            onPurchase={handlePurchase}
-          />
-        ))}
+        {INHERIT_TRACKS.map((track) => {
+          const nextCost = inheritTierCost(params, inheritTierOf(state, track));
+          return (
+            <InheritTrackRow
+              key={track}
+              track={track}
+              currentTier={inheritTierOf(state, track)}
+              maxTier={maxTier}
+              currentBonus={inheritBonusOf(state, content, track)}
+              bonusPerTier={params.trackBonusPerTier[track]}
+              nextCost={nextCost}
+              insufficientBalance={nextCost !== null && nextCost > available}
+              onPurchase={handlePurchase}
+            />
+          );
+        })}
       </ul>
 
       <div class="kf-inheritance-screen__nav">

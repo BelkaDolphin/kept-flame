@@ -1,25 +1,29 @@
 // ---------------------------------------------------------------------------
-// 継ぐ火 -Kept Flame- ⑨衛星拠点管理(M32)— GDD 9.2 / 11.4-7
+// 継ぐ火 -Kept Flame- ⑨衛星拠点管理(M32・束B/B-2で文言改訂)— GDD 9.2 / 11.4-7
 //
 // ===========================================================================
-// 1. このファイルがやること・やらないこと(★要ユーザー判断・最終報告参照)
+// 1. このファイルがやること・やらないこと
 // ===========================================================================
-//   拠点一覧(3タイプ)・供給レート・維持費・hazard・拠点網 ROI の**表示**。
-//   `rules/outpost.ts` の `outpostNetworkRoi` をそのまま呼ぶ(derived.ts の
-//   `outpostOverview`)。(B) 損失項(`expectedRareLossApprox`)を隠さない。
+//   拠点一覧(3タイプ)・供給レート・維持費・危険度(hazard)・拠点網 ROI の
+//   **表示**。`rules/outpost.ts` の `outpostNetworkRoi` をそのまま呼ぶ
+//   (derived.ts の `outpostOverview`)。(B) 損失項(`expectedRareLossApprox`)を
+//   隠さない。
 //
-//   **駐在割当/解除のコマンドは engine に実装されていない。**
-//   `src/engine/commands.ts` の `IMPLEMENTED_COMMAND_KINDS` に拠点系コマンドは
-//   1 つも無く(語彙予約すら無い)、拠点を作る・住民を配属する・解除する手段が
-//   engine に存在しない(state 上は `OutpostState` を直接組み立てるテスト
-//   フィクスチャでしか登場しない)。タスク指示「コマンド発行はengine実装済みの
-//   範囲のみ(無いものはUIを作らず★報告)」に従い、本画面は**表示専用**とし、
-//   駐在割当/解除・拠点設置/放棄のボタンは 1 つも置かない。詳細は最終報告の
-//   ★項目を参照。
+//   **[2026-08-01 M50 で engine 側は解消] 拠点操作コマンド(設置/放棄/駐在割当/
+//   駐在解除の 4 種)は M50 が実装済み**(`commands.ts` の
+//   `establishOutpost`/`abandonOutpost`/`stationResident`/`unstationResident`)。
+//   ただし M50 は UI 非接触の縛りで実施されたため、**本画面からそれらを呼ぶ
+//   結線はまだ無い**(表示専用のまま・次の UI タスクで接続予定)。以前の
+//   「engine に未実装」という注記は M50 完了後の今は事実と異なるため削除した。
 // ---------------------------------------------------------------------------
 
 import type { OutpostRosterEntry } from "../../derived";
-import { distanceBandLabel, outpostTypeLabel, resourceLabel } from "../contentLabels";
+import {
+  distanceBandLabel,
+  outpostTypeLabel,
+  residentDisplayName,
+  resourceLabel,
+} from "../contentLabels";
 import { formatGameClock } from "../format";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
@@ -39,7 +43,10 @@ export function OutpostCard({ outpost }: OutpostCardProps) {
         {distanceBandLabel(outpost.band)}
       </h4>
       <p class="kf-outpost-card__residents">
-        常駐: {outpost.residentIds.length > 0 ? outpost.residentIds.join("・") : "無し"}
+        常駐:{" "}
+        {outpost.residentIds.length > 0
+          ? outpost.residentIds.map((residentId) => residentDisplayName(residentId)).join("・")
+          : "無し"}
       </p>
       <p class="kf-outpost-card__established">設置: {formatGameClock(outpost.establishedTick)}</p>
       <p class="kf-outpost-card__supply">
@@ -51,14 +58,15 @@ export function OutpostCard({ outpost }: OutpostCardProps) {
         {outpost.netRevenueApprox < 0 ? "(維持費が供給を上回っています・放棄を検討)" : ""}
       </p>
       <p class="kf-outpost-card__hazard">
-        hazard: {(outpost.hazardApprox * 100).toFixed(1)}%(駐在員が (B) 資産を失う期待確率・GDD 9.2)
+        危険度: {(outpost.hazardApprox * 100).toFixed(1)}
+        %(常駐中に(B)一回性喪失の資産を失う確率の目安)
       </p>
       <p class="kf-outpost-card__loss" data-testid="outpost-b-loss">
         (B)喪失リスク: 期待損失 {outpost.expectedRareLossApprox.toFixed(2)}
         (対象 (B) 資産 {outpost.rareAssetCount} 件)
       </p>
       <p class="kf-outpost-card__roi">
-        ROI: {outpost.roiApprox === null ? "算出不可(分母0)" : outpost.roiApprox.toFixed(2)}
+        採算(ROI): {outpost.roiApprox === null ? "算出不可(分母0)" : outpost.roiApprox.toFixed(2)}
       </p>
     </li>
   );
@@ -77,8 +85,11 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-outposts-screen__title" id="kf-outposts-screen-title">
         衛星拠点管理
       </h2>
+      <p class="kf-screen-intro">
+        本拠の外に置いた採取拠点(鉱山/農園/林)の供給・維持費・常駐者を失う危険度をまとめて確認します。
+      </p>
 
-      <section class="kf-outposts-screen__network" aria-label="拠点網 ROI">
+      <section class="kf-outposts-screen__network" aria-label="拠点網の採算">
         <p class="kf-outposts-screen__network-count">拠点数: {overview.network.outpostCount}</p>
         <p class="kf-outposts-screen__network-supply">
           合計供給: {overview.network.totalSupplyApprox.toFixed(2)}/tick
@@ -93,7 +104,7 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
           拠点網の(B)喪失リスク合計: {overview.network.totalExpectedRareLossApprox.toFixed(2)}
         </p>
         <p class="kf-outposts-screen__network-roi">
-          拠点網 ROI(GDD 11.4-7):{" "}
+          拠点網全体の採算(ROI):{" "}
           {overview.network.roiApprox === null
             ? "算出不可(分母0)"
             : overview.network.roiApprox.toFixed(2)}
@@ -101,8 +112,7 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
       </section>
 
       <p class="kf-outposts-screen__note">
-        駐在割当/解除・拠点の設置/放棄は現行 engine
-        に未実装のため、本画面は表示専用です(★要ユーザー判断・最終報告参照)。
+        拠点の操作(駐在の割当/解除、設置/放棄)は今後のアップデートで追加されます。
       </p>
 
       {overview.roster.length === 0 ? (

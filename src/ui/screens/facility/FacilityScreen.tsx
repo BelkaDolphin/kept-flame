@@ -10,12 +10,13 @@
 //   そのまま再利用**(タスク指示どおり・独自の内訳計算を書かない)。
 //
 // ===========================================================================
-// 2. 増築コストについて(★ 要ユーザー判断・architecture.md §9-5 の追認)
+// 2. 増築コスト(束B/B-2・B-4 で解消)
 // ===========================================================================
-//   GDD 12.1 の facility スキーマにコスト項が無く、`upgradeFacility` は
-//   現行実装で資源を 1 つも消費しない(architecture.md §9 の要ユーザー判断 5)。
-//   本画面はこれを**捏造せず正直に表示する**(「コストなし」と明記し、実在
-//   しないコスト内訳をでっち上げない)。コスト項をどこへ足すかは M50 の担当。
+//   [2026-08-01 M50 で解消] `upgradeFacility` は content 定義の資源コストを
+//   実際に消費するようになった(commands.ts §4 の [M50] payFacilityCost)。
+//   束B では derived.ts に `upgradeCostApprox`/`upgradeCostResourceId` を足し、
+//   このパネルが実額を表示する(以前の「コストなし」表記は M50 前の暫定実装の
+//   名残であり、今は虚偽なので削除した)。
 //
 // ===========================================================================
 // 3. 判定は書かない(architecture.md §6 の7箇条目)
@@ -23,20 +24,30 @@
 //   増築ボタンは Lv 上限に達していても**非活性にしない**——上限判定も
 //   engine の `apply` が返す `levelAtMax` reject に委ねる(7箇条目が「上限」を
 //   名指しで挙げている)。押した結果は `RejectionBanner` で見せる。
+//
+// ===========================================================================
+// 4. [束B/m-1] 未選択時は施設一覧から選ばせる
+// ===========================================================================
+//   `store.sources.selectedCellIndex` は画面をまたいでも保持される
+//   (worldLoaded 以外でリセットされない・store.ts §1 の `CellSelectedEvent`
+//   doc)ので、②で一度選んだ施設は③へ直接ナビしても表示され続ける。
+//   本画面が追加するのは「一度も選んだことが無い」場合のフォールバックだけ:
+//   ②へ強制送還する 1 行だけの案内に代えて、`facilityRoster` から選べる
+//   一覧を出す(UX プレイテスト m-1)。
 // ---------------------------------------------------------------------------
 
 import { useState } from "preact/hooks";
 
 import type { CommandRejection } from "../../../engine/commands";
-import type { EntityId } from "../../../engine/state/state";
-import type { FacilityDetailView, FacilityWorkerView } from "../../derived";
-import { facilityLabel, resourceLabel } from "../contentLabels";
+import type { FacilityDetailView, FacilityRosterEntry, FacilityWorkerView } from "../../derived";
+import { facilityLabel, residentDisplayName, resourceLabel } from "../contentLabels";
 import { CellBreakdownView } from "../grid/CellBreakdownView";
 import "../grid/gridBoard.css";
 import { TagChip } from "../grid/TagChip";
 import { TagIconDefs } from "../grid/TagIcons";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./facilityScreen.css";
 
@@ -54,7 +65,7 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
   if (worker.recallImpaired) badges.push("想起困難");
   return (
     <li class="kf-facility-detail__worker">
-      <span class="kf-facility-detail__worker-id">{worker.residentId}</span>
+      <span class="kf-facility-detail__worker-id">{residentDisplayName(worker.residentId)}</span>
       <span class="kf-facility-detail__worker-morale">士気{worker.moraleApprox}</span>
       {badges.length > 0 && (
         <span class="kf-facility-detail__worker-badges">{badges.join("・")}</span>
@@ -109,13 +120,57 @@ export function FacilityDetailPanel({ detail, onUpgrade }: FacilityDetailPanelPr
       </ul>
       <div class="kf-facility-detail__upgrade">
         <p class="kf-facility-detail__upgrade-cost">
-          増築コスト: content 定義の資源を消費します(M50 結線済み。不足時は増築 ボタンで engine
-          が拒否し、必要量が機械可読で表示されます)
+          {detail.upgradeCostApprox === null || detail.upgradeCostResourceId === null
+            ? detail.level >= detail.maxLevel
+              ? "既に上限Lvです。"
+              : "増築コストはかかりません。"
+            : `増築コスト: ${resourceLabel(detail.upgradeCostResourceId)} ${detail.upgradeCostApprox}`}
         </p>
         <button type="button" class="kf-facility-detail__upgrade-button" onClick={onUpgrade}>
           Lv{detail.level + 1}へ増築
         </button>
       </div>
+    </section>
+  );
+}
+
+// --- 2b. [束B/m-1] 未選択時の施設一覧(hooks 不使用・直接テスト可能) ---------
+
+export interface FacilityPickerProps {
+  readonly roster: readonly FacilityRosterEntry[];
+  readonly onPick: (cellIndex: number) => void;
+}
+
+/**
+ * 選択中の施設が無いときのフォールバック。②へ強制送還する案内だけでなく、
+ * 既に建っている施設から直接選べるようにする(m-1)。
+ */
+export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
+  if (roster.length === 0) {
+    return (
+      <p class="kf-facility-screen__empty">
+        まだ施設がありません。②格子ビューでまず施設を建ててください。
+      </p>
+    );
+  }
+  return (
+    <section class="kf-facility-picker" aria-label="施設を選ぶ">
+      <p class="kf-screen-intro">
+        施設が選択されていません。一覧から選ぶか、②格子ビューで施設をタップして選択してください。
+      </p>
+      <ul class="kf-facility-picker__list">
+        {roster.map((facility) => (
+          <li key={facility.facilityId}>
+            <button
+              type="button"
+              class="kf-facility-picker__button"
+              onClick={() => onPick(facility.cellIndex)}
+            >
+              {facilityLabel(facility.defId)}({facility.cellId})・Lv{facility.level}
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -128,16 +183,40 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
 
   const detail = useSignalValue(store.derived.selectedFacilityDetail);
   const breakdown = useSignalValue(store.derived.selectedCellBreakdown);
+  const facilityRoster = useSignalValue(store.derived.facilityRoster);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  const toastStack = useToastStack();
 
-  function handleUpgrade(facilityId: EntityId): void {
+  function handleUpgrade(current: FacilityDetailView): void {
+    const beforeStockApprox =
+      current.upgradeCostResourceId === null
+        ? null
+        : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
     const result = store.dispatch({
       type: "commandApplied",
-      command: { kind: "upgradeFacility", facilityId },
+      command: { kind: "upgradeFacility", facilityId: current.facilityId },
     });
-    setLastRejection(
-      result.command !== null && !result.command.ok ? result.command.rejection : null,
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    const afterStockApprox =
+      current.upgradeCostResourceId === null
+        ? null
+        : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
+    const diff = resourceDeltaPhrase(
+      current.upgradeCostResourceId,
+      beforeStockApprox,
+      afterStockApprox,
     );
+    toastStack.push(
+      `${facilityLabel(current.defId)}をLv${String(current.level + 1)}へ増築した${diff.length > 0 ? `(${diff})` : ""}`,
+    );
+  }
+
+  function handlePickFacility(cellIndex: number): void {
+    store.dispatch({ type: "cellSelected", cellIndex });
   }
 
   return (
@@ -145,16 +224,17 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-facility-screen__title" id="kf-facility-screen-title">
         施設詳細/増築
       </h2>
+      <p class="kf-screen-intro">選んだ施設の中身を見て、資源を払って増築します。</p>
+
+      <ToastStackView toasts={toastStack.toasts} />
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
       {detail === null ? (
-        <p class="kf-facility-screen__empty">
-          施設が選択されていません。②格子ビューで施設をタップして選択してください。
-        </p>
+        <FacilityPicker roster={facilityRoster} onPick={handlePickFacility} />
       ) : (
         <>
-          <FacilityDetailPanel detail={detail} onUpgrade={() => handleUpgrade(detail.facilityId)} />
+          <FacilityDetailPanel detail={detail} onUpgrade={() => handleUpgrade(detail)} />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />
         </>
       )}

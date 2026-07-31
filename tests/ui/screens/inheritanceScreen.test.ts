@@ -45,6 +45,7 @@ describe("InheritTrackRow(⑪の1系統)", () => {
       currentBonus: 2,
       bonusPerTier: 2,
       nextCost: 75,
+      insufficientBalance: false,
       onPurchase: () => undefined,
     });
     const text = flattenText(vnode);
@@ -63,6 +64,7 @@ describe("InheritTrackRow(⑪の1系統)", () => {
       currentBonus: 100,
       bonusPerTier: 25,
       nextCost: null,
+      insufficientBalance: false,
       onPurchase: () => undefined,
     });
     const text = flattenText(vnode);
@@ -83,6 +85,7 @@ describe("InheritTrackRow(⑪の1系統)", () => {
       currentBonus: 0,
       bonusPerTier: 1,
       nextCost: 50,
+      insufficientBalance: false,
       onPurchase,
     });
     const button = vnode.props.children as readonly {
@@ -90,6 +93,34 @@ describe("InheritTrackRow(⑪の1系統)", () => {
     }[];
     button[button.length - 1]?.props?.onClick?.();
     expect(onPurchase).toHaveBeenCalledWith("crewCapacity");
+  });
+
+  it("[束B/B-4] 残高不足は disabled にせず、淡色化クラス+aria-disabled+理由を出す", () => {
+    const vnode = InheritTrackRow({
+      track: "crewCapacity",
+      currentTier: 0,
+      maxTier: 4,
+      currentBonus: 0,
+      bonusPerTier: 1,
+      nextCost: 50,
+      insufficientBalance: true,
+      onPurchase: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("残高が足りません");
+    const button = vnode.props.children as readonly {
+      readonly props?: {
+        readonly disabled?: boolean;
+        readonly "aria-disabled"?: boolean;
+        readonly class?: string;
+        readonly onClick?: () => void;
+      };
+    }[];
+    const buttonNode = button[button.length - 1];
+    // disabled にはしない(reject 委譲方針は維持)。
+    expect(buttonNode?.props?.disabled).toBe(false);
+    expect(buttonNode?.props?.["aria-disabled"]).toBe(true);
+    expect(buttonNode?.props?.class).toContain("kf-inherit-row__button--unlikely");
   });
 });
 

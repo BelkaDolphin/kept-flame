@@ -30,6 +30,7 @@ import { eraLabel, techLabel } from "../contentLabels";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { ToastStackView, useToastStack } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./researchScreen.css";
 
@@ -49,9 +50,9 @@ function statusText(entry: ResearchTreeEntry): string {
     case "completed":
       return "解禁済み";
     case "lostRecoverable":
-      return "停滞中(GDD 7.4 (A): 再研究できます)";
+      return "停滞中(再研究できます)";
     case "lostIrreversible":
-      return "喪失(GDD 7.4 (B): この周回では二度と得られません)";
+      return "喪失(この周回では二度と得られません)";
     default: {
       const unhandled: never = status;
       throw new TypeError(`未知の研究状態 ${JSON.stringify(unhandled)}`);
@@ -70,6 +71,20 @@ export function researchEntityIdFor(techId: EntityId): EntityId {
   return entityIdFromString(`research_${techId}`);
 }
 
+/**
+ * [束B/B-4] 「研究を開始」が確実に失敗する理由(前提未達/解禁済み/一回性喪失)。
+ * 無ければ null。**判定ではなく表示上の予告**であり、ボタンは非活性にしない
+ * (押した結果の最終判定は engine の apply が行う・architecture.md §6)。
+ */
+function guaranteedFailureReason(entry: ResearchTreeEntry): string | null {
+  if (entry.status === "completed") return "既に解禁済みです";
+  if (entry.status === "lostIrreversible") {
+    return "取り返しのつかない喪失で、この周回では再研究できません";
+  }
+  if (!entry.prereqsMet) return "前提の技術がまだ解禁されていません";
+  return null;
+}
+
 // --- 2. 1 行(hooks 不使用・直接テスト可能) ----------------------------------
 
 export interface ResearchTechRowProps {
@@ -83,8 +98,12 @@ export interface ResearchTechRowProps {
  * **[束A/M-3] 5 段組(名前/状態/前提/コスト/ボタン)を 3 段へ畳んだ**。
  * 24 本 × 150px で 4640px あった画面高を詰めるための変更であり、出す情報は
  * 1 つも減らしていない(前提とコストを同じ行に並べただけ)。
+ *
+ * **[束B/B-4] 確実に失敗する状態は淡色化 + aria-disabled + 理由の併記**。
+ * クリックそのものは塞がない(reject 委譲方針は維持)。
  */
 export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps) {
+  const failureReason = guaranteedFailureReason(entry);
   return (
     <li class="kf-research-row" data-tech-id={entry.techId} data-status={entry.status}>
       <div class="kf-research-row__head">
@@ -92,13 +111,22 @@ export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps
         <LossClassBadge lossClass={entry.lossClass} />
         <button
           type="button"
-          class="kf-research-row__start-button"
+          class={
+            failureReason === null
+              ? "kf-research-row__start-button"
+              : "kf-research-row__start-button kf-research-row__start-button--unlikely"
+          }
+          aria-disabled={failureReason !== null}
+          title={failureReason ?? undefined}
           onClick={() => onBeginResearch(entry.techId)}
         >
           研究を開始
         </button>
       </div>
       <p class="kf-research-row__status">{statusText(entry)}</p>
+      {failureReason !== null && (
+        <p class="kf-research-row__unlikely-reason">{failureReason}。押しても開始できません。</p>
+      )}
       <p class="kf-research-row__prereqs">
         {prereqText(entry)}
         <span class="kf-research-row__cost">研究コスト: {entry.researchCostApprox.toFixed(1)}</span>
@@ -194,6 +222,7 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
 
   const tree = useSignalValue(store.derived.researchTree);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  const toastStack = useToastStack();
 
   function handleBeginResearch(techId: EntityId): void {
     const result = store.dispatch({
@@ -204,9 +233,14 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
         techId,
       },
     });
-    setLastRejection(
-      result.command !== null && !result.command.ok ? result.command.rejection : null,
-    );
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    // 研究は資源ではなく研究点(施設の稼働就労者)で進むので資源差分は無い
+    // (成文化/建設と違い資源コストが無い・rules/research.ts)。
+    toastStack.push(`「${techLabel(techId)}」の研究を開始した`);
   }
 
   const groups = groupResearchTreeByEra(tree);
@@ -217,6 +251,13 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-research-screen__title" id="kf-research-screen-title">
         研究ツリー
       </h2>
+      <p class="kf-screen-intro">
+        テックツリーを進め、新しい施設や機能を解禁します。技術には(A)失っても取り戻せるものと
+        (B)一度失うと二度と戻らないものがあり、常にバッジで区別しています。
+      </p>
+
+      <ToastStackView toasts={toastStack.toasts} />
+
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
       {tree.length === 0 ? (

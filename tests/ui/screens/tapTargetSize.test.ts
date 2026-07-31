@@ -52,6 +52,7 @@ import {
 } from "../../../src/ui/screens/grid/GridScreen";
 import {
   FacilityDetailPanel,
+  FacilityPicker,
   FacilityWorkerRow,
 } from "../../../src/ui/screens/facility/FacilityScreen";
 import { ResidentRow } from "../../../src/ui/screens/residents/ResidentsScreen";
@@ -329,6 +330,9 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
     ".kf-settings__export-button",
     ".kf-settings__import-button",
     ".kf-settings-screen__nav-button",
+    // [束B/m-6] <label> はボタン/select ではないため collectInteractive の
+    // 自動収集対象外(§2)。ここで明示的に静的検査へ加える。
+    ".kf-settings__import-file-button",
   ] as const;
 
   it.each(INTERACTIVE_SELECTORS)("%s は 44px 角を満たす", (selector) => {
@@ -346,12 +350,16 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
     harshWork: false,
     outputKind: "resource",
     outputResourceId: id("firewood"),
+    // [束B/B-4] derived.ts の建設コスト欄の追加に追随。
+    buildCostApprox: null,
+    buildCostResourceId: null,
   };
 
   it("FacilityCatalogPanel(カタログボタン+キャンセルボタン)", () => {
     const vnode = FacilityCatalogPanel({
       catalog: [catalogEntry],
       pendingDefId: catalogEntry.defId,
+      resources: [],
       onPick: () => undefined,
       onCancel: () => undefined,
     });
@@ -364,6 +372,7 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
     const vnode = FacilityCatalogButton({
       entry: catalogEntry,
       active: false,
+      insufficient: false,
       onPick: () => undefined,
     });
     assertAllInteractiveElementsMeetMinTapTarget(vnode);
@@ -415,10 +424,31 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
       outputResourceId: id("firewood"),
       outputPerTickApprox: 1.2,
       multiplierApprox: 1.2,
+      // [束B/B-4] derived.ts の増築コスト欄の追加に追随。
+      upgradeCostApprox: null,
+      upgradeCostResourceId: null,
     };
     const vnode = FacilityDetailPanel({ detail, onUpgrade: () => undefined });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
     expect(found.some((e) => e.class.includes("kf-facility-detail__upgrade-button"))).toBe(true);
+  });
+
+  it("[束B/m-1] FacilityPicker(未選択時の施設一覧ボタン)", () => {
+    const roster: readonly FacilityRosterEntry[] = [
+      {
+        facilityId: id("facHearth1"),
+        defId: id("hearth"),
+        cellIndex: 14,
+        cellId: "c14",
+        level: 2,
+        tags: ["heat"],
+        workerIds: [],
+        slotsMax: null,
+      },
+    ];
+    const vnode = FacilityPicker({ roster, onPick: () => undefined });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-facility-picker__button"))).toBe(true);
   });
 
   it("FacilityWorkerRow は対話可能要素を持たない(表示専用)", () => {
@@ -595,7 +625,6 @@ describe("44px 最小タップ領域 — ⑦探索本部(M32)の実レンダー�
       options: [id("eventNearRubbleSweep")],
       destinationId: id("eventNearRubbleSweep"),
       onPick: () => undefined,
-      procedural: false,
     });
     assertAllInteractiveElementsMeetMinTapTarget(vnode);
   });
@@ -679,6 +708,7 @@ describe("44px 最小タップ領域 — ⑪継承点購入(M33)の実レンダ�
       currentBonus: 2,
       bonusPerTier: 2,
       nextCost: 75,
+      insufficientBalance: false,
       onPurchase: () => undefined,
     });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
@@ -693,6 +723,7 @@ describe("44px 最小タップ領域 — ⑪継承点購入(M33)の実レンダ�
       currentBonus: 100,
       bonusPerTier: 25,
       nextCost: null,
+      insufficientBalance: false,
       onPurchase: () => undefined,
     });
     assertAllInteractiveElementsMeetMinTapTarget(vnode);
@@ -713,6 +744,7 @@ describe("44px 最小タップ領域 — ＋セーブ・設定(M33)の実レン�
       onFileSelected: () => undefined,
       onSubmit: () => undefined,
       outcome: null,
+      selectedFileName: null,
     });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
     expect(found.some((e) => e.class.includes("kf-settings__import-button"))).toBe(true);

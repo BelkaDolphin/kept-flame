@@ -1,0 +1,39 @@
+/*
+ * 継ぐ火 -Kept Flame- 成功トースト(束B/B-4)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。色は appShell.css と共通のトーン
+ * (--kf-ink-body 系)を流用し、新しい色は作らない。
+ *
+ * 位置は画面下部の sticky ナビ(--kf-nav-height・appShell.css)の**真上**に固定
+ * する。sticky アクションバー(.kf-sticky-actions)と同じ理由で、ナビに隠れたり
+ * 本文の下端と重なったりしないようにするため。
+ */
+
+.kf-toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--kf-nav-height, 60px) + 0.6rem);
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: max-content;
+  max-width: min(92vw, 420px);
+  pointer-events: none;
+}
+
+.kf-toast-stack__item {
+  background: #24201c;
+  color: #ffffff;
+  font-size: var(--kf-fs-sub, 13px);
+  line-height: 1.4;
+  padding: 0.45rem 0.75rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(36, 32, 28, 0.35);
+  text-align: center;
+}

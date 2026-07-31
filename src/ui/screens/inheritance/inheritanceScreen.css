@@ -75,6 +75,20 @@
   cursor: not-allowed;
 }
 
+/* [束B/B-4] 残高不足(確実に失敗する)行の淡色化。disabled にはしない
+   (reject 委譲方針は維持・InheritTrackRow の doc 参照)。 */
+.kf-inherit-row__button--unlikely {
+  opacity: 0.5;
+  border-color: #8a857d;
+  color: #5b534b;
+}
+
+.kf-inherit-row__insufficient {
+  font-size: var(--kf-fs-sub);
+  color: #7a5a00;
+  margin: 0 0 0.3rem;
+}
+
 .kf-inheritance-screen__nav {
   display: flex;
   gap: 0.5rem;

@@ -23,7 +23,7 @@
 // (存在しない情報を捏造しない・PlaceholderScreen.tsx と同じ方針)。
 // ---------------------------------------------------------------------------
 
-import type { DistanceBand } from "../../engine/rules/types";
+import type { DistanceBand, RecordMedium } from "../../engine/rules/types";
 import type { EntityId, InheritTrack } from "../../engine/state/state";
 
 const FACILITY_LABELS: { readonly [key: string]: string } = {
@@ -179,4 +179,85 @@ const INHERIT_TRACK_LABELS: { readonly [K in InheritTrack]: string } = {
 /** [M33] 継承系統 → 日本語名。 */
 export function inheritTrackLabel(track: InheritTrack): string {
   return INHERIT_TRACK_LABELS[track];
+}
+
+/**
+ * [束B/B-6] 記録媒体(`RecordMedium`)の日本語名。
+ *
+ * 元々 CodifyScreen.tsx/MigrationScreen.tsx がそれぞれ独立に持っていた同名関数
+ * (7 行の軽い重複)を、束B でここへ集約した。両画面は re-export するだけにして
+ * 既存のテスト import 経路(`from ".../CodifyScreen"` 等)を壊さない。
+ */
+export function mediumLabel(medium: RecordMedium): string {
+  switch (medium) {
+    case "stoneTablet":
+      return "石板";
+    case "paper":
+      return "紙";
+    default: {
+      const unhandled: never = medium;
+      throw new TypeError(`未知の記録媒体 ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
+// ===========================================================================
+// [束B/B-3] event ID → 日本語名
+// ===========================================================================
+//
+// content/event.json の 10 件は id/destTags/nodes のみを持ち、和名フィールドは
+// 無い(確認済み)。GDD 側にも対応表が無いため、**id の destTags(近郊/遠隔/深部)
+// と本文中の choices.label / branches.logTemplate の情景描写から意味の通る
+// 和名を起こした**(捏造ではなく、content 内の実テキストを出典とする命名)。
+// 出典になった代表的な文言をコメントに残す。
+//
+// event.json に将来 `name` 相当のフィールドが追加された場合は、そちらを正とし
+// このテーブルは上書きされる想定(content ローダーには触れないという束B の
+// 制約により、本タスクでは content 側を変更していない)。
+//
+// 未登録の event ID は raw ID をそのまま返す(facility/resource 等と同じ方針)。
+
+const EVENT_LABELS: { readonly [key: string]: string } = {
+  // 近郊(near)
+  eventNearRubbleSweep: "瓦礫原の捜索", // 「瓦礫原の奥へ進んだ」
+  eventNearAshOrchard: "灰かぶりの果樹園", // 「灰をかぶった獣の群れ」「果樹園跡」
+  eventNearDrainageTunnel: "埋もれた排水路", // 「半ば埋もれた排水路」
+  // 遠隔(far)
+  eventFarSignalRuins: "信号塔の廃墟", // 「傾いた鉄塔」「廃墟の中腹」
+  eventFarSaltMarsh: "塩沼の渡渉路", // 「塩沼に潜む影」「渡渉路の先」
+  eventFarWindworksMill: "軋む風車小屋", // 「軋む風車の羽根」「製粉機の銘板」
+  // 深部(deep)
+  eventDeepEmberVault: "燠火の地下庫", // 「燠火の熱気渦巻く坑道」
+  eventDeepSunkenArchive: "水没した書庫", // 「水没した書架」「書庫の奥」
+  eventDeepFrostboundMine: "氷結坑道", // 「凍てついた坑道」「氷結した奥室」
+  eventDeepAshenSpire: "灰塵の尖塔", // 「降り積もる灰塵」「尖塔の中腹」
+};
+
+/** [束B/B-3] event ID → 日本語名(未登録は raw ID)。 */
+export function eventLabel(eventId: EntityId): string {
+  return labelOf(EVENT_LABELS, eventId);
+}
+
+// ===========================================================================
+// [束B/B-3] 住民の内部ID → 表示専用の整形名
+// ===========================================================================
+//
+// `ResidentState` に name 系フィールドは無い(state.ts で確認済み)。正式な
+// 名前生成は M53 が並行実装中であり、本タスクは state 構造に触れず**表示層
+// だけ**を整える(タスク指示どおり)。
+//
+// 現行の開始住民 ID は `src/newGame.ts` の命名規則「"res" + 名前(小文字ローマ字。
+// 例 "reshazu" = "res" + "hazu")」に従う。この規則にちょうど合う ID だけ
+// prefix を外して先頭を大文字化し、規則に合わない ID(晴天漂着で生成される
+// "arrival<tick>" 等)はそのまま先頭を大文字化するだけに留める——存在しない
+// 情報を捏造しない(未登録 ID を raw のまま返す既存方針と同じ姿勢)。
+
+const STARTING_RESIDENT_ID_PATTERN = /^res[a-z]+$/;
+
+/** [束B/B-3] 住民 ID の表示専用整形(機械的写像。名前の正式生成は M53)。 */
+export function residentDisplayName(residentId: EntityId): string {
+  const raw: string = residentId;
+  const body = STARTING_RESIDENT_ID_PATTERN.test(raw) ? raw.slice(3) : raw;
+  if (body.length === 0) return raw;
+  return body.charAt(0).toUpperCase() + body.slice(1);
 }

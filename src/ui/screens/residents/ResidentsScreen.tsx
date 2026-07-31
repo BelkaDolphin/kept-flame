@@ -28,7 +28,7 @@ import { useState } from "preact/hooks";
 import type { CommandRejection } from "../../../engine/commands";
 import { entityIdFromString, type EntityId } from "../../../engine/state/state";
 import type { FacilityRosterEntry, ResidentView } from "../../derived";
-import { facilityLabel, traitLabel } from "../contentLabels";
+import { facilityLabel, residentDisplayName, traitLabel } from "../contentLabels";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
@@ -70,7 +70,7 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
   return (
     <li class="kf-resident-row">
       <div class="kf-resident-row__head">
-        <span class="kf-resident-row__id">{resident.entityId}</span>
+        <span class="kf-resident-row__id">{residentDisplayName(resident.entityId)}</span>
         {badges.length > 0 && <span class="kf-resident-row__badges">{badges.join("・")}</span>}
       </div>
       <ul class="kf-resident-row__stats">
@@ -139,7 +139,11 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-residents-screen__title" id="kf-residents-screen-title">
         住民一覧・配置
       </h2>
-      <p class="kf-residents-screen__summary">{residents.length}人(ID昇順)</p>
+      <p class="kf-screen-intro">
+        住民の状態を確認し、就労先の施設を割り当てます。「想起困難」は技術を一時的に思い出せない
+        状態で、時間が経てば回復します(記録を失ったわけではありません)。
+      </p>
+      <p class="kf-residents-screen__summary">{residents.length}人</p>
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 

@@ -29,30 +29,56 @@ import { GRID_CELL_COUNT } from "../../../engine/adjacency";
 import type { CommandRejection, CommandResult } from "../../../engine/commands";
 import { toApproxNumber } from "../../../engine/fp";
 import type { EntityId } from "../../../engine/state/state";
-import type { CellViewModel, FacilityCatalogEntry, ReclaimInfo } from "../../derived";
+import type { CellViewModel, FacilityCatalogEntry, ReclaimInfo, ResourceView } from "../../derived";
 import { facilityLabel, resourceLabel } from "../contentLabels";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import { CellBreakdownView } from "./CellBreakdownView";
-import { GridBoard, type PendingPlacement } from "./GridBoard";
+import { GridBoard, type PendingPlacement, type PlacementSuccessInfo } from "./GridBoard";
 import "./gridBoard.css";
 import { nextFacilityId } from "./facilityId";
 import { LegendPanel, type LegendOvercrowdInfo } from "./LegendPanel";
 
 // --- 1. 施設カタログ(hooks を使わないので直接テスト可能) --------------------
 
+/** [束B/B-4] コスト資源の在庫が足りているか(判定ではなく表示上の目印)。 */
+function isCatalogEntryInsufficient(
+  entry: FacilityCatalogEntry,
+  resources: readonly ResourceView[],
+): boolean {
+  if (entry.buildCostApprox === null || entry.buildCostResourceId === null) return false;
+  const stock =
+    resources.find((resource) => resource.resourceId === entry.buildCostResourceId)?.stockApprox ??
+    0;
+  return stock < entry.buildCostApprox;
+}
+
 export interface FacilityCatalogButtonProps {
   readonly entry: FacilityCatalogEntry;
   /** 配置待ち中のこのボタン(選択中)か。 */
   readonly active: boolean;
+  /** [束B/B-4] 建設コストの資源が現在の在庫で足りないか。 */
+  readonly insufficient: boolean;
   readonly onPick: (defId: EntityId) => void;
 }
 
-/** カタログ 1 件。44px 角の最小タップ領域は CSS(`.kf-catalog__button`)で担保。 */
-export function FacilityCatalogButton({ entry, active, onPick }: FacilityCatalogButtonProps) {
+/**
+ * カタログ 1 件。44px 角の最小タップ領域は CSS(`.kf-catalog__button`)で担保。
+ * [束B/B-4] コストを併記し、在庫不足は色 + 記号(▲)の両方で示す
+ * (色だけに頼らない・LossClassBadge.tsx と同じ方針)。ボタン自体は
+ * 非活性にしない(判定は engine の `insufficientResource` reject に委ねる)。
+ */
+export function FacilityCatalogButton({
+  entry,
+  active,
+  insufficient,
+  onPick,
+}: FacilityCatalogButtonProps) {
   const classes = ["kf-catalog__button"];
   if (active) classes.push("kf-catalog__button--active");
+  if (insufficient) classes.push("kf-catalog__button--insufficient");
   return (
     <li>
       <button
@@ -66,6 +92,11 @@ export function FacilityCatalogButton({ entry, active, onPick }: FacilityCatalog
         <span class="kf-catalog__footprint" aria-hidden="true">
           {entry.footprint.width}×{entry.footprint.height}
         </span>
+        <span class="kf-catalog__cost">
+          {entry.buildCostApprox === null || entry.buildCostResourceId === null
+            ? "コストなし"
+            : `${insufficient ? "▲ " : ""}コスト ${entry.buildCostApprox} ${resourceLabel(entry.buildCostResourceId)}`}
+        </span>
       </button>
     </li>
   );
@@ -75,14 +106,17 @@ export interface FacilityCatalogPanelProps {
   readonly catalog: readonly FacilityCatalogEntry[];
   /** 配置待ち中の defId(未選択は null)。 */
   readonly pendingDefId: EntityId | null;
+  /** [束B/B-4] 在庫不足の色分け用(建設コストの判定はしない・表示のみ)。 */
+  readonly resources: readonly ResourceView[];
   readonly onPick: (defId: EntityId) => void;
   readonly onCancel: () => void;
 }
 
-/** GDD 6.6「タップ選択 → 配置先タップ」の 1 ステップ目。 */
+/** 「タップ選択 → 配置先タップ」の 1 ステップ目。 */
 export function FacilityCatalogPanel({
   catalog,
   pendingDefId,
+  resources,
   onPick,
   onCancel,
 }: FacilityCatalogPanelProps) {
@@ -95,6 +129,7 @@ export function FacilityCatalogPanel({
             key={entry.defId}
             entry={entry}
             active={entry.defId === pendingDefId}
+            insufficient={isCatalogEntryInsufficient(entry, resources)}
             onPick={onPick}
           />
         ))}
@@ -120,23 +155,33 @@ export interface ReclaimPanelProps {
  * 瓦礫セル選択 → 通算解放数に応じたコスト表示 → `reclaimCell` 発行
  * (M52 申し送りどおりの導線)。**コストは表示するだけ**で在庫不足の判定は
  * しない(engine の `insufficientResource` reject に委ねる・§2)。
+ * [束B/B-4] 在庫が足りないときは色 + 記号(▲)で明示する(表示のみ)。
  */
 export function ReclaimPanel({ cell, info, onReclaim }: ReclaimPanelProps) {
+  const insufficient =
+    info.available &&
+    info.nextCostApprox !== null &&
+    (info.availableStockApprox ?? 0) < info.nextCostApprox;
   return (
     <section class="kf-reclaim" aria-label="瓦礫の開墾">
       <h3 class="kf-reclaim__title">未開墾({cell.cellId})</h3>
       {!info.available ? (
-        <p class="kf-reclaim__inactive">
-          この盤面では開墾システムが無効です(content に reclaim 設定がありません)。
-        </p>
+        <p class="kf-reclaim__inactive">この盤面では開墾システムが無効です。</p>
       ) : (
         <>
           <p class="kf-reclaim__cost">
             開墾コスト: {info.nextCostApprox}
             {info.costResourceId !== null ? resourceLabel(info.costResourceId) : ""}
-            (通算 {info.reclaimedCount} 枚目・GDD 9.1)
+            (通算 {info.reclaimedCount} 枚目)
           </p>
-          <p class="kf-reclaim__stock">
+          <p
+            class={
+              insufficient
+                ? "kf-reclaim__stock kf-reclaim__stock--insufficient"
+                : "kf-reclaim__stock"
+            }
+          >
+            {insufficient ? "▲ " : ""}
             在庫: {info.availableStockApprox ?? 0}
             {info.costResourceId !== null ? resourceLabel(info.costResourceId) : ""}
           </p>
@@ -161,9 +206,11 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
   const reclaimInfo = useSignalValue(store.derived.reclaimInfo);
   const adjacencyMatrix = useSignalValue(store.derived.adjacencyMatrix);
   const summary = useSignalValue(store.derived.gridSummary);
+  const resources = useSignalValue(store.derived.resources);
 
   const [pendingDefId, setPendingDefId] = useState<EntityId | null>(null);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  const toastStack = useToastStack();
 
   // 採番は「選んだ瞬間の state」から 1 度だけ行い、配置が済む/キャンセルされる
   // までは同じ候補 ID を保つ(pendingDefId が変わらない限り再計算しない)。
@@ -193,15 +240,35 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
     setLastRejection(result.rejection);
   }
 
+  // [束B/B-4] 成功トースト。GridBoard 側で捕まえた投入前/投入後の在庫を
+  // 文言へ組み立てるだけで、判定は一切しない。
+  function handlePlacementSuccess(info: PlacementSuccessInfo): void {
+    const diff = resourceDeltaPhrase(
+      info.resourceId,
+      info.beforeStockApprox,
+      info.afterStockApprox,
+    );
+    toastStack.push(`${facilityLabel(info.defId)}を建てた${diff.length > 0 ? `(${diff})` : ""}`);
+  }
+
   function handleReclaim(): void {
     if (selectedCell === null) return;
+    const costResourceId = reclaimInfo.costResourceId;
+    const beforeStockApprox =
+      costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
     const result = store.dispatch({
       type: "commandApplied",
       command: { kind: "reclaimCell", cellIndex: selectedCell.cellIndex },
     });
-    setLastRejection(
-      result.command !== null && !result.command.ok ? result.command.rejection : null,
-    );
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    const afterStockApprox =
+      costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+    const diff = resourceDeltaPhrase(costResourceId, beforeStockApprox, afterStockApprox);
+    toastStack.push(`${selectedCell.cellId}を開墾した${diff.length > 0 ? `(${diff})` : ""}`);
   }
 
   const overcrowd: LegendOvercrowdInfo = {
@@ -223,6 +290,9 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
           {summary.overcrowdedFacilityCount}件
         </p>
       </div>
+      <p class="kf-screen-intro">本拠の6×8マスに施設を配置し、隣接ボーナスを組み立てます。</p>
+
+      <ToastStackView toasts={toastStack.toasts} />
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
@@ -234,6 +304,7 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
           <FacilityCatalogPanel
             catalog={catalog}
             pendingDefId={pendingDefId}
+            resources={resources}
             onPick={pickCatalogEntry}
             onCancel={cancelPending}
           />
@@ -244,6 +315,7 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
             store={store}
             pendingPlacement={pendingPlacement}
             onPlacementResult={handlePlacementResult}
+            onPlacementSuccess={handlePlacementSuccess}
           />
         </div>
 

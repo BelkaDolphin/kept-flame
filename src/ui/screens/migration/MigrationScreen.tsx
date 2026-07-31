@@ -55,7 +55,7 @@ import {
   type TechLossClass,
 } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
-import { techLabel, traitLabel } from "../contentLabels";
+import { mediumLabel, residentDisplayName, techLabel, traitLabel } from "../contentLabels";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -64,21 +64,12 @@ import "./migrationScreen.css";
 
 // --- 1. 表示文言(判定は engine・ここは文言だけ) -----------------------------
 
-/** GDD 11.1 追補の媒体 2 種(石板/紙)。`CodifyScreen.tsx` の同名関数と同じ対応
- * だが、画面ファイル間の相互 import はこのプロジェクトに前例が無いため
- * ここに独立して持つ(7 行の重複・許容範囲)。 */
-export function mediumLabel(medium: RecordMedium): string {
-  switch (medium) {
-    case "stoneTablet":
-      return "石板";
-    case "paper":
-      return "紙";
-    default: {
-      const unhandled: never = medium;
-      throw new TypeError(`未知の記録媒体 ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
+/**
+ * [束B] `mediumLabel` は contentLabels.ts へ集約した(CodifyScreen.tsx と
+ * 同じ定義を 2 箇所で持たないため)。re-export のみで既存テストの import 経路
+ * (`from ".../MigrationScreen"`)を壊さない。
+ */
+export { mediumLabel };
 
 // --- 2. 選択プールの表示モデル -----------------------------------------------
 
@@ -140,7 +131,7 @@ export function ExodusCrewRow({ resident, selected, onToggle }: ExodusCrewRowPro
         aria-pressed={selected}
         onClick={() => onToggle(resident.id)}
       >
-        <span class="kf-exodus__crew-id">{resident.id}</span>
+        <span class="kf-exodus__crew-id">{residentDisplayName(resident.id)}</span>
         <span class="kf-exodus__crew-morale">士気{resident.moraleApprox}</span>
         {resident.traitIds.length > 0 && (
           <span class="kf-exodus__crew-traits">
@@ -162,11 +153,7 @@ export interface ExodusPreviewPanelProps {
 /** GDD 10.2 の「何が落ちるか」プレビュー + GDD 10.3 の獲得予定継承点。 */
 export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
   if (resolution === null) {
-    return (
-      <p class="kf-exodus__preview-inactive">
-        content に exodus/recordMedia ブロックが無いので大移動を算出できません。
-      </p>
-    );
+    return <p class="kf-exodus__preview-inactive">現在のデータでは大移動を算出できません。</p>;
   }
   return (
     <section class="kf-exodus__preview" aria-label="大移動プレビュー">
@@ -182,7 +169,8 @@ export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
       )}
       {resolution.droppedCrewIds.length > 0 && (
         <p class="kf-exodus__preview-dropped" data-testid="exodus-dropped-crew">
-          定員超過で置いていく住民: {resolution.droppedCrewIds.join("・")}
+          定員超過で置いていく住民:{" "}
+          {resolution.droppedCrewIds.map((crewId) => residentDisplayName(crewId)).join("・")}
         </p>
       )}
       {resolution.lostRareTechIds.length > 0 && (
@@ -191,9 +179,7 @@ export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
           {resolution.lostRareTechIds.map((techId) => techLabel(techId)).join("・")}
         </p>
       )}
-      <p class="kf-exodus__preview-earned">
-        獲得予定の継承点(GDD 10.3): {resolution.earnedInheritPoints}
-      </p>
+      <p class="kf-exodus__preview-earned">獲得予定の継承点: {resolution.earnedInheritPoints}</p>
     </section>
   );
 }
@@ -346,9 +332,12 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-migration-screen__title" id="kf-migration-screen-title">
         大移動
       </h2>
+      <p class="kf-screen-intro">
+        今の本拠を畳んで、次の周回へ引き継ぐ記録と住民を選びます。取り消せない操作です。
+      </p>
       <p class="kf-migration-screen__note">
-        大移動は本拠(施設を含む)を捨てて次の周回へ進む、取り消せない操作です(GDD
-        10.2)。積めなかった記録・連れて行けなかった住民は長夜に還ります。
+        大移動は本拠(施設を含む)を捨てて次の周回へ進む、取り消せない操作です。
+        積めなかった記録・連れて行けなかった住民は長夜に還ります。
       </p>
 
       {completedEarnedPoints !== null && (
@@ -361,9 +350,7 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
       {!exodusActive && (
-        <p class="kf-migration-screen__inactive">
-          content に exodus/recordMedia ブロックが無いので大移動は実行できません。
-        </p>
+        <p class="kf-migration-screen__inactive">現在のデータでは大移動は実行できません。</p>
       )}
 
       <button
@@ -372,7 +359,7 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
         onClick={applyRecommendation}
         disabled={!exodusActive}
       >
-        おまかせ選択(決定論ヒューリスティック・GDD 2.1 の 80% 基準対象外)
+        おまかせ選択(自動でおすすめの記録・住民を選びます)
       </button>
 
       <h3 class="kf-migration-screen__subtitle">
@@ -411,17 +398,17 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
         </ul>
       )}
 
-      <h3 class="kf-migration-screen__subtitle">プレビュー(GDD 10.2)</h3>
+      <h3 class="kf-migration-screen__subtitle">積み込みプレビュー</h3>
       <ExodusPreviewPanel resolution={resolution} />
 
       <label class="kf-migration-screen__seed-label">
-        周回シードを指定(任意・GDD 10.5「UIで任意シード文字列入力も併設」)
+        次の周回のシードを指定(任意)
         <input
           type="text"
           class="kf-migration-screen__seed-input"
           value={worldSeedOverride}
           onChange={(event) => setWorldSeedOverride((event.target as HTMLInputElement).value)}
-          placeholder="空欄なら決定論的に自動導出"
+          placeholder="空欄なら自動で決まります"
         />
       </label>
 

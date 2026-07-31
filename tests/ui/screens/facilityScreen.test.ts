@@ -43,6 +43,10 @@ function detailView(overrides: Partial<FacilityDetailView> = {}): FacilityDetail
     outputResourceId: id("firewood"),
     outputPerTickApprox: 1.5,
     multiplierApprox: 1.2,
+    // [束B/B-4] 増築コスト欄の追加(derived.ts)に追随。既定は「無料」に揃え、
+    // コスト表示を確認するテストだけ overrides で足す。
+    upgradeCostApprox: null,
+    upgradeCostResourceId: null,
     ...overrides,
   };
 }
@@ -75,7 +79,8 @@ describe("FacilityWorkerRow(想起困難/派遣中/死亡tombstoneの状態表�
   it("平常時はステータス badge を 1 つも出さない", () => {
     const vnode = FacilityWorkerRow({ worker: workerView() });
     const text = flattenText(vnode);
-    expect(text).toContain("aRui");
+    // [束B/B-3] 住民IDは residentDisplayName(先頭大文字化)を通して表示する。
+    expect(text).toContain("ARui");
     expect(text).toContain("士気60");
     expect(text).not.toContain("死亡");
     expect(text).not.toContain("派遣中");
@@ -105,7 +110,8 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     expect(text).toContain("Lv5");
     expect(text).toContain("1.50");
     expect(text).toContain("薪");
-    expect(text).toContain("aRui");
+    // [束B/B-3] 住民IDは residentDisplayName(先頭大文字化)を通して表示する。
+    expect(text).toContain("ARui");
   });
 
   it("研究点産出(resourceId=null)は「研究点」と表示する", () => {
@@ -124,9 +130,30 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     expect(flattenText(vnode)).toContain("就労者がいません");
   });
 
-  it("増築コストは無いことを正直に表示する(★ architecture.md §9-5)", () => {
+  it("[束B/B-2] 増築コストが無い(def.cost 省略)場合は「コストはかかりません」と正直に表示する", () => {
     const vnode = FacilityDetailPanel({ detail: detailView(), onUpgrade: () => undefined });
-    expect(flattenText(vnode)).toContain("content 定義の資源を消費します");
+    expect(flattenText(vnode)).toContain("増築コストはかかりません。");
+  });
+
+  it("[束B/B-2/B-4] 増築コストがある場合は資源名+量を実額表示する(M50結線済み)", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ upgradeCostApprox: 45, upgradeCostResourceId: id("firewood") }),
+      onUpgrade: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("増築コスト: 薪 45");
+  });
+
+  it("[束B/B-2] 既に上限Lvなら「既に上限Lvです」と表示する", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({
+        level: 5,
+        maxLevel: 5,
+        upgradeCostApprox: null,
+        upgradeCostResourceId: null,
+      }),
+      onUpgrade: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("既に上限Lvです。");
   });
 
   it("増築ボタンは Lv 上限でも非活性にせず、押すと onUpgrade が呼ばれる(判定は engine に委ねる)", () => {

@@ -517,6 +517,15 @@ export interface FacilityCatalogEntry {
   readonly harshWork: boolean;
   readonly outputKind: "resource" | "research";
   readonly outputResourceId: EntityId | null;
+  /**
+   * [束B/B-4] Lv1 建設コスト(GDD 12.1)。`def.cost` 省略時は無料(`null`)——
+   * `commands.ts` の `facilityBuildCostFix` と同じ意味の値を**意図的に複製**
+   * している(commands.ts は import 経路を store.ts 1 箇所に制限する検収済みの
+   * 単一入口であり、`displayFacilityMaxLevel` 等と同じ理由で UI からは
+   * 直接呼べない・本ファイル §3-2 冒頭の doc 参照)。
+   */
+  readonly buildCostApprox: number | null;
+  readonly buildCostResourceId: EntityId | null;
 }
 
 function facilityCatalogEntryOf(def: FacilityDef): FacilityCatalogEntry {
@@ -527,6 +536,8 @@ function facilityCatalogEntryOf(def: FacilityDef): FacilityCatalogEntry {
     harshWork: def.harshWork,
     outputKind: def.output.kind,
     outputResourceId: def.output.kind === "resource" ? def.output.resourceId : null,
+    buildCostApprox: def.cost === undefined ? null : toApproxNumber(def.cost.buildFix),
+    buildCostResourceId: def.cost?.resourceId ?? null,
   };
 }
 
@@ -608,6 +619,26 @@ export interface FacilityDetailView {
   readonly outputPerTickApprox: number;
   /** ②のセルと同じ隣接乗数(`selectedCell.multiplierApprox` を転記)。 */
   readonly multiplierApprox: number;
+  /**
+   * [束B/B-4] 次の Lv への増築コスト(GDD 12.1)。既に上限 Lv なら `null`
+   * (増築先が無い)。`def.cost` 省略時も `null`(無料)。`commands.ts` の
+   * `facilityUpgradeCostFix` と同じ意味の値の意図的な複製(§3-2 冒頭 doc)。
+   */
+  readonly upgradeCostApprox: number | null;
+  readonly upgradeCostResourceId: EntityId | null;
+}
+
+/**
+ * [束B/B-4] `fromLevel` → `fromLevel + 1` の増築コスト。`commands.ts` の
+ * `facilityUpgradeCostFix` と同じ規約(index は Lv-1・配列より大きい Lv は
+ * 最後の段の値)。
+ */
+function displayFacilityUpgradeCostFix(def: FacilityDef, fromLevel: number): Fix | undefined {
+  const cost = def.cost;
+  if (cost === undefined) return undefined;
+  const curve = cost.upgradeByLevel;
+  if (curve.length === 0) return undefined;
+  return curve[fromLevel - 1] ?? curve[curve.length - 1];
 }
 
 /**
@@ -645,6 +676,12 @@ function buildFacilityDetail(
     activeLaborFix(state, content, facilityEntity, def, state.tick),
   );
 
+  const maxLevel = displayFacilityMaxLevel(def);
+  const upgradeCostFix =
+    facilityEntity.level >= maxLevel
+      ? undefined
+      : displayFacilityUpgradeCostFix(def, facilityEntity.level);
+
   return {
     facilityId: facilityEntity.id,
     defId: facilityEntity.defId,
@@ -652,13 +689,15 @@ function buildFacilityDetail(
     cellId: cell.cellId,
     tags: cell.tags,
     level: facilityEntity.level,
-    maxLevel: displayFacilityMaxLevel(def),
+    maxLevel,
     slotsMax: displayFacilityWorkerSlots(def, facilityEntity.level) ?? null,
     workers,
     outputKind: def.output.kind,
     outputResourceId: def.output.kind === "resource" ? def.output.resourceId : null,
     outputPerTickApprox: toApproxNumber(outputRateFix),
     multiplierApprox: cell.multiplierApprox,
+    upgradeCostApprox: upgradeCostFix === undefined ? null : toApproxNumber(upgradeCostFix),
+    upgradeCostResourceId: upgradeCostFix === undefined ? null : (def.cost?.resourceId ?? null),
   };
 }
 
@@ -1768,6 +1807,7 @@ function buildResearchTree(state: GameState, content: EngineContent): readonly R
     const prereqTechIds = prereqsOfTech(content, techId);
     const prereqsMet = prereqTechIds.every((prereqId) => isTechUnlocked(state, prereqId));
 
+    const researchCostApprox = toApproxNumber(def.researchCostFix);
     let status: ResearchTreeStatus;
     let progressApprox: number | null = null;
     if (research === undefined) {
@@ -1780,7 +1820,12 @@ function buildResearchTree(state: GameState, content: EngineContent): readonly R
       status = research.loss.irreversible ? "lostIrreversible" : "lostRecoverable";
     } else {
       status = "researching";
-      progressApprox = toApproxNumber(research.progress);
+      // [束B/m-2] 表示のみのクランプ。`research.progress` は完了 tick ちょうどで
+      // 区切ると切り上げ由来の余剰(research.ts の規約)を残したまま完了扱いに
+      // なる前の 1 tick だけコストを僅かに超えることがあり、素の値をそのまま
+      // 出すと「進行度 31.0/30.0」のような見た目になる(engine の値自体は
+      // 1 bit も変えない・表示のみのクランプ)。
+      progressApprox = Math.min(toApproxNumber(research.progress), researchCostApprox);
     }
 
     result.push({
@@ -1789,7 +1834,7 @@ function buildResearchTree(state: GameState, content: EngineContent): readonly R
       lossClass: lossClassOfTech(content, techId),
       prereqTechIds,
       prereqsMet,
-      researchCostApprox: toApproxNumber(def.researchCostFix),
+      researchCostApprox,
       status,
       progressApprox,
       isCurrentResearchTarget: current !== undefined && current.techId === techId,

@@ -48,7 +48,13 @@ import {
   type ExpeditionCandidateView,
   type ExpeditionDispatchView,
 } from "../../derived";
-import { distanceBandLabel, resourceLabel, traitLabel } from "../contentLabels";
+import {
+  distanceBandLabel,
+  eventLabel,
+  residentDisplayName,
+  resourceLabel,
+  traitLabel,
+} from "../contentLabels";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
@@ -69,6 +75,18 @@ const STANCE_LABELS: { readonly [K in DispatchStance]: string } = {
 };
 
 const TEAM_SIZE_OPTIONS: readonly number[] = [1, 2, 3, 4];
+
+/**
+ * [束B/B-3] 目的地の表示名。手続き生成フォールバック(`destinationOptions.ts`
+ * の `proceduralDestinationId`・ID 末尾が固定で "Procedural")は具体的な
+ * event が無いことの印であり、event 名として和名化しようとしない
+ * (捏造しない)。それ以外は `eventLabel`(content/event.json 由来の和名)。
+ */
+function destinationDisplayName(destinationId: EntityId): string {
+  const raw: string = destinationId;
+  if (raw.endsWith("Procedural")) return "この距離帯のどこか";
+  return eventLabel(destinationId);
+}
 
 // --- 1. 部品(hooks 不使用・直接テスト可能) ----------------------------------
 
@@ -100,16 +118,14 @@ export interface DestinationPickerProps {
   readonly options: readonly EntityId[];
   readonly destinationId: EntityId;
   readonly onPick: (destinationId: EntityId) => void;
-  /** content に named event が無く手続き生成へフォールバックしているか。 */
-  readonly procedural: boolean;
 }
 
-export function DestinationPicker({
-  options,
-  destinationId,
-  onPick,
-  procedural,
-}: DestinationPickerProps) {
+/**
+ * [束B/B-3] `procedural` フラグは受け取らない——手続き生成フォールバックかは
+ * `destinationDisplayName` が ID 末尾から自分で判別できるため
+ * (`options` そのものが呼び出し側で procedural 用の1件に絞られている)。
+ */
+export function DestinationPicker({ options, destinationId, onPick }: DestinationPickerProps) {
   return (
     <ul class="kf-expedition__destination-list" aria-label="目的地(具体的な行き先)">
       {options.map((option) => (
@@ -120,7 +136,9 @@ export function DestinationPicker({
             aria-pressed={option === destinationId}
             onClick={() => onPick(option)}
           >
-            {procedural ? "この距離帯(手続き生成)" : option}
+            {/* [束B/B-3] procedural フォールバックの ID も destinationDisplayName が
+                自分で判別する(末尾 "Procedural" の印)ので、ここでは分岐しない。 */}
+            {destinationDisplayName(option)}
           </button>
         </li>
       ))}
@@ -169,7 +187,7 @@ export function CandidateRow({ candidate, selected, disabled, onToggle }: Candid
         disabled={disabled && !selected}
         onClick={() => onToggle(candidate.entityId)}
       >
-        <span class="kf-expedition__candidate-id">{candidate.entityId}</span>
+        <span class="kf-expedition__candidate-id">{residentDisplayName(candidate.entityId)}</span>
         <span class="kf-expedition__candidate-power">戦力{candidate.combatPowerApprox}</span>
         <span class="kf-expedition__candidate-morale">士気{candidate.moraleApprox}</span>
         {candidate.traitIds.length > 0 && (
@@ -185,15 +203,18 @@ export function CandidateRow({ candidate, selected, disabled, onToggle }: Candid
 export interface RoiPanelProps {
   readonly report: ExplorationRoiReport | null;
   readonly rewardResourceId: EntityId | null;
+  /** [束B/m-8] 現在選ばれているチーム人数(0 人なら予測の代わりに案内を出す)。 */
+  readonly teamSize: number;
 }
 
-/** GDD 8.6 の ROI と(B)損失リスク項(本タスクの検収条件)。 */
-export function RoiPanel({ report, rewardResourceId }: RoiPanelProps) {
+/** ROI と(B)損失リスク項(本タスクの検収条件)。 */
+export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) {
+  if (teamSize === 0) {
+    return <p class="kf-expedition__roi-inactive">住民を選ぶと予測を表示します。</p>;
+  }
   if (report === null) {
     return (
-      <p class="kf-expedition__roi-inactive">
-        content に exploration ブロックが無いので ROI を算出できません。
-      </p>
+      <p class="kf-expedition__roi-inactive">現在のデータでは派遣前の見込みを算出できません。</p>
     );
   }
   return (
@@ -226,14 +247,17 @@ export function DispatchRow({ dispatch }: DispatchRowProps) {
   return (
     <li class="kf-expedition__dispatch-row">
       <p class="kf-expedition__dispatch-head">
-        {distanceBandLabel(dispatch.band)}・{dispatch.destinationId}・
+        {distanceBandLabel(dispatch.band)}・{destinationDisplayName(dispatch.destinationId)}・
         {STANCE_LABELS[dispatch.stance]}
       </p>
-      <p class="kf-expedition__dispatch-members">隊員: {dispatch.memberIds.join("・")}</p>
+      <p class="kf-expedition__dispatch-members">
+        隊員: {dispatch.memberIds.map((memberId) => residentDisplayName(memberId)).join("・")}
+      </p>
       <p class="kf-expedition__dispatch-tick">帰還予定: {formatGameClock(dispatch.returnTick)}</p>
       {dispatch.casualtyMemberIds.length > 0 && (
         <p class="kf-expedition__dispatch-casualty">
-          脱落見込み: {dispatch.casualtyMemberIds.join("・")}
+          脱落見込み:{" "}
+          {dispatch.casualtyMemberIds.map((memberId) => residentDisplayName(memberId)).join("・")}
         </p>
       )}
     </li>
@@ -342,6 +366,9 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-expedition-screen__title" id="kf-expedition-screen-title">
         探索本部
       </h2>
+      <p class="kf-screen-intro">
+        住民を送り出して外の資源や記録を探索します。行き先・方針・チームを選んで派遣してください。
+      </p>
       <p class="kf-expedition-screen__slots">
         派遣枠: {slots.used}/{slots.max}
       </p>
@@ -354,7 +381,6 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
         options={procedural ? [proceduralDestinationId(band)] : destinationOptions}
         destinationId={effectiveDestinationId}
         onPick={setDestinationId}
-        procedural={procedural}
       />
 
       <h3 class="kf-expedition-screen__subtitle">方針</h3>
@@ -365,7 +391,7 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       </h3>
       {candidates.length === 0 ? (
         <p class="kf-expedition-screen__no-candidates">
-          派遣できる住民がいません(寿命を持つ生存・非派遣中の住民のみ候補になります・GDD 8.1)。
+          派遣できる住民がいません(生存していて寿命があり、まだ派遣中でない住民だけが候補になります)。
         </p>
       ) : (
         <ul class="kf-expedition__candidate-list">
@@ -382,9 +408,7 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       )}
 
       <section class="kf-expedition__template" aria-label="編成テンプレ">
-        <h3 class="kf-expedition-screen__subtitle">
-          編成テンプレ(GDD 2.1・提案は理論最大の75%程度)
-        </h3>
+        <h3 class="kf-expedition-screen__subtitle">編成テンプレ(強めの編成を自動で提案します)</h3>
         <ul class="kf-expedition__team-size-list" aria-label="提案する人数">
           {TEAM_SIZE_OPTIONS.map((size) => (
             <li key={size}>
@@ -423,8 +447,12 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
         )}
       </section>
 
-      <h3 class="kf-expedition-screen__subtitle">派遣前 ROI(GDD 8.6)</h3>
-      <RoiPanel report={roiReport} rewardResourceId={rewardResourceId} />
+      <h3 class="kf-expedition-screen__subtitle">派遣前の見込み(ROI)</h3>
+      <RoiPanel
+        report={roiReport}
+        rewardResourceId={rewardResourceId}
+        teamSize={selectedMemberIds.length}
+      />
 
       {/* [束A/M-3] 確定操作(派遣する)は画面下部の sticky バーへ。候補一覧が
           長くても、選びながら常に押せる位置に留まる(ナビの直上に固定)。 */}

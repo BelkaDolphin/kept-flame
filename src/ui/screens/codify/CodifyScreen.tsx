@@ -32,32 +32,31 @@ import { useState } from "preact/hooks";
 
 import type { CommandRejection } from "../../../engine/commands";
 import { codifyRecordId } from "../../../engine/assist/codify";
-import { assistPreferredMedium } from "../../../engine/rules/codify";
+import { toApproxNumber } from "../../../engine/fp";
+import {
+  assistPreferredMedium,
+  isPrintingUnlocked,
+  planCodification,
+} from "../../../engine/rules/codify";
 import type { RecordMedium } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import type { CodifySuggestionView, CodifyTechEntry } from "../../derived";
-import { techLabel } from "../contentLabels";
+import { mediumLabel, techLabel } from "../contentLabels";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./codifyScreen.css";
 
 // --- 1. 表示文言(判定は derived.ts・ここは文言だけ) -------------------------
 
-/** `RecordMedium` の全件を必ず埋める(型で強制。GDD 11.1 追補の 2 種固定)。 */
-export function mediumLabel(medium: RecordMedium): string {
-  switch (medium) {
-    case "stoneTablet":
-      return "石板";
-    case "paper":
-      return "紙";
-    default: {
-      const unhandled: never = medium;
-      throw new TypeError(`未知の記録媒体 ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
+/**
+ * [束B] `mediumLabel` は contentLabels.ts へ集約した(MigrationScreen.tsx と
+ * 同じ定義を 2 箇所で持たないため)。この re-export は既存テストの
+ * `import { mediumLabel } from "...CodifyScreen"` を壊さないためだけにある。
+ */
+export { mediumLabel };
 
 // --- 2. 1 行(hooks 不使用・直接テスト可能) ----------------------------------
 
@@ -213,6 +212,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
 
   const techs = useSignalValue(store.derived.codifyTechs);
   const suggestions = useSignalValue(store.derived.codifySuggestions);
+  const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const [mediumOverrides, setMediumOverrides] = useState<ReadonlyMap<EntityId, RecordMedium>>(
     new Map(),
@@ -220,9 +220,42 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
   const [suggestionOutcome, setSuggestionOutcome] = useState<CodifySuggestionApplyOutcome | null>(
     null,
   );
+  const toastStack = useToastStack();
+
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり)。
+  const content = store.peekContent();
+
+  function stockApprox(resourceId: EntityId): number {
+    return resources.find((resource) => resource.resourceId === resourceId)?.stockApprox ?? 0;
+  }
+
+  /**
+   * [束B/B-6] 媒体の既定選択を「在庫が足りる方」にする。両方(または片方だけ)
+   * 足りるときは**石板を優先**し(粘土は序盤に潤沢・GDD 11.1 追補)、どちらも
+   * 足りないときだけ従来のヒューリスティック(唯一保持なら石板)へ倒す。
+   *
+   * 廃材代替(`codifyWasteSubstitution`)は加味しない簡易判定
+   * (★非ブロッキング: 廃材で足りるケースを見落として紙側の判定へ倒れることが
+   * あるが、実際に押せるかは engine の reject が最終判定なので誤動作ではない)。
+   * `recordMedia` ブロックが無い盤面では算出できない(`planCodification` が
+   * 例外を投げる)ため、その場合は従来どおりのヒューリスティックのみで倒す。
+   */
+  function defaultMediumFor(entry: CodifyTechEntry): RecordMedium {
+    if (content.recordMedia === undefined) return assistPreferredMedium(entry.uniqueHolder);
+    const printingUnlocked = isPrintingUnlocked(store.peekState(), content);
+    const stonePlan = planCodification(content, entry.techId, "stoneTablet", printingUnlocked);
+    if (stockApprox(stonePlan.costResourceId) >= toApproxNumber(stonePlan.costFix)) {
+      return "stoneTablet";
+    }
+    const paperPlan = planCodification(content, entry.techId, "paper", printingUnlocked);
+    if (stockApprox(paperPlan.costResourceId) >= toApproxNumber(paperPlan.costFix)) {
+      return "paper";
+    }
+    return assistPreferredMedium(entry.uniqueHolder);
+  }
 
   function mediumFor(entry: CodifyTechEntry): RecordMedium {
-    return mediumOverrides.get(entry.techId) ?? assistPreferredMedium(entry.uniqueHolder);
+    return mediumOverrides.get(entry.techId) ?? defaultMediumFor(entry);
   }
 
   function handleMediumChange(techId: EntityId, medium: RecordMedium): void {
@@ -234,6 +267,16 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
   }
 
   function handleEnqueue(techId: EntityId, medium: RecordMedium): void {
+    const beforeState = store.peekState();
+    // [束B/B-4] 成功トースト用の差分を取るため、投入前にコスト資源の在庫を
+    // 控えておく(content に recordMedia が無ければ算出しない)。
+    const plan =
+      content.recordMedia === undefined
+        ? null
+        : planCodification(content, techId, medium, isPrintingUnlocked(beforeState, content));
+    const beforeStockApprox =
+      plan === null ? null : resourceStockApprox(beforeState, plan.costResourceId);
+
     const result = store.dispatch({
       type: "commandApplied",
       command: {
@@ -243,8 +286,20 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
         medium,
       },
     });
-    setLastRejection(
-      result.command !== null && !result.command.ok ? result.command.rejection : null,
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    const afterStockApprox =
+      plan === null ? null : resourceStockApprox(store.peekState(), plan.costResourceId);
+    const diff = resourceDeltaPhrase(
+      plan?.costResourceId ?? null,
+      beforeStockApprox,
+      afterStockApprox,
+    );
+    toastStack.push(
+      `「${techLabel(techId)}」を成文化キューに入れた${diff.length > 0 ? `(${diff})` : ""}`,
     );
   }
 
@@ -281,11 +336,15 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-codify-screen__title" id="kf-codify-screen-title">
         成文化キュー
       </h2>
-      <p class="kf-codify-screen__note">
-        成文化は研究点を産出する施設の稼働就労者によって進行します(M50
-        結線済み)。取消コマンド(`cancelCodification`・返金なし)は engine
-        に実装済みですが、本画面の取消ボタンは未設置です(次の UI タスクで接続)。
+      <p class="kf-screen-intro">
+        住民の頭の中にある知識を、失われないよう記録に残します。記録は研究点を産出する施設の
+        稼働就労者によって少しずつ書き進み、時間が経つと完成します。
       </p>
+      <p class="kf-codify-screen__note">
+        記録の取り消しは今後のアップデートで対応予定です(いま投入した記録は取り消せません)。
+      </p>
+
+      <ToastStackView toasts={toastStack.toasts} />
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 

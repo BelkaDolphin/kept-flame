@@ -90,9 +90,49 @@
   margin: 0 0 0.5rem;
 }
 
+/* [束B/m-6] ネイティブ input は視覚的に隠す(display:none にはしない——
+   キーボード操作(Tab→Enter/Space でファイル選択ダイアログを開く)を
+   潰さないため。クリックは隣の <label for=...> がネイティブに委譲する)。 */
 .kf-settings__import-file {
-  display: block;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+}
+
+.kf-settings__import-file-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin: 0 0 0.5rem;
+}
+
+.kf-settings__import-file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-settings__import-file-name {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
 }
 
 .kf-settings__import-outcome {

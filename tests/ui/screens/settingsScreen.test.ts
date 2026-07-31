@@ -89,6 +89,7 @@ describe("ImportPanel", () => {
       onFileSelected: () => undefined,
       onSubmit: () => undefined,
       outcome: null,
+      selectedFileName: null,
     });
     const children = vnode.props.children as readonly {
       readonly props?: { readonly disabled?: boolean };
@@ -105,6 +106,7 @@ describe("ImportPanel", () => {
       onFileSelected: () => undefined,
       onSubmit: () => undefined,
       outcome: success,
+      selectedFileName: null,
     });
     expect(flattenText(successVnode)).toContain("成功しました");
 
@@ -115,6 +117,7 @@ describe("ImportPanel", () => {
       onFileSelected: () => undefined,
       onSubmit: () => undefined,
       outcome: error,
+      selectedFileName: null,
     });
     expect(flattenText(errorVnode)).toContain("失敗しました");
   });
@@ -126,8 +129,32 @@ describe("ImportPanel", () => {
       onFileSelected: () => undefined,
       onSubmit: () => undefined,
       outcome: null,
+      selectedFileName: null,
     });
     expect(flattenText(vnode)).toContain("復元できます");
+  });
+
+  it("[束B/m-6] ファイル選択は44px以上の日本語ラベルボタンでラップし、選択済みファイル名を表示する", () => {
+    const unselected = ImportPanel({
+      importText: "",
+      onImportTextChange: () => undefined,
+      onFileSelected: () => undefined,
+      onSubmit: () => undefined,
+      outcome: null,
+      selectedFileName: null,
+    });
+    expect(flattenText(unselected)).toContain("ファイルを選ぶ");
+    expect(flattenText(unselected)).toContain("選択されていません");
+
+    const selected = ImportPanel({
+      importText: "",
+      onImportTextChange: () => undefined,
+      onFileSelected: () => undefined,
+      onSubmit: () => undefined,
+      outcome: null,
+      selectedFileName: "kept-flame-save-tick1000.json",
+    });
+    expect(flattenText(selected)).toContain("kept-flame-save-tick1000.json");
   });
 });
 

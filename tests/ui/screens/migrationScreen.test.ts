@@ -95,7 +95,8 @@ describe("ExodusCrewRow(乗員プールの1件)", () => {
     };
     const vnode = ExodusCrewRow({ resident, selected: false, onToggle: () => undefined });
     const text = flattenText(vnode);
-    expect(text).toContain("aRui");
+    // [束B/B-3] residentDisplayName(先頭大文字化)を通して表示する。
+    expect(text).toContain("ARui");
     expect(text).toContain("士気60");
     expect(text).toContain("学者");
   });
@@ -130,8 +131,11 @@ describe("ExodusPreviewPanel(GDD 10.2・検収条件=何が落ちるかのプレ
     );
     if (resolution.droppedCrewIds.length > 0) {
       expect(text).toContain("定員超過で置いていく住民");
+      // [束B/B-3] 落ちた住民IDも residentDisplayName を通す。
+      expect(text).toContain("BKaya");
     }
-    expect(text).toContain(`獲得予定の継承点(GDD 10.3): ${String(resolution.earnedInheritPoints)}`);
+    // [束B/B-2] GDD 節番号の引用は削除した(プレイヤー向け画面から開発メモを除去)。
+    expect(text).toContain(`獲得予定の継承点: ${String(resolution.earnedInheritPoints)}`);
   });
 });
 

@@ -49,14 +49,16 @@ function outpost(overrides: Partial<OutpostRosterEntry> = {}): OutpostRosterEntr
 }
 
 describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画面に出ているか)", () => {
-  it("タイプ名(GDD 9.2の用語)・供給・維持費・ネット収益・hazard・ROIを表示する", () => {
+  it("タイプ名(GDD 9.2の用語)・供給・維持費・ネット収益・危険度・ROIを表示する", () => {
     const vnode = OutpostCard({ outpost: outpost() });
     const text = flattenText(vnode);
     expect(text).toContain("鉱山");
     expect(text).toContain("供給");
     expect(text).toContain("維持費");
     expect(text).toContain("ネット収益");
-    expect(text).toContain("hazard");
+    // [束B/B-2] 英語のまま出ていた "hazard" をプレイヤー語(危険度)へ改めた。
+    expect(text).toContain("危険度");
+    expect(text).not.toContain("hazard");
     expect(text).toContain("ROI");
   });
 

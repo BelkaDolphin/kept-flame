@@ -61,7 +61,7 @@ export function ExportPanel({ exportedText, onExport }: ExportPanelProps) {
       <h3 class="kf-settings__section-title">エクスポート</h3>
       <p class="kf-settings__section-note">
         セーブをファイルとして書き出します。特に大移動や継承点購入の直後は、今すぐエクスポートして
-        バックアップを取ることを強く推奨します(GDD 13.4)。
+        バックアップを取ることを強く推奨します。
       </p>
       <button type="button" class="kf-settings__export-button" onClick={onExport}>
         エクスポートしてダウンロード
@@ -84,14 +84,25 @@ export interface ImportPanelProps {
   readonly onFileSelected: (event: Event) => void;
   readonly onSubmit: () => void;
   readonly outcome: ImportOutcomeView | null;
+  /** [束B/m-6] 選択済みファイル名(未選択は null)。SettingsScreen が保持する。 */
+  readonly selectedFileName: string | null;
 }
 
+/**
+ * [束B/m-6] ファイル選択は `<input type="file">` を視覚的に隠し、44px 以上の
+ * 日本語ラベルボタン「ファイルを選ぶ」でラップする(ブラウザ既定の入力欄は
+ * OS 依存の見た目で 44px を保証できず、文言も英語になりがちなため)。
+ * `<label for=...>` によるネイティブな委譲でクリックを転送するので、
+ * hooks(ref)を持ち込まずに済む(このコンポーネントの「hooks 不使用」規約を
+ * 保ったまま実現できる)。選択後のファイル名は自前で表示する。
+ */
 export function ImportPanel({
   importText,
   onImportTextChange,
   onFileSelected,
   onSubmit,
   outcome,
+  selectedFileName,
 }: ImportPanelProps) {
   function handleTextareaChange(event: Event): void {
     onImportTextChange((event.target as HTMLTextAreaElement).value);
@@ -104,13 +115,22 @@ export function ImportPanel({
         起動に失敗した場合や、進行状況が急に消えてしまった場合は、以前エクスポートしたファイルを
         ここから読み込むことで復元できます。
       </p>
-      <input
-        type="file"
-        class="kf-settings__import-file"
-        accept="application/json,.json"
-        onChange={onFileSelected}
-        aria-label="バックアップファイルを選択"
-      />
+      <div class="kf-settings__import-file-row">
+        <input
+          type="file"
+          id="kf-settings-import-file-input"
+          class="kf-settings__import-file"
+          accept="application/json,.json"
+          onChange={onFileSelected}
+          aria-label="バックアップファイルを選択"
+        />
+        <label for="kf-settings-import-file-input" class="kf-settings__import-file-button">
+          ファイルを選ぶ
+        </label>
+        <span class="kf-settings__import-file-name">
+          {selectedFileName ?? "選択されていません"}
+        </span>
+      </div>
       <textarea
         class="kf-settings__import-text"
         value={importText}
@@ -157,6 +177,7 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
   const [exportedText, setExportedText] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
   const [outcome, setOutcome] = useState<ImportOutcomeView | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
   const state = store.peekState();
   let capacity: SaveCapacityCheck | null = null;
@@ -179,6 +200,7 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (file === undefined) return;
+    setSelectedFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       setImportText(typeof reader.result === "string" ? reader.result : "");
@@ -216,6 +238,9 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
       <h2 class="kf-settings-screen__title" id="kf-settings-screen-title">
         セーブ/設定
       </h2>
+      <p class="kf-screen-intro">
+        セーブデータの書き出し・読み込みと、進行状況が消えたときの復元を行います。
+      </p>
 
       <section class="kf-settings__info" aria-label="現在のセーブ情報">
         <p class="kf-settings__seed">難度シード: {state.worldSeed}</p>
@@ -226,9 +251,7 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
               "(警告: 1.5MB以上・そろそろエクスポートで退避を検討してください)"}
             {capacity.level === "abort" &&
               "(危険: 4MB以上・このままでは書込が中止されます。今すぐエクスポートしてください)"}
-            {capacity.level === "ok" &&
-              capacity.exceedsTarget &&
-              "(目標の512KBを超えています・ADR-012(2))"}
+            {capacity.level === "ok" && capacity.exceedsTarget && "(目標の容量を超えています)"}
           </p>
         )}
       </section>
@@ -240,6 +263,7 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
         onFileSelected={handleFileSelected}
         onSubmit={handleImportSubmit}
         outcome={outcome}
+        selectedFileName={selectedFileName}
       />
 
       <div class="kf-settings-screen__nav">

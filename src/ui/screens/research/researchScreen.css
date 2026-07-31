@@ -111,6 +111,20 @@
   cursor: pointer;
 }
 
+/* [束B/B-4] 確実に失敗する行(前提未達/解禁済み/一回性喪失)の淡色化。
+   非活性(disabled)にはしない——reject 委譲方針は維持する。 */
+.kf-research-row__start-button--unlikely {
+  opacity: 0.5;
+  border-color: #8a857d;
+  color: #5b534b;
+}
+
+.kf-research-row__unlikely-reason {
+  font-size: var(--kf-fs-sub);
+  color: #7a5a00;
+  margin: 0.15rem 0 0;
+}
+
 .kf-research-screen__nav {
   display: flex;
   gap: 0.5rem;

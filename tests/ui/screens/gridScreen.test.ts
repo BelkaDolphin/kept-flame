@@ -34,6 +34,10 @@ function catalogEntry(overrides: Partial<FacilityCatalogEntry> = {}): FacilityCa
     harshWork: false,
     outputKind: "resource",
     outputResourceId: id("firewood"),
+    // [束B/B-4] 建設コスト欄の追加(derived.ts)に追随。既定はテスト都合で
+    // 「無料」に揃え、コスト表示を確認するテストだけ overrides で足す。
+    buildCostApprox: null,
+    buildCostResourceId: null,
     ...overrides,
   };
 }
@@ -79,7 +83,12 @@ function flattenText(node: unknown): string {
 describe("FacilityCatalogButton(施設カタログ1件)", () => {
   it("施設名+footprintを表示し、押すと defId で onPick が呼ばれる", () => {
     const onPick = vi.fn();
-    const vnode = FacilityCatalogButton({ entry: catalogEntry(), active: false, onPick });
+    const vnode = FacilityCatalogButton({
+      entry: catalogEntry(),
+      active: false,
+      insufficient: false,
+      onPick,
+    });
     expect(flattenText(vnode)).toContain("かまど");
     const button = vnode.props.children as { readonly props: { readonly onClick: () => void } };
     button.props.onClick();
@@ -90,6 +99,7 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
     const activeVnode = FacilityCatalogButton({
       entry: catalogEntry(),
       active: true,
+      insufficient: false,
       onPick: () => undefined,
     });
     const button = activeVnode.props.children as { readonly props: { readonly class: string } };
@@ -100,9 +110,44 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
     const vnode = FacilityCatalogButton({
       entry: catalogEntry({ defId: id("granary") }),
       active: false,
+      insufficient: false,
       onPick: () => undefined,
     });
     expect(flattenText(vnode)).toContain("granary");
+  });
+
+  it("[束B/B-4] コストを併記し、在庫不足は色(専用クラス)+記号(▲)の両方で示す", () => {
+    const entry = catalogEntry({ buildCostApprox: 30, buildCostResourceId: id("firewood") });
+    const affordable = FacilityCatalogButton({
+      entry,
+      active: false,
+      insufficient: false,
+      onPick: () => undefined,
+    });
+    expect(flattenText(affordable)).toContain("コスト 30 薪");
+    expect(flattenText(affordable)).not.toContain("▲");
+
+    const insufficient = FacilityCatalogButton({
+      entry,
+      active: false,
+      insufficient: true,
+      onPick: () => undefined,
+    });
+    const text = flattenText(insufficient);
+    expect(text).toContain("▲");
+    expect(text).toContain("コスト 30 薪");
+    const button = insufficient.props.children as { readonly props: { readonly class: string } };
+    expect(button.props.class).toContain("kf-catalog__button--insufficient");
+  });
+
+  it("[束B/B-4] コストが無い(buildCostApprox=null)施設は「コストなし」と表示する", () => {
+    const vnode = FacilityCatalogButton({
+      entry: catalogEntry(),
+      active: false,
+      insufficient: false,
+      onPick: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("コストなし");
   });
 });
 
@@ -113,6 +158,7 @@ describe("FacilityCatalogPanel(②の施設カタログ全体)", () => {
     const vnode = FacilityCatalogPanel({
       catalog,
       pendingDefId: null,
+      resources: [],
       onPick: () => undefined,
       onCancel: () => undefined,
     });
@@ -124,6 +170,7 @@ describe("FacilityCatalogPanel(②の施設カタログ全体)", () => {
     const vnode = FacilityCatalogPanel({
       catalog,
       pendingDefId: id("hearth"),
+      resources: [],
       onPick: () => undefined,
       onCancel,
     });
