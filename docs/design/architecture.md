@@ -255,13 +255,17 @@ mount.dispose();                                  // 3. 購読を全部切る(AD
 
 ## 8. 未実装の接続点(アプリシェル = M29 で繋ぐもの)
 
-| 繋ぐもの | 材料(実装済み) | 繋ぎ方 |
-|---|---|---|
-| セーブ | `platform/saveScheduler.ts`(4 トリガ)+ `persistence.ts` | `const r = store.dispatch({type:"commandApplied", …})` の後に **`scheduler.recordCommandOutcome(r.command)`** を呼ぶ(拒否は数えない・列は要素数ぶん数える)。ストアはセーブを知らない |
-| Worker catch-up | `platform/workerClient.ts` の `startCatchUpWorker` | 完了ハンドラで `dispatch({type:"catchUpApplied", …})` |
-| 時計 | `platform/clock.ts`(**未実装**・ADR-026/GDD 11.9) | 単調時刻 → `computeTargetTick` → `dispatch({type:"ticked"})` |
-| ルータ | `platform/router.ts`(**未実装**・ADR-027) | `hashchange` → `isScreenId` で検証 → `mountScreen` + `dispatch({type:"screenOpened"})` |
-| バックアップ導線 | `platform/backupReminder.ts` / `localStorageMirror.ts` | ⑩⑪ + 設定画面(M33) |
+**[2026-07-31 / M29] 下表のうち時計・ルータ・Worker catch-up・セーブは結線済み。** 結線の実体は composition root `src/main.tsx` にあり、テスト可能な部分は `src/platform/{router,clock}.ts` と `src/ui/shellSession.ts` へ切り出してある(画面側の対応表は `docs/design/ui-spec.md`)。
+
+| 繋ぐもの | 材料(実装済み) | 繋ぎ方 | 状態 |
+|---|---|---|---|
+| セーブ | `platform/saveScheduler.ts`(4 トリガ)+ `persistence.ts` | `const r = store.dispatch({type:"commandApplied", …})` の後に **`scheduler.recordCommandOutcome(r.command)`** を呼ぶ(拒否は数えない・列は要素数ぶん数える)。ストアはセーブを知らない | **[M29] 最小結線済み**(起動時ロード + tick/catch-up 後の `recordCommands` + ライフサイクルフラッシュ)。破損時の救済・エクスポート導線は M33 |
+| Worker catch-up | `platform/workerClient.ts` の `startCatchUpWorker` | 完了ハンドラで `dispatch({type:"catchUpApplied", …})` | **[M29] 結線済み**(Worker が無い環境は 600 tick ずつメインで刻む縮退つき) |
+| 時計 | `platform/clock.ts`(ADR-026/GDD 11.9) | 単調時刻 → `planTick`(= `computeTargetTick`)→ `dispatch({type:"ticked"})` | **[M29] 実装済み**。`TickDriver.pump()` は**呼ばれた回数を計算に使わない** |
+| ルータ | `platform/router.ts`(ADR-027) | `hashchange` → 語彙検証 → `dispatch({type:"screenOpened"})`。マウント/アンマウントは `ScreenHost` が現在画面 1 個だけを描くことで自動的に起きる | **[M29] 実装済み**。語彙(`SCREEN_IDS`)は引数で注入(platform → ui の import を作らない) |
+| バックアップ導線 | `platform/backupReminder.ts` / `localStorageMirror.ts` | ⑩⑪ + 設定画面(M33) | 未着手 |
+
+**[M29] 画面の活性宣言の規約が変わった**: 画面コンポーネントは `useScreenMount(store, id, { activate: false })` を使い、自分を現在地だと宣言しない。`screenOpened` を出すのは `src/ui/shellSession.ts` の 1 箇所だけである(M8 の §6 骨格例にある `store.mountScreen("grid")` は既定 `activate: true` なので、M30 以降はこの形で書かないこと)。
 
 ---
 

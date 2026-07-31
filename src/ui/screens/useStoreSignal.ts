@@ -41,6 +41,16 @@ export function useSignalValue<T>(signal: ReadonlySignal<T>): T {
  * なので `null` を返しうる。呼び出し側は `mount === null` の間は
  * `store.derived.*.peek()` の初期値で描いておけばよい(1 フレーム後に
  * 購読が付いて追随する)。
+ *
+ * **[M29] `activate` は呼び出し側が明示すること(M18★5 への回答)。**
+ * M18 の時点では既定(= `true`)のまま使っていたため「マウント = 現在地」に
+ * なっており、現在地の権威がルータと画面の 2 箇所に割れていた。M29 以降、
+ * 現在地を決めるのは `src/platform/router.ts` だけであり、それをストアへ写す
+ * のは `src/ui/shellSession.ts` の 1 行だけである。よって**画面コンポーネントは
+ * `{ activate: false }` でマウントする**(自分を現在地だと宣言しない)。
+ *
+ * シェルの外で単体利用する場合(bench/gridMount のような計測ページ)も、
+ * ルータが居ない = 現在地の概念が無いので `false` でよい。
  */
 export function useScreenMount(
   store: GameStore,

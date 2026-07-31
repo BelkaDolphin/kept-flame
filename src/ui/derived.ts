@@ -63,13 +63,25 @@ import {
   occupiedCells,
 } from "../engine/footprint";
 import { FIX_ONE, FIX_ZERO, toApproxNumber, toRaw, type Fix } from "../engine/fp";
-import { requireFacilityDef, type EngineContent, type RecordMedium } from "../engine/rules/types";
+import { isCodified } from "../engine/rules/codify";
+import { techHoldersOf } from "../engine/rules/techMemory";
+import {
+  lossClassOfTech,
+  requireFacilityDef,
+  type EngineContent,
+  type RecordMedium,
+} from "../engine/rules/types";
 import {
   entitiesOfKind,
   type CodifyState,
+  type DispatchSnapshot,
   type EntityId,
   type GameState,
+  type MemoirEntry,
+  type RenderedLogEntry,
+  type ResidentState,
 } from "../engine/state/state";
+import type { ScreenId } from "./screens";
 import {
   computeAdjacencyBreakdown,
   type CellAdjacencyBreakdown,
@@ -181,8 +193,16 @@ export interface GridSummary {
   /**
    * 過密ペナルティが実際に掛かっている**施設**の数。
    * [M17] 大型施設はアンカーセルでのみ数える(1 施設 1 回・GDD 6.3)。
+   *
+   * **[M29・2026-07-30裁定] `overcrowdedCellCount` から改名した。** 実態が
+   * 「セルの数」ではなく「施設の数」であり(アンカーのみ集計)、同じ型の中で
+   * `occupiedCellCount`(セル単位)と単位が違うことが名前から読めなかったため。
+   * 改名の影響は本ファイルと `tests/ui/derived.test.ts` に閉じており、engine /
+   * schema / content / conformance には 1 バイトも波及しない(この型は派生値で
+   * あって state ではなく、直列化も golden vector も通らない)。詳細は
+   * `docs/design/ui-spec.md` §6。
    */
-  readonly overcrowdedCellCount: number;
+  readonly overcrowdedFacilityCount: number;
   /** 無効化された近傍の総数(タグ横断)。[M17] 同じく施設単位の合計。 */
   readonly overcrowdedNeighborTotal: number;
 }
@@ -246,6 +266,117 @@ export interface HomeBadges {
   readonly completedCodifyCount: number;
 }
 
+/**
+ * [M29] 緊急度バッジ 1 件(GDD 2.2 / 4.1(a))。**点灯しているものだけ**が並ぶ。
+ *
+ * ここに文言(表示テキスト)は持たない。持たせると「同じ意味の日本語が
+ * derived と画面の 2 箇所に出る」ことになるうえ、件数以外が変わらないのに
+ * 文字列が新しくなって `equals` が効かなくなるためである。文言は
+ * `src/ui/screens/home/HomeHub.tsx` の静的な表が持つ。
+ */
+export interface HomeAlert {
+  readonly id: HomeAlertId;
+  /** 赤/黄/灰(GDD 4.1(a))。 */
+  readonly level: UrgencyLevel;
+  /** バッジをタップしたときの遷移先(GDD 6.6「ワンタップ遷移」)。 */
+  readonly screen: ScreenId;
+  /** 点灯の根拠になった件数(1 以上。0 のバッジは並ばない)。 */
+  readonly count: number;
+}
+
+/**
+ * [M29] 緊急度の 3 段(GDD 4.1(a): 赤 = (B)喪失接近 / 黄 = 先延ばしコスト /
+ * 灰 = 任意)。
+ *
+ * **赤は限定点灯**(GDD 2.2)。「危ない気がする」では点けず、(B) 分類の技術が
+ * 実際に喪失へ近づいている状況だけに使う。
+ */
+export type UrgencyLevel = "critical" | "warn" | "info";
+
+/** [M29] バッジの種類。表示順は宣言順(重い順)。 */
+export const HOME_ALERT_IDS = [
+  "bLossImminent",
+  "recallImpaired",
+  "codifyPending",
+  "researchIdle",
+  "expeditionActive",
+  "idleResidents",
+] as const;
+
+export type HomeAlertId = (typeof HOME_ALERT_IDS)[number];
+
+/** [M29] ①ホームハブのバッジ列(ADR-027(4) の「軽量 computed」)。 */
+export interface HomeAlerts {
+  /** 点灯中のバッジ(重い順 = {@link HOME_ALERT_IDS} の宣言順)。 */
+  readonly alerts: readonly HomeAlert[];
+  readonly criticalCount: number;
+  readonly warnCount: number;
+  readonly infoCount: number;
+}
+
+function homeAlertsEqual(a: HomeAlerts, b: HomeAlerts): boolean {
+  if (a.alerts.length !== b.alerts.length) return false;
+  for (let i = 0; i < a.alerts.length; i++) {
+    const left = a.alerts[i];
+    const right = b.alerts[i];
+    if (left === undefined || right === undefined) return false;
+    if (left.id !== right.id || left.count !== right.count || left.level !== right.level) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * [M29] (B) 一回性喪失が「実際に近づいている」技術(GDD 2.2 の赤バッジ条件)。
+ *
+ * 条件は 4 つ全部の重なりであり、1 つでも欠ければ点かない:
+ *   (1) `lossClass = rareIrreversible`(= (B)。(A) は再研究できるので赤にしない・GDD 7.4)
+ *   (2) 解禁済み(未研究の技術は失いようがない)
+ *   (3) 未成文(記録が 1 枚でもあれば喪失しない・rules/codify.ts)
+ *   (4) 生存保持者が 1 人だけ で、その 1 人が **派遣中** または **士気が下位閾値未満**
+ *       (GDD 2.2 の例示「唯一保持者を派遣中 × 士気危機の重なり等」そのもの)
+ *
+ * 判定に使う述語はすべて engine の既存実装(`isCodified` / `techHoldersOf` /
+ * `lossClassOfTech`)であり、UI 側に喪失判定を書き写していない。
+ * 士気の閾値も content(`recallRisk.moraleThresholdLowFix`)から引く。
+ */
+function bLossImminentTechIds(state: GameState, content: EngineContent): readonly EntityId[] {
+  const moraleCrisisRaw = toRaw(content.recallRisk.moraleThresholdLowFix);
+  const result: EntityId[] = [];
+  for (const research of entitiesOfKind(state, "research")) {
+    if (research.completedTick === null) continue;
+    const techId = research.techId;
+    // content に定義が無い tech(理論上は起きない)でホーム画面を落とさない。
+    if (!content.techDefs.has(techId)) continue;
+    if (lossClassOfTech(content, techId) !== "rareIrreversible") continue;
+    if (isCodified(state, techId)) continue;
+
+    const holders = techHoldersOf(state, techId);
+    if (holders.length !== 1) continue;
+    const holderId = holders[0];
+    if (holderId === undefined) continue;
+    const holder = state.entityStateById.get(holderId);
+    if (holder === undefined || holder.kind !== "resident") continue;
+    if (!holder.dispatched && toRaw(holder.morale) >= moraleCrisisRaw) continue;
+    result.push(techId);
+  }
+  return result;
+}
+
+/** [M29] 未成文のまま残っている解禁済み技術(生存保持者あり)の件数。 */
+function pendingCodifyTechCount(state: GameState, content: EngineContent): number {
+  let count = 0;
+  for (const research of entitiesOfKind(state, "research")) {
+    if (research.completedTick === null) continue;
+    if (!content.techDefs.has(research.techId)) continue;
+    if (isCodified(state, research.techId)) continue;
+    if (techHoldersOf(state, research.techId).length === 0) continue;
+    count++;
+  }
+  return count;
+}
+
 function homeBadgesEqual(a: HomeBadges, b: HomeBadges): boolean {
   return (
     a.residentCount === b.residentCount &&
@@ -283,6 +414,12 @@ export interface StoreDerived {
   readonly residents: ReadonlyComputed<readonly ResidentView[]>;
   readonly codify: ReadonlyComputed<readonly CodifyView[]>;
   readonly homeBadges: ReadonlyComputed<HomeBadges>;
+  /**
+   * [M29] ①ホームハブの緊急度バッジ(GDD 2.2 / 4.1(a) / 6.6)。
+   * `homeBadges` と同じく **tick を含めない**(§2)ので、件数が動かない限り
+   * バッジ行は再描画されない。
+   */
+  readonly homeAlerts: ReadonlyComputed<HomeAlerts>;
 
   /** 選択中セルの表示モデル(未選択は null)。③施設詳細と②の選択枠が読む。 */
   readonly selectedCell: ReadonlyComputed<CellViewModel | null>;
@@ -415,7 +552,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
   const gridSummary = computed<GridSummary>(
     () => {
       let occupiedCellCount = 0;
-      let overcrowdedCellCount = 0;
+      let overcrowdedFacilityCount = 0;
       let overcrowdedNeighborTotal = 0;
       for (let cellIndex = 0; cellIndex < GRID_CELL_COUNT; cellIndex++) {
         const node = cellAdjacency[cellIndex];
@@ -428,14 +565,14 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         const placement = sources.cellPlacement[cellIndex]?.value ?? null;
         if (placement !== null && placement.anchorCellIndex !== cellIndex) continue;
         if (result.overcrowdedNeighborCount > 0) {
-          overcrowdedCellCount++;
+          overcrowdedFacilityCount++;
           overcrowdedNeighborTotal += result.overcrowdedNeighborCount;
         }
       }
       return {
         occupiedCellCount,
         emptyCellCount: GRID_CELL_COUNT - occupiedCellCount,
-        overcrowdedCellCount,
+        overcrowdedFacilityCount,
         overcrowdedNeighborTotal,
       };
     },
@@ -561,6 +698,55 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { equals: homeBadgesEqual, name: "homeBadges" },
   );
 
+  const homeAlerts = computed<HomeAlerts>(
+    () => {
+      const state: GameState = sources.state.value;
+      const content: EngineContent = sources.content.value;
+      const badges = homeBadges.value;
+
+      const counts: { readonly [K in HomeAlertId]: number } = {
+        bLossImminent: bLossImminentTechIds(state, content).length,
+        recallImpaired: badges.impairedResidentCount,
+        codifyPending: pendingCodifyTechCount(state, content),
+        researchIdle: badges.activeResearchCount === 0 ? 1 : 0,
+        expeditionActive: state.dispatchSnapshots.length,
+        idleResidents: badges.idleResidentCount,
+      };
+      const levels: { readonly [K in HomeAlertId]: UrgencyLevel } = {
+        bLossImminent: "critical",
+        recallImpaired: "warn",
+        codifyPending: "warn",
+        researchIdle: "warn",
+        expeditionActive: "info",
+        idleResidents: "info",
+      };
+      const screens: { readonly [K in HomeAlertId]: ScreenId } = {
+        bLossImminent: "codify",
+        recallImpaired: "residents",
+        codifyPending: "codify",
+        researchIdle: "research",
+        expeditionActive: "expedition",
+        idleResidents: "residents",
+      };
+
+      const alerts: HomeAlert[] = [];
+      let criticalCount = 0;
+      let warnCount = 0;
+      let infoCount = 0;
+      for (const id of HOME_ALERT_IDS) {
+        const count = counts[id];
+        if (count <= 0) continue;
+        const level = levels[id];
+        alerts.push({ id, level, screen: screens[id], count });
+        if (level === "critical") criticalCount++;
+        else if (level === "warn") warnCount++;
+        else infoCount++;
+      }
+      return { alerts, criticalCount, warnCount, infoCount };
+    },
+    { equals: homeAlertsEqual, name: "homeAlerts" },
+  );
+
   const selectedCell = computed<CellViewModel | null>(
     () => {
       const cellIndex = sources.selectedCellIndex.value;
@@ -619,6 +805,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     residents,
     codify,
     homeBadges,
+    homeAlerts,
     selectedCell,
     selectedCellBreakdown,
   };
@@ -711,4 +898,301 @@ export function computePlacementPreview(
     });
   }
   return results;
+}
+
+// --- 6. ⑫帰還ダイジェスト(GDD 4.2「復帰専用画面」・M29) --------------------
+//
+// GDD 4.2 は「**ネガティブ先頭単独表示 → ダイジェスト → ドリルダウン**の3段」と
+// 定める。本節はその 3 段ぶんの表示モデルを **engine の既存フィールドを読んで
+// 並べ替えるだけ**で組み立てる純関数である(新しい engine 計算を足さない)。
+//
+// (a) **「不在中」の起点は engine の state に無い。** `lastSeenTick` のような
+//     フィールドを GameState へ足すのは engine 変更(= golden vector と
+//     saveSchemaVersion に波及)なので採らず、composition root が持つ
+//     「catch-up 前の tick」を `sinceTick` として引数で受け取る。これは
+//     セーブに載らない UI 状態である(docs/design/ui-spec.md §4)。
+//
+// (b) **未帰還の派遣スナップショットから結果を読まない。** `DispatchSnapshot` は
+//     派遣確定時に脱落者まで含めて確定している(GDD 12.5-7)ので、そこから
+//     「全滅」「脱落」を先に表示するとプレイヤーへの盛大なネタバレになる。
+//     ダイジェストが読むのは **既に起きたこと**(住民の `life.diedTick`・
+//     research の `loss`・memoir・レンダリング済み帰還ログ)だけであり、
+//     未帰還の派遣については「何件が未帰還か」しか出さない。
+//
+// (c) 派生値(computed)にしていないのは、`sinceTick` が画面側の一時状態であり
+//     signal グラフに入らないためである(§5 の `computePlacementPreview` と
+//     同じ扱い・architecture.md §6 の規律どおり)。
+
+/** ⑫の 1 段目(ネガティブ先頭単独表示)の種別。重い順。 */
+export const DIGEST_LEAD_KINDS = [
+  "rareTechLost",
+  "residentDeath",
+  "recoverableTechLost",
+  "partnerLost",
+  "none",
+] as const;
+
+export type DigestLeadKind = (typeof DIGEST_LEAD_KINDS)[number];
+
+/** ⑫の 1 段目。`kind: "none"` なら「悪い知らせは無い」を単独表示する。 */
+export interface DigestLead {
+  readonly kind: DigestLeadKind;
+  /** ドリルダウン先(`none` のときはホームハブ)。 */
+  readonly screen: ScreenId;
+  /** 同種の出来事の件数(1 以上。`none` は 0)。 */
+  readonly count: number;
+  /** 代表の対象 ID(技術 / 住民)。`none` は null。 */
+  readonly subjectId: EntityId | null;
+  /** 代表の発生 tick。`none` は null。 */
+  readonly tick: number | null;
+}
+
+/** ⑫の 2 段目に並べる要約行の種別(表示順は宣言順)。 */
+export const DIGEST_ROW_IDS = [
+  "residentDeaths",
+  "techLosses",
+  "returnLogs",
+  "rescues",
+  "arrivals",
+  "bondMilestones",
+  "expeditionsInFlight",
+  "overcrowdedFacilities",
+] as const;
+
+export type DigestRowId = (typeof DIGEST_ROW_IDS)[number];
+
+/** ⑫の 2 段目 1 行 = 3 段目(ドリルダウン)の遷移元。文言は画面側が持つ。 */
+export interface DigestRow {
+  readonly id: DigestRowId;
+  readonly screen: ScreenId;
+  /** 件数(1 以上。0 の行は並ばない)。 */
+  readonly count: number;
+  /** 悪い知らせか(意匠を分けるため。色だけに頼らずラベルも変える)。 */
+  readonly negative: boolean;
+}
+
+/** ⑫の表示モデル。 */
+export interface ReturnDigestView {
+  /** 「不在中」の起点(排他: この tick は含まない)。 */
+  readonly sinceTick: number;
+  readonly nowTick: number;
+  /** `nowTick - sinceTick`(= 不在中に進んだ tick 数 = 分)。 */
+  readonly elapsedTicks: number;
+  readonly lead: DigestLead;
+  readonly rows: readonly DigestRow[];
+  /** 不在中の帰還ログ(**新しい順**)。GDD 8.4 のレンダリング済み文字列。 */
+  readonly logEntries: readonly RenderedLogEntry[];
+  /** 上限 50 件を超えて畳まれた帰還ログの累計(GDD 8.4 / 12.5-9)。 */
+  readonly foldedLogCount: number;
+  /** 1 件でも報告することがあるか(false なら「変わりありません」)。 */
+  readonly hasNews: boolean;
+}
+
+export interface ReturnDigestInput {
+  /** 「不在中」の起点。通常は起動直後(catch-up 前)の `state.tick`。 */
+  readonly sinceTick: number;
+  /**
+   * 盤面の集計(`store.derived.gridSummary`)。⑫は `gridSummary` を読んでよい
+   * 数少ない画面である(§1(b) の用途制限どおり)。
+   */
+  readonly gridSummary: GridSummary;
+}
+
+interface DigestLeadCandidate {
+  readonly kind: DigestLeadKind;
+  readonly screen: ScreenId;
+  readonly subjectId: EntityId;
+  readonly tick: number;
+}
+
+/** 代表 1 件の選び方: 種別の重さ → 発生 tick 昇順 → 対象 ID 昇順(全順序)。 */
+function pickLeadCandidate(candidates: readonly DigestLeadCandidate[]): DigestLeadCandidate | null {
+  let best: DigestLeadCandidate | null = null;
+  for (const candidate of candidates) {
+    if (best === null) {
+      best = candidate;
+      continue;
+    }
+    const bestRank = DIGEST_LEAD_KINDS.indexOf(best.kind);
+    const rank = DIGEST_LEAD_KINDS.indexOf(candidate.kind);
+    if (rank !== bestRank) {
+      if (rank < bestRank) best = candidate;
+      continue;
+    }
+    if (candidate.tick !== best.tick) {
+      if (candidate.tick < best.tick) best = candidate;
+      continue;
+    }
+    if (candidate.subjectId < best.subjectId) best = candidate;
+  }
+  return best;
+}
+
+/** 住民 1 人の memoir を「不在中」で絞って数える。 */
+function countMemoirSince(
+  resident: ResidentState,
+  sinceTick: number,
+  kinds: ReadonlySet<MemoirEntry["kind"]>,
+): number {
+  const memoir = resident.memoir;
+  if (memoir === undefined) return 0;
+  let count = 0;
+  for (const entry of memoir.entries) {
+    if (entry.tick <= sinceTick) continue;
+    if (kinds.has(entry.kind)) count++;
+  }
+  return count;
+}
+
+const ARRIVAL_KINDS: ReadonlySet<MemoirEntry["kind"]> = new Set(["arrival"]);
+const RESCUE_KINDS: ReadonlySet<MemoirEntry["kind"]> = new Set(["explorationRescue"]);
+const BOND_KINDS: ReadonlySet<MemoirEntry["kind"]> = new Set(["bondMilestone"]);
+
+/**
+ * ⑫帰還ダイジェストの表示モデルを組み立てる(GDD 4.2)。
+ *
+ * **state を 1 バイトも変えない純関数**であり、engine の計算も 1 つも呼ばない
+ * (既存フィールドの読み出しと並べ替えだけ)。
+ *
+ * @throws {RangeError} `sinceTick` が整数でない / 現在 tick より未来の場合
+ */
+export function buildReturnDigest(state: GameState, input: ReturnDigestInput): ReturnDigestView {
+  const sinceTick = input.sinceTick;
+  if (!Number.isSafeInteger(sinceTick) || sinceTick < 0) {
+    throw new RangeError(`sinceTick ${String(sinceTick)} が 0 以上の整数でない`);
+  }
+  if (sinceTick > state.tick) {
+    throw new RangeError(
+      `sinceTick ${String(sinceTick)} が現在 tick ${String(state.tick)} より未来(起点の取り違え)`,
+    );
+  }
+
+  const leadCandidates: DigestLeadCandidate[] = [];
+  let deathCount = 0;
+  let rareLossCount = 0;
+  let recoverableLossCount = 0;
+  let arrivalCount = 0;
+  let rescueCount = 0;
+  let bondMilestoneCount = 0;
+  let partnerLostCount = 0;
+
+  for (const entity of state.entityStateById.values()) {
+    if (entity.kind === "resident") {
+      const diedTick = entity.life?.diedTick ?? null;
+      if (diedTick !== null && diedTick > sinceTick) {
+        deathCount++;
+        leadCandidates.push({
+          kind: "residentDeath",
+          screen: "residents",
+          subjectId: entity.id,
+          tick: diedTick,
+        });
+      }
+      arrivalCount += countMemoirSince(entity, sinceTick, ARRIVAL_KINDS);
+      rescueCount += countMemoirSince(entity, sinceTick, RESCUE_KINDS);
+      bondMilestoneCount += countMemoirSince(entity, sinceTick, BOND_KINDS);
+      for (const memoirEntry of entity.memoir?.entries ?? []) {
+        if (memoirEntry.kind !== "partnerLost" || memoirEntry.tick <= sinceTick) continue;
+        partnerLostCount++;
+        leadCandidates.push({
+          kind: "partnerLost",
+          screen: "chronicle",
+          subjectId: entity.id,
+          tick: memoirEntry.tick,
+        });
+      }
+      continue;
+    }
+    if (entity.kind !== "research") continue;
+    const loss = entity.loss;
+    if (loss === undefined || loss.tick <= sinceTick) continue;
+    if (loss.irreversible) rareLossCount++;
+    else recoverableLossCount++;
+    leadCandidates.push({
+      // (B) は取り返しがつかない = 最優先。(A) は再研究できるので停滞コスト扱い(GDD 7.4)。
+      kind: loss.irreversible ? "rareTechLost" : "recoverableTechLost",
+      screen: "research",
+      subjectId: entity.techId,
+      tick: loss.tick,
+    });
+  }
+
+  const picked = pickLeadCandidate(leadCandidates);
+  const leadCountByKind: { readonly [K in DigestLeadKind]: number } = {
+    rareTechLost: rareLossCount,
+    residentDeath: deathCount,
+    recoverableTechLost: recoverableLossCount,
+    partnerLost: partnerLostCount,
+    none: 0,
+  };
+  const lead: DigestLead =
+    picked === null
+      ? { kind: "none", screen: "home", count: 0, subjectId: null, tick: null }
+      : {
+          kind: picked.kind,
+          screen: picked.screen,
+          count: leadCountByKind[picked.kind],
+          subjectId: picked.subjectId,
+          tick: picked.tick,
+        };
+
+  // 帰還ログは古い順に積まれている(state.ts の RenderedLogState)ので、
+  // 不在中のぶんだけ取り出して新しい順へ反転する。
+  const logEntries: RenderedLogEntry[] = [];
+  for (let i = state.renderedLogs.entries.length - 1; i >= 0; i--) {
+    const entry = state.renderedLogs.entries[i];
+    if (entry === undefined) continue;
+    if (entry.tick <= sinceTick) break;
+    logEntries.push(entry);
+  }
+
+  const inFlight: readonly DispatchSnapshot[] = state.dispatchSnapshots;
+  const counts: { readonly [K in DigestRowId]: number } = {
+    residentDeaths: deathCount,
+    techLosses: rareLossCount + recoverableLossCount,
+    returnLogs: logEntries.length,
+    rescues: rescueCount,
+    arrivals: arrivalCount,
+    bondMilestones: bondMilestoneCount,
+    expeditionsInFlight: inFlight.length,
+    overcrowdedFacilities: input.gridSummary.overcrowdedFacilityCount,
+  };
+  const screens: { readonly [K in DigestRowId]: ScreenId } = {
+    residentDeaths: "residents",
+    techLosses: "research",
+    returnLogs: "chronicle",
+    rescues: "residents",
+    arrivals: "residents",
+    bondMilestones: "chronicle",
+    expeditionsInFlight: "expedition",
+    overcrowdedFacilities: "grid",
+  };
+  const negatives: { readonly [K in DigestRowId]: boolean } = {
+    residentDeaths: true,
+    techLosses: true,
+    returnLogs: false,
+    rescues: false,
+    arrivals: false,
+    bondMilestones: false,
+    expeditionsInFlight: false,
+    overcrowdedFacilities: true,
+  };
+
+  const rows: DigestRow[] = [];
+  for (const id of DIGEST_ROW_IDS) {
+    const count = counts[id];
+    if (count <= 0) continue;
+    rows.push({ id, screen: screens[id], count, negative: negatives[id] });
+  }
+
+  return {
+    sinceTick,
+    nowTick: state.tick,
+    elapsedTicks: state.tick - sinceTick,
+    lead,
+    rows,
+    logEntries,
+    foldedLogCount: state.renderedLogs.foldedCount,
+    hasNews: rows.length > 0 || lead.kind !== "none",
+  };
 }

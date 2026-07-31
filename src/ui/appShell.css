@@ -1,0 +1,414 @@
+/*
+ * 継ぐ火 -Kept Flame- アプリシェル + ①ホームハブ + ⑫帰還ダイジェスト(M29)
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。`prefers-color-scheme` の分岐は
+ * 1 行も書かない。GDD 3.1 の「荒涼から再生への暖色」に沿った暖色寄りの中間色。
+ *
+ * 色トークンの出典:
+ *   - 中立色(--kf-ink-body / --kf-ink-muted / --kf-line-grid / 面色)は
+ *     docs/design/tags-spec.md §2.2 の値をそのまま使う(勝手に変えない)。
+ *   - 緊急度バッジ(--kf-urgency-*)は docs/design/ui-spec.md §3.3 が正本であり、
+ *     tags-spec のタグ ink/tint とは**値を 1 つも共有しない別名前空間**である。
+ *     面の相対輝度を 0.08 / 0.68 / 0.84 と離してあるので、グレースケールでも
+ *     3 段が判別できる。色だけに頼らないよう、マークアップ側で必ず
+ *     記号 + 日本語ラベル + 件数を併記すること。
+ *
+ * GDD 6.6: 最小タップ領域 44px 角。ボタン類はすべて min-height/min-width で担保。
+ */
+
+.kf-app {
+  --kf-surface-page: #ffffff;
+  --kf-surface-panel: #faf8f5;
+  --kf-surface-sunken: #f4f2ee;
+  --kf-ink-body: #24201c;
+  --kf-ink-muted: #5b534b;
+  --kf-line-grid: #8a857d;
+  --kf-line-soft: #c9c3b8;
+
+  --kf-urgency-critical-fill: #a11334;
+  --kf-urgency-critical-ink: #ffffff;
+  --kf-urgency-critical-line: #a11334;
+  --kf-urgency-warn-fill: #ffd34d;
+  --kf-urgency-warn-ink: #24201c;
+  --kf-urgency-warn-line: #7a5a00;
+  --kf-urgency-info-fill: #eeece8;
+  --kf-urgency-info-ink: #5b534b;
+  --kf-urgency-info-line: #8a857d;
+
+  color-scheme: light;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Hiragino Kaku Gothic ProN",
+    "Yu Gothic UI",
+    Meiryo,
+    sans-serif;
+  line-height: 1.6;
+}
+
+/* --- ヘッダ(現在画面名 + ゲーム内時計) ---------------------------------- */
+
+.kf-app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--kf-line-grid);
+  background: var(--kf-surface-panel);
+}
+
+.kf-app__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.kf-app__title-sub {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--kf-ink-muted);
+}
+
+.kf-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.kf-clock__label {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--kf-ink-muted);
+}
+
+/* --- 画面本体 -------------------------------------------------------------- */
+
+.kf-app__screen {
+  flex: 1 1 auto;
+  padding: 0.75rem;
+}
+
+/* --- ナビゲーション(12画面 + 設定) --------------------------------------- */
+
+.kf-nav {
+  border-top: 1px solid var(--kf-line-grid);
+  background: var(--kf-surface-sunken);
+  padding: 0.5rem;
+}
+
+.kf-nav__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-nav__button {
+  font: inherit;
+  font-size: 0.78rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
+.kf-nav__button[aria-current="page"] {
+  border-color: var(--kf-ink-body);
+  border-width: 2px;
+  background: #fcefd0;
+  font-weight: 600;
+}
+
+.kf-nav__order {
+  color: var(--kf-ink-muted);
+  margin-right: 0.2em;
+}
+
+/* --- 緊急度バッジ(GDD 2.2 / 4.1(a)・ui-spec §3) --------------------------- */
+
+.kf-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
+.kf-badge__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kf-badge--critical .kf-badge__pill {
+  background: var(--kf-urgency-critical-fill);
+  color: var(--kf-urgency-critical-ink);
+  border-color: var(--kf-urgency-critical-line);
+}
+
+.kf-badge--warn .kf-badge__pill {
+  background: var(--kf-urgency-warn-fill);
+  color: var(--kf-urgency-warn-ink);
+  border-color: var(--kf-urgency-warn-line);
+}
+
+.kf-badge--info .kf-badge__pill {
+  background: var(--kf-urgency-info-fill);
+  color: var(--kf-urgency-info-ink);
+  border-color: var(--kf-urgency-info-line);
+}
+
+.kf-badge--critical {
+  border-color: var(--kf-urgency-critical-line);
+  border-width: 2px;
+}
+
+.kf-badge__text {
+  flex: 1 1 auto;
+}
+
+.kf-badge__hint {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--kf-ink-muted);
+}
+
+.kf-badge__count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.kf-badge__chevron {
+  flex: 0 0 auto;
+  color: var(--kf-ink-muted);
+}
+
+/* --- ホームハブ ------------------------------------------------------------ */
+
+.kf-home__section-title {
+  font-size: 0.9rem;
+  margin: 0 0 0.4rem;
+}
+
+.kf-home__calm {
+  margin: 0 0 1rem;
+  padding: 0.6rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-panel);
+  font-size: 0.85rem;
+}
+
+.kf-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-stats__item {
+  min-width: 6.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-panel);
+}
+
+.kf-stats__label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--kf-ink-muted);
+}
+
+.kf-stats__value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- ⑫帰還ダイジェスト ---------------------------------------------------- */
+
+.kf-digest__lead {
+  margin: 0 0 1rem;
+  padding: 0.75rem;
+  border: 2px solid var(--kf-urgency-critical-line);
+  border-radius: 4px;
+  background: var(--kf-surface-panel);
+}
+
+.kf-digest__lead--none {
+  border-color: var(--kf-line-soft);
+  border-width: 1px;
+}
+
+.kf-digest__lead-mark {
+  font-weight: 700;
+  margin-right: 0.35em;
+}
+
+.kf-digest__lead-title {
+  margin: 0 0 0.3rem;
+  font-size: 1rem;
+}
+
+.kf-digest__lead-body {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.kf-digest__meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--kf-ink-muted);
+}
+
+.kf-digest__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-digest__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
+.kf-digest__row--negative {
+  border-color: var(--kf-urgency-critical-line);
+}
+
+.kf-digest__row-mark {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.kf-digest__row-text {
+  flex: 1 1 auto;
+}
+
+.kf-digest__row-count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.kf-digest__logs {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--kf-line-soft);
+  border-radius: 4px;
+  background: var(--kf-surface-panel);
+}
+
+.kf-digest__log {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--kf-line-soft);
+}
+
+.kf-digest__log:last-child {
+  border-bottom: none;
+}
+
+.kf-digest__log-tick {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--kf-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-digest__folded {
+  margin: 0 0 1rem;
+  font-size: 0.75rem;
+  color: var(--kf-ink-muted);
+}
+
+/* --- 未実装画面のプレースホルダ -------------------------------------------- */
+
+.kf-placeholder {
+  padding: 1rem;
+  border: 1px dashed var(--kf-line-grid);
+  border-radius: 4px;
+  background: var(--kf-surface-sunken);
+}
+
+.kf-placeholder__title {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+
+.kf-placeholder__task {
+  font-size: 0.85rem;
+  color: var(--kf-ink-muted);
+}
+
+.kf-placeholder__back {
+  font: inherit;
+  font-size: 0.85rem;
+  min-height: 44px;
+  min-width: 44px;
+  margin-top: 0.75rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid var(--kf-line-grid);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}

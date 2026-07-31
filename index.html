@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>継ぐ火 -Kept Flame-</title>
+    <!--
+      アプリシェルの外枠(M29)。
+      - ライトテーマ固定(CLAUDE.md 絶対ルール)。`prefers-color-scheme` の分岐を書かない。
+      - 外部フォント/CSS/CDN を参照しない(ADR-025 の静的アセット同梱・オフライン動作)。
+      - 画面の中身はすべて src/main.tsx が #app へマウントする。
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+        color: #24201c;
+      }
+      #app {
+        min-height: 100vh;
+      }
+      #app:empty::after {
+        content: "読み込み中…";
+        display: block;
+        padding: 1rem;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          "Hiragino Kaku Gothic ProN",
+          "Yu Gothic UI",
+          Meiryo,
+          sans-serif;
+        color: #5b534b;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

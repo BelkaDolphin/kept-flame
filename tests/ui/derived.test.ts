@@ -247,7 +247,7 @@ describe("全体集計はセル表示の依存に置かない(ADR-002(2))", () =
     const summary = store.derived.gridSummary.value;
     expect(summary.occupiedCellCount).toBe(5);
     expect(summary.emptyCellCount).toBe(GRID_CELL_COUNT - 5);
-    expect(summary.overcrowdedCellCount).toBeGreaterThan(0);
+    expect(summary.overcrowdedFacilityCount).toBeGreaterThan(0);
   });
 
   it("全体集計を購読してもセル表示の再計算回数は増えない", () => {
@@ -452,7 +452,7 @@ describe("[M17] 大型施設の隣接判定(GDD 6.3 の判定基準セル)", () 
     expect(summary.emptyCellCount).toBe(GRID_CELL_COUNT - 7);
     // 過密は 2×1(アンカー 12)/ cell 7 / cell 14 の 3 施設。アンカー限定でなければ
     // 2×1 が cell 12 と 13 で二重に数えられて 4 になる。
-    expect(summary.overcrowdedCellCount).toBe(3);
+    expect(summary.overcrowdedFacilityCount).toBe(3);
     expect(summary.overcrowdedNeighborTotal).toBe(3);
   });
 

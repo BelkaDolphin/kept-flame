@@ -380,7 +380,9 @@ function useGridCells(store: GameStore): readonly CellViewModel[] {
   const [cells, setCells] = useState<readonly CellViewModel[]>(() =>
     store.derived.cellView.map((node) => node.peek()),
   );
-  const mount = useScreenMount(store, "grid");
+  // [M29] 現在地の宣言はシェル(src/ui/shellSession.ts)の仕事なので
+  // `activate: false`(M18★5 への回答・useStoreSignal.ts の doc 参照)。
+  const mount = useScreenMount(store, "grid", { activate: false });
 
   useEffect(() => {
     if (mount === null) return;
