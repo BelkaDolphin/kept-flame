@@ -74,6 +74,15 @@ import {
   DestinationPicker,
   StancePicker,
 } from "../../../src/ui/screens/expedition/ExpeditionScreen";
+import {
+  ExodusCompletedNotice,
+  ExodusCrewRow,
+  ExodusRecordRow,
+  type ExodusCrewOption,
+  type ExodusRecordOption,
+} from "../../../src/ui/screens/migration/MigrationScreen";
+import { InheritTrackRow } from "../../../src/ui/screens/inheritance/InheritanceScreen";
+import { ExportPanel, ImportPanel } from "../../../src/ui/screens/settings/SettingsScreen";
 
 const id = entityIdFromString;
 
@@ -132,6 +141,10 @@ const ALL_RULES: ReadonlyMap<string, CssDeclarations> = new Map([
   ...readCss("src/ui/screens/expedition/expeditionScreen.css"),
   ...readCss("src/ui/screens/chronicle/chronicleScreen.css"),
   ...readCss("src/ui/screens/outposts/outpostsScreen.css"),
+  // [M33]
+  ...readCss("src/ui/screens/migration/migrationScreen.css"),
+  ...readCss("src/ui/screens/inheritance/inheritanceScreen.css"),
+  ...readCss("src/ui/screens/settings/settingsScreen.css"),
 ]);
 
 function pxValue(raw: string | undefined): number | null {
@@ -293,6 +306,20 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
     ".kf-expedition-screen__nav-button",
     ".kf-chronicle-screen__nav-button",
     ".kf-outposts-screen__nav-button",
+    // [M33] 新規(⑩大移動ナップサックUI/⑪継承点購入/＋セーブ・設定)
+    ".kf-migration-screen__recommend-button",
+    ".kf-migration-screen__execute-button",
+    ".kf-migration__confirm-execute-button",
+    ".kf-migration__confirm-cancel-button",
+    ".kf-migration-screen__nav-button",
+    ".kf-exodus__record-button",
+    ".kf-exodus__crew-button",
+    ".kf-exodus__completed-button",
+    ".kf-inherit-row__button",
+    ".kf-inheritance-screen__nav-button",
+    ".kf-settings__export-button",
+    ".kf-settings__import-button",
+    ".kf-settings-screen__nav-button",
   ] as const;
 
   it.each(INTERACTIVE_SELECTORS)("%s は 44px 角を満たす", (selector) => {
@@ -584,6 +611,102 @@ describe("44px 最小タップ領域 — ⑦探索本部(M32)の実レンダー�
       onToggle: () => undefined,
     });
     assertAllInteractiveElementsMeetMinTapTarget(vnode);
+  });
+});
+
+// --- 4-4. [M33] ⑩大移動ナップサックUI/⑪継承点購入/＋セーブ・設定の実レンダー突合せ
+
+describe("44px 最小タップ領域 — ⑩大移動(M33)の実レンダー突合せ", () => {
+  const recordOption: ExodusRecordOption = {
+    id: id("codifyFireStone"),
+    techId: id("techFireStarting"),
+    medium: "stoneTablet",
+    lossClass: "criticalRecoverable",
+    weightApprox: 1,
+  };
+
+  it("ExodusRecordRow(記録の選択トグルボタン)", () => {
+    const vnode = ExodusRecordRow({
+      record: recordOption,
+      selected: false,
+      onToggle: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-exodus__record-button"))).toBe(true);
+  });
+
+  const crewOption: ExodusCrewOption = {
+    id: id("aRui"),
+    moraleApprox: 60,
+    traitIds: [id("traitScholar")],
+  };
+
+  it("ExodusCrewRow(住民の選択トグルボタン)", () => {
+    const vnode = ExodusCrewRow({
+      resident: crewOption,
+      selected: true,
+      onToggle: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-exodus__crew-button"))).toBe(true);
+  });
+
+  it("ExodusCompletedNotice(＋設定画面への導線ボタン)", () => {
+    const vnode = ExodusCompletedNotice({
+      earnedInheritPoints: 84,
+      onGoToSettings: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-exodus__completed-button"))).toBe(true);
+  });
+});
+
+describe("44px 最小タップ領域 — ⑪継承点購入(M33)の実レンダー突合せ", () => {
+  it("InheritTrackRow(購入ボタン)", () => {
+    const vnode = InheritTrackRow({
+      track: "caravanCapacity",
+      currentTier: 1,
+      maxTier: 4,
+      currentBonus: 2,
+      bonusPerTier: 2,
+      nextCost: 75,
+      onPurchase: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-inherit-row__button"))).toBe(true);
+  });
+
+  it("InheritTrackRow(上限段は非活性でも 44px を満たす)", () => {
+    const vnode = InheritTrackRow({
+      track: "startingStock",
+      currentTier: 4,
+      maxTier: 4,
+      currentBonus: 100,
+      bonusPerTier: 25,
+      nextCost: null,
+      onPurchase: () => undefined,
+    });
+    assertAllInteractiveElementsMeetMinTapTarget(vnode);
+  });
+});
+
+describe("44px 最小タップ領域 — ＋セーブ・設定(M33)の実レンダー突合せ", () => {
+  it("ExportPanel(エクスポートボタン)", () => {
+    const vnode = ExportPanel({ exportedText: null, onExport: () => undefined });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-settings__export-button"))).toBe(true);
+  });
+
+  it("ImportPanel(インポート実行ボタン)", () => {
+    const vnode = ImportPanel({
+      importText: "",
+      onImportTextChange: () => undefined,
+      onFileSelected: () => undefined,
+      onSubmit: () => undefined,
+      outcome: null,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-settings__import-button"))).toBe(true);
   });
 });
 

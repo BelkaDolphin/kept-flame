@@ -24,7 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import type { DistanceBand } from "../../engine/rules/types";
-import type { EntityId } from "../../engine/state/state";
+import type { EntityId, InheritTrack } from "../../engine/state/state";
 
 const FACILITY_LABELS: { readonly [key: string]: string } = {
   hearth: "かまど",
@@ -163,4 +163,20 @@ export function outpostTypeLabel(outpostTypeId: EntityId): string {
 /** [M32] 距離帯 → 日本語名(裁定 B7)。全件を必ず埋める(型で強制)。 */
 export function distanceBandLabel(band: DistanceBand): string {
   return DISTANCE_BAND_LABELS[band];
+}
+
+/**
+ * [M33] 継承系統(`INHERIT_TRACKS`・GDD 10.3)の日本語名。全件を必ず埋める
+ * (型で強制)。engine 側の英字 ID(`caravanCapacity`/`crewCapacity`/
+ * `startingStock`)と GDD 10.2/10.3 の用語(キャラバン容量/乗員定員/開始備蓄)の対応。
+ */
+const INHERIT_TRACK_LABELS: { readonly [K in InheritTrack]: string } = {
+  caravanCapacity: "キャラバン容量",
+  crewCapacity: "乗員定員",
+  startingStock: "開始備蓄",
+};
+
+/** [M33] 継承系統 → 日本語名。 */
+export function inheritTrackLabel(track: InheritTrack): string {
+  return INHERIT_TRACK_LABELS[track];
 }

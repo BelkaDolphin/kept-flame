@@ -24,11 +24,13 @@ import { ExpeditionScreen } from "../../../src/ui/screens/expedition/ExpeditionS
 import { FacilityScreen } from "../../../src/ui/screens/facility/FacilityScreen";
 import { GridScreen } from "../../../src/ui/screens/grid/GridScreen";
 import { HomeHub } from "../../../src/ui/screens/home/HomeHub";
+import { InheritanceScreen } from "../../../src/ui/screens/inheritance/InheritanceScreen";
+import { MigrationScreen } from "../../../src/ui/screens/migration/MigrationScreen";
 import { OutpostsScreen } from "../../../src/ui/screens/outposts/OutpostsScreen";
-import { PlaceholderScreen } from "../../../src/ui/screens/PlaceholderScreen";
 import { ResearchScreen } from "../../../src/ui/screens/research/ResearchScreen";
 import { ResidentsScreen } from "../../../src/ui/screens/residents/ResidentsScreen";
 import { ReturnDigest } from "../../../src/ui/screens/digest/ReturnDigest";
+import { SettingsScreen } from "../../../src/ui/screens/settings/SettingsScreen";
 import { SCREEN_ENTRIES, SCREEN_REGISTRY } from "../../../src/ui/screens/registry";
 import { formatGameClock, formatTickSpan } from "../../../src/ui/screens/format";
 import type { GameStore } from "../../../src/ui/store";
@@ -67,19 +69,19 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     expect(SCREEN_REGISTRY.outposts.ownerTask).toBeNull();
   });
 
-  it("未実装画面の担当タスクはロードマップ(M33)と一致する", () => {
-    const expected: Record<string, string> = {
-      migration: "M33",
-      inheritance: "M33",
-      settings: "M33",
-    };
-    for (const [screenId, task] of Object.entries(expected)) {
-      const entry = SCREEN_ENTRIES.find((candidate) => candidate.id === screenId);
-      expect(entry?.ownerTask).toBe(task);
+  it("[M33] ⑩大移動/⑪継承点購入/＋設定は実装済み(担当タスク無し)", () => {
+    expect(SCREEN_REGISTRY.migration.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.inheritance.ownerTask).toBeNull();
+    expect(SCREEN_REGISTRY.settings.ownerTask).toBeNull();
+  });
+
+  it("全件(ownerTask)が null = プレースホルダの担当タスクがどこにも残っていない", () => {
+    for (const entry of SCREEN_ENTRIES) {
+      expect([entry.id, entry.ownerTask]).toEqual([entry.id, null]);
     }
   });
 
-  it("実装済み 10 画面はそれぞれのコンポーネントを、残りはプレースホルダを返す", () => {
+  it("実装済み 13 画面(全件)がそれぞれのコンポーネントを返す", () => {
     const { store } = createTestStore();
     const props = screenProps(store);
     expect(SCREEN_REGISTRY.home.render(props).type).toBe(HomeHub);
@@ -92,30 +94,23 @@ describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
     expect(SCREEN_REGISTRY.expedition.render(props).type).toBe(ExpeditionScreen);
     expect(SCREEN_REGISTRY.chronicle.render(props).type).toBe(ChronicleScreen);
     expect(SCREEN_REGISTRY.outposts.render(props).type).toBe(OutpostsScreen);
-    for (const entry of SCREEN_ENTRIES) {
-      if (entry.ownerTask === null) continue;
-      const vnode = entry.render(props);
-      expect(vnode.type).toBe(PlaceholderScreen);
-      const props2 = vnode.props as unknown as {
-        readonly ownerTask: string;
-        readonly screenId: string;
-      };
-      expect(props2.ownerTask).toBe(entry.ownerTask);
-      expect(props2.screenId).toBe(entry.id);
-    }
+    // [M33]
+    expect(SCREEN_REGISTRY.migration.render(props).type).toBe(MigrationScreen);
+    expect(SCREEN_REGISTRY.inheritance.render(props).type).toBe(InheritanceScreen);
+    expect(SCREEN_REGISTRY.settings.render(props).type).toBe(SettingsScreen);
   });
 });
 
 describe("ScreenHost(非アクティブ画面は物理アンマウント・ADR-027(2))", () => {
-  it("現在画面 1 個ぶんしか vnode を作らない(未実装画面=プレースホルダで確認)", () => {
+  it("現在画面 1 個ぶんしか vnode を作らない(13画面全件が実装済みになったので実画面で確認)", () => {
     const { store } = createTestStore();
-    // [M31/M32 統合] expedition も実装済みになったので、未実装のまま残る
-    // migration(M33)でプレースホルダ経路を確認する(前例=M30/M31 が同じ理由で差し替えた形)。
+    // [M33 統合] migration も実装済みになり、プレースホルダ経路を示す画面が
+    // 1 つも残っていない(前例=M30/M31/M32 が同じ理由で差し替えてきた形の最終形)。
     const vnode = ScreenHost({ screenId: "migration", ...screenProps(store) });
     const children = vnode.props.children as unknown;
     // `display:none` で 13 画面を並べる形なら配列になる。1 個だけであることを固定する。
     expect(Array.isArray(children)).toBe(false);
-    expect((children as { readonly type: unknown }).type).toBe(PlaceholderScreen);
+    expect((children as { readonly type: unknown }).type).toBe(MigrationScreen);
   });
 
   it("[M30] 実装済み画面(grid)でも同じく 1 個ぶんしか vnode を作らない", () => {

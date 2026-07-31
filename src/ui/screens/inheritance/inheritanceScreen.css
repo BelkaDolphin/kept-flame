@@ -1,0 +1,95 @@
+/*
+ * 継ぐ火 -Kept Flame- ⑪継承点購入(M33)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-inheritance-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-inheritance-screen__balance {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: #5b534b;
+  margin: 0 0 0.6rem;
+}
+
+.kf-inheritance-screen__inactive {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-inheritance-screen__purchased {
+  font-size: 0.82rem;
+  color: #24201c;
+  margin: 0 0 0.5rem;
+}
+
+.kf-inheritance-screen__list {
+  list-style: none;
+  margin: 0 0 0.7rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kf-inherit-row {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+}
+
+.kf-inherit-row__title {
+  font-size: 0.9rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-inherit-row__tier,
+.kf-inherit-row__cost {
+  font-size: 0.8rem;
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.3rem;
+}
+
+.kf-inherit-row__button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-inherit-row__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kf-inheritance-screen__nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.kf-inheritance-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

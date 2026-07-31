@@ -1,0 +1,129 @@
+/*
+ * 継ぐ火 -Kept Flame- ＋セーブ/設定(M33)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-settings-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-settings__info {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-settings__seed,
+.kf-settings__capacity {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  color: #5b534b;
+  margin: 0 0 0.25rem;
+}
+
+.kf-settings__capacity[data-capacity-level="warning"],
+.kf-settings__capacity[data-capacity-level="abort"] {
+  color: #a11334;
+  font-weight: 600;
+}
+
+.kf-settings__export,
+.kf-settings__import {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-settings__section-title {
+  font-size: 0.9rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-settings__section-note {
+  font-size: 0.78rem;
+  color: #5b534b;
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__export-button,
+.kf-settings__import-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-settings__export-button {
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__import-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kf-settings__export-text,
+.kf-settings__import-text {
+  display: block;
+  width: 100%;
+  min-height: 88px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-family: monospace;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  box-sizing: border-box;
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__import-file {
+  display: block;
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__import-outcome {
+  font-size: 0.82rem;
+  margin: 0.5rem 0 0;
+}
+
+.kf-settings__import-outcome--success {
+  color: #24201c;
+}
+
+.kf-settings__import-outcome--error {
+  color: #a11334;
+  font-weight: 600;
+}
+
+.kf-settings-screen__nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.kf-settings-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

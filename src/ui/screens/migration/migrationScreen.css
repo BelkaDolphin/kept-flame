@@ -1,0 +1,261 @@
+/*
+ * 継ぐ火 -Kept Flame- ⑩大移動ナップサックUI(M33)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。中立色は appShell.css/tags-spec.md
+ * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
+ */
+
+.kf-migration-screen__title {
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.kf-migration-screen__note {
+  font-size: 0.75rem;
+  color: #5b534b;
+  padding: 0.5rem 0.6rem;
+  margin: 0 0 0.6rem;
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  background: #faf8f5;
+}
+
+.kf-migration-screen__inactive,
+.kf-migration-screen__empty {
+  font-size: 0.85rem;
+  color: #5b534b;
+}
+
+.kf-migration-screen__subtitle {
+  font-size: 0.85rem;
+  margin: 0.7rem 0 0.3rem;
+}
+
+.kf-migration-screen__recommend-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+  margin: 0 0 0.5rem;
+}
+
+.kf-migration-screen__recommend-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kf-exodus__record-list,
+.kf-exodus__crew-list {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.kf-exodus__record-button,
+.kf-exodus__crew-button {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+  text-align: left;
+}
+
+.kf-exodus__record-button[aria-pressed="true"],
+.kf-exodus__crew-button[aria-pressed="true"] {
+  border-color: #24201c;
+  border-width: 2px;
+  background: #faf8f5;
+}
+
+.kf-exodus__record-tech,
+.kf-exodus__crew-id {
+  font-weight: 600;
+}
+
+.kf-exodus__record-medium,
+.kf-exodus__record-weight,
+.kf-exodus__crew-morale,
+.kf-exodus__crew-traits {
+  font-size: 0.75rem;
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
+}
+
+.kf-exodus__preview {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-exodus__preview-inactive {
+  font-size: 0.82rem;
+  color: #5b534b;
+}
+
+.kf-exodus__preview-capacity,
+.kf-exodus__preview-earned {
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.3rem;
+}
+
+/* [M33] 落ちるもの/永久喪失。検収条件(何が落ちるかのプレビュー)なので目立たせる。 */
+.kf-exodus__preview-dropped {
+  font-size: 0.8rem;
+  color: #8c290b;
+  margin: 0 0 0.3rem;
+}
+
+.kf-exodus__preview-lost {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #a11334;
+  margin: 0 0 0.3rem;
+}
+
+.kf-migration-screen__seed-label {
+  display: block;
+  font-size: 0.78rem;
+  color: #5b534b;
+  margin: 0 0 0.6rem;
+}
+
+.kf-migration-screen__seed-input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  margin-top: 0.25rem;
+  box-sizing: border-box;
+}
+
+.kf-migration-screen__execute-button {
+  width: 100%;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.5rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #a11334;
+  cursor: pointer;
+  margin: 0 0 0.7rem;
+}
+
+.kf-migration-screen__execute-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kf-migration__confirm {
+  border: 2px solid #a11334;
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  background: #faf8f5;
+  margin: 0 0 0.7rem;
+}
+
+.kf-migration__confirm-message {
+  font-size: 0.82rem;
+  margin: 0 0 0.5rem;
+}
+
+.kf-migration__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-migration__confirm-execute-button,
+.kf-migration__confirm-cancel-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #a11334;
+  cursor: pointer;
+}
+
+.kf-migration__confirm-cancel-button {
+  border-color: #8a857d;
+  color: #24201c;
+}
+
+.kf-exodus__completed {
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  background: #faf8f5;
+  margin: 0 0 0.6rem;
+}
+
+.kf-exodus__completed-message {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.kf-exodus__completed-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-migration-screen__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-migration-screen__nav-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}

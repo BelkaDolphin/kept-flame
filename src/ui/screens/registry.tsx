@@ -9,9 +9,8 @@
 // **[M30]** ②格子ビュー/③施設詳細・増築/④住民一覧・配置を実装済みに追加。
 // **[M31]** ⑤研究ツリー/⑥成文化キューを実装済みに追加。
 // **[M32]** ⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理を実装済みに追加。
-// 残り(⑩⑪・設定)は {@link PlaceholderScreen}(画面名 + 「未実装(Mxx)」)
-// である。**ルート自体は 12画面ぶん登録する**(タスク指示)ので、①のバッジ
-// からのワンタップ遷移も、URL 直打ちも、いま全部通る。
+// **[M33]** ⑩大移動ナップサックUI/⑪継承点購入/＋セーブ・設定を実装済みに追加。
+// これで 12画面 + 設定の全件が {@link PlaceholderScreen} を経由しなくなった。
 // ---------------------------------------------------------------------------
 
 import type { VNode } from "preact";
@@ -23,11 +22,13 @@ import { ExpeditionScreen } from "./expedition/ExpeditionScreen";
 import { FacilityScreen } from "./facility/FacilityScreen";
 import { GridScreen } from "./grid/GridScreen";
 import { HomeHub } from "./home/HomeHub";
+import { InheritanceScreen } from "./inheritance/InheritanceScreen";
+import { MigrationScreen } from "./migration/MigrationScreen";
 import { OutpostsScreen } from "./outposts/OutpostsScreen";
-import { PlaceholderScreen } from "./PlaceholderScreen";
 import { ResearchScreen } from "./research/ResearchScreen";
 import { ResidentsScreen } from "./residents/ResidentsScreen";
 import { ReturnDigest } from "./digest/ReturnDigest";
+import { SettingsScreen } from "./settings/SettingsScreen";
 import type { ScreenProps } from "./screenProps";
 
 export interface ScreenEntry {
@@ -38,14 +39,6 @@ export interface ScreenEntry {
    */
   readonly ownerTask: string | null;
   readonly render: (props: ScreenProps) => VNode;
-}
-
-function placeholder(id: ScreenId, ownerTask: string): ScreenEntry {
-  return {
-    id,
-    ownerTask,
-    render: (props) => <PlaceholderScreen {...props} screenId={id} ownerTask={ownerTask} />,
-  };
 }
 
 /** 画面 ID → 実装。**全件必須**(欠けると型エラー)。 */
@@ -75,10 +68,18 @@ export const SCREEN_REGISTRY: { readonly [K in ScreenId]: ScreenEntry } = {
     ownerTask: null,
     render: (props) => <OutpostsScreen {...props} />,
   },
-  migration: placeholder("migration", "M33"),
-  inheritance: placeholder("inheritance", "M33"),
+  migration: {
+    id: "migration",
+    ownerTask: null,
+    render: (props) => <MigrationScreen {...props} />,
+  },
+  inheritance: {
+    id: "inheritance",
+    ownerTask: null,
+    render: (props) => <InheritanceScreen {...props} />,
+  },
   digest: { id: "digest", ownerTask: null, render: (props) => <ReturnDigest {...props} /> },
-  settings: placeholder("settings", "M33"),
+  settings: { id: "settings", ownerTask: null, render: (props) => <SettingsScreen {...props} /> },
 };
 
 /** 反復用(宣言順 = GDD 6.6 の表順)。 */
