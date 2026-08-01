@@ -167,6 +167,25 @@
   flex: 0 0 auto;
 }
 
+/* --- [2026-08-02裁定・台帳v10 必-1] 研究チップ「停止中」の淡色表示 ----------- */
+
+.kf-hud__chip--muted .kf-hud__chip-label,
+.kf-hud__chip--muted .kf-hud__chip-value {
+  color: var(--kf-ink-muted);
+  font-weight: 400;
+}
+
+/* --- [M59] テストプレイ加速モードのインジケータ(戻し忘れ防止) -------------- */
+
+.kf-hud__chip--testplay {
+  border-color: var(--kf-urgency-warn-line);
+  background: var(--kf-urgency-warn-fill);
+}
+
+.kf-hud__chip--testplay .kf-hud__chip-value {
+  color: var(--kf-urgency-warn-ink);
+}
+
 /* --- 画面本体 -------------------------------------------------------------- */
 
 .kf-app__screen {

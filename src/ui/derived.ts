@@ -259,6 +259,64 @@ export interface ResearchView {
 }
 
 /**
+ * [2026-08-02裁定・台帳v10 必-1] ヘッダ研究チップ(§7 手前参照)が表示する最小限の
+ * 値。「いま研究点が実際に流れ込んでいる対象」= `currentResearch(state)`
+ * (`engine/rules/research.ts` §2。選択が有効ならそれ/無ければ ID 昇順先頭)
+ * であり、`researchTree` 全 24 行を組み立てずに済む軽量版。
+ */
+export interface ResearchChipView {
+  readonly techId: EntityId;
+  /** floor 済みの整数(0〜100)。研究コストが 0 以下の tech は 100 固定。 */
+  readonly progressPercent: number;
+  /**
+   * [2026-08-02差し戻し・台帳v10 必-1] **台帳の眼目そのもの**: 対象 tech は
+   * 選ばれている(`completedTick === null` かつ (B) 未喪失)のに、研究点レートが
+   * 実質 0(= 研究点産出施設に「稼働」就労者が誰もいない。作業台から人を外した
+   * 等)で進捗が凍っている状態。`hasActiveResearchProduction` 参照。
+   */
+  readonly stalled: boolean;
+}
+
+/**
+ * [2026-08-02差し戻し・台帳v10 必-1] 研究点レートが実際に正か
+ * (= 研究点産出施設(`output.kind === "research"`)が 1 つでも「稼働」しているか)。
+ *
+ * 台帳v10 必-1 の眼目は「作業台から人を外して研究が止まっていても気づけない」
+ * ことへの対応であり、`currentResearch` の**選択の有無**(state が対象を持つか)
+ * だけでは検出できない——選択は生きたまま、稼働就労者が 0 人になって研究点
+ * レートだけが 0 に落ちるケースが本命である。
+ *
+ * `computeProductionRates`(rules/production.ts)を丸ごと呼ぶと保管上限解決・
+ * mastery 蓄積まで走る重い処理になるので、ここでは同モジュールが公開する
+ * 2 つの純関数(`facilityOutputPerTick`/`activeLaborFix`)だけを使い、
+ * 「研究点産出施設のうち基礎産出と稼働労働の両方が正のものが 1 つでもあるか」
+ * だけを見る軽量判定にする。
+ *
+ * **隣接乗数を掛けずに済む根拠**: 隣接ボーナス/過密ペナルティはタグ横断で
+ * ±60%にクランプされる(GDD 6.3・adjacency.ts の `ADJACENCY_CLAMP_*`)ため、
+ * 乗数は常に正である。よって `base>0 && labor>0` ⟺
+ * `rate = base×multiplier×labor > 0`(正の乗数を掛けても符号は保存される)。
+ * 乗数を実際に読まずに済むので、ヘッダの軽量チップ 1 個のために隣接行列
+ * computed への依存を増やさずに済む。
+ *
+ * **精度の限界(既知・意図的な妥協)**: `activeLaborFix` は住民単位の想起困難
+ * 停止(`isWorkerActiveAtFacility`)までは見るが、`buildImpairmentIndex`(区間
+ * ごと 1 パスの索引)は渡さない——引数省略時はその場で都度判定する低頻度経路
+ * になる(production.ts の doc 参照)。③施設詳細(`buildFacilityDetail` 系)が
+ * 同じ精度(索引省略)で妥協しているのに揃えたもので、ヘッダのチップ 1 個の
+ * ために (住民,tech) 別索引を毎 tick 再構築するコストは払わない。
+ */
+function hasActiveResearchProduction(state: GameState, content: EngineContent): boolean {
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "research") continue;
+    if (toRaw(facilityOutputPerTick(def, facility.level)) <= 0) continue;
+    if (toRaw(activeLaborFix(state, content, facility, def, state.tick)) > 0) return true;
+  }
+  return false;
+}
+
+/**
  * [M30] ステータス 5 種(裁定 B8 / GDD 7.1)の表示値。trait 適用後
  * (`effectiveStats`)を近似値へ落としたもの——生産式が実際に読む値と同じ
  * (rules/production.ts の `residentContribution` と同一の合成経路)。
@@ -760,6 +818,12 @@ export interface StoreDerived {
   readonly tick: ReadonlyComputed<number>;
   readonly resources: ReadonlyComputed<readonly ResourceView[]>;
   readonly research: ReadonlyComputed<readonly ResearchView[]>;
+  /**
+   * [2026-08-02裁定・台帳v10 必-1] ヘッダ研究チップ用の軽量版(§7 手前・
+   * `ResearchChipView` 参照)。`researchTree`(全 tech 24 行)と違い
+   * 「いま点が流れ込んでいる 1 件」だけを持つ。
+   */
+  readonly researchChip: ReadonlyComputed<ResearchChipView | null>;
   readonly residents: ReadonlyComputed<readonly ResidentView[]>;
   readonly codify: ReadonlyComputed<readonly CodifyView[]>;
   readonly homeBadges: ReadonlyComputed<HomeBadges>;
@@ -1022,6 +1086,34 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
       }));
     },
     { name: "research" },
+  );
+
+  /**
+   * [2026-08-02裁定・台帳v10 必-1] ヘッダ研究チップ。`currentResearch` が
+   * undefined(未選択かつ未完了 research が無い = 対象そのものが無い)なら null。
+   * 対象があっても `stalled` が true なら「選ばれてはいるが進んでいない」
+   * (`hasActiveResearchProduction` 直前の doc 参照・差し戻しの本題)。
+   */
+  const researchChip = computed<ResearchChipView | null>(
+    () => {
+      const state: GameState = sources.state.value;
+      const content: EngineContent = sources.content.value;
+      const current = currentResearch(state);
+      if (current === undefined) return null;
+      const def = content.techDefs.get(current.techId);
+      if (def === undefined) return null; // 参照整合は engine 側が保証するが、表示側は捏造しない。
+      const stalled = !hasActiveResearchProduction(state, content);
+      const costApprox = toApproxNumber(def.researchCostFix);
+      if (costApprox <= 0) return { techId: current.techId, progressPercent: 100, stalled };
+      const progressApprox = toApproxNumber(current.progress);
+      const clampedApprox = Math.min(progressApprox, costApprox);
+      return {
+        techId: current.techId,
+        progressPercent: Math.floor((clampedApprox / costApprox) * 100),
+        stalled,
+      };
+    },
+    { name: "researchChip" },
   );
 
   const residents = computed<readonly ResidentView[]>(
@@ -1293,6 +1385,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     tick,
     resources,
     research,
+    researchChip,
     residents,
     codify,
     homeBadges,

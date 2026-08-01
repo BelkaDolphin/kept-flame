@@ -39,9 +39,10 @@ import { resolveLocalStorage } from "../../../platform/localStorageMirror";
 import { encodeSaveRecord } from "../../../platform/persistence";
 import { checkSaveCapacity, type SaveCapacityCheck } from "../../../platform/saveCapacity";
 import { createNewGameState } from "../../../newGame";
+import { TESTPLAY_SPEEDS, type TestplaySpeed } from "../../testplaySpeed";
 import type { ScreenProps } from "../screenProps";
 import { useToastStack, ToastStackView } from "../Toast";
-import { useScreenMount } from "../useStoreSignal";
+import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./settingsScreen.css";
 
 // --- 1. インポート結果の表示モデル -------------------------------------------
@@ -241,6 +242,53 @@ export function ResetGameSection({
   );
 }
 
+// --- 2c. [M59] テストプレイ支援(hooks 不使用・直接テスト可能) ----------------
+//
+// 実際の速度変更(`ScaledClock.setSpeed`)とその UI 反応系ブリッジ
+// (`createTestplaySpeedController`)は `src/platform/timeScale.ts` /
+// `src/ui/testplaySpeed.ts` に既にあるので、ここは ×1/×60/×720 の3択ボタンと
+// 現在値の表示だけを持つ薄い部品にする(`ResetGameSection` と同じ「hooks を
+// 持たない・値とコールバックだけを props で受ける」形)。
+
+export interface TestplaySpeedSectionProps {
+  readonly speed: number;
+  readonly onSetSpeed: (speed: TestplaySpeed) => void;
+}
+
+export function TestplaySpeedSection({ speed, onSetSpeed }: TestplaySpeedSectionProps) {
+  return (
+    <section class="kf-settings__testplay" aria-label="テストプレイ支援">
+      <h3 class="kf-settings__section-title">テストプレイ支援</h3>
+      <p class="kf-settings__section-note">
+        時間の進みを速めて動作確認をしやすくします。セッション限りの設定です(リロードすると必ず ×1
+        に戻ります)。
+      </p>
+      <p class="kf-settings__testplay-current">
+        現在の速度: <strong>×{speed}</strong>
+      </p>
+      <div class="kf-settings__testplay-buttons" role="group" aria-label="速度選択">
+        {TESTPLAY_SPEEDS.map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            class="kf-settings__testplay-button"
+            aria-pressed={candidate === speed}
+            onClick={() => onSetSpeed(candidate)}
+          >
+            ×{candidate}
+          </button>
+        ))}
+      </div>
+      {speed !== 1 && (
+        <p class="kf-settings__testplay-warning" role="status">
+          いま ×{speed} で進行しています。ヘッダにインジケータが常時表示されます。テストが終わったら
+          ×1 に戻すことを推奨します。
+        </p>
+      )}
+    </section>
+  );
+}
+
 // --- 3. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 function downloadTextFile(filename: string, text: string): void {
@@ -253,9 +301,12 @@ function downloadTextFile(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function SettingsScreen({ store, onNavigate }: ScreenProps) {
+export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps) {
   // 現在地の宣言はシェル(shellSession)の仕事なので activate は false(M18★5)。
   useScreenMount(store, "settings", { activate: false });
+  // [M59] ヘッダのインジケータと同じ signal を購読するので、設定画面で切り替えた
+  // 直後に AppShell 側の表示も揃う(2 箇所とも同じ `TestplaySpeedController`)。
+  const testplaySpeedValue = useSignalValue(testplaySpeed.speed);
 
   const [exportedText, setExportedText] = useState<string | null>(null);
   const [importText, setImportText] = useState("");
@@ -381,6 +432,8 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
         outcome={outcome}
         selectedFileName={selectedFileName}
       />
+
+      <TestplaySpeedSection speed={testplaySpeedValue} onSetSpeed={testplaySpeed.setSpeed} />
 
       <ResetGameSection
         step={resetStep}

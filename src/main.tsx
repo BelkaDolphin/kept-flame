@@ -40,7 +40,7 @@ import {
   saveBackupReminderPromptSnapshot,
 } from "./platform/backupReminder";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "./platform/catchUp";
-import { createTickDriver } from "./platform/clock";
+import { createTickDriver, performanceClock } from "./platform/clock";
 import {
   createInstallPromotionTracker,
   isStandaloneDisplayMode,
@@ -64,6 +64,7 @@ import {
 } from "./platform/persistence";
 import { createBrowserRouterHost, createHashRouter } from "./platform/router";
 import { SaveScheduler, attachLifecycleFlush } from "./platform/saveScheduler";
+import { createScaledClock } from "./platform/timeScale";
 import { startCatchUpWorker } from "./platform/workerClient";
 import { createNewGameState } from "./newGame";
 import {
@@ -81,6 +82,7 @@ import {
 } from "./ui/screens";
 import { createShellSession } from "./ui/shellSession";
 import { createGameStore, type GameStore } from "./ui/store";
+import { createTestplaySpeedController } from "./ui/testplaySpeed";
 
 // `beforeinstallprompt` はページ生存中いつでも来うるが、条件を満たしていれば
 // 早い段階で発火することが多い。boot() の非同期処理(content 検証・セーブ
@@ -188,10 +190,21 @@ async function boot(): Promise<void> {
   // --- tick 駆動(ADR-026)---------------------------------------------------
   // pump の呼ばれ方(rAF の発火回数)は結果に影響しない。進める量は
   // `planTick` が単調時刻から純関数で決める(platform/clock.ts §1)。
+  //
+  // [M59] `createTickDriver` へ渡す clock だけを倍速ラッパ(`timeScale.ts`)で
+  // 包む。**セーブ/バックアップ推奨/PWA 誘導/このあとの起動時オフライン復帰
+  // 計算(`bootPlan`)には絶対に触れない**——それらは `performanceClock`/壁時計を
+  // 個別に読んでおり(saveScheduler.ts の `systemSaveClock` 等)、ここでは
+  // tick 駆動の 1 箇所だけを差し替える。既定 speed=1 なので、通常時は
+  // `performanceClock` と完全に同じ値を返す(挙動不変)。
+  const scaledClock = createScaledClock(performanceClock);
+  const testplaySpeed = createTestplaySpeedController(scaledClock);
+
   let catchUpInFlight = false;
 
   const driver = createTickDriver({
     startTick: store.peekState().tick,
+    clock: scaledClock,
     onAdvance: (toTick) => {
       const result = store.dispatch({ type: "ticked", toTick });
       if (result.stateChanged) scheduler?.recordCommands(store.peekState());
@@ -347,6 +360,7 @@ async function boot(): Promise<void> {
       notificationOptIn={notificationOptIn}
       backupReminder={backupReminder}
       loadFailure={loadFailure}
+      testplaySpeed={testplaySpeed}
     />,
     root,
   );

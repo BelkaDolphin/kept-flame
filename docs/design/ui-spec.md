@@ -166,6 +166,8 @@
 | `src/ui/screens/format.ts` | ゲーム内時計の整形(ロケール非依存) | 同上 |
 | `src/ui/appShell.css` | シェル + バッジ + ①⑫ の意匠(ライト固定) | — |
 | `src/newGame.ts` | 新規ゲームの初期盤面(**暫定**・§7-7) | — |
+| `src/platform/timeScale.ts` | **[M59]** `createScaledClock`(倍速ラッパ・§10.2) | `tests/platform/timeScale.test.ts` |
+| `src/ui/testplaySpeed.ts` | **[M59]** `createTestplaySpeedController`(UI 反応系ブリッジ・§10.2) | `tests/ui/testplaySpeed.test.ts` |
 | `src/main.tsx` / `index.html` | composition root(副作用の組み立て) | ブラウザ実機のみ(§7-8) |
 
 ---
@@ -210,3 +212,28 @@ engine/schema/content/conformance は無改変(M50 で完成済みのコマン�
 - ①`commandsSinceExport`(バックアップ推奨のコマンド数軸)を未結線。`store.dispatch({type:"commandApplied"})` は画面から直接呼ばれるため、composition root(`main.tsx`)がコマンド発行の粒度で介入する経路が無い(`SaveScheduler.recordCommandOutcome` も同じ制約で現状どこからも呼ばれていない=architecture.md §4-1 の記述と実装の食い違いは別途申し送り)。経過実時間(既定24h)軸のみで周期表示は成立する。
 - ②衛星拠点の常駐者候補は寿命/派遣中で絞り込まない(ResidentsScreen.tsx §3 と同じ立場の踏襲)。
 - ③「最初からやり直す」の確認は2段(大移動は1段)。誤タップ防止の強度をタスク指示どおり引き上げた設計判断であり、GDD/ADR に段数の明文規定はない。
+
+---
+
+## 10. ヘッダ研究チップ + テストプレイ加速モード([2026-08-02裁定・台帳v10 必-1] / [2026-08-02ユーザー要望] M59)
+
+### 10.1 ヘッダ研究チップ(台帳v10 必-1)
+
+UX プレイテストの指摘(資源以外の「いま何が進んでいるか」がヘッダから見えない)への対応。**研究点はストックではなくレート**(`rules/production.ts` の `researchRateFix`)であり、選択中の 1 本(`currentResearch`・`rules/research.ts` §2。[M50] 選択が有効ならそれ/無ければ ID 昇順先頭)へ直接流れ込む設計なので、資源HUDのような在庫チップが無かった。
+
+- **表示**: 資源HUD(`ResourceHud`)の隣に 1 個だけ追加(`AppShell.tsx` の `ResearchChip`)。研究中は「🔬 `<tech和名>` `<floor(進捗/コスト×100)>`%」、`currentResearch` が undefined(未選択かつ未完了 research が皆無、または残り全てが (B) 一回性喪失で対象外)のときは「🔬 停止中」を `--kf-ink-muted` で淡色表示する。
+- **ロジックの置き場**: `derived.ts` の `researchChip`(`ResearchChipView | null`)computed に集約(`orderHudResources` と同じ「純ロジックは derived/純関数、コンポーネントは表示専用」の分担)。研究コストが 0 以下の tech は 100% 固定、進捗がコストを僅かに超える(切り上げ由来・研究完了直前の 1 tick)場合は表示のみ 100 にクランプする(研究ツリー画面の既存クランプと同じ考え方)。
+- **[2026-08-02差し戻し] `stalled`(研究点レート0=停止中)**: 台帳v10 必-1 の眼目は「作業台(研究机等)から人を外して研究が止まっていても気づけない」ことであり、`currentResearch` の**選択の有無**だけでは検出できない(選択は生きたまま研究点レートだけが 0 に落ちるケースが本命)。`ResearchChipView.stalled` は「研究点産出施設(`output.kind === "research"`)のうち基礎産出(`facilityOutputPerTick`)と稼働労働(`activeLaborFix`)の両方が正のものが 1 つでもあるか」の軽量判定(`hasActiveResearchProduction`・derived.ts)で決める。隣接乗数は掛けない(タグ横断 ±60% クランプで常に正なので符号に影響しない・doc コメント参照)。**精度の限界**: 想起困難の判定は毎回その場で行い(区間索引 `buildImpairmentIndex` は渡さない)、③施設詳細と同じ精度に揃えてある。`stalled: true` のときは tech名/%を**残したまま**淡色化し、値の末尾に「(停止中)」を付ける(`chip === null` の「🔬 停止中」とは区別する)。
+- **タイポ**: 既存 HUD チップと同型(`.kf-hud__chip`)・12px 床(`--kf-fs-micro`)を継承。停止中(`chip === null` または `stalled: true`)は `.kf-hud__chip--muted` 修飾。
+
+### 10.2 テストプレイ加速モード(ロードマップ M59)
+
+プレイテストで深部探索・72h オフライン復帰等を待てない問題への対応。**セッション限り**(localStorage 等へ一切永続化しない。リロードで必ず ×1 に戻る)。
+
+- **`src/platform/timeScale.ts`**: `createScaledClock(base: MonotonicClock)` が `ScaledClock`(`now()`/`speed()`/`setSpeed(n)`)を返す。式は `scaledNow = scaledAnchorMs + (base.now() - baseAnchorMs) * speed`。`setSpeed` は両アンカーを呼び出し時点の値へ引き直すので、直前直後で `now()` は連続(ジャンプ無し・巻き戻り無し)。`speed` は正の有限数のみ受理し、それ以外は `TimeScaleError`。
+- **結線は 1 点のみ**: `src/main.tsx` が `createTickDriver` へ渡す `clock` オプションだけを `createScaledClock(performanceClock)` の結果に差し替える。**`saveScheduler`(`systemSaveClock`)・`backupReminder`/`installPromotion`/`notificationCapability`(いずれも壁時計 `Date.now()`)・起動時オフライン復帰の経過計算(`main.tsx` の `bootPlan`)には触れない**——これらは実時間そのものを扱う責務であり、速度変更は物理的に main.tsx 起動後(UI 操作後)にしか起こり得ないため、起動直後の catch-up 判定は構造的に影響を受けない。
+- **UI 反応系ブリッジ**: `src/ui/testplaySpeed.ts` の `createTestplaySpeedController(clock)` が `ScaledClock` の上に `reactive.ts` の `Signal` を 1 個だけ被せ、＋設定画面(書き込み)とヘッダのインジケータ(読み取り専用)の両方が同じ値を見られるようにする。書き込み口は `setSpeed` 1 本(`Signal` 自体は外へ出さない・reactive.ts の規約どおり)。
+- **設定画面**: ＋設定「テストプレイ支援」節(`TestplaySpeedSection`・hooks 不使用の部品)に ×1/×60/×720 の3択ボタン。現在値は本文(「現在の速度: ×N」)と `aria-pressed` の両方で明示する(色だけに頼らない・全画面共通規約§0-6)。
+- **ヘッダインジケータ**: ×1 のときは何も描かない(平常時にヘッダを汚さない)。×1 以外のときだけ `TestplaySpeedIndicator`(`AppShell.tsx`)が「⏩×N」を常時表示し、戻し忘れに気づけるようにする。
+- **`ScreenProps`/`AppShellProps` への追加**: `testplaySpeed: TestplaySpeedController` を `bootTick` と同じ扱い(composition root が 1 個だけ作り、セーブに載らない UI 状態として全画面 props に配る)で追加した。
+- **engine/schema/content/conformance は無改変**。engine は tick 番号しか見ないため、速度変更は決定論に影響しない(ゲーム内 tick の刻み方自体は変わらず、実時間との対応だけが変わる)。

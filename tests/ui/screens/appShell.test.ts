@@ -16,7 +16,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { ScreenHost, ScreenNav } from "../../../src/ui/AppShell";
+import { ScreenHost, ScreenNav, researchChipDisplay } from "../../../src/ui/AppShell";
 import {
   NAV_GROUPS,
   navGroupScreenIds,
@@ -39,12 +39,24 @@ import { ReturnDigest } from "../../../src/ui/screens/digest/ReturnDigest";
 import { SettingsScreen } from "../../../src/ui/screens/settings/SettingsScreen";
 import { SCREEN_ENTRIES, SCREEN_REGISTRY } from "../../../src/ui/screens/registry";
 import { formatGameClock, formatTickSpan } from "../../../src/ui/screens/format";
+import { Signal } from "../../../src/ui/reactive";
 import type { GameStore } from "../../../src/ui/store";
-import { createTestStore } from "../fixtures";
+import type { TestplaySpeedController } from "../../../src/ui/testplaySpeed";
+import { createTestStore, id } from "../fixtures";
+
+/** [M59] テスト用の最小コントローラ(実 ScaledClock には繋がない・登録テスト専用)。 */
+function fakeTestplaySpeed(): TestplaySpeedController {
+  return { speed: new Signal(1), setSpeed: () => undefined };
+}
 
 /** レンダリングされない props(vnode を作るだけなので store は触られない)。 */
 function screenProps(store: GameStore) {
-  return { store, bootTick: 0, onNavigate: () => undefined };
+  return {
+    store,
+    bootTick: 0,
+    onNavigate: () => undefined,
+    testplaySpeed: fakeTestplaySpeed(),
+  };
 }
 
 describe("画面レジストリ(12画面 + 設定の全件登録)", () => {
@@ -250,6 +262,33 @@ describe("ScreenNav([束A] 5グループ集約 + サブ項目展開)", () => {
         expect(text).not.toContain(`${String(SCREEN_META[id].order ?? "")}. `);
       }
     }
+  });
+});
+
+// [2026-08-02差し戻し・台帳v10 必-1] `ResearchChip`(§1-3)自体は hooks を持つため
+// ColonyClock/ResourceHud と同じ理由で直接呼び出すテストができない。表示ロジック
+// (class名・値の文言)は `researchChipDisplay`(hooks 不使用)へ切り出してあるので
+// ここで直接固定する。`stalled` の意味論(derived.ts の `researchChip`)自体は
+// tests/ui/derived.test.ts が固定済み。
+describe("[2026-08-02差し戻し・台帳v10 必-1] researchChipDisplay(研究チップの停止中表示)", () => {
+  it("stalled=false: 通常表示(淡色化なし・(停止中)を付けない)", () => {
+    const display = researchChipDisplay({
+      techId: id("techFireStarting"),
+      progressPercent: 43,
+      stalled: false,
+    });
+    expect(display.className).toBe("kf-hud__chip");
+    expect(display.valueText).toBe("43%");
+  });
+
+  it("stalled=true: tech名/%を残したまま淡色化 + 「(停止中)」を付ける", () => {
+    const display = researchChipDisplay({
+      techId: id("techFireStarting"),
+      progressPercent: 43,
+      stalled: true,
+    });
+    expect(display.className).toBe("kf-hud__chip kf-hud__chip--muted");
+    expect(display.valueText).toBe("43%(停止中)");
   });
 });
 

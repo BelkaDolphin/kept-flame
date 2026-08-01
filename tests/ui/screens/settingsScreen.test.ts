@@ -21,6 +21,7 @@ import {
   ExportPanel,
   ImportPanel,
   ResetGameSection,
+  TestplaySpeedSection,
   type ImportOutcomeView,
 } from "../../../src/ui/screens/settings/SettingsScreen";
 import { createTestStore } from "../fixtures";
@@ -156,6 +157,68 @@ describe("ImportPanel", () => {
       selectedFileName: "kept-flame-save-tick1000.json",
     });
     expect(flattenText(selected)).toContain("kept-flame-save-tick1000.json");
+  });
+});
+
+// [M59] ボタンの走査は ResetGameSection のテストと同じ vnode 再帰ヘルパを使う。
+function findButtonsWithLabel(
+  node: unknown,
+  out: { readonly onClick: () => void; readonly text: string; readonly pressed: unknown }[],
+): void {
+  if (Array.isArray(node)) {
+    for (const child of node) findButtonsWithLabel(child, out);
+    return;
+  }
+  if (node === null || node === undefined || typeof node !== "object") return;
+  const candidate = node as {
+    readonly type?: unknown;
+    readonly props?: {
+      readonly onClick?: unknown;
+      readonly children?: unknown;
+      readonly "aria-pressed"?: unknown;
+    };
+  };
+  if (candidate.type === "button" && typeof candidate.props?.onClick === "function") {
+    out.push({
+      onClick: candidate.props.onClick as () => void,
+      text: flattenText(candidate.props.children),
+      pressed: candidate.props["aria-pressed"],
+    });
+    return;
+  }
+  findButtonsWithLabel(candidate.props?.children, out);
+}
+
+describe("[M59] TestplaySpeedSection(テストプレイ加速モード・×1/×60/×720)", () => {
+  it("3択ボタンを表示し、現在値を明示する(本文 + aria-pressed の両方)", () => {
+    const vnode = TestplaySpeedSection({ speed: 60, onSetSpeed: () => undefined });
+    const text = flattenText(vnode);
+    expect(text).toContain("×60");
+    expect(text).toContain("現在の速度");
+
+    const buttons: { onClick: () => void; text: string; pressed: unknown }[] = [];
+    findButtonsWithLabel(vnode, buttons);
+    expect(buttons.map((b) => b.text)).toEqual(["×1", "×60", "×720"]);
+    expect(buttons.map((b) => b.pressed)).toEqual([false, true, false]);
+  });
+
+  it("ボタンを押すと onSetSpeed がその速度で呼ばれる", () => {
+    const onSetSpeed = vi.fn();
+    const vnode = TestplaySpeedSection({ speed: 1, onSetSpeed });
+    const buttons: { onClick: () => void; text: string; pressed: unknown }[] = [];
+    findButtonsWithLabel(vnode, buttons);
+    buttons[2]?.onClick(); // ×720
+    expect(onSetSpeed).toHaveBeenCalledWith(720);
+  });
+
+  it("×1(既定)のときは戻し忘れ警告文を出さない", () => {
+    const vnode = TestplaySpeedSection({ speed: 1, onSetSpeed: () => undefined });
+    expect(flattenText(vnode)).not.toContain("戻すことを推奨");
+  });
+
+  it("×1 以外のときは戻し忘れ警告文を出す", () => {
+    const vnode = TestplaySpeedSection({ speed: 720, onSetSpeed: () => undefined });
+    expect(flattenText(vnode)).toContain("戻すことを推奨");
   });
 });
 

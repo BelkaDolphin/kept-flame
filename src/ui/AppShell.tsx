@@ -53,14 +53,15 @@ import { InstallPromotionBanner } from "./InstallPromotionBanner";
 import { LoadFailureBanner } from "./LoadFailureBanner";
 import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
-import { resourceLabel } from "./screens/contentLabels";
+import { resourceLabel, techLabel } from "./screens/contentLabels";
 import { formatGameClock, formatResourceAmount } from "./screens/format";
 import { SCREEN_META, type ScreenId } from "./screens";
 import { SCREEN_REGISTRY } from "./screens/registry";
 import { useSignalValue } from "./screens/useStoreSignal";
-import type { ResourceView } from "./derived";
+import type { ResearchChipView, ResourceView } from "./derived";
 import type { ShellSession } from "./shellSession";
 import type { GameStore } from "./store";
+import type { TestplaySpeedController } from "./testplaySpeed";
 
 // --- 1. ゲーム内時計(毎分ここだけが再描画される・§3) -----------------------
 
@@ -123,6 +124,88 @@ export function ResourceHud({ store }: ResourceHudProps) {
         </li>
       ))}
     </ul>
+  );
+}
+
+// --- 1-3. 研究チップ(ヘッダ常設・[2026-08-02裁定・台帳v10 必-1]) --------------
+//
+//   資源HUDの隣に「いま研究点が流れ込んでいる tech + 進捗%」を 1 個だけ出す。
+//   研究点はストックではなくレート(`production.ts` の `researchRateFix`)で
+//   あり、選択中の tech(`currentResearch`・engine/rules/research.ts §2)へ
+//   直接流れる設計なので、資源のように在庫を持つ画面が無い——ここがヘッダで
+//   唯一の可視化点になる。ロジック(どの tech か・floor 済み%・`stalled`)は
+//   `derived.ts` の `researchChip` computed に集約済みで、ここでは表示専用
+//   (`orderHudResources` と同じ「純ロジックは derived 側」の分担)。
+//
+//   **[2026-08-02差し戻し] `stalled` の表示**: 台帳v10 必-1 の眼目は「作業台
+//   から人を外して研究が止まっていても気づけない」ことなので、`chip` 自体が
+//   null(対象なし)の場合と、対象はあるがレートが 0 の場合(`stalled: true`)を
+//   混同しない。後者は tech 名と%を**残したまま**淡色化 + 「(停止中)」を添える
+//   (「何が」「どこまで」進んで凍っているかが見えたままであることが重要)。
+//   この分岐(class 名・値の文言)は `researchChipDisplay` という**hooks 不使用の
+//   純関数**へ切り出してある(`orderHudResources` と同じ「表示ロジックは直接
+//   テストできる形にする」作法。コンポーネント自体は hooks を持つため直接
+//   呼び出すテストができない=既存の ColonyClock/ResourceHud と同じ制約)。
+
+export interface ResearchChipDisplay {
+  readonly className: string;
+  readonly valueText: string;
+}
+
+/** `chip !== null` の場合の class 名 / 値表示テキストを決める(hooks 不使用)。 */
+export function researchChipDisplay(chip: ResearchChipView): ResearchChipDisplay {
+  return {
+    className: chip.stalled ? "kf-hud__chip kf-hud__chip--muted" : "kf-hud__chip",
+    valueText: chip.stalled ? `${chip.progressPercent}%(停止中)` : `${chip.progressPercent}%`,
+  };
+}
+
+export interface ResearchChipProps {
+  readonly store: GameStore;
+}
+
+export function ResearchChip({ store }: ResearchChipProps) {
+  const chip = useSignalValue(store.derived.researchChip);
+  if (chip === null) {
+    return (
+      <div class="kf-hud__chip kf-hud__chip--muted" data-testid="research-chip">
+        <span class="kf-hud__chip-label">🔬</span>
+        <span class="kf-hud__chip-value">停止中</span>
+      </div>
+    );
+  }
+  const display = researchChipDisplay(chip);
+  return (
+    <div
+      class={display.className}
+      data-testid="research-chip"
+      data-tech-id={chip.techId}
+      data-stalled={chip.stalled}
+    >
+      <span class="kf-hud__chip-label">🔬 {techLabel(chip.techId)}</span>
+      <span class="kf-hud__chip-value">{display.valueText}</span>
+    </div>
+  );
+}
+
+// --- 1-4. テストプレイ加速モードのインジケータ(ロードマップ M59) -------------
+//
+//   ×1(既定)のときは何も出さない(戻し忘れの心配が無い平常時にヘッダを
+//   汚さない)。×1 以外のときだけ常時表示し、「倍速のまま放置」に気づける
+//   ようにする(タスク指示「戻し忘れ防止」)。書き込み(速度切替)は＋設定画面
+//   「テストプレイ支援」節の担当で、ここは読み取り専用。
+
+export interface TestplaySpeedIndicatorProps {
+  readonly controller: TestplaySpeedController;
+}
+
+export function TestplaySpeedIndicator({ controller }: TestplaySpeedIndicatorProps) {
+  const speed = useSignalValue(controller.speed);
+  if (speed === 1) return null;
+  return (
+    <div class="kf-hud__chip kf-hud__chip--testplay" data-testid="testplay-speed-indicator">
+      <span class="kf-hud__chip-value">⏩×{speed}</span>
+    </div>
   );
 }
 
@@ -224,13 +307,21 @@ export interface ScreenHostProps {
   readonly store: GameStore;
   readonly bootTick: number;
   readonly onNavigate: (screen: ScreenId) => void;
+  /** [M59] ＋設定画面の「テストプレイ支援」節が読み書きする。 */
+  readonly testplaySpeed: TestplaySpeedController;
 }
 
-export function ScreenHost({ screenId, store, bootTick, onNavigate }: ScreenHostProps) {
+export function ScreenHost({
+  screenId,
+  store,
+  bootTick,
+  onNavigate,
+  testplaySpeed,
+}: ScreenHostProps) {
   const entry = SCREEN_REGISTRY[screenId];
   return (
     <main class="kf-app__screen" key={screenId}>
-      {entry.render({ store, bootTick, onNavigate })}
+      {entry.render({ store, bootTick, onNavigate, testplaySpeed })}
     </main>
   );
 }
@@ -288,6 +379,8 @@ export interface AppShellProps {
   readonly backupReminder?: BackupReminderViewModel;
   /** 起動失敗のその場通知(M54)。省略時は描かない。 */
   readonly loadFailure?: LoadFailureViewModel;
+  /** [M59] テストプレイ加速モード。ヘッダのインジケータと＋設定画面の両方が使う。 */
+  readonly testplaySpeed: TestplaySpeedController;
 }
 
 export function AppShell({
@@ -296,6 +389,7 @@ export function AppShell({
   bootTick,
   installPromotion,
   notificationOptIn,
+  testplaySpeed,
   backupReminder,
   loadFailure,
 }: AppShellProps) {
@@ -338,6 +432,8 @@ export function AppShell({
         <div class="kf-app__hud">
           <ColonyClock store={store} />
           <ResourceHud store={store} />
+          <ResearchChip store={store} />
+          <TestplaySpeedIndicator controller={testplaySpeed} />
         </div>
       </header>
       {installPromotion && (
@@ -369,7 +465,13 @@ export function AppShell({
           onClose={() => setBackupReminderClosed(true)}
         />
       )}
-      <ScreenHost screenId={screenId} store={store} bootTick={bootTick} onNavigate={navigate} />
+      <ScreenHost
+        screenId={screenId}
+        store={store}
+        bootTick={bootTick}
+        onNavigate={navigate}
+        testplaySpeed={testplaySpeed}
+      />
       <ScreenNav
         current={screenId}
         onNavigate={navigate}

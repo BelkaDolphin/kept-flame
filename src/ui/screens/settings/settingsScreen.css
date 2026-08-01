@@ -149,6 +149,57 @@
   font-weight: 600;
 }
 
+/* [M59] テストプレイ支援(速度切替) */
+
+.kf-settings__testplay {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-settings__testplay-current {
+  font-size: var(--kf-fs-sub);
+  font-variant-numeric: tabular-nums;
+  color: #24201c;
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__testplay-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-settings__testplay-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  font-variant-numeric: tabular-nums;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-settings__testplay-button[aria-pressed="true"] {
+  border-color: #24201c;
+  border-width: 2px;
+  background: #fcefd0;
+  font-weight: 600;
+}
+
+.kf-settings__testplay-warning {
+  font-size: var(--kf-fs-sub);
+  color: #7a5a00;
+  margin: 0.5rem 0 0;
+}
+
 /* [M54] 最初からやり直す */
 
 .kf-settings__reset {

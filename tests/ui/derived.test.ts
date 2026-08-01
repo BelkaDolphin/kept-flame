@@ -1073,6 +1073,142 @@ describe("[M31] researchTree(⑤研究ツリー・GDD 5/7.4)", () => {
   });
 });
 
+describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チップ)", () => {
+  it("研究中だが研究点産出施設が盤面に無ければ stalled=true(レートが流れていない)", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf(
+      [resident("aTest"), research("rBeta", TECH_BETA.id, 10)], // 10/50 → 20%
+      META,
+    );
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toEqual({
+      techId: TECH_BETA.id,
+      progressPercent: 20,
+      stalled: true,
+    });
+  });
+
+  // [2026-08-02差し戻し・台帳v10 必-1] 本命のケース: 台帳の眼目は
+  // 「作業台(ここでは研究机)から人を外して研究が止まっていても気づけない」
+  // ことなので、`currentResearch` は生きたまま(選択は失効していない)研究点
+  // レートだけが 0 に落ちる状況を区別できることを固定する。
+  it("研究机(研究点産出施設)に稼働就労者がいれば stalled=false", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf(
+      [
+        resident("aScholar"),
+        facility("fDesk", STUDY_DESK.id, 0, [id("aScholar")]),
+        research("rBeta", TECH_BETA.id, 10),
+      ],
+      META,
+    );
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toEqual({
+      techId: TECH_BETA.id,
+      progressPercent: 20,
+      stalled: false,
+    });
+  });
+
+  it("研究机はあるが稼働就労者が0人(作業台から人を外した)なら stalled=true", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf(
+      [
+        facility("fDesk", STUDY_DESK.id, 0), // workerIds 省略 = 空(誰も配置していない)
+        research("rBeta", TECH_BETA.id, 10),
+      ],
+      META,
+    );
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toEqual({
+      techId: TECH_BETA.id,
+      progressPercent: 20,
+      stalled: true,
+    });
+  });
+
+  it("研究机の就労者が想起困難/派遣中で稼働していなければ stalled=true", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf(
+      [
+        resident("aScholar", { dispatched: true }), // 稼働の定義(isWorkerActive)から外れる
+        facility("fDesk", STUDY_DESK.id, 0, [id("aScholar")]),
+        research("rBeta", TECH_BETA.id, 10),
+      ],
+      META,
+    );
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value?.stalled).toBe(true);
+  });
+
+  it("floor であって四捨五入ではない(cost が 100 を割り切らない値で確認)", () => {
+    const testContent = researchTreeContent(); // techAlpha: cost 30
+    const state = stateOf([resident("aTest"), research("rAlpha", TECH_ALPHA.id, 29)], META);
+    const store = createGameStore({ state, content: testContent });
+    // 29/30 * 100 = 96.6666...。floor なら 96、四捨五入なら 97 になる。
+    expect(store.derived.researchChip.value?.progressPercent).toBe(96);
+  });
+
+  it("完了 tick ちょうどの余剰進捗は 100% にクランプする(素の値は変えない)", () => {
+    const testContent = researchTreeContent(); // techAlpha: cost 30
+    const entities: EntityState[] = [
+      resident("aTest"),
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(31), // 切り上げ由来の 1 tick 超過(research.ts の規約)
+        completedTick: null,
+      } satisfies ResearchState,
+    ];
+    const state = stateOf(entities, META);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value?.progressPercent).toBe(100);
+  });
+
+  it("停止中: 未完了の research entity が 1 つも無ければ null", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf([resident("aTest")], META);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toBeNull();
+  });
+
+  it("停止中: 残っているのが完了済みだけでも null", () => {
+    const testContent = researchTreeContent();
+    const entities: EntityState[] = [
+      resident("aTest"),
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+    ];
+    const state = stateOf(entities, META);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toBeNull();
+  });
+
+  it("停止中: (B) 一回性喪失した tech しか無ければ currentResearch の対象から外れて null", () => {
+    const testContent = researchTreeContent();
+    const entities: EntityState[] = [
+      resident("aTest"),
+      {
+        kind: "research",
+        id: id("rRare"),
+        techId: TECH_RARE.id,
+        progress: fixFromInt(0),
+        completedTick: null,
+        loss: { tick: 30, irreversible: true },
+      } satisfies ResearchState,
+    ];
+    const state = stateOf(entities, META);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value).toBeNull();
+  });
+});
+
 describe("[M31] codifyTechs(⑥成文化キュー対象・GDD 7.4/7.5/11.1追補)", () => {
   const HOLDER_A = id("holderA");
   const HOLDER_B = id("holderB");
