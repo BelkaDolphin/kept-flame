@@ -43,6 +43,8 @@
 
 > **12画面の数え方**: GDD 6.6 の表は①〜⑫ + 「＋ セーブ/設定」であり、マウント単位は **13** ある(`src/ui/screens.ts` §1 が正本)。「12画面」は①〜⑫を指す。
 
+> **[2026-08-01裁定・台帳v9 追-3] ナビゲーションの集約(束A)**: ナビは 13 タブを並べる方式をやめ、**5 グループ(拠点/研究/探索/周回/設定)+タップで開くポップオーバー**に集約した(正本 = `src/ui/navGroups.ts`)。設定のみ 1 タップ直遷移。丸数字(①②…)のナビ表示は全廃(本文書の丸数字は GDD 対応の識別子として残す)。ヘッダは sticky で、資源 HUD(薪/鉄/粘土/紙/廃材・`derived.resources` 購読)を常時表示する。
+
 ---
 
 ## 2. ルーティング(ADR-027)
@@ -155,7 +157,8 @@
 | `src/platform/router.ts` | 自前ハッシュルータ + `RouterHost`(DOM 境界) | `tests/platform/router.test.ts` |
 | `src/platform/clock.ts` | `planTick`(ADR-026 の純関数)+ `TickDriver` | `tests/platform/clock.test.ts` |
 | `src/ui/shellSession.ts` | ルータ ⇄ ストアの結線(`screenOpened` の唯一の発行点) | `tests/ui/shellSession.test.ts` |
-| `src/ui/AppShell.tsx` | ヘッダ / `ColonyClock` / `ScreenNav` / `ScreenHost` | `tests/ui/screens/appShell.test.ts` |
+| `src/ui/AppShell.tsx` | ヘッダ(sticky・資源 HUD) / `ColonyClock` / `ScreenNav` / `ScreenHost` | `tests/ui/screens/appShell.test.ts` |
+| `src/ui/navGroups.ts` | **[束A]** ナビ 5 グループ(拠点/研究/探索/周回/設定)の正本 | 同上(ナビ構造追随) |
 | `src/ui/screens/registry.tsx` | 画面 ID → コンポーネント(**全件必須**を型で強制) | 同上 |
 | `src/ui/screens/home/HomeHub.tsx` | ①ホームハブ + `UrgencyBadge` | `tests/ui/screens/homeHub.test.ts` |
 | `src/ui/screens/digest/ReturnDigest.tsx` | ⑫帰還ダイジェスト | `tests/ui/screens/returnDigest.test.ts` |
