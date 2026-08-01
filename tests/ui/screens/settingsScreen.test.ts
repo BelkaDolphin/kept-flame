@@ -20,6 +20,7 @@ import { exportSaveText, importSaveText } from "../../../src/platform/exchange";
 import {
   ExportPanel,
   ImportPanel,
+  ResetGameSection,
   type ImportOutcomeView,
 } from "../../../src/ui/screens/settings/SettingsScreen";
 import { createTestStore } from "../fixtures";
@@ -155,6 +156,135 @@ describe("ImportPanel", () => {
       selectedFileName: "kept-flame-save-tick1000.json",
     });
     expect(flattenText(selected)).toContain("kept-flame-save-tick1000.json");
+  });
+});
+
+describe("[M54] ResetGameSection(最初からやり直す・確認2段)", () => {
+  it("段0はボタンのみ・警告パネルは出さない", () => {
+    const vnode = ResetGameSection({
+      step: 0,
+      onStart: () => undefined,
+      onProceed: () => undefined,
+      onConfirm: () => undefined,
+      onCancel: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("最初からやり直す");
+    expect(text).not.toContain("取り消せません");
+  });
+
+  it("段0のボタンを押すと onStart が呼ばれる", () => {
+    const onStart = vi.fn();
+    const vnode = ResetGameSection({
+      step: 0,
+      onStart,
+      onProceed: () => undefined,
+      onConfirm: () => undefined,
+      onCancel: () => undefined,
+    });
+    function findFirstButton(node: unknown): (() => void) | null {
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = findFirstButton(child);
+          if (found !== null) return found;
+        }
+        return null;
+      }
+      if (node === null || node === undefined || typeof node !== "object") return null;
+      const candidate = node as {
+        readonly type?: unknown;
+        readonly props?: { readonly onClick?: unknown; readonly children?: unknown };
+      };
+      if (candidate.type === "button" && typeof candidate.props?.onClick === "function") {
+        return candidate.props.onClick as () => void;
+      }
+      return findFirstButton(candidate.props?.children);
+    }
+    const onClick = findFirstButton(vnode);
+    expect(onClick).not.toBeNull();
+    onClick?.();
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("段1はエクスポート推奨の警告と「次へ」/「キャンセル」を持つ", () => {
+    const onProceed = vi.fn();
+    const onCancel = vi.fn();
+    const vnode = ResetGameSection({
+      step: 1,
+      onStart: () => undefined,
+      onProceed,
+      onConfirm: () => undefined,
+      onCancel,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("全て消えます");
+    expect(text).toContain("エクスポート");
+
+    function findButtons(node: unknown, out: { onClick: () => void; text: string }[]): void {
+      if (Array.isArray(node)) {
+        for (const child of node) findButtons(child, out);
+        return;
+      }
+      if (node === null || node === undefined || typeof node !== "object") return;
+      const candidate = node as {
+        readonly type?: unknown;
+        readonly props?: { readonly onClick?: unknown; readonly children?: unknown };
+      };
+      if (candidate.type === "button" && typeof candidate.props?.onClick === "function") {
+        out.push({
+          onClick: candidate.props.onClick as () => void,
+          text: flattenText(candidate.props.children),
+        });
+        return;
+      }
+      findButtons(candidate.props?.children, out);
+    }
+    const buttons: { onClick: () => void; text: string }[] = [];
+    findButtons(vnode, buttons);
+    expect(buttons).toHaveLength(2);
+    buttons[0]?.onClick();
+    expect(onProceed).toHaveBeenCalledOnce();
+    buttons[1]?.onClick();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("段2は取り消せない旨の最終確認と「消去して新規開始する」/「キャンセル」を持つ", () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    const vnode = ResetGameSection({
+      step: 2,
+      onStart: () => undefined,
+      onProceed: () => undefined,
+      onConfirm,
+      onCancel,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("取り消せません");
+    expect(text).toContain("消去して新規開始する");
+
+    function findButtons(node: unknown, out: { onClick: () => void }[]): void {
+      if (Array.isArray(node)) {
+        for (const child of node) findButtons(child, out);
+        return;
+      }
+      if (node === null || node === undefined || typeof node !== "object") return;
+      const candidate = node as {
+        readonly type?: unknown;
+        readonly props?: { readonly onClick?: unknown; readonly children?: unknown };
+      };
+      if (candidate.type === "button" && typeof candidate.props?.onClick === "function") {
+        out.push({ onClick: candidate.props.onClick as () => void });
+        return;
+      }
+      findButtons(candidate.props?.children, out);
+    }
+    const buttons: { onClick: () => void }[] = [];
+    findButtons(vnode, buttons);
+    expect(buttons).toHaveLength(2);
+    buttons[0]?.onClick();
+    expect(onConfirm).toHaveBeenCalledOnce();
+    buttons[1]?.onClick();
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 });
 

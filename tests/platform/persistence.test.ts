@@ -24,6 +24,7 @@ import {
   SAVE_FORMAT_VERSION,
   SAVE_STORE_NAME,
   SaveIntegrityError,
+  SaveNotFoundError,
   verifySaveRecord,
   type SaveRecord,
 } from "../../src/platform/persistence";
@@ -169,6 +170,15 @@ describe("verifySaveRecord", () => {
 
   it("SaveIntegrityError は PersistenceError の一種(呼び出し側が一括で捕まえられる)", () => {
     expect(new SaveIntegrityError("x", 1, 2)).toBeInstanceOf(PersistenceError);
+  });
+
+  it("[M54] SaveNotFoundError は PersistenceError の一種だが、名前で他の破損と区別できる", () => {
+    const notFound = new SaveNotFoundError("x");
+    expect(notFound).toBeInstanceOf(PersistenceError);
+    expect(notFound.name).toBe("SaveNotFoundError");
+    // 「セーブは無い」と「セーブはあったが読めなかった」は main.tsx の
+    // loadOrCreateState が instanceof で分岐する(ロードマップ M54 行)。
+    expect(new SaveIntegrityError("x", 1, 2)).not.toBeInstanceOf(SaveNotFoundError);
   });
 });
 

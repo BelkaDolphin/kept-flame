@@ -1,16 +1,17 @@
 // ---------------------------------------------------------------------------
-// src/ui/screens/outposts/OutpostsScreen.tsx のテスト(M32)。
+// src/ui/screens/outposts/OutpostsScreen.tsx のテスト(M32・M54で操作結線)。
 //
-// `OutpostCard` は hooks を使わない純関数なので、Preact の render() を通さず
-// 直接呼んで検証する(facilityScreen.test.ts と同じ方針)。`OutpostsScreen`
-// 本体(hooks あり)は登録テスト(appShell.test.ts)のみ。
+// `OutpostCard`/`OutpostEstablishForm` は hooks を使わない純関数なので、
+// Preact の render() を通さず直接呼んで検証する(facilityScreen.test.ts と
+// 同じ方針)。`OutpostsScreen` 本体(hooks あり)は登録テスト
+// (appShell.test.ts)のみ。
 // ---------------------------------------------------------------------------
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
-import type { OutpostRosterEntry } from "../../../src/ui/derived";
-import { OutpostCard } from "../../../src/ui/screens/outposts/OutpostsScreen";
+import type { OutpostRosterEntry, ResidentView } from "../../../src/ui/derived";
+import { OutpostCard, OutpostEstablishForm } from "../../../src/ui/screens/outposts/OutpostsScreen";
 
 const id = entityIdFromString;
 
@@ -26,6 +27,22 @@ function flattenText(node: unknown): string {
     return flattenText((vnode.type as (props: unknown) => unknown)(vnode.props));
   }
   return flattenText(vnode.props?.children);
+}
+
+interface FoundElement {
+  readonly type: unknown;
+  readonly props: Record<string, unknown>;
+}
+
+function collectByType(node: unknown, type: string, out: FoundElement[]): void {
+  if (Array.isArray(node)) {
+    for (const child of node) collectByType(child, type, out);
+    return;
+  }
+  if (node === null || node === undefined || typeof node !== "object") return;
+  const vnode = node as { readonly type?: unknown; readonly props?: Record<string, unknown> };
+  if (vnode.type === type) out.push({ type, props: vnode.props ?? {} });
+  collectByType(vnode.props?.children, type, out);
 }
 
 function outpost(overrides: Partial<OutpostRosterEntry> = {}): OutpostRosterEntry {
@@ -48,9 +65,43 @@ function outpost(overrides: Partial<OutpostRosterEntry> = {}): OutpostRosterEntr
   };
 }
 
+function residentView(entityId = id("bKaya")): ResidentView {
+  return {
+    entityId,
+    moraleApprox: 60,
+    masteryApprox: 0,
+    assignedFacilityId: null,
+    dispatched: false,
+    recallImpaired: false,
+    recallImpairedUntilTick: 0,
+    traitIds: [],
+    stats: {
+      vigorApprox: 50,
+      dexterityApprox: 50,
+      intellectApprox: 50,
+      fortitudeApprox: 50,
+      willApprox: 50,
+    },
+    alive: true,
+    diedTick: null,
+  };
+}
+
+/** [M54] 呼ばれなければ失敗させる用の no-op コールバック一式。 */
+function cardHandlers() {
+  return {
+    residentOptions: [residentView()],
+    stationSelectValue: "" as const,
+    onStationSelectChange: vi.fn(),
+    onStation: vi.fn(),
+    onUnstation: vi.fn(),
+    onAbandon: vi.fn(),
+  };
+}
+
 describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画面に出ているか)", () => {
   it("タイプ名(GDD 9.2の用語)・供給・維持費・ネット収益・危険度・ROIを表示する", () => {
-    const vnode = OutpostCard({ outpost: outpost() });
+    const vnode = OutpostCard({ outpost: outpost(), ...cardHandlers() });
     const text = flattenText(vnode);
     expect(text).toContain("鉱山");
     expect(text).toContain("供給");
@@ -65,6 +116,7 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
   it("(B)喪失リスク項を隠さない(GDD 8.6 を援用・本タスクの検収条件)", () => {
     const vnode = OutpostCard({
       outpost: outpost({ rareAssetCount: 2, expectedRareLossApprox: 12.5 }),
+      ...cardHandlers(),
     });
     const text = flattenText(vnode);
     expect(text).toContain("(B)喪失リスク");
@@ -73,12 +125,137 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
   });
 
   it("ネット収益が負なら放棄検討の注記を出す", () => {
-    const vnode = OutpostCard({ outpost: outpost({ netRevenueApprox: -3 }) });
+    const vnode = OutpostCard({ outpost: outpost({ netRevenueApprox: -3 }), ...cardHandlers() });
     expect(flattenText(vnode)).toContain("放棄を検討");
   });
 
   it("ROI が null(分母0)なら「算出不可」", () => {
-    const vnode = OutpostCard({ outpost: outpost({ roiApprox: null }) });
+    const vnode = OutpostCard({ outpost: outpost({ roiApprox: null }), ...cardHandlers() });
     expect(flattenText(vnode)).toContain("算出不可");
+  });
+
+  it("[M54] 常駐者ごとに解除ボタンを持ち、押すと onUnstation(residentId) が呼ばれる", () => {
+    const handlers = cardHandlers();
+    const vnode = OutpostCard({
+      outpost: outpost({ residentIds: [id("aRui"), id("bKaya")] }),
+      ...handlers,
+    });
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const unstationButtons = buttons.filter(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("unstation-button"),
+    );
+    expect(unstationButtons).toHaveLength(2);
+    (unstationButtons[0]?.props.onClick as () => void)();
+    expect(handlers.onUnstation).toHaveBeenCalledWith(id("aRui"));
+  });
+
+  it("[M54] 放棄ボタンを押すと onAbandon が呼ばれる", () => {
+    const handlers = cardHandlers();
+    const vnode = OutpostCard({ outpost: outpost(), ...handlers });
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const abandonButton = buttons.find(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("abandon-button"),
+    );
+    (abandonButton?.props.onClick as () => void)();
+    expect(handlers.onAbandon).toHaveBeenCalledOnce();
+  });
+
+  it("[M54] 駐在させるセレクトの変更で onStationSelectChange、ボタンで onStation が呼ばれる", () => {
+    const handlers = cardHandlers();
+    const vnode = OutpostCard({ outpost: outpost(), ...handlers });
+    const selects: FoundElement[] = [];
+    collectByType(vnode, "select", selects);
+    expect(selects).toHaveLength(1);
+    const onChange = selects[0]?.props.onChange as (event: Event) => void;
+    onChange({ target: { value: "bKaya" } } as unknown as Event);
+    expect(handlers.onStationSelectChange).toHaveBeenCalledWith("bKaya");
+
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const stationButton = buttons.find(
+      (b) =>
+        typeof b.props.class === "string" &&
+        b.props.class.includes("station-button") &&
+        !b.props.class.includes("unstation"),
+    );
+    (stationButton?.props.onClick as () => void)();
+    expect(handlers.onStation).toHaveBeenCalledOnce();
+  });
+
+  it("常駐者が0名なら「無し」を表示し、解除ボタンを1つも持たない", () => {
+    const handlers = cardHandlers();
+    const vnode = OutpostCard({ outpost: outpost({ residentIds: [] }), ...handlers });
+    expect(flattenText(vnode)).toContain("無し");
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    expect(
+      buttons.some(
+        (b) => typeof b.props.class === "string" && b.props.class.includes("unstation-button"),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("OutpostEstablishForm(⑨新規設置・GDD 9.2)", () => {
+  function baseProps() {
+    return {
+      outpostTypeOptions: [id("outpostFarm"), id("outpostMine")],
+      selectedTypeId: id("outpostMine"),
+      onTypeChange: vi.fn(),
+      band: "near" as const,
+      onBandChange: vi.fn(),
+      residentOptions: [residentView(id("aRui")), residentView(id("bKaya"))],
+      selectedResidentIds: new Set([id("aRui")]),
+      onToggleResident: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+  }
+
+  it("content に outpostType が無ければ不活性メッセージを出す(捏造しない)", () => {
+    const vnode = OutpostEstablishForm({ ...baseProps(), outpostTypeOptions: [] });
+    expect(flattenText(vnode)).toContain("設置できません");
+  });
+
+  it("タイプ選択肢・距離帯ボタン・住民トグル・設置ボタンを持つ", () => {
+    const props = baseProps();
+    const vnode = OutpostEstablishForm(props);
+    const text = flattenText(vnode);
+    expect(text).toContain("鉱山");
+    expect(text).toContain("農園");
+    expect(text).toContain("近郊");
+
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const submit = buttons.find(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("submit-button"),
+    );
+    (submit?.props.onClick as () => void)();
+    expect(props.onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("距離帯ボタンは選択中のものだけ aria-pressed=true", () => {
+    const vnode = OutpostEstablishForm(baseProps());
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const bandButtons = buttons.filter(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("band-button"),
+    );
+    expect(bandButtons).toHaveLength(3);
+    expect(bandButtons.filter((b) => b.props["aria-pressed"] === true)).toHaveLength(1);
+  });
+
+  it("住民トグルを押すと onToggleResident(residentId) が呼ばれる", () => {
+    const props = baseProps();
+    const vnode = OutpostEstablishForm(props);
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const residentButtons = buttons.filter(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("resident-button"),
+    );
+    expect(residentButtons).toHaveLength(2);
+    (residentButtons[1]?.props.onClick as () => void)();
+    expect(props.onToggleResident).toHaveBeenCalledWith("bKaya");
   });
 });

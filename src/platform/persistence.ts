@@ -109,6 +109,22 @@ export class PersistenceError extends Error {
   }
 }
 
+/**
+ * [M54] キーにセーブが**一度も存在しない**(初回起動)。他の `PersistenceError`
+ * (checksum 不一致・版違反・migration 失敗等 = 何かが実際に壊れている)と
+ * 区別するための専用型。`loadLatestSave` が `value === undefined` のときだけ
+ * 投げる。呼び出し側(`src/main.tsx` の `loadOrCreateState`)はこれを捕まえた
+ * 場合だけ「セーブが無いだけ」として黙って新規開始し、それ以外の
+ * `PersistenceError`(セーブはあったが読めなかった)はその場でユーザーへ知らせる
+ * (ロードマップ M54 行「起動失敗のその場通知」)。
+ */
+export class SaveNotFoundError extends PersistenceError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SaveNotFoundError";
+  }
+}
+
 /** integrityChecksum 不一致 = セーブ破損(ADR-012(2))。 */
 export class SaveIntegrityError extends PersistenceError {
   constructor(
@@ -596,7 +612,8 @@ export async function loadLatestSave(
   );
   const afterIdbGet = performance.now();
   if (value === undefined) {
-    throw new PersistenceError(`キー "${key}" のセーブが存在しない`);
+    // [M54] 「初回起動でまだ何も保存していない」を他の壊れ方と区別する専用型。
+    throw new SaveNotFoundError(`キー "${key}" のセーブが存在しない`);
   }
   const migrated = migrateStoredSave(value);
   const payload = verifySaveRecord(migrated.value);

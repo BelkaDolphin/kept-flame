@@ -12,14 +12,17 @@
 //   の提案 → 確認 → 適用も持つ(ui-spec ⑥「おまかせ成文化の提案」)。
 //
 // ===========================================================================
-// 2. 二重の正直な開示(★ 要ユーザー判断・derived.ts §7-1 と同じ内容をここにも明記)
+// 2. 二重の正直な開示(derived.ts §7-1 と同じ内容をここにも明記)
 // ===========================================================================
-//   [2026-08-01 M50 で両方解消] (a) 成文化の tick 結線は M50 が実装した
+//   [2026-08-01 M50 で両方実装] (a) 成文化の tick 結線は M50 が実装した
 //       (`PIPELINE_STAGE.codify` 段50・レート=研究点産出施設の稼働就労者)。
 //       投入した記録は時間経過で完了する。(b) 取消コマンド
-//       `cancelCodification`(返金なし)も M50 で新設済み。ただし**本画面の
-//       取消ボタンは未設置**(M50 は UI 非接触の縛りで実施されたため。
-//       次の UI タスクで接続する・画面注記にも明記)。
+//       `cancelCodification`(返金なし)も M50 で新設済み。
+//   [2026-08-01 M54 で解消] 本画面の取消ボタンを接続した(作業中の記録のみ
+//       対象・完成済みは `codifyAlreadyCompleted` で reject)。**返金は一切
+//       無い**ことを取消ボタンの近くと成功トーストの両方に明記し、正直に
+//       開示する(`beginCodification` が着手時に資源を全額支払う契約・M50 の
+//       ★報告どおり)。
 //
 // ===========================================================================
 // 3. 判定は書かない(architecture.md §6 の7箇条目)
@@ -65,6 +68,11 @@ export interface CodifyTechRowProps {
   readonly selectedMedium: RecordMedium;
   readonly onMediumChange: (techId: EntityId, medium: RecordMedium) => void;
   readonly onEnqueue: (techId: EntityId, medium: RecordMedium) => void;
+  /**
+   * [M54] 作業中の記録(`entry.pendingRecords`)の取消。省略時は取消ボタンを
+   * 描かない(既存テストの呼び出し互換・タスク指示の対象=進行中の記録のみ)。
+   */
+  readonly onCancel?: (codifyId: EntityId) => void;
 }
 
 export function CodifyTechRow({
@@ -72,6 +80,7 @@ export function CodifyTechRow({
   selectedMedium,
   onMediumChange,
   onEnqueue,
+  onCancel,
 }: CodifyTechRowProps) {
   function handleMediumChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as RecordMedium;
@@ -109,6 +118,15 @@ export function CodifyTechRow({
             <li key={record.entityId}>
               作業中: {mediumLabel(record.medium)}(進行度 {record.progressApprox.toFixed(1)}/
               {record.requiredWorkApprox.toFixed(1)})
+              {onCancel !== undefined && (
+                <button
+                  type="button"
+                  class="kf-codify-row__cancel-button"
+                  onClick={() => onCancel(record.entityId)}
+                >
+                  取消(返金なし)
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -303,6 +321,23 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
     );
   }
 
+  /**
+   * [M54] 作業中の記録を取り消す(`cancelCodification`・GDD 6.2)。
+   * 返金は一切無い(§2)ので、成功トーストでもその旨をもう一度明記する。
+   */
+  function handleCancel(codifyId: EntityId): void {
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: { kind: "cancelCodification", codifyId },
+    });
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    toastStack.push("成文化の記録を取り消した(支払った資源は戻りません)");
+  }
+
   // おまかせ成文化の適用: 提案順に 1 件ずつ dispatch する(1 本の atomic 列に
   // しない=途中の衝突で提案全体を巻き戻さないため。commands.ts §6 の列入力は
   // 「1 つでも reject なら全部捨てる」なので、ここではあえて使わない)。
@@ -341,7 +376,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
         稼働就労者によって少しずつ書き進み、時間が経つと完成します。
       </p>
       <p class="kf-codify-screen__note">
-        記録の取り消しは今後のアップデートで対応予定です(いま投入した記録は取り消せません)。
+        作業中の記録は取り消せます。ただし支払った資源は戻りません(完成した記録は取り消せません)。
       </p>
 
       <ToastStackView toasts={toastStack.toasts} />
@@ -367,6 +402,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
               selectedMedium={mediumFor(entry)}
               onMediumChange={handleMediumChange}
               onEnqueue={handleEnqueue}
+              onCancel={handleCancel}
             />
           ))}
         </ul>

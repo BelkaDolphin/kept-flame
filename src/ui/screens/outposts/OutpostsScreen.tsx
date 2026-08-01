@@ -1,23 +1,35 @@
 // ---------------------------------------------------------------------------
-// 継ぐ火 -Kept Flame- ⑨衛星拠点管理(M32・束B/B-2で文言改訂)— GDD 9.2 / 11.4-7
+// 継ぐ火 -Kept Flame- ⑨衛星拠点管理(M32・束B/B-2で文言改訂・M54で操作結線)— GDD 9.2 / 11.4-7
 //
 // ===========================================================================
 // 1. このファイルがやること・やらないこと
 // ===========================================================================
-//   拠点一覧(3タイプ)・供給レート・維持費・危険度(hazard)・拠点網 ROI の
-//   **表示**。`rules/outpost.ts` の `outpostNetworkRoi` をそのまま呼ぶ
-//   (derived.ts の `outpostOverview`)。(B) 損失項(`expectedRareLossApprox`)を
-//   隠さない。
+//   拠点一覧(3タイプ)・供給レート・維持費・危険度(hazard)・拠点網 ROI の表示
+//   (`rules/outpost.ts` の `outpostNetworkRoi` をそのまま呼ぶ・derived.ts の
+//   `outpostOverview`)。(B) 損失項(`expectedRareLossApprox`)を隠さない。
 //
-//   **[2026-08-01 M50 で engine 側は解消] 拠点操作コマンド(設置/放棄/駐在割当/
-//   駐在解除の 4 種)は M50 が実装済み**(`commands.ts` の
-//   `establishOutpost`/`abandonOutpost`/`stationResident`/`unstationResident`)。
-//   ただし M50 は UI 非接触の縛りで実施されたため、**本画面からそれらを呼ぶ
-//   結線はまだ無い**(表示専用のまま・次の UI タスクで接続予定)。以前の
-//   「engine に未実装」という注記は M50 完了後の今は事実と異なるため削除した。
+//   **[2026-08-01 M54 で接続] 拠点操作 4 コマンド**(`establishOutpost`/
+//   `abandonOutpost`/`stationResident`/`unstationResident`。M50 で実装済み)を
+//   本画面へ結線した。設置は本ファイル `nextOutpostId`(施設 ID 採番=
+//   `grid/facilityId.ts` と同型)で ID を発行する。以前の「表示専用」注記は
+//   本タスクで解消したため削除した。
+//
+// ===========================================================================
+// 2. 判定は書かない(architecture.md §6 の7箇条目)
+// ===========================================================================
+//   常駐者候補は寿命/派遣中で絞り込まない(`ResidentsScreen.tsx` §3 と同じ
+//   立場: 死亡/派遣中の住民でも選択自体はできる状態にし、実際に押せるかは
+//   `establishOutpost`/`stationResident` の `residentUnavailable` reject に
+//   委ねる)。常駐 1〜4 名・重複なし等も同様に先読みしない。
 // ---------------------------------------------------------------------------
 
-import type { OutpostRosterEntry } from "../../derived";
+import { useState } from "preact/hooks";
+
+import { compareUtf16 } from "../../../engine/canonicalize";
+import type { CommandRejection } from "../../../engine/commands";
+import type { DistanceBand } from "../../../engine/rules/types";
+import { type EntityId } from "../../../engine/state/state";
+import type { OutpostRosterEntry, ResidentView } from "../../derived";
 import {
   distanceBandLabel,
   outpostTypeLabel,
@@ -25,29 +37,90 @@ import {
   resourceLabel,
 } from "../contentLabels";
 import { formatGameClock } from "../format";
+import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
+import { nextOutpostId } from "./outpostId";
 import "./outpostsScreen.css";
+
+/** GDD 9.2 の読み順(近郊→遠隔→深部)。`DISTANCE_BANDS` は UTF-16 昇順
+ * (deep/far/near)なので、`ExpeditionScreen.tsx` の `BAND_ORDER` と同じく
+ * 表示専用にここで並べ直す。 */
+const OUTPOST_BAND_ORDER: readonly DistanceBand[] = ["near", "far", "deep"];
 
 // --- 1. 拠点カード(hooks 不使用・直接テスト可能) ----------------------------
 
 export interface OutpostCardProps {
   readonly outpost: OutpostRosterEntry;
+  /** [M54] この拠点へ新たに駐在させられる住民の一覧(判定は書かない・§2)。 */
+  readonly residentOptions: readonly ResidentView[];
+  /** [M54] 駐在させる住民セレクトの選択中の値("" = 未選択)。 */
+  readonly stationSelectValue: EntityId | "";
+  readonly onStationSelectChange: (residentId: EntityId | "") => void;
+  readonly onStation: () => void;
+  readonly onUnstation: (residentId: EntityId) => void;
+  readonly onAbandon: () => void;
 }
 
-export function OutpostCard({ outpost }: OutpostCardProps) {
+export function OutpostCard({
+  outpost,
+  residentOptions,
+  stationSelectValue,
+  onStationSelectChange,
+  onStation,
+  onUnstation,
+  onAbandon,
+}: OutpostCardProps) {
+  function handleStationSelectChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    onStationSelectChange(value === "" ? "" : (value as EntityId));
+  }
+
   return (
     <li class="kf-outpost-card">
       <h4 class="kf-outpost-card__title">
         {outpostTypeLabel(outpost.outpostTypeId)}({outpost.outpostId})・Lv{outpost.level}・
         {distanceBandLabel(outpost.band)}
       </h4>
-      <p class="kf-outpost-card__residents">
-        常駐:{" "}
-        {outpost.residentIds.length > 0
-          ? outpost.residentIds.map((residentId) => residentDisplayName(residentId)).join("・")
-          : "無し"}
-      </p>
+      {outpost.residentIds.length === 0 ? (
+        <p class="kf-outpost-card__residents">常駐: 無し</p>
+      ) : (
+        <ul class="kf-outpost-card__resident-list" aria-label="常駐している住民">
+          {outpost.residentIds.map((residentId) => (
+            <li key={residentId} class="kf-outpost-card__resident-row">
+              <span class="kf-outpost-card__resident-name">{residentDisplayName(residentId)}</span>
+              <button
+                type="button"
+                class="kf-outpost-card__unstation-button"
+                onClick={() => onUnstation(residentId)}
+              >
+                解除
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div class="kf-outpost-card__station-row">
+        <label class="kf-outpost-card__station-label">
+          駐在させる
+          <select
+            class="kf-outpost-card__station-select"
+            value={stationSelectValue}
+            onChange={handleStationSelectChange}
+          >
+            <option value="">(住民を選ぶ)</option>
+            {residentOptions.map((resident) => (
+              <option key={resident.entityId} value={resident.entityId}>
+                {residentDisplayName(resident.entityId)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" class="kf-outpost-card__station-button" onClick={onStation}>
+          駐在させる
+        </button>
+      </div>
       <p class="kf-outpost-card__established">設置: {formatGameClock(outpost.establishedTick)}</p>
       <p class="kf-outpost-card__supply">
         供給: {outpost.supplyApprox.toFixed(2)}/tick {resourceLabel(outpost.resourceId)}
@@ -68,17 +141,215 @@ export function OutpostCard({ outpost }: OutpostCardProps) {
       <p class="kf-outpost-card__roi">
         採算(ROI): {outpost.roiApprox === null ? "算出不可(分母0)" : outpost.roiApprox.toFixed(2)}
       </p>
+      <button type="button" class="kf-outpost-card__abandon-button" onClick={onAbandon}>
+        この拠点を放棄する
+      </button>
     </li>
   );
 }
 
-// --- 2. 画面本体(hooks を持つのはここだけ) ----------------------------------
+// --- 2. 新規設置フォーム(hooks 不使用・直接テスト可能) ----------------------
+
+export interface OutpostEstablishFormProps {
+  /** content の outpostType 定義 ID 一覧(ID 昇順)。0 件 = 設置システムが不活性。 */
+  readonly outpostTypeOptions: readonly EntityId[];
+  readonly selectedTypeId: EntityId | null;
+  readonly onTypeChange: (typeId: EntityId) => void;
+  readonly band: DistanceBand;
+  readonly onBandChange: (band: DistanceBand) => void;
+  readonly residentOptions: readonly ResidentView[];
+  readonly selectedResidentIds: ReadonlySet<EntityId>;
+  readonly onToggleResident: (residentId: EntityId) => void;
+  readonly onSubmit: () => void;
+}
+
+export function OutpostEstablishForm({
+  outpostTypeOptions,
+  selectedTypeId,
+  onTypeChange,
+  band,
+  onBandChange,
+  residentOptions,
+  selectedResidentIds,
+  onToggleResident,
+  onSubmit,
+}: OutpostEstablishFormProps) {
+  if (outpostTypeOptions.length === 0) {
+    return <p class="kf-outposts-establish__inactive">現在のデータでは拠点を設置できません。</p>;
+  }
+
+  function handleTypeChange(event: Event): void {
+    onTypeChange((event.target as HTMLSelectElement).value as EntityId);
+  }
+
+  return (
+    <section class="kf-outposts-establish" aria-label="新しい拠点を設置">
+      <h3 class="kf-outposts-establish__title">新しい拠点を設置</h3>
+      <label class="kf-outposts-establish__type-label">
+        拠点タイプ
+        <select
+          class="kf-outposts-establish__type-select"
+          value={selectedTypeId ?? ""}
+          onChange={handleTypeChange}
+        >
+          {outpostTypeOptions.map((typeId) => (
+            <option key={typeId} value={typeId}>
+              {outpostTypeLabel(typeId)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <ul class="kf-outposts-establish__band-list" aria-label="距離帯">
+        {OUTPOST_BAND_ORDER.map((option) => (
+          <li key={option}>
+            <button
+              type="button"
+              class="kf-outposts-establish__band-button"
+              aria-pressed={option === band}
+              onClick={() => onBandChange(option)}
+            >
+              {distanceBandLabel(option)}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p class="kf-outposts-establish__resident-count">
+        常駐させる住民({selectedResidentIds.size}/4名まで選択)
+      </p>
+      <ul class="kf-outposts-establish__resident-list" aria-label="常駐させる住民">
+        {residentOptions.map((resident) => (
+          <li key={resident.entityId}>
+            <button
+              type="button"
+              class="kf-outposts-establish__resident-button"
+              aria-pressed={selectedResidentIds.has(resident.entityId)}
+              onClick={() => onToggleResident(resident.entityId)}
+            >
+              {residentDisplayName(resident.entityId)}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" class="kf-outposts-establish__submit-button" onClick={onSubmit}>
+        設置する
+      </button>
+    </section>
+  );
+}
+
+// --- 3. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
   // 現在地の宣言はシェル(shellSession)の仕事なので activate は false(M18★5)。
   useScreenMount(store, "outposts", { activate: false });
 
   const overview = useSignalValue(store.derived.outpostOverview);
+  const residents = useSignalValue(store.derived.residents);
+  const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  const toastStack = useToastStack();
+
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり)。
+  const content = store.peekContent();
+  const outpostTypeIds: readonly EntityId[] =
+    content.outpostTypeDefs === undefined
+      ? []
+      : [...content.outpostTypeDefs.keys()].sort(compareUtf16);
+
+  const [establishTypeId, setEstablishTypeId] = useState<EntityId | null>(null);
+  const [establishBand, setEstablishBand] = useState<DistanceBand>("near");
+  const [establishResidentIds, setEstablishResidentIds] = useState<ReadonlySet<EntityId>>(
+    () => new Set(),
+  );
+  const [stationSelections, setStationSelections] = useState<ReadonlyMap<EntityId, EntityId | "">>(
+    () => new Map(),
+  );
+
+  const effectiveEstablishTypeId = establishTypeId ?? outpostTypeIds[0] ?? null;
+
+  function handleToggleEstablishResident(residentId: EntityId): void {
+    setEstablishResidentIds((current) => {
+      const next = new Set(current);
+      if (next.has(residentId)) next.delete(residentId);
+      else next.add(residentId);
+      return next;
+    });
+  }
+
+  function handleEstablish(): void {
+    if (effectiveEstablishTypeId === null) return; // 設置対象の型が無い(content 不活性)。
+    const outpostId = nextOutpostId(store.peekState(), effectiveEstablishTypeId);
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: {
+        kind: "establishOutpost",
+        outpostId,
+        outpostTypeId: effectiveEstablishTypeId,
+        band: establishBand,
+        residentIds: [...establishResidentIds],
+      },
+    });
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    setEstablishResidentIds(new Set());
+    toastStack.push(`${outpostTypeLabel(effectiveEstablishTypeId)}(${outpostId})を設置した`);
+  }
+
+  function handleAbandon(outpostId: EntityId): void {
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: { kind: "abandonOutpost", outpostId },
+    });
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    toastStack.push(`拠点(${outpostId})を放棄した`);
+  }
+
+  function handleUnstation(residentId: EntityId): void {
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: { kind: "unstationResident", residentId },
+    });
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    toastStack.push(`${residentDisplayName(residentId)}の駐在を解除した`);
+  }
+
+  function handleStationSelectChange(outpostId: EntityId, residentId: EntityId | ""): void {
+    setStationSelections((current) => {
+      const next = new Map(current);
+      next.set(outpostId, residentId);
+      return next;
+    });
+  }
+
+  function handleStation(outpostId: EntityId): void {
+    const residentId = stationSelections.get(outpostId) ?? "";
+    if (residentId === "") return; // 未選択(判定ではなく入力の欠落)。
+    const result = store.dispatch({
+      type: "commandApplied",
+      command: { kind: "stationResident", residentId, outpostId },
+    });
+    if (result.command !== null && !result.command.ok) {
+      setLastRejection(result.command.rejection);
+      return;
+    }
+    setLastRejection(null);
+    setStationSelections((current) => {
+      const next = new Map(current);
+      next.delete(outpostId);
+      return next;
+    });
+    toastStack.push(`${residentDisplayName(residentId)}を拠点(${outpostId})へ駐在させた`);
+  }
 
   return (
     <section class="kf-outposts-screen" aria-labelledby="kf-outposts-screen-title">
@@ -88,6 +359,10 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
       <p class="kf-screen-intro">
         本拠の外に置いた採取拠点(鉱山/農園/林)の供給・維持費・常駐者を失う危険度をまとめて確認します。
       </p>
+
+      <ToastStackView toasts={toastStack.toasts} />
+
+      {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
       <section class="kf-outposts-screen__network" aria-label="拠点網の採算">
         <p class="kf-outposts-screen__network-count">拠点数: {overview.network.outpostCount}</p>
@@ -111,16 +386,35 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
         </p>
       </section>
 
-      <p class="kf-outposts-screen__note">
-        拠点の操作(駐在の割当/解除、設置/放棄)は今後のアップデートで追加されます。
-      </p>
+      <OutpostEstablishForm
+        outpostTypeOptions={outpostTypeIds}
+        selectedTypeId={effectiveEstablishTypeId}
+        onTypeChange={setEstablishTypeId}
+        band={establishBand}
+        onBandChange={setEstablishBand}
+        residentOptions={residents}
+        selectedResidentIds={establishResidentIds}
+        onToggleResident={handleToggleEstablishResident}
+        onSubmit={handleEstablish}
+      />
 
       {overview.roster.length === 0 ? (
         <p class="kf-outposts-screen__empty">拠点はまだありません。</p>
       ) : (
         <ul class="kf-outposts-screen__list">
           {overview.roster.map((outpost) => (
-            <OutpostCard key={outpost.outpostId} outpost={outpost} />
+            <OutpostCard
+              key={outpost.outpostId}
+              outpost={outpost}
+              residentOptions={residents}
+              stationSelectValue={stationSelections.get(outpost.outpostId) ?? ""}
+              onStationSelectChange={(residentId) =>
+                handleStationSelectChange(outpost.outpostId, residentId)
+              }
+              onStation={() => handleStation(outpost.outpostId)}
+              onUnstation={handleUnstation}
+              onAbandon={() => handleAbandon(outpost.outpostId)}
+            />
           ))}
         </ul>
       )}

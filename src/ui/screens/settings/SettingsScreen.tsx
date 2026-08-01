@@ -33,10 +33,14 @@
 
 import { useState } from "preact/hooks";
 
+import { recordBackupExported } from "../../../platform/backupReminder";
 import { exportSaveText, importSaveText } from "../../../platform/exchange";
+import { resolveLocalStorage } from "../../../platform/localStorageMirror";
 import { encodeSaveRecord } from "../../../platform/persistence";
 import { checkSaveCapacity, type SaveCapacityCheck } from "../../../platform/saveCapacity";
+import { createNewGameState } from "../../../newGame";
 import type { ScreenProps } from "../screenProps";
+import { useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount } from "../useStoreSignal";
 import "./settingsScreen.css";
 
@@ -158,6 +162,85 @@ export function ImportPanel({
   );
 }
 
+// --- 2b. [M54] 最初からやり直す(hooks 不使用・直接テスト可能) ----------------
+
+/**
+ * 「最初からやり直す」導線の確認 2 段(ロードマップ M54 行「誤タップ防止」)。
+ *
+ * 大移動の実行前確認(`MigrationScreen.tsx` の `confirming`)は 1 段だが、
+ * こちらは**現在の周回の全データを無条件に捨てる**(大移動と違い継承点も
+ * 何も残らない)ため、誤タップの重大度が一段高いと判断し 2 段にした
+ * (タスク指示どおり)。
+ *
+ *   段 0: 「最初からやり直す」ボタンのみ。
+ *   段 1: 警告(データは消える・エクスポート推奨)+「次へ」/「キャンセル」。
+ *   段 2: 最終確認(取り消せない旨の念押し)+「消去して新規開始する」/「キャンセル」。
+ */
+export interface ResetGameSectionProps {
+  readonly step: 0 | 1 | 2;
+  readonly onStart: () => void;
+  readonly onProceed: () => void;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+}
+
+export function ResetGameSection({
+  step,
+  onStart,
+  onProceed,
+  onConfirm,
+  onCancel,
+}: ResetGameSectionProps) {
+  return (
+    <section class="kf-settings__reset" aria-label="最初からやり直す">
+      <h3 class="kf-settings__section-title">最初からやり直す</h3>
+      {step === 0 && (
+        <>
+          <p class="kf-settings__section-note">
+            現在の周回のデータを消して、新しいゲームとして最初から開始できます。難度シードは既定の
+            まま引き継がれます。
+          </p>
+          <button type="button" class="kf-settings__reset-start-button" onClick={onStart}>
+            最初からやり直す
+          </button>
+        </>
+      )}
+      {step === 1 && (
+        <section class="kf-settings__reset-warning" role="alertdialog" aria-label="やり直しの確認1">
+          <p class="kf-settings__reset-warning-message">
+            現在のデータは全て消えます。元に戻せないので、まだエクスポートしていなければ先に上の
+            「エクスポートしてダウンロード」で退避することを強くお勧めします。
+          </p>
+          <div class="kf-settings__reset-actions">
+            <button type="button" class="kf-settings__reset-proceed-button" onClick={onProceed}>
+              次へ(理解した上で続ける)
+            </button>
+            <button type="button" class="kf-settings__reset-cancel-button" onClick={onCancel}>
+              キャンセル
+            </button>
+          </div>
+        </section>
+      )}
+      {step === 2 && (
+        <section class="kf-settings__reset-warning" role="alertdialog" aria-label="やり直しの確認2">
+          <p class="kf-settings__reset-warning-message">
+            本当によろしいですか。この操作は取り消せません。現在のセーブは新しいゲームの初期状態で
+            上書きされます。
+          </p>
+          <div class="kf-settings__reset-actions">
+            <button type="button" class="kf-settings__reset-confirm-button" onClick={onConfirm}>
+              はい、消去して新規開始する
+            </button>
+            <button type="button" class="kf-settings__reset-cancel-button" onClick={onCancel}>
+              キャンセル
+            </button>
+          </div>
+        </section>
+      )}
+    </section>
+  );
+}
+
 // --- 3. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 function downloadTextFile(filename: string, text: string): void {
@@ -178,6 +261,9 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
   const [importText, setImportText] = useState("");
   const [outcome, setOutcome] = useState<ImportOutcomeView | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  // [M54] 「最初からやり直す」の確認 2 段(0=未着手/1=第1確認/2=最終確認)。
+  const [resetStep, setResetStep] = useState<0 | 1 | 2>(0);
+  const toastStack = useToastStack();
 
   const state = store.peekState();
   let capacity: SaveCapacityCheck | null = null;
@@ -194,6 +280,9 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
     const text = exportSaveText(store.peekState());
     setExportedText(text);
     downloadTextFile(`kept-flame-save-tick${String(store.peekState().tick)}.json`, text);
+    // [M54] 定期バックアップ推奨バナーのデータ条件(backupReminder.ts §3)を
+    // リセットする。実際にエクスポートした事実だけを記録し、判定は書かない。
+    recordBackupExported(resolveLocalStorage());
   }
 
   function handleFileSelected(event: Event): void {
@@ -233,6 +322,31 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
     }
   }
 
+  // [M54] 最初からやり直す(確認 2 段・ResetGameSection の doc 参照)。
+  function handleResetStart(): void {
+    setResetStep(1);
+  }
+
+  function handleResetProceed(): void {
+    setResetStep(2);
+  }
+
+  function handleResetCancel(): void {
+    setResetStep(0);
+  }
+
+  function handleResetConfirm(): void {
+    const content = store.peekContent();
+    const current = store.peekState();
+    // `newGame.ts` の既定(worldSeed/難度シード)をそのまま使う(タスク指示
+    // 「難度シードは既定のまま」)。algoVersion だけは現在の state から引く
+    // (main.tsx の起動時 `createNewGameState` 呼び出しと同じ考え方)。
+    const fresh = createNewGameState(content, { algoVersion: current.algoVersion });
+    store.dispatch({ type: "worldLoaded", state: fresh, content, source: "newGame" });
+    setResetStep(0);
+    toastStack.push("最初からやり直しました(新しいゲームを開始しました)。");
+  }
+
   return (
     <section class="kf-settings-screen" aria-labelledby="kf-settings-screen-title">
       <h2 class="kf-settings-screen__title" id="kf-settings-screen-title">
@@ -241,6 +355,8 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
       <p class="kf-screen-intro">
         セーブデータの書き出し・読み込みと、進行状況が消えたときの復元を行います。
       </p>
+
+      <ToastStackView toasts={toastStack.toasts} />
 
       <section class="kf-settings__info" aria-label="現在のセーブ情報">
         <p class="kf-settings__seed">難度シード: {state.worldSeed}</p>
@@ -264,6 +380,14 @@ export function SettingsScreen({ store, onNavigate }: ScreenProps) {
         onSubmit={handleImportSubmit}
         outcome={outcome}
         selectedFileName={selectedFileName}
+      />
+
+      <ResetGameSection
+        step={resetStep}
+        onStart={handleResetStart}
+        onProceed={handleResetProceed}
+        onConfirm={handleResetConfirm}
+        onCancel={handleResetCancel}
       />
 
       <div class="kf-settings-screen__nav">

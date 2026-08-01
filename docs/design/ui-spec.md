@@ -175,7 +175,7 @@
 1. **③施設詳細/⑥成文化キュー等の派生値は `derived.ts` に足す**(architecture.md §7-1)。画面ファイルの中で `computed(() => store.sources.state.value…)` と書き始めない。
 2. **施設 ID の採番方式が未決**(M18★4)。`placeFacility` は呼び出し側が発行した ID を要求するため、②の施設カタログを作る M30 で決める必要がある。
 3. **建設/増築コストが content スキーマに無い**(architecture.md §9-5)。③の増築 UI はコスト表示の材料が無い状態なので、スキーマ拡張(要ユーザー判断)が先。
-4. ~~**`beginResearch` が未実装**(architecture.md §9-6)。⑤研究ツリーは「選ぶ」操作が engine 側に無く、現状は ID 昇順の自動選択である。M31 着手前に裁定が要る。~~ **[2026-08-01 M50 で解消]** `beginResearch` 実装済み(選択が有効ならそれ/無ければ ID 昇順先頭の2段)。⑤は画面無変更で動作。あわせて成文化 tick 結線・`cancelCodification`・拠点操作4コマンドも M50 で実装済み(⑥の取消ボタンと⑨の操作 UI の接続は次の UI タスク)。
+4. ~~**`beginResearch` が未実装**(architecture.md §9-6)。⑤研究ツリーは「選ぶ」操作が engine 側に無く、現状は ID 昇順の自動選択である。M31 着手前に裁定が要る。~~ **[2026-08-01 M50 で解消]** `beginResearch` 実装済み(選択が有効ならそれ/無ければ ID 昇順先頭の2段)。⑤は画面無変更で動作。あわせて成文化 tick 結線・`cancelCodification`・拠点操作4コマンドも M50 で実装済み。~~⑥の取消ボタンと⑨の操作 UI の接続は次の UI タスク~~ **[2026-08-02 M54 で解消]** ⑥に取消ボタン(返金なし明記)、⑨に設置/放棄/駐在割当/解除の操作 UI を接続した(§8 の★2 も参照)。
 5. **緊急成文化フェーズ(GDD 4.2)が engine 未実装**。⑫は導線だけを持つ(§4)。
 6. **バッジ意匠のユーザー目視確認**(§3.3)。M19★4 と同じ扱い。
 7. **新規ゲーム生成(`src/newGame.ts`)は暫定であり、ロードマップに担当タスクが無い。** 固定 worldSeed / 住民に `life` を付けない(= 寿命で死なない)/ 初期資源に根拠なし、の 3 点が仮置きである。難度シード「穏」(GDD 2.2)も未実装。
@@ -190,6 +190,23 @@
 - ⑦⑧⑨とも `src/ui/derived.ts` の派生値(`expeditionCandidates`/`expeditionDispatches`/`expeditionSlots`/`memoirFeed`/`renderedLog`/`outpostOverview`)と、GDD 8.6 / 11.4-7 の ROI 式(`rules/exploration.ts` の `explorationRoi`・`rules/outpost.ts` の `outpostNetworkRoi`)をそのまま呼ぶ 2 つの純関数(`explorationDestinationsForBand`/`previewExplorationRoi`)だけを土台にしている(新規 engine 計算なし)。
 - **目的地選択の 2 段構え**: GDD 8.1 原文の「目的地(近郊/遠隔/深部)」を距離帯そのものとして選ばせたうえで、M22 の named event content(`content/event.json`)がその距離帯にあれば具体的な行き先も選べる。content に無ければ「この距離帯(手続き生成)」の 1 択(band 由来の合成 ID)へ自動フォールバックする——M21 以前と 1 bit も挙動が変わらないフォールバック規約(`rules/event.ts`)を UI 側でも踏襲した。
 - **編成テンプレワンタップ(★1 として下記に記載)**: 本文書(§1 の⑦行)は列挙していなかったが、GDD 2.1「探索編成テンプレ」の定義と `assist/exploration.ts`(M27)の実装意図(呼び出し側 UI からの利用を前提としたコメント)に基づき実装した。提案(`suggestExpeditionTeams`)→確認表示(戦力/目標/理論最大の内訳)→適用(選択チームへ反映)の3段。
-- **⑨衛星拠点管理は表示専用**: 駐在割当/解除・拠点設置/放棄のコマンドが engine(`src/engine/commands.ts`)に 1 つも実装されていない(語彙予約すらない)ため、GDD 9.2 が言う「駐在割当/解除」の操作 UI は作らず、一覧・供給・維持費・hazard・(B)喪失リスク・拠点網 ROI の表示のみに留めた(★2 として下記に記載)。
+- ~~**⑨衛星拠点管理は表示専用**: 駐在割当/解除・拠点設置/放棄のコマンドが engine(`src/engine/commands.ts`)に 1 つも実装されていない(語彙予約すらない)ため、GDD 9.2 が言う「駐在割当/解除」の操作 UI は作らず、一覧・供給・維持費・hazard・(B)喪失リスク・拠点網 ROI の表示のみに留めた(★2 として下記に記載)。~~ **[2026-08-02 M54 で解消]** engine 側のコマンド 4 種は M50 で実装済みだったものを本画面へ結線した。設置(タイプ/距離帯/常駐 1〜4 名選択)・放棄・駐在割当(住民セレクト+ボタン)・駐在解除(住民ごとのボタン)を追加。住民の絞り込み(寿命/派遣中)は行わず、engine の reject に委ねる(architecture.md §6 の7箇条目どおり)。
 - **★1**: 上記の編成テンプレワンタップは ui-spec 側の記載漏れであり、実装後に本節へ追記する形で埋めた(手戻りなしと判断)。
-- **★2**: 拠点コマンド不在は M24(データ層のみ実装)の時点からの既知のスコープ外であり、M32 は UI 側で新設せず表示専用とした。駐在割当/解除・拠点設置/放棄のコマンドを新設するかどうかは要ユーザー判断(新規 engine タスクの要否を含む)。
+- ~~**★2**: 拠点コマンド不在は M24(データ層のみ実装)の時点からの既知のスコープ外であり、M32 は UI 側で新設せず表示専用とした。駐在割当/解除・拠点設置/放棄のコマンドを新設するかどうかは要ユーザー判断(新規 engine タスクの要否を含む)。~~ **[2026-08-02 M54で解消]** 上記のとおり接続済み。
+
+---
+
+## 9. M54 で実装した範囲(UI 残件束ね・⑥⑨の操作結線 + バナー2種 + 設定リセット)
+
+engine/schema/content/conformance は無改変(M50 で完成済みのコマンド4種+`cancelCodification`を UI へ結線しただけ)。5件:
+
+1. **⑥成文化キューの取消ボタン**: `CodifyTechRow` の `pendingRecords` 各行へ「取消(返金なし)」ボタンを追加。`cancelCodification` を dispatch し、成功トースト・失敗は `RejectionBanner`。返金が無いことをボタン文言・画面注記・トーストの3箇所で明記。
+2. **⑨衛星拠点の操作 UI**: `OutpostCard` に常駐者ごとの解除ボタン・駐在させる住民セレクト+ボタン・放棄ボタンを追加。新規設置は `OutpostEstablishForm`(タイプ/距離帯/常駐 1〜4 名トグル)。拠点 ID 採番は `src/ui/screens/outposts/outpostId.ts`(`grid/facilityId.ts` と同型、`<outpostTypeId><連番>` の形。二重プレフィックスを避けるため capitalize 再プレフィックスはしない意図的な逸脱)。
+3. **定期バックアップ推奨バナー**: `platform/backupReminder.ts` に M34 の `PromotionPromptTracker` と同型の2層(データ条件=既存 `BackupReminderTracker` / 表示頻度=`PromotionPromptTracker` 流用)を追加し、`AppShell` へグローバル配線。**時計をこの変更で `systemSaveClock`(単調・`performance.now()`)から `systemWallClock`(`Date.now()`)へ修正した**(単調時計はページ再読込で原点が0へ戻るため、複数セッションを跨ぐ「経過実時間」を測れなかった=実装前から潜在していた不具合)。`commandsSinceExport` 軸は今回未結線(★下記)。
+4. **起動失敗のその場通知**: `platform/persistence.ts` に `SaveNotFoundError`(初回起動=セーブ無し)を新設し、`loadLatestSave` の「セーブが無い」と「セーブはあったが読めなかった」を型で区別。後者だけ `main.tsx` の `loadOrCreateState` が `loadFailed: true` を返し、`AppShell` が `LoadFailureBanner` を表示して＋設定画面のインポート導線へ誘導する(boot 自体は継続)。
+5. **設定画面の「最初からやり直す」導線**: `ResetGameSection`(hooks 不使用・段0/1/2)で確認2段(大移動の1段確認より重大度が高いと判断)。`createNewGameState(content, { algoVersion: state.algoVersion })` を再実行し `worldLoaded(source:"newGame")` で上書き。難度シード/worldSeed は既定のまま(`newGame.ts` の既定値を変えない)。
+
+**★(要ユーザー判断・非ブロッキング)**:
+- ①`commandsSinceExport`(バックアップ推奨のコマンド数軸)を未結線。`store.dispatch({type:"commandApplied"})` は画面から直接呼ばれるため、composition root(`main.tsx`)がコマンド発行の粒度で介入する経路が無い(`SaveScheduler.recordCommandOutcome` も同じ制約で現状どこからも呼ばれていない=architecture.md §4-1 の記述と実装の食い違いは別途申し送り)。経過実時間(既定24h)軸のみで周期表示は成立する。
+- ②衛星拠点の常駐者候補は寿命/派遣中で絞り込まない(ResidentsScreen.tsx §3 と同じ立場の踏襲)。
+- ③「最初からやり直す」の確認は2段(大移動は1段)。誤タップ防止の強度をタスク指示どおり引き上げた設計判断であり、GDD/ADR に段数の明文規定はない。

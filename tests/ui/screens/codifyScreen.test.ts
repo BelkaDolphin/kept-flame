@@ -238,6 +238,91 @@ describe("CodifyTechRow: 媒体トグル + キュー投入(ロードマップ M3
   });
 });
 
+describe("[M54] CodifyTechRow: 作業中の記録の取消(返金なし・GDD 6.2)", () => {
+  it("onCancel 省略時は取消ボタンを描かない(既存呼び出し互換)", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        pendingRecords: [
+          { entityId: id("cJob1"), medium: "paper", progressApprox: 5, requiredWorkApprox: 20 },
+        ],
+      }),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+    });
+    expect(flattenText(vnode)).not.toContain("取消");
+  });
+
+  it("onCancel を渡すと作業中の記録ごとに取消ボタンが出て、押すと codifyId で呼ばれる", () => {
+    const onCancel = vi.fn();
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        pendingRecords: [
+          { entityId: id("cJob1"), medium: "paper", progressApprox: 5, requiredWorkApprox: 20 },
+        ],
+      }),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      onCancel,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("取消");
+    expect(text).toContain("返金なし");
+    const button = findButton(vnode);
+    expect(button).not.toBeNull();
+    button?.props.onClick();
+    expect(onCancel).toHaveBeenCalledWith(id("cJob1"));
+  });
+
+  it("複数の作業中記録があれば取消ボタンもその数だけ出る", () => {
+    const onCancel = vi.fn();
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        pendingRecords: [
+          { entityId: id("cJob1"), medium: "paper", progressApprox: 5, requiredWorkApprox: 20 },
+          {
+            entityId: id("cJob2"),
+            medium: "stoneTablet",
+            progressApprox: 1,
+            requiredWorkApprox: 10,
+          },
+        ],
+      }),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      onCancel,
+    });
+    let count = 0;
+    function countButtons(node: unknown): void {
+      if (Array.isArray(node)) {
+        for (const child of node) countButtons(child);
+        return;
+      }
+      if (node === null || node === undefined || typeof node !== "object") return;
+      const candidate = node as {
+        readonly type?: unknown;
+        readonly props?: { readonly children?: unknown; readonly class?: string };
+      };
+      if (
+        candidate.type === "button" &&
+        typeof candidate.props?.class === "string" &&
+        candidate.props.class.includes("cancel-button")
+      ) {
+        count++;
+      }
+      if (typeof candidate.type === "function") {
+        countButtons((candidate.type as (props: unknown) => unknown)(candidate.props));
+        return;
+      }
+      countButtons(candidate.props?.children);
+    }
+    countButtons(vnode);
+    expect(count).toBe(2);
+  });
+});
+
 describe("CodifySuggestionRow(おまかせ成文化 1 件・GDD 2.1)", () => {
   it("順番・媒体・所要/累積tick・間に合う見込みを表示する", () => {
     const vnode = CodifySuggestionRow({

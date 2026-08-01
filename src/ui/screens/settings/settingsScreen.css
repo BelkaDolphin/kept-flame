@@ -149,6 +149,69 @@
   font-weight: 600;
 }
 
+/* [M54] 最初からやり直す */
+
+.kf-settings__reset {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-settings__reset-start-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #a11334;
+  cursor: pointer;
+}
+
+.kf-settings__reset-warning {
+  border: 2px solid #a11334;
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  background: #faf8f5;
+  margin: 0.5rem 0 0;
+}
+
+.kf-settings__reset-warning-message {
+  font-size: var(--kf-fs-sub);
+  margin: 0 0 0.5rem;
+}
+
+.kf-settings__reset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-settings__reset-proceed-button,
+.kf-settings__reset-confirm-button,
+.kf-settings__reset-cancel-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #a11334;
+  cursor: pointer;
+}
+
+.kf-settings__reset-cancel-button {
+  border-color: #8a857d;
+  color: #24201c;
+}
+
 .kf-settings-screen__nav {
   display: flex;
   gap: 0.5rem;

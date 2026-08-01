@@ -617,6 +617,7 @@
 .kf-promo-banner__button {
   font: inherit;
   font-size: var(--kf-fs-sub);
+  min-width: 44px;
   min-height: 44px;
   padding: 0.3rem 0.8rem;
   border: 1px solid var(--kf-line-grid);

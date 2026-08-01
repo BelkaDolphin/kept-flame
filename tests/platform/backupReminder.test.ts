@@ -9,9 +9,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BACKUP_REMINDER_PROMPT_STORAGE_KEY,
+  BACKUP_REMINDER_STORAGE_KEY,
   BackupReminderTracker,
   DEFAULT_BACKUP_REMINDER_COMMAND_COUNT,
   DEFAULT_BACKUP_REMINDER_ELAPSED_MS,
+  DEFAULT_BACKUP_REMINDER_PROMPT_MAX_SHOWN,
+  DEFAULT_BACKUP_REMINDER_PROMPT_RESHOW_MS,
+  createBackupReminderPromptTracker,
+  createBackupReminderTracker,
+  loadBackupReminderPromptSnapshot,
+  loadBackupReminderSnapshot,
+  recordBackupExported,
+  saveBackupReminderPromptSnapshot,
+  saveBackupReminderSnapshot,
   type ReminderClock,
 } from "../../src/platform/backupReminder";
 
@@ -158,6 +169,110 @@ describe("snapshot / initialSnapshot(永続化の復元)", () => {
   it("initialSnapshot 省略時は未エクスポート扱い", () => {
     const tracker = new BackupReminderTracker();
     expect(tracker.snapshot()).toEqual({ lastExportAt: null, commandsSinceExport: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M54] §3: 周期表示への配線(installPromotion.ts と同型の 2 層構成)。
+// ---------------------------------------------------------------------------
+
+interface FakeLocalStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+function fakeLocalStorage(initial: Record<string, string> = {}): FakeLocalStorage {
+  const map = new Map(Object.entries(initial));
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => {
+      map.set(key, value);
+    },
+    removeItem: (key) => {
+      map.delete(key);
+    },
+  };
+}
+
+describe("[M54] 既定値(表示頻度)", () => {
+  it("再表示は24h・上限回数は無制限(Add-to-Homeと違い恒久的に黙らない)", () => {
+    expect(DEFAULT_BACKUP_REMINDER_PROMPT_RESHOW_MS).toBe(24 * 60 * 60 * 1000);
+    expect(DEFAULT_BACKUP_REMINDER_PROMPT_MAX_SHOWN).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe("[M54] データ条件の永続化(loadBackupReminderSnapshot/saveBackupReminderSnapshot)", () => {
+  it("保存 → 読出の往復が一致する", () => {
+    const storage = fakeLocalStorage();
+    const snapshot = { lastExportAt: 1234, commandsSinceExport: 5 };
+    saveBackupReminderSnapshot(storage, snapshot);
+    expect(loadBackupReminderSnapshot(storage)).toEqual(snapshot);
+    expect(storage.getItem(BACKUP_REMINDER_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("何も保存されていない/壊れていれば null", () => {
+    expect(loadBackupReminderSnapshot(fakeLocalStorage())).toBeNull();
+    expect(
+      loadBackupReminderSnapshot(fakeLocalStorage({ [BACKUP_REMINDER_STORAGE_KEY]: "{" })),
+    ).toBeNull();
+  });
+
+  it("createBackupReminderTracker は永続化済みスナップショットを復元する", () => {
+    const clock = new FakeClock();
+    const storage = fakeLocalStorage();
+    const first = createBackupReminderTracker({ storage, clock });
+    clock.advance(500);
+    first.recordExport();
+    saveBackupReminderSnapshot(storage, first.snapshot());
+
+    const second = createBackupReminderTracker({ storage, clock });
+    expect(second.status()).toEqual(first.status());
+  });
+});
+
+describe("[M54] 表示頻度の永続化(loadBackupReminderPromptSnapshot/saveBackupReminderPromptSnapshot)", () => {
+  it("保存 → 読出の往復が一致する(promotionPrompt.ts §4 のヘルパをそのまま使う)", () => {
+    const storage = fakeLocalStorage();
+    const snapshot = { firstSeenAt: 1, lastShownAt: 2, shownCount: 3 };
+    saveBackupReminderPromptSnapshot(storage, snapshot);
+    expect(loadBackupReminderPromptSnapshot(storage)).toEqual(snapshot);
+    expect(storage.getItem(BACKUP_REMINDER_PROMPT_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("データ条件とはキーが分かれている(片方の永続化がもう片方に影響しない)", () => {
+    expect(BACKUP_REMINDER_STORAGE_KEY).not.toBe(BACKUP_REMINDER_PROMPT_STORAGE_KEY);
+  });
+
+  it("createBackupReminderPromptTracker は上限回数が無制限(何度リマインドしても黙らない)", () => {
+    const clock = new FakeClock();
+    const storage = fakeLocalStorage();
+    const tracker = createBackupReminderPromptTracker({ storage, clock });
+    for (let i = 0; i < 20; i++) {
+      expect(tracker.status().capped).toBe(false);
+      tracker.recordShown();
+      clock.advance(DEFAULT_BACKUP_REMINDER_PROMPT_RESHOW_MS);
+    }
+    expect(tracker.status().shouldShow).toBe(true);
+  });
+});
+
+describe("[M54] recordBackupExported(SettingsScreen のエクスポート成功直後から呼ぶ)", () => {
+  it("データ条件トラッカーの lastExportAt/commandsSinceExport をリセットして永続化する", () => {
+    const clock = new FakeClock();
+    const storage = fakeLocalStorage();
+    // エクスポート前: 既定の経過しきい値(24h)を超え、しきい値に達している状態を作る。
+    const before = new BackupReminderTracker({ clock });
+    clock.advance(DEFAULT_BACKUP_REMINDER_ELAPSED_MS);
+    saveBackupReminderSnapshot(storage, before.snapshot());
+    expect(before.status().shouldRemind).toBe(true);
+
+    recordBackupExported(storage, clock);
+
+    const after = createBackupReminderTracker({ storage, clock });
+    expect(after.status().shouldRemind).toBe(false);
+    expect(after.status().lastExportAt).toBe(clock.now());
+    expect(after.status().commandsSinceExport).toBe(0);
   });
 });
 

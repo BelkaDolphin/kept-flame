@@ -84,7 +84,15 @@ import {
   type ExodusRecordOption,
 } from "../../../src/ui/screens/migration/MigrationScreen";
 import { InheritTrackRow } from "../../../src/ui/screens/inheritance/InheritanceScreen";
-import { ExportPanel, ImportPanel } from "../../../src/ui/screens/settings/SettingsScreen";
+import {
+  ExportPanel,
+  ImportPanel,
+  ResetGameSection,
+} from "../../../src/ui/screens/settings/SettingsScreen";
+import { OutpostCard, OutpostEstablishForm } from "../../../src/ui/screens/outposts/OutpostsScreen";
+import type { OutpostRosterEntry } from "../../../src/ui/derived";
+import { BackupReminderBanner } from "../../../src/ui/BackupReminderBanner";
+import { LoadFailureBanner } from "../../../src/ui/LoadFailureBanner";
 
 const id = entityIdFromString;
 
@@ -333,6 +341,24 @@ describe("44px 最小タップ領域(GDD 6.6)— CSS 静的検査", () => {
     // [束B/m-6] <label> はボタン/select ではないため collectInteractive の
     // 自動収集対象外(§2)。ここで明示的に静的検査へ加える。
     ".kf-settings__import-file-button",
+    // [M54] 新規(⑥成文化キューの取消/⑨拠点操作/定期バックアップ・起動失敗
+    // バナー/設定の最初からやり直す)
+    ".kf-codify-row__cancel-button",
+    ".kf-outpost-card__unstation-button",
+    ".kf-outpost-card__station-select",
+    ".kf-outpost-card__station-button",
+    ".kf-outpost-card__abandon-button",
+    ".kf-outposts-establish__type-select",
+    ".kf-outposts-establish__band-button",
+    ".kf-outposts-establish__resident-button",
+    ".kf-outposts-establish__submit-button",
+    ".kf-settings__reset-start-button",
+    ".kf-settings__reset-proceed-button",
+    ".kf-settings__reset-confirm-button",
+    ".kf-settings__reset-cancel-button",
+    // M34 由来だが本タスクで min-width を足し、44px 検査の対象へ加えた
+    // (誘導バナー3種=Add-to-Home/通知/バックアップ・起動失敗の共有クラス)。
+    ".kf-promo-banner__button",
   ] as const;
 
   it.each(INTERACTIVE_SELECTORS)("%s は 44px 角を満たす", (selector) => {
@@ -748,6 +774,144 @@ describe("44px 最小タップ領域 — ＋セーブ・設定(M33)の実レン�
     });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
     expect(found.some((e) => e.class.includes("kf-settings__import-button"))).toBe(true);
+  });
+});
+
+// --- 4-5. [M54] 新規UI(⑥取消/⑨拠点操作/バナー2種/設定リセット)の実レンダー突合せ
+
+describe("44px 最小タップ領域 — [M54] ⑥成文化キューの取消ボタン", () => {
+  it("CodifyTechRow(作業中の記録の取消ボタン)", () => {
+    const entry: CodifyTechEntry = {
+      techId: id("techFireStarting"),
+      lossClass: "criticalRecoverable",
+      holderIds: [id("aRui")],
+      uniqueHolder: true,
+      isCodified: false,
+      recordedMedia: [],
+      pendingRecords: [
+        { entityId: id("cJob1"), medium: "paper", progressApprox: 5, requiredWorkApprox: 20 },
+      ],
+      residualTick: 1000,
+      hasDeadline: true,
+      maxRecallRiskPercentApprox: 5,
+    };
+    const vnode = CodifyTechRow({
+      entry,
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      onCancel: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-codify-row__cancel-button"))).toBe(true);
+  });
+});
+
+describe("44px 最小タップ領域 — [M54] ⑨衛星拠点の操作 UI", () => {
+  const residentA: ResidentView = {
+    entityId: id("aRui"),
+    moraleApprox: 60,
+    masteryApprox: 0,
+    assignedFacilityId: null,
+    dispatched: false,
+    recallImpaired: false,
+    recallImpairedUntilTick: 0,
+    traitIds: [],
+    stats: {
+      vigorApprox: 50,
+      dexterityApprox: 50,
+      intellectApprox: 50,
+      fortitudeApprox: 50,
+      willApprox: 50,
+    },
+    alive: true,
+    diedTick: null,
+  };
+
+  const outpostEntry: OutpostRosterEntry = {
+    outpostId: id("outpostMine1"),
+    outpostTypeId: id("outpostMine"),
+    resourceId: id("iron"),
+    band: "near",
+    level: 1,
+    residentIds: [id("aRui")],
+    establishedTick: 0,
+    supplyApprox: 10,
+    upkeepApprox: 4,
+    netRevenueApprox: 6,
+    hazardApprox: 0.05,
+    rareAssetCount: 0,
+    expectedRareLossApprox: 0,
+    roiApprox: 2.5,
+  };
+
+  it("OutpostCard(解除/駐在セレクト+ボタン/放棄ボタン)", () => {
+    const vnode = OutpostCard({
+      outpost: outpostEntry,
+      residentOptions: [residentA],
+      stationSelectValue: "",
+      onStationSelectChange: () => undefined,
+      onStation: () => undefined,
+      onUnstation: () => undefined,
+      onAbandon: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-outpost-card__unstation-button"))).toBe(true);
+    expect(found.some((e) => e.class.includes("kf-outpost-card__station-button"))).toBe(true);
+    expect(found.some((e) => e.tag === "select")).toBe(true);
+    expect(found.some((e) => e.class.includes("kf-outpost-card__abandon-button"))).toBe(true);
+  });
+
+  it("OutpostEstablishForm(タイプ選択/距離帯/住民トグル/設置ボタン)", () => {
+    const vnode = OutpostEstablishForm({
+      outpostTypeOptions: [id("outpostMine")],
+      selectedTypeId: id("outpostMine"),
+      onTypeChange: () => undefined,
+      band: "near",
+      onBandChange: () => undefined,
+      residentOptions: [residentA],
+      selectedResidentIds: new Set(),
+      onToggleResident: () => undefined,
+      onSubmit: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.tag === "select")).toBe(true);
+    expect(found.some((e) => e.class.includes("kf-outposts-establish__submit-button"))).toBe(true);
+  });
+});
+
+describe("44px 最小タップ領域 — [M54] 定期バックアップ/起動失敗バナー", () => {
+  it("BackupReminderBanner", () => {
+    const vnode = BackupReminderBanner({
+      visible: true,
+      onGoToSettings: () => undefined,
+      onClose: () => undefined,
+    });
+    assertAllInteractiveElementsMeetMinTapTarget(vnode);
+  });
+
+  it("LoadFailureBanner", () => {
+    const vnode = LoadFailureBanner({
+      visible: true,
+      onGoToSettings: () => undefined,
+      onClose: () => undefined,
+    });
+    assertAllInteractiveElementsMeetMinTapTarget(vnode);
+  });
+});
+
+describe("44px 最小タップ領域 — [M54] ＋設定「最初からやり直す」", () => {
+  it("ResetGameSection(段0/段1/段2それぞれのボタン)", () => {
+    for (const step of [0, 1, 2] as const) {
+      const vnode = ResetGameSection({
+        step,
+        onStart: () => undefined,
+        onProceed: () => undefined,
+        onConfirm: () => undefined,
+        onCancel: () => undefined,
+      });
+      assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    }
   });
 });
 

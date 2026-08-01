@@ -34,6 +34,11 @@ import { loadEngineContentOrThrow } from "../schema/engineContent";
 import { advance } from "./engine/advance";
 import type { EngineContent } from "./engine/rules/types";
 import type { GameState } from "./engine/state/state";
+import {
+  createBackupReminderPromptTracker,
+  createBackupReminderTracker,
+  saveBackupReminderPromptSnapshot,
+} from "./platform/backupReminder";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "./platform/catchUp";
 import { createTickDriver } from "./platform/clock";
 import {
@@ -51,14 +56,21 @@ import {
   saveNotificationOptInSnapshot,
   shouldOfferNotificationOptIn,
 } from "./platform/notificationCapability";
-import { loadLatestSave, openSaveDb, saveGameState } from "./platform/persistence";
+import {
+  loadLatestSave,
+  openSaveDb,
+  saveGameState,
+  SaveNotFoundError,
+} from "./platform/persistence";
 import { createBrowserRouterHost, createHashRouter } from "./platform/router";
 import { SaveScheduler, attachLifecycleFlush } from "./platform/saveScheduler";
 import { startCatchUpWorker } from "./platform/workerClient";
 import { createNewGameState } from "./newGame";
 import {
   AppShell,
+  type BackupReminderViewModel,
   type InstallPromotionViewModel,
+  type LoadFailureViewModel,
   type NotificationOptInViewModel,
 } from "./ui/AppShell";
 import {
@@ -104,6 +116,16 @@ function loadContent(): EngineContent {
 interface BootState {
   readonly state: GameState;
   readonly source: "save" | "newGame";
+  /**
+   * [M54] セーブは**あったのに読めなかった**(破損・版違反・migration 失敗等)か。
+   * `SaveNotFoundError`(初回起動でまだ何も保存していないだけ)は含まない——
+   * 区別しないと「初めて遊ぶ人」にまで「読み込みに失敗しました」を誤表示する。
+   */
+  readonly loadFailed: boolean;
+}
+
+function freshNewGameState(content: EngineContent): GameState {
+  return createNewGameState(content, { algoVersion: balanceJson.algoVersion });
 }
 
 async function loadOrCreateState(
@@ -113,17 +135,21 @@ async function loadOrCreateState(
   if (db !== null) {
     try {
       const restored = await loadLatestSave(db);
-      return { state: restored.state, source: "save" };
-    } catch {
-      // セーブが無い / 壊れている。破損時の救済 UI(インポート導線)は
-      // ＋設定画面(M33)の担当なので、M29 は「セーブが無い」と同じ扱いで
-      // 新規開始する(申し送り)。
+      return { state: restored.state, source: "save", loadFailed: false };
+    } catch (error) {
+      if (error instanceof SaveNotFoundError) {
+        // 初回起動(まだ何も保存していない)。黙って新規開始する(M29 以来の挙動)。
+      } else {
+        // セーブはあったが読めなかった(破損・版違反・migration 失敗・上界超過等)。
+        // 破損時の救済 UI(インポート導線)は＋設定画面(M33)の常設フォームだが、
+        // それだけでは「進行状況が消えた」ことにその場で気づけない(M29 申し送り)
+        // ので、`loadFailed: true` を立てて呼び出し側(AppShell)にバナーを出させる
+        // (ロードマップ M54 行「起動失敗のその場通知」)。boot 自体は続行する。
+        return { state: freshNewGameState(content), source: "newGame", loadFailed: true };
+      }
     }
   }
-  return {
-    state: createNewGameState(content, { algoVersion: balanceJson.algoVersion }),
-    source: "newGame",
-  };
+  return { state: freshNewGameState(content), source: "newGame", loadFailed: false };
 }
 
 async function boot(): Promise<void> {
@@ -276,6 +302,33 @@ async function boot(): Promise<void> {
     },
   };
 
+  // --- 定期バックアップ推奨バナー(M54・GDD 13.4 の精神)----------------------
+  // データ条件(`BackupReminderTracker`・M4 実装済み)AND 表示頻度
+  // (`PromotionPromptTracker`・M34 と同型)の 2 層 AND を、Add-to-Home/通知と
+  // 同じ「起動時に 1 回だけ判定する」形で結線する(backupReminder.ts §3)。
+  // **commandsSinceExport 軸は今回未結線**(★非ブロッキング・最終報告参照):
+  // プレイヤー操作は画面から `store.dispatch` を直接呼ぶため、この
+  // composition root がコマンド発行 1 件ごとに介入する経路が無い
+  // (`SaveScheduler` も同じ制約=`recordCommandOutcome` は現状どこからも
+  // 呼ばれていない・architecture.md §4-1 の記述と実装の差異は別途申し送り)。
+  // 経過実時間(既定 24h)軸のみで周期表示を成立させている。
+  const backupReminderTracker = createBackupReminderTracker({ storage: promotionStorage });
+  const backupReminderPromptTracker = createBackupReminderPromptTracker({
+    storage: promotionStorage,
+  });
+  const backupReminderVisible =
+    backupReminderTracker.status().shouldRemind && backupReminderPromptTracker.status().shouldShow;
+  if (backupReminderVisible) {
+    backupReminderPromptTracker.recordShown();
+    saveBackupReminderPromptSnapshot(promotionStorage, backupReminderPromptTracker.snapshot());
+  }
+  const backupReminder: BackupReminderViewModel = { visible: backupReminderVisible };
+
+  // --- 起動失敗のその場通知(M54)---------------------------------------------
+  // 判定は `loadOrCreateState` が済ませ済み(`booted.loadFailed`)。ここでは
+  // view model へ写すだけ(main.tsx はこれ以上の判定を持たない)。
+  const loadFailure: LoadFailureViewModel = { visible: booted.loadFailed };
+
   // --- 初期画面(GDD 4.2「復帰時に必ず最初に表示」)---------------------------
   // 判定は **plan の targetTick** で行う。長期不在(> 600 tick)は Worker 経路が
   // 非同期に適用されるので、この時点の `store.peekState().tick` はまだ動いておらず、
@@ -292,6 +345,8 @@ async function boot(): Promise<void> {
       bootTick={bootTick}
       installPromotion={installPromotion}
       notificationOptIn={notificationOptIn}
+      backupReminder={backupReminder}
+      loadFailure={loadFailure}
     />,
     root,
   );

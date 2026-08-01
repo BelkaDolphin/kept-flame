@@ -48,7 +48,9 @@
 import { useEffect, useState } from "preact/hooks";
 
 import "./appShell.css";
+import { BackupReminderBanner } from "./BackupReminderBanner";
 import { InstallPromotionBanner } from "./InstallPromotionBanner";
+import { LoadFailureBanner } from "./LoadFailureBanner";
 import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
 import { resourceLabel } from "./screens/contentLabels";
@@ -254,6 +256,22 @@ export interface NotificationOptInViewModel {
   readonly onRequestPermission: () => void;
 }
 
+/**
+ * [M54] 定期バックアップ推奨バナー。M34 の 2 種と同じ形(`visible` は
+ * composition root がデータ条件 AND 表示頻度を先に AND 済みにした最終値)。
+ * ＋設定画面への遷移はシェル自身の `navigate` を使うので、ここには載せない
+ * (`onGoToSettings` は M33 の `ExodusCompletedNotice` と違い画面ローカルの
+ * コールバックではなく、シェルが直接 `navigate("settings")` を渡す)。
+ */
+export interface BackupReminderViewModel {
+  readonly visible: boolean;
+}
+
+/** [M54] 起動失敗のその場通知。`visible` は `main.tsx` の `loadOrCreateState` が判定済み。 */
+export interface LoadFailureViewModel {
+  readonly visible: boolean;
+}
+
 // --- 5. シェル本体 -----------------------------------------------------------
 
 export interface AppShellProps {
@@ -266,6 +284,10 @@ export interface AppShellProps {
   readonly installPromotion?: InstallPromotionViewModel;
   /** 通知オプトイン誘導バナー(M34)。省略時は描かない。 */
   readonly notificationOptIn?: NotificationOptInViewModel;
+  /** 定期バックアップ推奨バナー(M54)。省略時は描かない。 */
+  readonly backupReminder?: BackupReminderViewModel;
+  /** 起動失敗のその場通知(M54)。省略時は描かない。 */
+  readonly loadFailure?: LoadFailureViewModel;
 }
 
 export function AppShell({
@@ -274,10 +296,14 @@ export function AppShell({
   bootTick,
   installPromotion,
   notificationOptIn,
+  backupReminder,
+  loadFailure,
 }: AppShellProps) {
   const [screenId, setScreenId] = useState<ScreenId>(() => session.screen());
   const [installBannerClosed, setInstallBannerClosed] = useState(false);
   const [notificationBannerClosed, setNotificationBannerClosed] = useState(false);
+  const [backupReminderClosed, setBackupReminderClosed] = useState(false);
+  const [loadFailureClosed, setLoadFailureClosed] = useState(false);
   // ナビの展開状態は**セーブにも URL にも載らない揮発 UI 状態**(バナーの
   // 閉鎖状態と同じ扱い)。現在地の権威はあくまでルータ側にある。
   const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
@@ -327,6 +353,20 @@ export function AppShell({
           visible={notificationOptIn.visible && !notificationBannerClosed}
           onRequestPermission={notificationOptIn.onRequestPermission}
           onClose={() => setNotificationBannerClosed(true)}
+        />
+      )}
+      {loadFailure && (
+        <LoadFailureBanner
+          visible={loadFailure.visible && !loadFailureClosed}
+          onGoToSettings={() => navigate("settings")}
+          onClose={() => setLoadFailureClosed(true)}
+        />
+      )}
+      {backupReminder && (
+        <BackupReminderBanner
+          visible={backupReminder.visible && !backupReminderClosed}
+          onGoToSettings={() => navigate("settings")}
+          onClose={() => setBackupReminderClosed(true)}
         />
       )}
       <ScreenHost screenId={screenId} store={store} bootTick={bootTick} onNavigate={navigate} />

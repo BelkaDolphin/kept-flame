@@ -82,6 +82,75 @@
   color: #5b534b;
 }
 
+/* [M54] 常駐者一覧 + 駐在解除 */
+.kf-outpost-card__resident-list {
+  list-style: none;
+  margin: 0 0 0.4rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.kf-outpost-card__resident-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+}
+
+.kf-outpost-card__unstation-button,
+.kf-outpost-card__station-button,
+.kf-outpost-card__abandon-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-outpost-card__abandon-button {
+  margin: 0.4rem 0 0;
+  border-color: #a11334;
+  color: #a11334;
+}
+
+/* [M54] 駐在させる住民の選択行 */
+.kf-outpost-card__station-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+}
+
+.kf-outpost-card__station-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+}
+
+.kf-outpost-card__station-select {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+}
+
 /* [M32] GDD 8.6 を援用した拠点個別の (B) 喪失リスク項。検収条件。 */
 .kf-outpost-card__loss {
   font-size: var(--kf-fs-sub);
@@ -89,6 +158,98 @@
   font-variant-numeric: tabular-nums;
   color: #a11334;
   margin: 0 0 0.25rem;
+}
+
+/* [M54] 新規設置フォーム */
+
+.kf-outposts-establish {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.7rem;
+}
+
+.kf-outposts-establish__inactive {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0 0 0.7rem;
+}
+
+.kf-outposts-establish__title {
+  font-size: var(--kf-fs-body);
+  margin: 0 0 0.4rem;
+}
+
+.kf-outposts-establish__type-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0 0 0.5rem;
+}
+
+.kf-outposts-establish__type-select {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+}
+
+.kf-outposts-establish__band-list,
+.kf-outposts-establish__resident-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.kf-outposts-establish__band-button,
+.kf-outposts-establish__resident-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-outposts-establish__band-button[aria-pressed="true"],
+.kf-outposts-establish__resident-button[aria-pressed="true"] {
+  border-color: #24201c;
+  border-width: 2px;
+  background: #faf8f5;
+}
+
+.kf-outposts-establish__resident-count {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0 0 0.3rem;
+}
+
+.kf-outposts-establish__submit-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
 }
 
 .kf-outposts-screen__nav {

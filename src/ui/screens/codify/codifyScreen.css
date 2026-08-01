@@ -70,6 +70,28 @@
   color: #8c290b;
 }
 
+.kf-codify-row__pending li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+}
+
+/* [M54] 成文化の取消(返金なし・GDD 6.2)。 */
+.kf-codify-row__cancel-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
 .kf-codify-row__medium {
   display: flex;
   align-items: center;
