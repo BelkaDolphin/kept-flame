@@ -1,60 +1,111 @@
 // ---------------------------------------------------------------------------
-// 継ぐ火 -Kept Flame- 新規ゲームの初期盤面(M29・**暫定**)
+// 継ぐ火 -Kept Flame- 新規ゲーム生成 — M53(M29 暫定実装の置き換え)
 //
 // ===========================================================================
-// 0. これは仮置きである(★ 要ユーザー判断)
+// 0. 何を置き換えたか
 // ===========================================================================
-//   **ロードマップに「ニューゲーム生成」を担当するタスクが存在しない**
-//   (M1〜M52 を検索しても初期盤面の定義はどのタスクにも割り当てられていない)。
-//   一方でアプリシェル(M29)は「起動したら遊べる状態」が無いと 1 画面も出せない
-//   ため、ここに**起動に必要な最小の盤面**を置く。
+//   M29 暫定版(このファイルの旧版・コミット履歴参照)は以下を「未割当」として
+//   明示していた:
+//     (a) worldSeed は固定文字列で、難度シードの選択機構が無い
+//     (b) 住民は `life` を持たない(寿命で死なない・探索派遣の候補にならない)
+//     (c) 初期資源・人数に根拠が無い
+//     (d) 大移動後の新周回開始状態(初期施設配置)を作るタスクが無い
+//   本版はロードマップ M53(台帳v5 必-1 / [2026-08-01裁定] 台帳v7 必-2)として
+//   これを正式化する。(d) は `rules/exodus.ts` の `executeExodus` が
+//   `rules/worldGen.ts` の {@link placeStartingFacilities} を直接呼ぶ形で対応
+//   済み(このファイルも同じ関数を呼ぶ = 「初回起動と同じ生成器を通す」)。
 //
-//   暫定である点を隠さないために、以下を明示しておく:
-//     (a) worldSeed は固定文字列。周回ごとのシード導出は M28(大移動)の担当で
-//         あり、初回シードの決め方(難度「穏」の選択・GDD 2.2)は未割当。
-//     (b) 住民は `life` を持たない = **寿命で死なない**。寿命の抽選
-//         (`rules/lifespan.ts` の `createResidentLife`)は RNG ストリームを
-//         要求し、それを「新規ゲーム生成」としてどう回すかが未設計である。
-//     (c) 初期資源・初期施設・人数はバランス調整(M39〜M41)の対象であり、
-//         ここの数値に根拠は無い(人口 6 だけは GDD 7.6 の人口下限に合わせた)。
+// ===========================================================================
+// 1. 生成順(worldSeed 展開・ドメイン分離)
+// ===========================================================================
+//   1. 難度シード(GDD 2.2)を content へ適用する(`rules/difficulty.ts` の
+//      `applyDifficultySeed`)。**RNG を 1 切引かない純粋な値変換**。
+//   2. worldSeed(文字列)を uint32 へ落とす(`worldSeedToUint32`)。
+//   3. 初期住民を**宣言順**に生成する。1 人につき:
+//        life    : `rules/lifespan.ts` の `createResidentLife`
+//                  (domainTag `lifespan`/`joinAge`。GDD 7.7「人物・寿命は
+//                  seed 決定論生成」を新規ゲームでも同じ関数で満たす)
+//        trait   : 本ファイルの `rollInitialTraits`(domainTag `newGame`。
+//                  新規登録・§3 参照)
+//      salt は常に `residentId` 由来(生成順に依存しない・hash アドレス方式)。
+//   4. 住民 + 初期研究(火起こし)だけの「施設ゼロ」state を組み立てる。
+//   5. `placeStartingFacilities`(engine・`rules/worldGen.ts`)で開始施設
+//      (かまど・作業台)と詰み防止の開墾資源最低保証を適用する。
+//   6. 石板 1 枚ぶんの粘土(§4)を追加する。
 //
-//   engine / content / schema は 1 行も変えていない。ここは composition root
-//   (`src/main.tsx`)側の組み立てであり、engine から見れば「外から渡された
-//   ただの GameState」である。
+//   同じ (worldSeed, 難度シード, algoVersion, contentVersion) からは常に同じ
+//   byte 列の state になる(Date.now/Math.random を 1 度も読まない・
+//   tests/engine/newGame.test.ts の往復テストで固定)。
+//
+// ===========================================================================
+// 2. 初期住民数(★要ユーザー判断・GDD に明記なし)
+// ===========================================================================
+//   6 名を維持する(M29 版から変更なし)。根拠は GDD 7.6 の人口下限
+//   `min(寝床上限 × 0.5, 6)` の絶対保証側(6)に合わせた値であり、「下限ちょうど
+//   から始める」という設計選択。人数そのものの最適値は M39〜M41 のバランス調整
+//   対象(ロードマップ M53 行・数値は暫定)。
+//
+// ===========================================================================
+// 3. domainTag `newGame`(★要ユーザー判断)
+// ===========================================================================
+//   trait の抽選規則は GDD に定義が無い。本実装は「0〜2 個(上限 3 の下、全員
+//   フル装備にはしない)を等確率で個数決定 → 重複無く等確率で選ぶ」という
+//   最小の決定論規則を採る。`content.traitDefs` が無い/空の content では
+//   trait を 1 つも付けない(= M11 以前や trait 無し content と 1 bit も違わない
+//   既定の「省略時は不活性」規約)。
+//
+// ===========================================================================
+// 4. 初期資源(★要ユーザー判断・根拠は各コメント参照)
+// ===========================================================================
+//   薪(firewood 相当)は `placeStartingFacilities` が開墾コスト
+//   (`content.reclaim.costResourceId` の解放数 0 の 1 回ぶん)を下限保証する
+//   (GDD 9.1)。加えてここで**粘土 1 枚ぶん**(`content.recordMedia` の石板
+//   コスト = `baseCostFix × byMedium.stoneTablet.costMulFix`)を積む —
+//   GDD 2.3「開始5分の体験」の②(小クラフト完成)③(成文化前の喪失)を初手から
+//   遊べるようにするための最小限。`content.recordMedia` が無い content では
+//   粘土を積まない(同じ「省略時は不活性」規約)。
 // ---------------------------------------------------------------------------
 
-import { GRID_WIDTH } from "./engine/adjacency";
-import { fixFromInt } from "./engine/fp";
+import { compareUtf16 } from "./engine/canonicalize";
+import { fixFromInt, mulFix, type Fix } from "./engine/fp";
+import { DOMAIN_TAGS } from "./engine/rng/domainTags";
+import { createResidentLife } from "./engine/rules/lifespan";
 import { initialTerrain } from "./engine/rules/reclaim";
-import { requireFacilityDef, type EngineContent } from "./engine/rules/types";
+import { RulesError, requireFacilityDef, type EngineContent } from "./engine/rules/types";
+import { placeStartingFacilities } from "./engine/rules/worldGen";
 import {
   entityIdFromString,
+  MAX_TRAITS_PER_RESIDENT,
   type EntityId,
   type EntityState,
   type GameState,
   type GameStateMeta,
+  type ResidentState,
 } from "./engine/state/state";
-import { createGameState } from "./engine/state/update";
+import { createGameState, putEntity } from "./engine/state/update";
+import {
+  hashedDrawUint32,
+  saltFromId,
+  uniformIntFromDraw,
+  worldSeedToUint32,
+} from "./engine/stochastic";
+import {
+  DEFAULT_DIFFICULTY_SEED_ID,
+  applyDifficultySeed,
+  type DifficultySeedId,
+} from "./difficulty";
 import { SAVE_SCHEMA_VERSION } from "./platform/migration";
 
 const eid = entityIdFromString;
 
-/** 【暫定】固定の世界シード(§0(a))。 */
+/** 【暫定】固定の世界シード(§1 の worldSeed 既定値・UI 側の入力欄は未実装)。 */
 export const NEW_GAME_WORLD_SEED = "kept-flame-mvp-2026";
 
-/** 【暫定】開始時の住民(GDD 7.6 の人口下限 6 に合わせた 6 名)。 */
+/** 【★要ユーザー判断・§2】開始時の住民 6 名(GDD 7.6 の人口下限に合わせた数)。 */
 const STARTING_RESIDENT_NAMES = ["rui", "kaya", "seri", "tou", "mio", "hazu"] as const;
 
-/** 【暫定】開始時の薪(firewood)。開墾 1 回ぶん(baseCost 40)を少し超える量。 */
-const STARTING_FIREWOOD = 60;
-
-/** 【暫定】開始時の粘土(石板 1 枚 = baseCost 20 相当)。 */
-const STARTING_CLAY = 20;
-
-/** かまど(1×1・熱源・薪産出)を置くセル。上 2 行(瓦礫でない領域)の左上。 */
-const HEARTH_CELL = 0;
-/** 作業台(1×1・学芸・研究点産出)を置くセル。かまどの 8 近傍を避けた同じ行。 */
-const WORKBENCH_CELL = GRID_WIDTH - 1;
+/** 【★要ユーザー判断・§3】1 住民が初期状態で持つ trait 数の上限(0〜2)。 */
+const INITIAL_TRAIT_COUNT_MAX = 2;
 
 export interface NewGameOptions {
   /**
@@ -66,17 +117,85 @@ export interface NewGameOptions {
   readonly algoVersion: number;
   /** content の版(ADR 3 軸(b))。既定 1。 */
   readonly contentVersion?: number;
-  /** 世界シード。既定は {@link NEW_GAME_WORLD_SEED}(§0(a) の暫定固定値)。 */
+  /** 世界シード。既定は {@link NEW_GAME_WORLD_SEED}。 */
   readonly worldSeed?: string;
+  /** 難度シード(GDD 2.2)。既定は {@link DEFAULT_DIFFICULTY_SEED_ID}(`"standard"`)。 */
+  readonly difficultySeedId?: DifficultySeedId;
+}
+
+/** `stem` + ID 先頭大文字化(`rules/worldGen.ts` / `ui/screens/grid/facilityId.ts` と同型)。 */
+function capitalize(value: string): string {
+  const head = value.charAt(0);
+  return head.toUpperCase() + value.slice(1);
 }
 
 /**
- * 新規ゲームの初期 state を組み立てる(§0 の暫定条件つき)。
+ * 初期住民 1 人の trait 抽選(§3)。`content.traitDefs` が無い/空なら常に空配列。
  *
- * 地形(瓦礫)は content(`balance.reclaim.initialRubbleCells`)から
- * engine の {@link initialTerrain} が作る = UI 側で瓦礫配置を決め打ちしない。
+ * 個数(0〜{@link INITIAL_TRAIT_COUNT_MAX})を 1 回引き、残りは「候補集合から
+ * 1 個引いて外す」を個数ぶん繰り返す(非復元抽出・重複なしが構造的に保証される)。
+ * 戻り値は ID 昇順(`ResidentState.traitIds` の不変条件・state.ts)。
+ */
+function rollInitialTraits(
+  worldSeedU32: number,
+  residentId: EntityId,
+  content: EngineContent,
+): readonly EntityId[] {
+  const defs = content.traitDefs;
+  if (defs === undefined || defs.size === 0) return [];
+
+  const residentSalt = saltFromId(residentId);
+  const countDraw = hashedDrawUint32(worldSeedU32, DOMAIN_TAGS.newGame, [residentSalt, 0]);
+  const maxCount = Math.min(INITIAL_TRAIT_COUNT_MAX, MAX_TRAITS_PER_RESIDENT, defs.size);
+  const count = uniformIntFromDraw(countDraw, 0, maxCount);
+  if (count === 0) return [];
+
+  // 候補は ID 昇順に正準化してから引く(content Map の反復順に依存させない)。
+  const pool = [...defs.keys()].sort(compareUtf16);
+  const chosen: EntityId[] = [];
+  for (let slot = 1; slot <= count; slot++) {
+    const draw = hashedDrawUint32(worldSeedU32, DOMAIN_TAGS.newGame, [residentSalt, slot]);
+    const index = uniformIntFromDraw(draw, 0, pool.length - 1);
+    const picked = pool[index];
+    if (picked === undefined) {
+      throw new RulesError(
+        `rollInitialTraits: 候補プールの添字 ${String(index)} が引けない(実装バグ)`,
+      );
+    }
+    chosen.push(picked);
+    pool.splice(index, 1);
+  }
+  return [...chosen].sort(compareUtf16);
+}
+
+/**
+ * 資源 entity の在庫を「少なくとも floor」にする(既存在庫は max で保つ)。
+ * 対象 resourceId の entity が無ければ floor で新規作成する
+ * (`rules/worldGen.ts` の `ensureReclaimFloor` と同じ考え方)。
+ */
+function ensureResourceFloor(state: GameState, resourceId: EntityId, floorFix: Fix): GameState {
+  for (const entity of state.entityStateById.values()) {
+    if (entity.kind !== "resource" || entity.resourceId !== resourceId) continue;
+    if (entity.stock >= floorFix) return state;
+    return putEntity(state, { ...entity, stock: floorFix });
+  }
+  return putEntity(state, {
+    kind: "resource",
+    id: eid(`stock${capitalize(resourceId)}`),
+    resourceId,
+    stock: floorFix,
+  });
+}
+
+/**
+ * 新規ゲームの初期 state を組み立てる(§1)。
  *
  * @throws {RulesError} content に hearth / workbench の定義が無い場合
+ *   (**[M53] 現状は要求のまま維持**: 開始施設が置けない content は MVP の
+ *   起動要件を満たさないため、`placeStartingFacilities` の「省略時は不活性」
+ *   より早い段階(起動時)で気付けるよう、ここで明示的に確認する)
+ * @throws {RulesError} content に `townParams`(`content.town`)が無い場合
+ *   (初期住民の life が生成できない・GDD 7.5)
  */
 export function createNewGameState(content: EngineContent, options: NewGameOptions): GameState {
   const hearthDefId = eid("hearth");
@@ -84,71 +203,37 @@ export function createNewGameState(content: EngineContent, options: NewGameOptio
   requireFacilityDef(content, hearthDefId);
   requireFacilityDef(content, workbenchDefId);
 
-  const hearthId = eid("facHearth1");
-  const workbenchId = eid("facWorkbench1");
+  const town = content.town;
+  if (town === undefined) {
+    throw new RulesError(
+      "createNewGameState: content に townParams(content.town)が無いので" +
+        "初期住民の life が生成できない(GDD 7.5)",
+    );
+  }
+
+  const seededContent = applyDifficultySeed(
+    content,
+    options.difficultySeedId ?? DEFAULT_DIFFICULTY_SEED_ID,
+  );
+  const worldSeed = options.worldSeed ?? NEW_GAME_WORLD_SEED;
+  const worldSeedU32 = worldSeedToUint32(worldSeed);
 
   const residentIds: EntityId[] = STARTING_RESIDENT_NAMES.map((name) => eid(`res${name}`));
-  const hearthWorkerId = residentIds[0];
-  const workbenchWorkerId = residentIds[1];
-  if (hearthWorkerId === undefined || workbenchWorkerId === undefined) {
-    throw new RangeError("開始住民が 2 名未満(STARTING_RESIDENT_NAMES の設定ミス)");
-  }
 
   const entities: EntityState[] = [];
   for (const residentId of residentIds) {
-    const assigned =
-      residentId === hearthWorkerId
-        ? hearthId
-        : residentId === workbenchWorkerId
-          ? workbenchId
-          : null;
-    entities.push({
+    const resident: ResidentState = {
       kind: "resident",
       id: residentId,
       morale: fixFromInt(60),
       mastery: fixFromInt(0),
-      assignedFacilityId: assigned,
+      assignedFacilityId: null,
       dispatched: false,
-      traitIds: [],
+      traitIds: rollInitialTraits(worldSeedU32, residentId, seededContent),
       recallImpairedUntilTick: 0,
-    });
-  }
-
-  entities.push({
-    kind: "facility",
-    id: hearthId,
-    defId: hearthDefId,
-    level: 1,
-    cellIndex: HEARTH_CELL,
-    workerIds: [hearthWorkerId],
-  });
-  entities.push({
-    kind: "facility",
-    id: workbenchId,
-    defId: workbenchDefId,
-    level: 1,
-    cellIndex: WORKBENCH_CELL,
-    workerIds: [workbenchWorkerId],
-  });
-
-  // 産出先の resource entity が state に無いレートがあると engine が止まる
-  // (rules/production.ts の `applyProduction`)。content の facility が産出する
-  // 資源(firewood / iron)と、成文化・保管の受け皿(clay / paper / waste)を
-  // 最初から置いておく。
-  const startingStock: readonly (readonly [string, string, number])[] = [
-    ["stockFirewood", "firewood", STARTING_FIREWOOD],
-    ["stockClay", "clay", STARTING_CLAY],
-    ["stockIron", "iron", 0],
-    ["stockPaper", "paper", 0],
-    ["stockWaste", "waste", 0],
-  ];
-  for (const [entityName, resourceName, stock] of startingStock) {
-    entities.push({
-      kind: "resource",
-      id: eid(entityName),
-      resourceId: eid(resourceName),
-      stock: fixFromInt(stock),
-    });
+      life: createResidentLife(worldSeedU32, residentId, 0, town),
+    };
+    entities.push(resident);
   }
 
   // 最初の研究は「火起こし」= 拠点の全ての起点(GDD 5.2)。engine の研究は
@@ -166,9 +251,34 @@ export function createNewGameState(content: EngineContent, options: NewGameOptio
     saveSchemaVersion: SAVE_SCHEMA_VERSION,
     contentVersion: options.contentVersion ?? 1,
     algoVersion: options.algoVersion,
-    worldSeed: options.worldSeed ?? NEW_GAME_WORLD_SEED,
+    worldSeed,
     tick: 0,
   };
 
-  return createGameState(meta, entities, [], [], [], [], undefined, [], initialTerrain(content));
+  const bare = createGameState(
+    meta,
+    entities,
+    [],
+    [],
+    [],
+    [],
+    undefined,
+    [],
+    initialTerrain(seededContent),
+  );
+  // [M53] 開始施設・詰み防止の開墾資源は、大移動の新周回と共通の生成器を通す
+  // (rules/worldGen.ts §1)。
+  let state = placeStartingFacilities(bare, seededContent);
+
+  // [M53・§4] 石板 1 枚ぶんの粘土。content に recordMedia が無ければ積まない
+  // (成文化そのものが不活性な content なので不要・rules/types.ts の
+  // `RecordMediaParams` doc)。
+  const recordMedia = seededContent.recordMedia;
+  if (recordMedia !== undefined) {
+    const stoneTablet = recordMedia.byMedium.stoneTablet;
+    const clayFloorFix = mulFix(recordMedia.baseCostFix, stoneTablet.costMulFix);
+    state = ensureResourceFloor(state, stoneTablet.costResourceId, clayFloorFix);
+  }
+
+  return state;
 }

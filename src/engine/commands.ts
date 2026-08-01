@@ -586,6 +586,15 @@ export const COMMAND_REJECTION_CODES = [
    */
   "exodusCapacityExceeded",
   /**
+   * [M53] 乗員 0 名で大移動しようとした。連れて行く住民が 1 人も居ないと
+   * 次周の生存人口が 0 になり、コロニー全滅ENDを起こさない設計
+   * (ONBOARDING.md §3「人口下限6人絶対保証」・GDD 7.6)がそもそも成立する
+   * 前提(住民が居ること)を欠く。`placeStartingFacilities`
+   * (rules/worldGen.ts)側の詰み防止(資源0かつ産出手段0の回避)も、
+   * 産出手段(就労者)が誰も居なければ機能しようがない。
+   */
+  "exodusNoCrew",
+  /**
    * [M28] 未帰還の探索派遣が残っているので大移動できない(GDD 8.2 のスナップ
    * ショットは帰還先の盤面を前提にしており、次周へ持ち越せない)。
    */
@@ -1691,10 +1700,13 @@ function applyReclaimCell(
 /**
  * [M28] 大移動の実行(GDD 10.2〜10.5)。
  *
- * 検査の順序は「content の有無 → 未帰還の派遣 → 参照の妥当性 → 容量/定員」で、
- * どれか 1 つでも落ちれば state は 1 bit も動かない(§3)。参照の妥当性
- * (未完了の記録・死亡した住民・種別違い)は `rules/exodus.ts` が RulesError に
- * するので、**コマンド層で先に値の reject へ落とす**(§3 と同じ層分け)。
+ * 検査の順序は「content の有無 → 未帰還の派遣 → 参照の妥当性 → **[M53] 乗員 0 名**
+ * → 容量/定員」で、どれか 1 つでも落ちれば state は 1 bit も動かない(§3)。
+ * 参照の妥当性(未完了の記録・死亡した住民・種別違い)は `rules/exodus.ts` が
+ * RulesError にするので、**コマンド層で先に値の reject へ落とす**(§3 と同じ
+ * 層分け)。乗員 0 名の検査を参照検査の**後**に置くのは、`crewIds:[]` が他の
+ * 値検査の入力としても普通に使われる形だからである(先に置くと他の reject を
+ * 覆い隠す)。
  */
 function applyExecuteExodus(
   state: GameState,
@@ -1729,7 +1741,6 @@ function applyExecuteExodus(
       message: "worldSeedOverride が空文字列(GDD 10.5 の任意シード入力は 1 文字以上)",
     });
   }
-
   for (const recordId of command.recordIds) {
     const entity = getEntity(state, recordId);
     if (entity === undefined || entity.kind !== "codify") {
@@ -1763,6 +1774,19 @@ function applyExecuteExodus(
         message: `住民 "${residentId}" は死亡している(GDD 7.5 の tombstone)`,
       });
     }
+  }
+  // [M53] 乗員 0 名の拒否は「値として無意味」(GDD 7.6 の人口下限保証・詰み防止)
+  // であり、参照の妥当性(entityNotFound 等)より後に判定する。`crewIds:[]` は
+  // 他の値検査(recordIds の存在・invalidArgument 等)の入力としても普通に
+  // 使われる形なので、ここより前に置くとそれらの reject を覆い隠してしまう
+  // (§3(a) の「検査の順序」で先に落ちるべきものを横取りしない)。
+  if (command.crewIds.length === 0) {
+    return rejected("executeExodus", index, {
+      code: "exodusNoCrew",
+      message:
+        "乗員を 1 人も選んでいない(誰も連れて行かないと次周の生存人口が 0 になる・" +
+        "GDD 7.6 の人口下限保証・M53 詰み防止)",
+    });
   }
 
   // 解決関数(rules/exodus.ts §1)を先に回して「何が落ちるか」を得る。

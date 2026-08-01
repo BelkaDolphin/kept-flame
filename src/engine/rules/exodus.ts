@@ -80,11 +80,18 @@
 //   出る(直列化は負の tick を受け付けない)。周回をまたいで単調な時間軸を保つ
 //   方が、オフライン差分(ADR-026 の単調時刻)とも整合する。
 //
-//   **施設を載せない**帰結として、次周 state は施設ゼロの盤面になる。開始施設を
-//   どう置くかは新規ゲーム生成の担当(`src/newGame.ts` §0 が「ロードマップに
-//   担当タスクが無い」と明示している未割当領域)であり、engine はそこへ踏み込ま
-//   ない —— 踏み込むと「初期盤面の定義」が engine と composition root の 2 箇所に
-//   できてしまう。
+//   **施設は載せて出発時点では持たない**が、`executeExodus` は最後に
+//   `rules/worldGen.ts` の {@link placeStartingFacilities} を通す。
+//
+//   [2026-08-01裁定・台帳v7 必-2](M53 正本化) 「大移動後の新周回の開始状態
+//   (初期施設配置・持ち込んだ資産の展開)の生成も新規ゲーム生成タスクの担当。
+//   初回起動と同じ生成器を通す」。旧コメント(このセクションの旧版)は
+//   「engine はそこへ踏み込まない」としていたが、`executeExodus` は
+//   commands.ts からしか呼べず composition root にフックする場所が無いため、
+//   「初期盤面の定義を 1 箇所に保つ」という当時の動機を保ったまま裁定を満たす
+//   には**その 1 箇所を engine 側**(`rules/worldGen.ts`)に置くほかない。
+//   `src/newGame.ts`(新規ゲーム)も同じ関数を呼ぶので、定義は今も 1 箇所である
+//   (worldGen.ts §1 に経緯の全文)。
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "../canonicalize";
@@ -132,6 +139,7 @@ import {
   type EngineContent,
   type ExodusParams,
 } from "./types";
+import { placeStartingFacilities } from "./worldGen";
 
 // --- 0. 周回シードの導出(GDD 10.5・§2)------------------------------------
 
@@ -813,7 +821,7 @@ export function executeExodus(
     tick: state.tick,
   };
 
-  return createGameState(
+  const bareNext = createGameState(
     meta,
     entities,
     // GDD 10.5「周回時 RNG カウンタを全ドメイン 0 リセット」。
@@ -827,6 +835,9 @@ export function executeExodus(
     initialTerrain(content),
     nextProgression,
   );
+  // [M53・2026-08-01裁定] 新周回の開始状態(初期施設配置・詰み防止の資源最低
+  // 保証)は「初回起動と同じ生成器」を通す(§3 冒頭 / worldGen.ts §1)。
+  return placeStartingFacilities(bareNext, content);
 }
 
 /** 連れて行く住民を「新天地に着いた直後」の形へ整える(§3)。 */

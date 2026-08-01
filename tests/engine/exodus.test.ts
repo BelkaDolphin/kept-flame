@@ -37,12 +37,15 @@ import {
   type EngineContent,
   type EraDef,
   type ExodusParams,
+  type FacilityDef,
+  type ReclaimParams,
   type RecordMediaParams,
   type TechDef,
 } from "../../src/engine/rules/types";
 import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
 import {
   EMPTY_PROGRESSION,
+  entitiesOfKind,
   entityIdFromString,
   inheritTierOf,
   requireEntity,
@@ -166,6 +169,36 @@ const CONTENT_NO_EXODUS: EngineContent = {
   ...baseContent({ facilityDefs: new Map([[HEARTH.id, HEARTH]]), techDefs: TECH_DEFS }),
   eraDefs: ERA_DEFS,
   recordMedia: RECORD_MEDIA,
+};
+
+/**
+ * [M53] `hearth`/`workbench` が揃い `reclaim` も持つ content(CONTENT の
+ * facilityDefs は hearth のみなので、新周回の詰み防止(worldGen.ts)を確かめる
+ * ためだけの別 content として作る)。
+ */
+const WORKBENCH: FacilityDef = {
+  id: id("workbench"),
+  tags: ["lore"],
+  harshWork: false,
+  outputPerTickByLevel: [fixFromInt(1), fixFromInt(1), fixFromInt(1), fixFromInt(1), fixFromInt(1)],
+  output: { kind: "research" },
+};
+
+const RECLAIM: ReclaimParams = {
+  baseCostFix: fixFromInt(40),
+  costGrowthFix: fixFromRaw(1_150_000),
+  costCapFix: fixFromInt(2000),
+  costResourceId: WOOD,
+  initialRubbleCells: [12, 13, 14],
+};
+
+const CONTENT_WITH_STARTER_FACILITIES: EngineContent = {
+  ...CONTENT,
+  facilityDefs: new Map([
+    [HEARTH.id, HEARTH],
+    [WORKBENCH.id, WORKBENCH],
+  ]),
+  reclaim: RECLAIM,
 };
 
 function research(name: string, techId: EntityId, completedTick: number | null): EntityState {
@@ -752,6 +785,45 @@ describe("大移動の実行(GDD 10.2)", () => {
   });
 });
 
+// --- 5b. 新周回の開始状態(M53・詰み防止・[2026-08-01裁定] 台帳v7 必-2)-------
+
+describe("新周回の開始状態(M53)", () => {
+  it("hearth/workbench が揃った content では、次周に開始施設が置かれ就労者が付く", () => {
+    const after = executeExodus(board(), CONTENT_WITH_STARTER_FACILITIES, {
+      recordIds: [],
+      crewIds: [id("residentAlpha"), id("residentBravo")],
+    });
+    const facilities = entitiesOfKind(after, "facility");
+    expect(facilities.length).toBe(2);
+    for (const f of facilities) {
+      expect(f.workerIds.length).toBe(1);
+    }
+  });
+
+  it("開墾コスト(解放数0の1回ぶん)未満に薪在庫を落とさない(詰み防止・GDD9.1)", () => {
+    // board() の薪在庫は 500(RECLAIM.baseCostFix=40 を大きく上回る)ので、
+    // 「上書きしない」側を固定するにはあえて在庫 0 の盤面で確かめる。
+    const empty = stateOf([resident("residentAlpha"), resource("stockWood", WOOD, 0)], {
+      tick: 1000,
+    });
+    const after = executeExodus(empty, CONTENT_WITH_STARTER_FACILITIES, {
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    const wood = [...entitiesOfKind(after, "resource")].find((r) => r.resourceId === WOOD);
+    expect(wood).toBeDefined();
+    expect(toRaw(wood!.stock)).toBeGreaterThanOrEqual(toRaw(RECLAIM.baseCostFix));
+  });
+
+  it("hearth のみ(workbench 定義なし)の CONTENT では新周回でも施設は増えない(既存互換)", () => {
+    // CONTENT(既存フィクスチャ)は workbench を持たないので、M53 追加後も
+    // 施設ゼロの盤面のままである(このファイルの他の全テストの前提が動かない
+    // ことの直接固定)。
+    const after = executeExodus(board(), CONTENT, { recordIds: [], crewIds: [] });
+    expect(entitiesOfKind(after, "facility").length).toBe(0);
+  });
+});
+
 // --- 6. コマンド層(commands.ts)----------------------------------------------
 
 describe("executeExodus / purchaseInheritBonus コマンド", () => {
@@ -790,6 +862,28 @@ describe("executeExodus / purchaseInheritBonus コマンド", () => {
         worldSeedOverride: "",
       }),
     ).toBe<CommandRejectionCode>("invalidArgument");
+    expect(
+      rejectionCode(board(), CONTENT, {
+        kind: "executeExodus",
+        recordIds: [id("codifyMissing")],
+        crewIds: [],
+      }),
+    ).toBe<CommandRejectionCode>("entityNotFound");
+  });
+
+  it("[M53] 乗員 0 名は exodusNoCrew で拒否する(誰も連れて行かないと詰む)", () => {
+    expect(
+      rejectionCode(board(), CONTENT, {
+        kind: "executeExodus",
+        recordIds: [],
+        crewIds: [],
+      }),
+    ).toBe<CommandRejectionCode>("exodusNoCrew");
+  });
+
+  it("[M53] 乗員 0 名以外の値検査(recordIds の実在)は exodusNoCrew より先に通る", () => {
+    // crewIds:[] と同時に recordIds が不正なら、既存の entityNotFound が先に出る
+    // (commands.ts の検査順: 参照の妥当性 → 乗員0名)。
     expect(
       rejectionCode(board(), CONTENT, {
         kind: "executeExodus",

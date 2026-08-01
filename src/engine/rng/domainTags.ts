@@ -49,6 +49,13 @@
  *                    候補数の中から等確率で 1 つを選ぶだけで、選んだ後は状態を
  *                    参照しない。hash アドレス方式(住民の生成順・呼び出し順に
  *                    依存しない・rules/memoir.ts §3)。
+ *   newGame        : [M53] 新規ゲーム生成専用の抽選(初期住民の trait 選択)。
+ *                    salt = (fnv1a32(residentId), スロット番号)。**tick ループ・
+ *                    大移動のどちらからも引かれない**(呼び出し口は
+ *                    `src/newGame.ts` の初期住民生成 1 箇所のみ)。既存 golden
+ *                    vector が構造的に踏みようがないドメインである点は `exodus`
+ *                    と同じ(rules/exodus.ts §0 参照)。hash アドレス方式
+ *                    (住民の生成順に依存しない)。
  *   recall         : 想起困難の発生ベルヌーイ試行(GDD 11.2 / 段階1・ADR-009/018(1))。
  *                    salt = (fnv1a32(residentId), fnv1a32(techId), coarseStepIndex)。
  *                    per-step 全再評価が順序非依存であることを構造で保証するため
@@ -69,6 +76,7 @@ const DOMAIN_TAG_LIST = [
   "joinAge",
   "lifespan",
   "memoir",
+  "newGame",
   "recall",
   "recallDuration",
 ] as const;

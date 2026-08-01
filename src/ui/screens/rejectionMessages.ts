@@ -163,6 +163,7 @@ const MESSAGE_BUILDERS: { readonly [K in CommandRejectionCode]: MessageBuilder }
   noResearchTarget: () => "研究中の技術がありません。廃材はここでは使えません。",
   exodusCapacityExceeded: () =>
     "持ち出せる量を超えています。プレビューで何が積みきれないか確認してください。",
+  exodusNoCrew: () => "大移動には同行する住民が 1 人以上必要です。",
   dispatchInProgress: (r) =>
     r.actual !== null
       ? `未帰還の探索が ${String(r.actual)} 件あるあいだは大移動できません。`

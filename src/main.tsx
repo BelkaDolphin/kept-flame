@@ -8,7 +8,7 @@
 //
 // 起動の順序(perf-boundaries.md §3 の B2 → B1 → B3 → B4 に対応):
 //   1. content ロード(本番と同じ入口 = validateContentBundle → loadEngineContent)
-//   2. セーブ復元(B2)。無ければ新規ゲーム(`src/newGame.ts`・暫定)
+//   2. セーブ復元(B2)。無ければ新規ゲーム(`src/newGame.ts`・M53)
 //   3. ストア構築(B3)→ ルータ/tick driver/セーブを結線
 //   4. tick 差が大きければ Worker catch-up(B1)へ回す
 //   5. Preact マウント(B4)
