@@ -165,7 +165,23 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
     if (!result.ok) return;
 
     const content = result.value;
-    expect([...content.facilityDefs.keys()]).toEqual(["forge", "hearth", "workbench"]);
+    // [M58] 施設14種(GDD 6.1)。並びは ID の UTF-16 昇順(§4 の前提)。
+    expect([...content.facilityDefs.keys()]).toEqual([
+      "bed",
+      "charcoalKiln",
+      "explorationHq",
+      "forge",
+      "foundry",
+      "hearth",
+      "infirmary",
+      "kitchenGarden",
+      "researchDesk",
+      "scriptorium",
+      "warehouse",
+      "watchtower",
+      "waterTank",
+      "workbench",
+    ]);
     // [M6] E1〜E3 のテック 24 本(GDD 5.2)。並びは ID の UTF-16 昇順(§4 の前提)。
     expect([...content.techDefs.keys()]).toEqual([
       "techAgriculture",

@@ -180,7 +180,11 @@ describe("[M11] loadEngineContent — townParams → TownParams", () => {
 });
 
 describe("[M11] facility.bedCapacityCurve", () => {
-  it("既存 content の施設は寝床を持たない(寝床上限 0 = M11 不活性)", () => {
+  // [M58] 施設14種投入により「bed」(寝床)が寝床上限を持つようになった
+  // (M11 時点の「既存 content は寝床を持たない」は解消・GDD 6.1)。
+  // それ以外の施設は引き続き寝床を提供しない(= M11 不活性のまま)ことを
+  // 併せて固定する。
+  it("bed だけが寝床上限を持ち、他の施設は寝床を持たない", () => {
     const validated = validateContentBundle({
       tech: techJson,
       facility: facilityJson,
@@ -191,12 +195,20 @@ describe("[M11] facility.bedCapacityCurve", () => {
     expect(validated.ok).toBe(true);
     if (!validated.ok) return;
     for (const facility of validated.value.facility) {
+      if (facility.id === "bed") {
+        expect(facility.bedCapacityCurve).not.toBeNull();
+        continue;
+      }
       expect(facility.bedCapacityCurve).toBeNull();
     }
     const loaded = loadEngineContent(validated.value);
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
-    for (const def of loaded.value.facilityDefs.values()) {
+    for (const [defId, def] of loaded.value.facilityDefs) {
+      if (defId === "bed") {
+        expect(def.bedCapacityByLevel).toEqual([2, 3, 4, 5, 6]);
+        continue;
+      }
       expect(def.bedCapacityByLevel).toBeUndefined();
     }
   });

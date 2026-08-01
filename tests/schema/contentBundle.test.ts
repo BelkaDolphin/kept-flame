@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { canonicalizeJson } from "../../src/engine/canonicalize";
 import { type RawContentBundle, validateContentBundle } from "../../schema/contentBundle";
+import { loadEngineContentOrThrow } from "../../schema/engineContent";
 
 import adjacencyJson from "../../content/adjacency.json";
 import balanceJson from "../../content/balance.json";
@@ -36,16 +37,75 @@ describe("validateContentBundle — ダミー content", () => {
   });
 
   // [M6] tech は E1〜E3 の 24 本(GDD 5.2)へ additive 追加した。
-  // [M7] trait は GDD 7.2 の MVP 8 種へ additive 追加した。facility 14 種は
-  // 未投入(別タスク)なので T6 のダミー規模のまま。
-  it("tech 24件・facility 3件・trait 8件がロードされる(規模の確認)", () => {
+  // [M7] trait は GDD 7.2 の MVP 8 種へ additive 追加した。
+  // [M58] facility は GDD 6.1 の 14 種(かまど/貯水槽/菜園/寝床/作業台/炭焼き窯/
+  // 製錬炉/鍛冶場/研究机/写字室/保管庫/見張り台/探索本部/療養所)が出揃った。
+  it("tech 24件・facility 14件・trait 8件がロードされる(規模の確認)", () => {
     const result = validateContentBundle(dummyBundle());
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.tech).toHaveLength(24);
-      expect(result.value.facility).toHaveLength(3);
+      expect(result.value.facility).toHaveLength(14);
       expect(result.value.trait).toHaveLength(8);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M58] 施設14種拡充の固定テスト。
+//   要件:①GDD 6.1 の 14 種すべてがスキーマ valid で engine content(カタログ)へ
+//        載る ②粘土・紙(GDD 11.3 の跨時代資源 / 11.1 の記録媒体コスト)に
+//        本拠内で完結する入手経路(facility.output)が存在する。
+// ---------------------------------------------------------------------------
+
+describe("[M58] 施設14種(GDD 6.1)がカタログに載る", () => {
+  const GDD_6_1_FACILITY_IDS = [
+    "hearth",
+    "waterTank",
+    "kitchenGarden",
+    "bed",
+    "workbench",
+    "charcoalKiln",
+    "foundry",
+    "forge",
+    "researchDesk",
+    "scriptorium",
+    "warehouse",
+    "watchtower",
+    "explorationHq",
+    "infirmary",
+  ] as const;
+
+  it("14種すべてが schema valid かつ engine content へロードされる", () => {
+    const validated = validateContentBundle(dummyBundle());
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+
+    const loaded = loadEngineContentOrThrow(validated.value);
+    expect(loaded.facilityDefs.size).toBe(14);
+    for (const facilityId of GDD_6_1_FACILITY_IDS) {
+      expect(loaded.facilityDefs.has(facilityId as never)).toBe(true);
+    }
+  });
+
+  it("粘土(clay)に本拠内の入手経路が存在する(貯水槽)", () => {
+    const validated = validateContentBundle(dummyBundle());
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    const producers = validated.value.facility.filter(
+      (f) => f.output?.kind === "resource" && f.output.resourceId === "clay",
+    );
+    expect(producers.map((f) => f.id)).toEqual(["waterTank"]);
+  });
+
+  it("紙(paper)に本拠内の入手経路が存在する(写字室)", () => {
+    const validated = validateContentBundle(dummyBundle());
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    const producers = validated.value.facility.filter(
+      (f) => f.output?.kind === "resource" && f.output.resourceId === "paper",
+    );
+    expect(producers.map((f) => f.id)).toEqual(["scriptorium"]);
   });
 });
 

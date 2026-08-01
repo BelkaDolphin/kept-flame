@@ -48,5 +48,188 @@
     "output": { "kind": "research" },
     "buildCost": { "resourceId": "firewood", "amount": 20 },
     "upgradeCostCurve": [24, 28.8, 34.56, 41.472, 49.7664]
+  },
+  {
+    "id": "waterTank",
+    "tags": ["damp"],
+    "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+    "lvCurve": [90, 103.5, 119.025, 136.87875, 157.410562],
+    "overflowCapPolicy": "convertToWaste",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0.4,
+      "dexterity": 0.3,
+      "intellect": 0,
+      "fortitude": 0.3,
+      "will": 0
+    },
+    "output": { "kind": "resource", "resourceId": "clay" },
+    "buildCost": { "resourceId": "firewood", "amount": 25 },
+    "upgradeCostCurve": [27, 32.4, 38.88, 46.656, 55.9872]
+  },
+  {
+    "id": "kitchenGarden",
+    "tags": ["clean"],
+    "slots": { "lv1": 1, "lv2": 2, "lv3": 2, "lv4": 3, "lv5": 3 },
+    "lvCurve": [110, 126.5, 145.475, 167.29625, 192.390687],
+    "overflowCapPolicy": "convertToWaste",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0.35,
+      "dexterity": 0.35,
+      "intellect": 0.1,
+      "fortitude": 0.1,
+      "will": 0.1
+    },
+    "output": { "kind": "resource", "resourceId": "grain" },
+    "buildCost": { "resourceId": "firewood", "amount": 25 },
+    "upgradeCostCurve": [32, 38.4, 46.08, 55.296, 66.3552]
+  },
+  {
+    "id": "charcoalKiln",
+    "tags": ["heat"],
+    "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+    "lvCurve": [120, 138, 158.7, 182.505, 209.88075],
+    "overflowCapPolicy": "convertToWaste",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0.35,
+      "dexterity": 0.25,
+      "intellect": 0,
+      "fortitude": 0.4,
+      "will": 0
+    },
+    "output": { "kind": "resource", "resourceId": "charcoal" },
+    "buildCost": { "resourceId": "firewood", "amount": 35 },
+    "upgradeCostCurve": [34, 40.8, 48.96, 58.752, 70.5024]
+  },
+  {
+    "id": "foundry",
+    "tags": ["heat"],
+    "slots": { "lv1": 1, "lv2": 2, "lv3": 2, "lv4": 3, "lv5": 3 },
+    "lvCurve": [140, 161, 185.15, 212.9225, 244.860875],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 2, "height": 1 },
+    "harshWork": true,
+    "statWeights": {
+      "vigor": 0.4,
+      "dexterity": 0.3,
+      "intellect": 0,
+      "fortitude": 0.3,
+      "will": 0
+    },
+    "output": { "kind": "resource", "resourceId": "copper" },
+    "buildCost": { "resourceId": "iron", "amount": 30 },
+    "upgradeCostCurve": [35, 42, 50.4, 60.48, 72.576]
+  },
+  {
+    "id": "researchDesk",
+    "tags": ["lore"],
+    "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+    "lvCurve": [95, 109.25, 125.6375, 144.483125, 166.155593],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0,
+      "dexterity": 0.3,
+      "intellect": 0.6,
+      "fortitude": 0,
+      "will": 0.1
+    },
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "clay", "amount": 20 },
+    "upgradeCostCurve": [25, 30, 36, 43.2, 51.84]
+  },
+  {
+    "id": "scriptorium",
+    "tags": ["lore"],
+    "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 3 },
+    "lvCurve": [85, 97.75, 112.4125, 129.274375, 148.665531],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0,
+      "dexterity": 0.45,
+      "intellect": 0.4,
+      "fortitude": 0,
+      "will": 0.15
+    },
+    "output": { "kind": "resource", "resourceId": "paper" },
+    "buildCost": { "resourceId": "firewood", "amount": 25 },
+    "upgradeCostCurve": [22, 26.4, 31.68, 38.016, 45.6192]
+  },
+  {
+    "id": "explorationHq",
+    "tags": ["noise"],
+    "slots": { "lv1": 1, "lv2": 1, "lv3": 2, "lv4": 2, "lv5": 2 },
+    "lvCurve": [70, 80.5, 92.575, 106.46125, 122.430437],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "statWeights": {
+      "vigor": 0.1,
+      "dexterity": 0.1,
+      "intellect": 0.4,
+      "fortitude": 0.1,
+      "will": 0.3
+    },
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "firewood", "amount": 40 },
+    "upgradeCostCurve": [21, 25.2, 30.24, 36.288, 43.5456]
+  },
+  {
+    "id": "bed",
+    "tags": ["calm"],
+    "slots": { "lv1": 0, "lv2": 0, "lv3": 0, "lv4": 0, "lv5": 0 },
+    "lvCurve": [8, 9.2, 10.58, 12.167, 13.99205],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "firewood", "amount": 20 },
+    "upgradeCostCurve": [15, 18, 21.6, 25.92, 31.104],
+    "bedCapacityCurve": [2, 3, 4, 5, 6]
+  },
+  {
+    "id": "warehouse",
+    "tags": ["foul"],
+    "slots": { "lv1": 0, "lv2": 0, "lv3": 0, "lv4": 0, "lv5": 0 },
+    "lvCurve": [12, 13.8, 15.87, 18.2505, 20.988075],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 2, "height": 2 },
+    "harshWork": false,
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "firewood", "amount": 35 },
+    "upgradeCostCurve": [20, 24, 28.8, 34.56, 41.472],
+    "storageCapacityCurve": [400, 460, 529, 608.35, 699.6025]
+  },
+  {
+    "id": "watchtower",
+    "tags": ["noise"],
+    "slots": { "lv1": 0, "lv2": 0, "lv3": 0, "lv4": 0, "lv5": 0 },
+    "lvCurve": [9, 10.35, 11.9025, 13.687875, 15.741056],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "firewood", "amount": 30 },
+    "upgradeCostCurve": [18, 21.6, 25.92, 31.104, 37.3248]
+  },
+  {
+    "id": "infirmary",
+    "tags": ["clean"],
+    "slots": { "lv1": 0, "lv2": 0, "lv3": 0, "lv4": 0, "lv5": 0 },
+    "lvCurve": [11, 12.65, 14.5475, 16.729625, 19.239068],
+    "overflowCapPolicy": "discardExcess",
+    "footprint": { "width": 1, "height": 1 },
+    "harshWork": false,
+    "output": { "kind": "research" },
+    "buildCost": { "resourceId": "clay", "amount": 20 },
+    "upgradeCostCurve": [16, 19.2, 23.04, 27.648, 33.1776]
   }
 ]

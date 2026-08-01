@@ -251,9 +251,10 @@ describe("authoring-samples — content/*.json 不変性の確認", () => {
   //   T6/T7 時点: tech 3 / facility 3 / trait 2
   //   M6:         tech 24(E1〜E3・GDD 5.2)。facility / trait は据え置き。
   //   M7:         trait 8(GDD 7.2 の MVP 8 種)。facility は据え置き(14 種は別タスク)。
+  //   M58:        facility 14(GDD 6.1 の全14種)。
   it("本物の content/*.json の規模が想定どおり(計測サンプルが混入していない)", () => {
     expect(techJson).toHaveLength(24);
-    expect(facilityJson).toHaveLength(3);
+    expect(facilityJson).toHaveLength(14);
     expect(traitJson).toHaveLength(8);
     // 計測サンプルの ID が本物側へ混入していないこと(このテストの本来の関心事)。
     const techIds = new Set(techJson.map((t) => t.id));

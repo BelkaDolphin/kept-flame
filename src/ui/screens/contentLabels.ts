@@ -9,12 +9,22 @@
 // ===========================================================================
 // 対応の根拠(捏造しないための出典)
 // ===========================================================================
-//   - facility: 現行 content(`content/facility.json`)は 3 種(hearth/forge/
-//     workbench)のみ実装済み(M5 の申し送り「施設14種contentは未実施」)。
-//     GDD 6.1 の 14 種のどれに対応するかの正式な対応表は無いため、**ID の
-//     literal 直訳**(hearth=かまど/forge=鍛冶場/workbench=作業台)に留める。
+//   - facility: `content/facility.json` は GDD 6.1 の 14 種(かまど/貯水槽/
+//     菜園/寝床/作業台/炭焼き窯/製錬炉/鍛冶場/研究机/写字室/保管庫/見張り台/
+//     探索本部/療養所)が出揃った(M58)。既存3種(hearth/forge/workbench)は
+//     **ID の literal 直訳**(hearth=かまど/forge=鍛冶場/workbench=作業台)の
+//     まま変更していない。[M58] 追加の 11 種は GDD 6.1 の名称と 1:1 対応する
+//     (ID は英字での役割直訳・命名根拠は content/facility.json 追加時の設計
+//     報告を参照: waterTank=貯水槽/kitchenGarden=菜園/charcoalKiln=炭焼き窯/
+//     foundry=製錬炉/researchDesk=研究机/scriptorium=写字室/bed=寝床/
+//     warehouse=保管庫/watchtower=見張り台/explorationHq=探索本部/
+//     infirmary=療養所。foundry/waterTank/kitchenGarden は conformance の
+//     fixture facility "smelter"/"cistern" や #12 計測サンプルの
+//     "garden"/"reservoir" と ID が衝突するため素直な直訳から変えている)。
 //   - resource: GDD 6.7 / 9.1 / 11.1 に出てくる資源名(薪/鉄/粘土/紙/廃材)を
 //     そのまま英字 ID(firewood/iron/clay/paper/waste)へ対応させる。
+//     [M58] 追加の charcoal(木炭・炭焼き窯の産出)/copper(銅・製錬炉(foundry)の
+//     産出。GDD 5.2「製錬(銅→青銅)」に根拠)も同じ直訳方針。
 //   - trait: GDD 7.2「学者/職人/探索者/記憶巧者(生きた書庫)/病弱/楽観/悲観/
 //     怪力」の 8 種と content の trait ID(traitScholar 等)は 1:1 対応する
 //     (ID が英訳そのものなので取り違えない)。
@@ -30,6 +40,18 @@ const FACILITY_LABELS: { readonly [key: string]: string } = {
   hearth: "かまど",
   forge: "鍛冶場",
   workbench: "作業台",
+  // [M58] GDD 6.1 の残り 11 種(additive・設計根拠は content/facility.json 参照)。
+  waterTank: "貯水槽",
+  kitchenGarden: "菜園",
+  bed: "寝床",
+  charcoalKiln: "炭焼き窯",
+  foundry: "製錬炉",
+  researchDesk: "研究机",
+  scriptorium: "写字室",
+  warehouse: "保管庫",
+  watchtower: "見張り台",
+  explorationHq: "探索本部",
+  infirmary: "療養所",
 };
 
 const RESOURCE_LABELS: { readonly [key: string]: string } = {
@@ -41,6 +63,9 @@ const RESOURCE_LABELS: { readonly [key: string]: string } = {
   // [M32] GDD 9.2「タイプ別供給(鉱山＝鉄/石炭、農園＝穀物、林＝薪/繊維)」の
   // 農園が産出する資源(`content/outpostType.json` の `outpostFarm.resource`)。
   grain: "穀物",
+  // [M58] 新設施設(炭焼き窯/製錬炉)の産出資源。
+  charcoal: "木炭",
+  copper: "銅",
 };
 
 /**

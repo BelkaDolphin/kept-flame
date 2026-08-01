@@ -106,7 +106,23 @@ describe("省略時は M24 以前と同一挙動", () => {
 
   it("他カテゴリ(facility/tech)は outpostType 追加の影響を受けない", () => {
     const content = load(rawBundle());
-    expect([...content.facilityDefs.keys()]).toEqual(["forge", "hearth", "workbench"]);
+    // [M58] facility 14 種(GDD 6.1)。
+    expect([...content.facilityDefs.keys()]).toEqual([
+      "bed",
+      "charcoalKiln",
+      "explorationHq",
+      "forge",
+      "foundry",
+      "hearth",
+      "infirmary",
+      "kitchenGarden",
+      "researchDesk",
+      "scriptorium",
+      "warehouse",
+      "watchtower",
+      "waterTank",
+      "workbench",
+    ]);
   });
 });
 

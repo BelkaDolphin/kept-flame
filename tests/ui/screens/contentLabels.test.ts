@@ -27,12 +27,31 @@ describe("contentLabels: 既知 ID の日本語名", () => {
     expect(facilityLabel(id("workbench"))).toBe("作業台");
   });
 
+  it("[M58] facility: GDD 6.1 の残り 11 種", () => {
+    expect(facilityLabel(id("waterTank"))).toBe("貯水槽");
+    expect(facilityLabel(id("kitchenGarden"))).toBe("菜園");
+    expect(facilityLabel(id("bed"))).toBe("寝床");
+    expect(facilityLabel(id("charcoalKiln"))).toBe("炭焼き窯");
+    expect(facilityLabel(id("foundry"))).toBe("製錬炉");
+    expect(facilityLabel(id("researchDesk"))).toBe("研究机");
+    expect(facilityLabel(id("scriptorium"))).toBe("写字室");
+    expect(facilityLabel(id("warehouse"))).toBe("保管庫");
+    expect(facilityLabel(id("watchtower"))).toBe("見張り台");
+    expect(facilityLabel(id("explorationHq"))).toBe("探索本部");
+    expect(facilityLabel(id("infirmary"))).toBe("療養所");
+  });
+
   it("resource: GDD 6.7/9.1/11.1 の 5 資源", () => {
     expect(resourceLabel(id("firewood"))).toBe("薪");
     expect(resourceLabel(id("iron"))).toBe("鉄");
     expect(resourceLabel(id("clay"))).toBe("粘土");
     expect(resourceLabel(id("paper"))).toBe("紙");
     expect(resourceLabel(id("waste"))).toBe("廃材");
+  });
+
+  it("[M58] resource: 新設施設の産出資源(木炭/銅)", () => {
+    expect(resourceLabel(id("charcoal"))).toBe("木炭");
+    expect(resourceLabel(id("copper"))).toBe("銅");
   });
 
   it("trait: GDD 7.2 の 8 種", () => {
