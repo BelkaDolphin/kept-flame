@@ -1,0 +1,159 @@
+{
+  "protocol": "docs/design/playtest-protocol.md",
+  "round": 1,
+  "date": "2026-08-02",
+  "commit": "c047d55 (docs反映後 70baa09)",
+  "agents": "axisA/B=Opus(390x844, T1-T12+x720長時間) / axisC/E=Sonnet(13画面x3VP) / axisD=Sonnet(13画面)",
+  "verdict": "不合格",
+  "verdictReasons": [
+    "fatal 3所見(進行不能2系統+インポート非永続化)",
+    "軸A平均 1.17 < 基準1.5",
+    "軸D 2/5 pass(D1/D3/D4 fail)",
+    "軸E 5/6 pass(E5 sticky確定バー fail)"
+  ],
+  "scores": {
+    "A_task": 1.17,
+    "A_task_detail": {
+      "T1": 1,
+      "T2": 2,
+      "T3": 1,
+      "T4": 1,
+      "T5": 1,
+      "T6": 2,
+      "T7": 1,
+      "T8": 2,
+      "T9": 1,
+      "T10": 0,
+      "T11": 1,
+      "T12": 1
+    },
+    "C_heuristics": 1.8,
+    "C_groupAverages": {
+      "home_hud": 1.7,
+      "base": 1.8,
+      "research_codify": 1.8,
+      "expedition": 1.8,
+      "cycle_settings": 1.9
+    },
+    "D_wording": "2/5 pass (D2 reject文言/D5 成功FBのみpass)",
+    "E_layout": "5/6 pass (E5のみfail)"
+  },
+  "B_health": {
+    "fatalFindings": 3,
+    "consoleErrors": 2,
+    "notes": [
+      "import(>600tick巻き戻し)でrAF tickループ死亡=時間永久停止(UI表示は正常のまま)",
+      "最初からやり直す(tick>600)で新規ゲームが第1日00:00凍結",
+      "インポート結果が永続化されずリロードで巻き戻る",
+      "大移動はtick維持のため凍結しない(実測)",
+      "x720で7ゲーム日: 想起困難/死亡/晴天漂着の観測0件・冒険記空のまま(M38/M39検討材料)",
+      "薪1,620,004.7まで桁破綻なし。ただし3桁区切りなし+HUDチップが順次画面外へ",
+      "第5日ごろ薪産出が約半減(+98,771/8h→+50,676/8h)したが原因表示がUIに皆無"
+    ]
+  },
+  "findingClusters": [
+    {
+      "key": "FC1",
+      "severity": "fatal",
+      "title": "世界入れ替え(インポート/最初からやり直す)で時計凍結+インポート非永続化",
+      "members": ["R1-A01", "R1-A02", "R1-A03"],
+      "cause": "clock.ts defaultTickSchedulerがpump() throwでrAF連鎖切断 + driver.syncToのセーブ復元/世界入れ替え結線漏れ + インポート後の即時保存なし",
+      "disposition": "今やる(同日修正)"
+    },
+    {
+      "key": "FC2",
+      "severity": "major",
+      "title": "モバイル390pxでHUD溢れ: 研究チップ・⏩・後半資源が画面外(資源増で悪化)",
+      "members": ["R1-A04", "R1-C01", "R1-A19"],
+      "disposition": "束E(UI品質改修)"
+    },
+    {
+      "key": "FC3",
+      "severity": "major",
+      "title": "sticky確定バーが直前コンテンツ(ROI/積み込みプレビュー=不可逆操作の確認情報)を隠す",
+      "members": ["R1-C03", "R1-C04", "R1-A20"],
+      "disposition": "束E"
+    },
+    {
+      "key": "FC4",
+      "severity": "major",
+      "title": "帰還ログ・memoirへの内部ID焼き込み(セーブ確定=事後修正不能。eventID/資源ID/機械生成住民ID)",
+      "members": ["R1-D03", "R1-D04", "R1-A06"],
+      "disposition": "束E(保存前に変換。最優先)"
+    },
+    {
+      "key": "FC5",
+      "severity": "major",
+      "title": "GDD画面番号がナビ文言に生露出17件(束B掃討からの退行)+cellId/outpostId露出+編成提案の住民ID+tick単位露出",
+      "members": ["R1-D01", "R1-D02", "R1-A07", "R1-A09", "R1-A17", "R1-A18"],
+      "disposition": "束E"
+    },
+    {
+      "key": "FC6",
+      "severity": "major",
+      "title": "非稼働4施設(寝床/保管庫/見張り台/療養所)が効果ゼロと伝わらない資源トラップ(増築まで可能)",
+      "members": ["R1-D06", "R1-A08", "R1-C02"],
+      "disposition": "束E(カタログ+詳細に効果なし表示)"
+    },
+    {
+      "key": "FC7",
+      "severity": "major",
+      "title": "探索帰還が完全無通知(トースト/ホームカードなし)+研究完了も無言",
+      "members": ["R1-A05", "R1-A16"],
+      "disposition": "束E"
+    },
+    {
+      "key": "FC8",
+      "severity": "major",
+      "title": "拠点放棄が確認0段で即時実行(大移動1段/リセット2段と不整合)",
+      "members": ["R1-D05"],
+      "disposition": "束E"
+    },
+    {
+      "key": "FC9",
+      "severity": "major",
+      "title": "大移動反復で人口6→3→2→1(GDD人口下限6人保証との整合が要裁定)+初回周回で継承点22<最安50",
+      "members": ["R1-A13", "R1-A12"],
+      "disposition": "裁定(台帳v12)→M39"
+    },
+    {
+      "key": "FC10",
+      "severity": "major",
+      "title": "生産半減等の状態変化に原因表示なし+7日間で想起困難/死亡/漂着0件(観測可能性・バランス)",
+      "members": ["R1-A11"],
+      "disposition": "M38/M39へ登録"
+    },
+    {
+      "key": "FC11",
+      "severity": "minor",
+      "title": "数値整形(3桁区切り/小数桁/単位)・事前情報(Lv曲線/媒体コスト)・バナー位置・二重番号等の磨き15件",
+      "members": [
+        "R1-A14",
+        "R1-A15",
+        "R1-A21",
+        "R1-A22",
+        "R1-A23",
+        "R1-A24",
+        "R1-A25",
+        "R1-A26",
+        "R1-A27",
+        "R1-A28",
+        "R1-D07",
+        "R1-D08"
+      ],
+      "disposition": "束E(軽微分)+M39"
+    }
+  ],
+  "passObservations": [
+    "console error 0件(評価3体の全経路。fatal再現時の2件のみ)",
+    "軸C平均1.8合格・E1(12px)/E2(44px)/E3(横スク)/E4(4重符号化)/E6全pass",
+    "reject文言7/7日本語・成功トースト前後値表示・大移動/リセットの段階確認は良好",
+    "粘土=貯水槽/紙=写字室の入手経路が実測で機能(M58)"
+  ],
+  "unmeasured": [
+    "reject残り約26コードの実発火",
+    "residentDisplayName他画面波及の実測",
+    "E4ピンチ全LOD境界の実タッチ(=#9b実機)",
+    "加速下のトースト可読性"
+  ]
+}
