@@ -10,7 +10,6 @@
     "golden": "npm run golden:check",
     "tests": "npm test"
   },
-
   "nightlyGateBeforeAfter": {
     "before": {
       "source": "docs/measurements/actions-nightly-gate-2026-08-02.json(M38 実測・本タスクの worktree でも再現済み)",
@@ -19,13 +18,18 @@
       "unverifiable": 6,
       "structuralFail": 0
     },
-    "after": { "pass": 17, "fail": 2, "unverifiable": 6, "structuralFail": 0 },
+    "after": {
+      "pass": 17,
+      "fail": 2,
+      "unverifiable": 6,
+      "structuralFail": 0
+    },
     "perAssert": [
       {
         "id": "gdd-11.4-8b",
         "title": "想起困難頻度(実 run 盤面)",
         "before": 3.358992805755396,
-        "after": 2.6613894139886576,
+        "after": 2.661389413988658,
         "range": [1, 3],
         "verdict": "fail → pass",
         "driver": "recallRiskParams.base_p 0.05 → 0.036"
@@ -45,7 +49,11 @@
         "after": 0.110607,
         "threshold": 0.15,
         "verdict": "pass → pass。**ただし意味が変わった**",
-        "note": "before は storage.baseCapacity が空で上限機構自体が走らない恒真 pass(M38 が detail にそう明記していた)。after は基礎上限 400 が全資源に効いた状態での実測値。"
+        "note": "before は storage.baseCapacity が空で上限機構自体が走らない恒真 pass(M38 が detail にそう明記していた)。after は基礎上限 400 が全資源に効いた状態での実測値。",
+        "afterDocketV15": {
+          "measured": 0.110607,
+          "verdict": "pass(廃材スポンジ復活後も不変)"
+        }
       },
       {
         "id": "gdd-11.4-2a",
@@ -71,7 +79,12 @@
         "after": 7,
         "threshold": 8,
         "verdict": "fail のまま",
-        "note": "content 単独では原理的に解消不能(下記 structuralFinding_era3 参照)"
+        "note": "content 単独では原理的に解消不能(下記 structuralFinding_era3 参照)",
+        "afterDocketV15": {
+          "measured": 7,
+          "threshold": 7,
+          "verdict": "pass(レンジ改訂 [8,16] → [7,18]・台帳v15 必-2)"
+        }
       },
       {
         "id": "gdd-11.4-3-era3-upper",
@@ -80,7 +93,12 @@
         "after": 18,
         "threshold": 16,
         "verdict": "fail のまま(19 → 18 へ 1 日ぶんだけ改善)",
-        "note": "同上"
+        "note": "同上",
+        "afterDocketV15": {
+          "measured": 18,
+          "threshold": 18,
+          "verdict": "pass(同上・上限ちょうど)"
+        }
       },
       {
         "id": "gdd-11.4-3-era1",
@@ -98,9 +116,15 @@
         "gddGuideline": "GDD 5.2 の到達目安 3〜8 日",
         "verdict": "unverifiable。実測 4〜9 日で上限を 1 日超過。era3 と同じ構造要因"
       }
-    ]
+    ],
+    "afterDocketV15": {
+      "pass": 19,
+      "fail": 0,
+      "unverifiable": 6,
+      "structuralFail": 0,
+      "note": "台帳v15(必-1〜必-4)の実装後。balance-fail 0 達成。"
+    }
   },
-
   "structuralFinding_era3": {
     "headline": "E3 到達レンジ [8,16] は content 単独では原理的に達成不能",
     "measurement": [
@@ -121,9 +145,9 @@
       "(b) sim bot 側を変える(1 日 1 本の研究決定を複数本にする / greedy にも研究キューを持たせる)。engine 非変更・sim のみ。M39 のスコープ外。",
       "(c) engine 側で『選択が無いときも次の未完了研究へ点が流れる』を全 tech に広げる(現状は beginResearch 済み entity のみ)。algoVersion 判定に載る。"
     ],
-    "notAttempted": "上記いずれも content 側の権限外のため本タスクでは実装していない。"
+    "notAttempted": "上記いずれも content 側の権限外のため本タスクでは実装していない。",
+    "resolution": "**[2026-08-02裁定・台帳v15 必-2] GDD 11.4-3 の E3 レンジを [8,16] → [7,18] へ改訂**(options の (a) を採用)。sim/nightlyGate.ts 反映済み。レンジ狭化は M40/M41 で再訪。"
   },
-
   "changeTable": {
     "content/balance.json": [
       {
@@ -140,14 +164,21 @@
       },
       {
         "key": "storage.wasteConversionRatio",
-        "from": { "firewood": 0.5 },
+        "from": {
+          "firewood": 0.5
+        },
         "to": {},
         "reason": "**強制された副作用・裁定事項**。baseCapacity を入れると上限に当たった資源が毎 tick 廃材を生むようになり、waste の resource entity を持たない fixture(sim/board.ts の縮約盤面 = 夜間ゲート 11.4-8a の入力、conformance シナリオ、schema テスト)が production.ts の『生んだ廃材を黙って捨てない』ガードで **RulesError 停止**する(夜間ゲート自体が起動不能になった)。content 側だけで止血する唯一の手段が変換率を空にすることだった。GDD 6.7 の廃材スポンジが不活性になるので、fixture 側へ waste entity を足して復活させるべき(sim/tests の変更 = 本タスクの権限外)。"
       },
       {
         "key": "exploration.rewardOverflow",
         "from": "(キー無し = 上限なし)",
-        "to": { "policy": "discard", "capacity": 200, "convertTo": null, "ratio": 0 },
+        "to": {
+          "policy": "discard",
+          "capacity": 200,
+          "convertTo": null,
+          "ratio": 0
+        },
         "reason": "探索報酬は生産側の会計を通さない(GDD 8.1 裁定⑥)ため上限を素通りして在庫を 400 超へ押し上げ、以後の施設産出が 100% オーバーフローしていた(explorationFirst の損失率 0.795)。capacity 200(基礎上限の半分)で 0.069 まで低下。convertTo を waste にすると上記と同じ fixture 停止を起こすため discard。"
       },
       {
@@ -233,7 +264,6 @@
       }
     ]
   },
-
   "blockers": [
     {
       "id": "B1",
@@ -246,7 +276,8 @@
         "(a) 『既存 ID の数値変更を伴うバランス調整段(M39〜M41)では golden を再生成し、algoVersion ではなく contentVersion を上げる』と ADR-016 へ例外を明記して再生成する。",
         "(b) base content シナリオを patch 付きへ変え、conformance を content から独立させる(conformance/scenarios.ts の変更 = 本タスクの権限外)。",
         "(c) algoVersion を bump して再生成する(旧セーブ影響を許容する)。"
-      ]
+      ],
+      "resolution": "**解消済み(台帳v15 必-1)**。docketV15Resolution 参照。"
     },
     {
       "id": "B2",
@@ -254,7 +285,8 @@
       "title": "廃材スポンジ(GDD 6.7)を content 側で不活性にせざるを得なかった",
       "cause": "storage.baseCapacity を全資源に入れると、上限に当たった資源が毎 tick 廃材を生む。waste の resource entity を持たない fixture(sim/board.ts の縮約 20 人盤面・conformance シナリオ・schema テストの盤面)は production.ts creditWaste の『生んだ廃材を黙って捨てない』ガードで例外停止する。実際に夜間ゲート(11.4-8a が sim/board.ts を使う)が起動不能になった。",
       "workaround": "storage.wasteConversionRatio を {} にした(= スポンジ由来の廃材が 1 単位も生まれない)。廃材の 3 出口(GDD 6.7)は入力が絶たれるので実質不活性。",
-      "properFix": "sim/board.ts と conformance/scenarios.ts の盤面へ waste の resource entity を足す(R2-A01 で worldGen.ensureWasteResourceEntity として実ゲーム経路には既に入っている修正の、fixture 側への横展開)。engine 非変更だが sim/tests の変更なので本タスクの権限外。"
+      "properFix": "sim/board.ts と conformance/scenarios.ts の盤面へ waste の resource entity を足す(R2-A01 で worldGen.ensureWasteResourceEntity として実ゲーム経路には既に入っている修正の、fixture 側への横展開)。engine 非変更だが sim/tests の変更なので本タスクの権限外。",
+      "resolution": "**解消済み(台帳v15 必-3)**。sim/board.ts へ waste 受け皿を追加し wasteConversionRatio を元値へ復帰。"
     },
     {
       "id": "B3",
@@ -267,10 +299,10 @@
         "(a) M39 ⑥(木炭/銅の消費先接続)を実装して資源価値を均す。",
         "(b) 消費先が未接続の grain/charcoal/copper を storage.baseCapacity から外す(上限なしなら overflow に寄与しないので産出を均質値まで上げられる)。ユーザー裁定『全資源 400』からの逸脱になるため実施していない。",
         "(c) クリープ検出のグループ分けを『資源の用途クラス』で分ける(sim/creep.ts の変更)。"
-      ]
+      ],
+      "resolution": "**既知例外として仕組み化(台帳v15 必-4)**。根本解消は M40 の ⑥(木炭/銅の消費先接続)。"
     }
   ],
-
   "deferred": [
     {
       "item": "② 大移動の実行ガード(最少乗員の警告/ガード数値)",
@@ -322,13 +354,54 @@
       ]
     }
   ],
-
   "gateResults": {
-    "npm test": "2884 passed / 56 failed(55 = golden vector [B1]、1 = creep 外れ値 [B3])",
-    "npm run typecheck": "pass(conformance/harnessData.json 未生成の既存エラー 1 件のみ = npm run conformance:build で生成される .gitignore 対象)",
+    "npm test": "**2942 passed / 0 failed(143 ファイル全 pass)**",
+    "npm run typecheck": "pass",
     "npm run lint": "pass",
     "npm run format": "pass",
-    "npm run golden:check": "**fail(B1)**",
-    "npm run sim:nightly-gate": "pass 17 / fail 2 / unverifiable 6 / structural fail 0"
+    "npm run golden:check": "**golden vector 77 本、差分なし**",
+    "npm run sim:nightly-gate": "**pass 19 / fail 0 / unverifiable 6 / structural fail 0**",
+    "npm run sim:creep": "外れ値 0 件 / suppressed(既知) 1 件 / 消し忘れ 0 件"
+  },
+  "docketV15Resolution": {
+    "approvedOn": "2026-08-02",
+    "必-1_goldenのcontent切り離し": {
+      "実装": "conformance/content-snapshot/ を新設(コミット 4730ee7 時点の tech/facility/trait/adjacency/balance/outpostType の 6 ファイルを凍結コピー)。conformance/scenarios.ts の loadBaseRawContentBundle をスナップショットへ向けた。",
+      "副作用と手当て": "sim/board.ts の resolveSimContent が同じ loader を再利用していたため、そのままだと**夜間ゲートが旧 content を測る**見せかけ収束になった(実際に 1 回そうなり pass17/fail2 の旧数値が再現した)。conformance/scenarios.ts へ loadLiveRawContentBundle(content/ を読む)を追加し sim 側をそちらへ切り替えた。読み込み先が 2 系統ある理由は両関数の doc に明記。",
+      "検証": "M39 の content 変更が入ったまま golden vector 77 本、差分なし(npm run golden:check / tests/conformance/goldenVectors.test.ts 80 件 pass)。",
+      "運用上の注意": "スナップショット更新時は golden 再生成と algoVersion 判定を同時に行うこと。ADR-017 の『週次 content を実 content で踏む in-browser conformance』は別系統であり本スナップショットは置き換えない。"
+    },
+    "必-3_廃材スポンジ復活": {
+      "実装": "sim/board.ts の buildPatternBoard へ waste の resource entity(resourceWasteSim)を追加。content.storage.wasteResourceId が null/不在なら 1 entity も足さない(従来盤面と 1 bit も変わらない)。",
+      "content復帰": "storage.wasteConversionRatio を {} → { firewood: 0.5 }(元値)へ戻した。",
+      "conformance側は無変更": "凍結スナップショットの balance.baseCapacity は空なので base content シナリオでは上限機構自体が走らず waste 受け皿が要らない。上限を patch で入れる sc18 系は元から waste entity を持っている。**よって golden への波及ゼロ**(77 本不変を実測確認)。",
+      "スポンジ復活後の実測": {
+        "gdd-11.4-7c": "0.110607(スポンジ無効時と同値・< 0.15)",
+        "gdd-11.4-8a": "2.50625(レンジ [1,3])",
+        "gdd-11.4-8b": "2.6613894139886576(レンジ [1,3])",
+        "contentの再調整": "**不要**。廃材は超過分の一部を受け取るだけで生産会計(cumulativeProduced / cumulativeOverflow)の分子分母を動かさないため、損失率も到達日も動かなかった。"
+      }
+    },
+    "必-2_E3レンジ改訂": {
+      "実装": "sim/nightlyGate.ts の ERA3_REACH_DAYS_MIN/MAX を 8/16 → 7/18。改訂根拠(律速が bot の tech 踏破本数・本数比 2.29 > 窓 2.0・研究点律速化で 7〜27 日へ悪化する実測)を定数の doc に記載。",
+      "実測": "E3 到達 7〜18 日(researchFirst 7 / greedy・placementVariant 15〜18 / explorationFirst 15〜16 / codifyFirst 15〜16)。両 assert pass。",
+      "申し送り": "レンジ狭化は M40/M41 で再訪(bot の研究決定 cadence 見直しを含む)。"
+    },
+    "必-4_クリープ検出の既知例外": {
+      "実装": "sim/creep.ts に KNOWN_CREEP_SUPPRESSIONS(groupId × metric × entityId の名前つきリスト・reason と expiresAtMilestone 必須)を追加。**閾値(Z_THRESHOLD 3.0 / RELATIVE_DEVIATION_THRESHOLD 1.0)は 1 段も緩めていない**。判定は従来どおり行い、合致した外れ値だけを outliers ではなく suppressedOutliers へ振り分ける。",
+      "黙殺にしない担保": [
+        "CLI が SUPPRESSED(既知) 行で実測値(looZ/relDev)と理由と解除期限を必ず出力する。",
+        "console.table に suppressed(既知) 列を追加。",
+        "CreepReport に suppressedCount / suppressions / staleSuppressions を持たせ sim/output/creep-report.json へ出す。",
+        "staleSuppressions = 登録したのに今回外れ値にならなかった例外(= 消し忘れ)を検出し STALE 行で出力・テストで 0 件を固定。"
+      ],
+      "登録した1件": {
+        "対象": "facility/output=resource:resource / lvCurve[0]/buildCost.amount / hearth",
+        "実測": "looZ 6.806(閾値 3)/ relDev 5.481(閾値 1)",
+        "理由": "薪だけが建設・増築・開墾を賄う汎用通貨で、他 6 資源は消費先が未設計(M39 ⑥)。消費先の無い資源は保管上限 400 に当たらない水準まで産出を落とさざるを得ず、均質化するとオーバーフロー損失率が 0.111 → 0.310 で GDD 11.4-7c が落ちる(M39 実測)。",
+        "期限": "M40(木炭/銅の消費先接続の入口で解除・再判定)"
+      },
+      "テスト": "tests/sim/creep.test.ts を 6 → 8 件へ。既知例外が実測値ごとレポートに残ること、理由と期限が空でないこと、groupId/metric が違えば同名 entityId でも抑止されないことを固定。"
+    }
   }
 }

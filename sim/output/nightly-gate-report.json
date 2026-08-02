@@ -101,11 +101,11 @@
       "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=18.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=18.0日 codifyFirst/nightly-a=16.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
       "gddRef": "GDD 11.4-3",
       "id": "gdd-11.4-3-era3-lower",
-      "inequality": "min_run(E3 到達日) >= 8",
+      "inequality": "min_run(E3 到達日) >= 7",
       "measured": 7,
       "owner": "balance",
-      "status": "fail",
-      "threshold": 8,
+      "status": "pass",
+      "threshold": 7,
       "thresholdUpper": null,
       "title": "E3 到達が早すぎない(全戦略)",
       "unblockCondition": null,
@@ -117,11 +117,11 @@
       "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=18.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=18.0日 codifyFirst/nightly-a=16.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
       "gddRef": "GDD 11.4-3",
       "id": "gdd-11.4-3-era3-upper",
-      "inequality": "max_run(E3 到達日) <= 16",
+      "inequality": "max_run(E3 到達日) <= 18",
       "measured": 18,
       "owner": "balance",
-      "status": "fail",
-      "threshold": 16,
+      "status": "pass",
+      "threshold": 18,
       "thresholdUpper": null,
       "title": "E3 到達が遅すぎない(全戦略)",
       "unblockCondition": null,
@@ -401,7 +401,7 @@
       "unverifiableReason": null
     }
   ],
-  "failCount": 2,
+  "failCount": 0,
   "options": {
     "determinismRuns": 1000,
     "determinismTicks": 2880,
@@ -411,7 +411,7 @@
     "runTicks": 57600,
     "strategySeeds": ["nightly-a", "nightly-b", "nightly-c"]
   },
-  "passCount": 17,
+  "passCount": 19,
   "profile": "full",
   "runObservations": [
     {

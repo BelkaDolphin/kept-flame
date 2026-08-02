@@ -97,6 +97,56 @@ export interface CreepOutlier {
   readonly modifiedZ: number;
 }
 
+/**
+ * **[2026-08-02裁定・台帳v15 必-4] 名前つき既知例外。**
+ *
+ * 検出器の閾値は 1 段も緩めない。「なぜ外れ値なのかが分かっていて、いつ解除するかも
+ * 決まっている」1 件だけを名指しで抑止し、レポートには `suppressed(既知)` として
+ * 必ず出す(黙殺にしない)。合致しなかった登録は {@link CreepReport.staleSuppressions}
+ * に出るので、content が直ったのに登録だけ残ることも検出できる。
+ */
+export interface CreepSuppression {
+  readonly groupId: string;
+  readonly metric: string;
+  readonly entityId: string;
+  /** なぜこの外れ値が設計どおりなのか。 */
+  readonly reason: string;
+  /** いつ解除するか(ロードマップのマイルストーン ID)。 */
+  readonly expiresAtMilestone: string;
+}
+
+/** 既知例外リスト(**追加は裁定事項**。増やすときは reason と期限を必ず書く)。 */
+export const KNOWN_CREEP_SUPPRESSIONS: readonly CreepSuppression[] = [
+  {
+    groupId: "facility/output=resource:resource",
+    metric: "lvCurve[0]/buildCost.amount",
+    entityId: "hearth",
+    reason:
+      "薪(かまど)だけが建設・増築・開墾の全てを賄う汎用通貨で、他 6 資源" +
+      "(鉄/粘土/穀物/木炭/銅/紙)は消費先が未設計(ロードマップ M39 ⑥)。" +
+      "消費先の無い資源は保管上限 400 に当たらない水準まで産出を落とさざるを得ず、" +
+      "その結果 output/buildCost がかまどだけ突出する。クリープ検出は資源ごとの" +
+      "用途価値差を知らないためこれを偽陽性として拾う。産出を均質化すると" +
+      "オーバーフロー損失率(GDD 11.4-7c)が 0.111 → 0.310 で落ちることを M39 で実測済み。",
+    expiresAtMilestone: "M40(木炭/銅の消費先接続の入口で解除・再判定する)",
+  },
+];
+
+function suppressionFor(
+  groupId: string,
+  metric: string,
+  entityId: string,
+): CreepSuppression | undefined {
+  return KNOWN_CREEP_SUPPRESSIONS.find(
+    (entry) => entry.groupId === groupId && entry.metric === metric && entry.entityId === entityId,
+  );
+}
+
+/** 既知例外で抑止された外れ値(実測値はそのまま保持する)。 */
+export interface SuppressedCreepOutlier extends CreepOutlier {
+  readonly suppression: CreepSuppression;
+}
+
 export interface CreepGroupReport {
   readonly groupId: string;
   readonly metric: string;
@@ -115,6 +165,8 @@ export interface CreepGroupReport {
   /** 参考値(判定には使わない・§1)。 */
   readonly maxAbsModifiedZ: number;
   readonly outliers: readonly CreepOutlier[];
+  /** 既知例外で抑止された外れ値(判定閾値は同じ・{@link KNOWN_CREEP_SUPPRESSIONS})。 */
+  readonly suppressedOutliers: readonly SuppressedCreepOutlier[];
 }
 
 export interface CreepReport {
@@ -123,6 +175,12 @@ export interface CreepReport {
   readonly minGroupSize: number;
   readonly groups: readonly CreepGroupReport[];
   readonly outlierCount: number;
+  /** 既知例外で抑止した件数(0 でないことが正常な状態ではない・期限つき)。 */
+  readonly suppressedCount: number;
+  /** 有効な既知例外の一覧(レポートに必ず載せる)。 */
+  readonly suppressions: readonly CreepSuppression[];
+  /** 登録されているが今回 1 度も合致しなかった既知例外(= 消し忘れの検出)。 */
+  readonly staleSuppressions: readonly CreepSuppression[];
   readonly skippedGroupCount: number;
   /** クリープ検出が**まだ掛かっていない** content カテゴリ(正直な開示・§2)。 */
   readonly uncoveredCategories: readonly { readonly category: string; readonly reason: string }[];
@@ -183,10 +241,12 @@ export function analyzeGroup(
       maxRelativeDeviation: 0,
       maxAbsModifiedZ: 0,
       outliers: [],
+      suppressedOutliers: [],
     };
   }
 
   const outliers: CreepOutlier[] = [];
+  const suppressedOutliers: SuppressedCreepOutlier[] = [];
   let maxAbsLeaveOneOutZ = 0;
   let maxRelativeDeviation = 0;
   let maxAbsModifiedZ = 0;
@@ -213,7 +273,7 @@ export function analyzeGroup(
     if (Math.abs(modifiedZ) > maxAbsModifiedZ) maxAbsModifiedZ = Math.abs(modifiedZ);
 
     if (Math.abs(leaveOneOutZ) > Z_THRESHOLD && relativeDeviation > RELATIVE_DEVIATION_THRESHOLD) {
-      outliers.push({
+      const outlier: CreepOutlier = {
         groupId,
         entityId: sample.id,
         value: sample.value,
@@ -223,7 +283,12 @@ export function analyzeGroup(
         leaveOneOutZ,
         relativeDeviation,
         modifiedZ,
-      });
+      };
+      // 閾値判定は上で完了している。既知例外は「赤くするかどうか」だけを変え、
+      // 実測値は suppressedOutliers に保持してレポートへ必ず出す(黙殺にしない)。
+      const suppression = suppressionFor(groupId, metric, sample.id);
+      if (suppression === undefined) outliers.push(outlier);
+      else suppressedOutliers.push({ ...outlier, suppression });
     }
   }
 
@@ -241,6 +306,7 @@ export function analyzeGroup(
     maxRelativeDeviation,
     maxAbsModifiedZ,
     outliers,
+    suppressedOutliers,
   };
 }
 
@@ -308,9 +374,13 @@ export function runCreepDetection(): CreepReport {
   }
 
   let outlierCount = 0;
+  let suppressedCount = 0;
   let skippedGroupCount = 0;
+  const matched = new Set<CreepSuppression>();
   for (const group of groups) {
     outlierCount += group.outliers.length;
+    suppressedCount += group.suppressedOutliers.length;
+    for (const entry of group.suppressedOutliers) matched.add(entry.suppression);
     if (!group.evaluated) skippedGroupCount++;
   }
 
@@ -320,6 +390,9 @@ export function runCreepDetection(): CreepReport {
     minGroupSize: MIN_GROUP_SIZE,
     groups,
     outlierCount,
+    suppressedCount,
+    suppressions: KNOWN_CREEP_SUPPRESSIONS,
+    staleSuppressions: KNOWN_CREEP_SUPPRESSIONS.filter((entry) => !matched.has(entry)),
     skippedGroupCount,
     uncoveredCategories: [
       {
@@ -375,11 +448,20 @@ async function main(): Promise<void> {
       maxRelDev: group.maxRelativeDeviation.toFixed(3),
       "max|modZ|(参考)": group.maxAbsModifiedZ.toFixed(3),
       外れ値: group.outliers.length,
+      "suppressed(既知)": group.suppressedOutliers.length,
     })),
   );
   for (const group of report.groups) {
     if (group.skipReason !== null) {
       console.log(`  SKIP ${group.groupId} (${group.metric}): ${group.skipReason}`);
+    }
+    for (const entry of group.suppressedOutliers) {
+      console.log(
+        `  SUPPRESSED(既知) ${entry.groupId} (${group.metric}) ${entry.entityId}: ` +
+          `値 ${String(entry.value)} / looZ ${entry.leaveOneOutZ.toFixed(3)} / ` +
+          `relDev ${entry.relativeDeviation.toFixed(3)} — ${entry.suppression.reason} ` +
+          `[解除期限: ${entry.suppression.expiresAtMilestone}]`,
+      );
     }
     for (const outlier of group.outliers) {
       console.error(
@@ -390,8 +472,16 @@ async function main(): Promise<void> {
       );
     }
   }
+  for (const stale of report.staleSuppressions) {
+    console.log(
+      `  STALE(既知例外の消し忘れ) ${stale.groupId} (${stale.metric}) ${stale.entityId}: ` +
+        `今回は外れ値として検出されなかった。KNOWN_CREEP_SUPPRESSIONS から削除できる`,
+    );
+  }
   console.log(
-    `外れ値 ${String(report.outlierCount)} 件 / 判定省略グループ ${String(report.skippedGroupCount)} 件 ` +
+    `外れ値 ${String(report.outlierCount)} 件 / suppressed(既知) ${String(report.suppressedCount)} 件 ` +
+      `/ 既知例外の消し忘れ ${String(report.staleSuppressions.length)} 件 ` +
+      `/ 判定省略グループ ${String(report.skippedGroupCount)} 件 ` +
       `/ 未カバーカテゴリ ${String(report.uncoveredCategories.length)} 件`,
   );
 

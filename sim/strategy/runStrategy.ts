@@ -33,7 +33,7 @@
 // 3. content(event を含む実 content を明示的に組み立てる)
 // ===========================================================================
 //   `sim/board.ts` の {@link resolveSimContent} が使う
-//   `conformance/scenarios.ts` の `loadBaseRawContentBundle` は event.json を
+//   `conformance/scenarios.ts` の `loadLiveRawContentBundle` は event.json を
 //   読まない(conformance シナリオが event を使わないため)。本ランナーは
 //   探索派遣を実際に行うので、`ContentPatch` で `content/event.json` を
 //   追加してから解決する(`sim/eventReachability.ts` と同じ
