@@ -78,32 +78,32 @@
     {
       "evaluated": true,
       "groupId": "facility/output=resource:resource",
-      "mad": 0.2666666666666666,
-      "maxAbsLeaveOneOutZ": 3.8022121852369803,
-      "maxAbsModifiedZ": 6.070500000000002,
-      "maxRelativeDeviation": 0.7073170731707318,
-      "mean": 4.118367346938776,
-      "median": 3.6,
+      "mad": 0.0001666666666666667,
+      "maxAbsLeaveOneOutZ": 2.0608476634381607,
+      "maxAbsModifiedZ": 1.9425599999999992,
+      "maxRelativeDeviation": 1.5882352941176467,
+      "mean": 0.0004877097505668935,
+      "median": 0.0004,
       "metric": "lvCurve[0]/buildCost.amount",
       "outliers": [],
       "sampleCount": 7,
       "skipReason": null,
-      "stdev": 0.9829669119036608
+      "stdev": 0.000266501001342699
     },
     {
       "evaluated": true,
       "groupId": "facility/output=resource:resource",
       "mad": 0,
-      "maxAbsLeaveOneOutZ": 3.227486121839514,
+      "maxAbsLeaveOneOutZ": 4.183300132670378,
       "maxAbsModifiedZ": 0,
-      "maxRelativeDeviation": 0.4,
-      "mean": 27.857142857142858,
+      "maxRelativeDeviation": 0.8,
+      "mean": 30,
       "median": 25,
       "metric": "buildCost.amount",
       "outliers": [],
       "sampleCount": 7,
       "skipReason": null,
-      "stdev": 3.9339789623472163
+      "stdev": 7.637626158259733
     }
   ],
   "minGroupSize": 5,

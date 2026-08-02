@@ -18,11 +18,11 @@
     },
     {
       "comparator": ">",
-      "detail": "クリティカル資源 = 開墾コスト資源 ∪ その run が建てた施設の建設コスト資源。15 run × 計 37 (run,資源) ペアを run 後半の標本で評価。最小は placementVariant/nightly-c:firewood",
+      "detail": "クリティカル資源 = 開墾コスト資源 ∪ その run が建てた施設の建設コスト資源。15 run × 計 36 (run,資源) ペアを run 後半の標本で評価。最小は placementVariant/nightly-a:iron",
       "gddRef": "GDD 11.4-2",
       "id": "gdd-11.4-2a",
       "inequality": "min_(run, 資源) max_標本(生産レート raw) > 0",
-      "measured": 88113300,
+      "measured": 4500,
       "owner": "structural",
       "status": "pass",
       "threshold": 0,
@@ -98,7 +98,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=19.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=19.0日 codifyFirst/nightly-a=17.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
+      "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=18.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=18.0日 codifyFirst/nightly-a=16.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
       "gddRef": "GDD 11.4-3",
       "id": "gdd-11.4-3-era3-lower",
       "inequality": "min_run(E3 到達日) >= 8",
@@ -114,11 +114,11 @@
     },
     {
       "comparator": "<=",
-      "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=19.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=19.0日 codifyFirst/nightly-a=17.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
+      "detail": "greedy/nightly-a=17.0日 greedy/nightly-b=15.0日 greedy/nightly-c=18.0日 researchFirst/nightly-a=7.0日 researchFirst/nightly-b=7.0日 researchFirst/nightly-c=7.0日 explorationFirst/nightly-a=15.0日 explorationFirst/nightly-b=15.0日 explorationFirst/nightly-c=16.0日 placementVariant/nightly-a=17.0日 placementVariant/nightly-b=15.0日 placementVariant/nightly-c=18.0日 codifyFirst/nightly-a=16.0日 codifyFirst/nightly-b=15.0日 codifyFirst/nightly-c=16.0日",
       "gddRef": "GDD 11.4-3",
       "id": "gdd-11.4-3-era3-upper",
       "inequality": "max_run(E3 到達日) <= 16",
-      "measured": 19,
+      "measured": 18,
       "owner": "balance",
       "status": "fail",
       "threshold": 16,
@@ -130,7 +130,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "144 ペアを評価(所要は石板 = 遅い方・GDD 11.1 追補)。最小余裕は codifyFirst/nightly-a:resseri/techMetalCasting",
+      "detail": "158 ペアを評価(所要は石板 = 遅い方・GDD 11.1 追補)。最小余裕は codifyFirst/nightly-a:resseri/techBlacksmithing",
       "gddRef": "GDD 11.4-4",
       "id": "gdd-11.4-4",
       "inequality": "min_(住民,技術) (残存tick × memoryDecayDelay − 成文化所要tick × 1.5) >= 0",
@@ -194,7 +194,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "代表周回 = GDD 10.3(到達E3 + 成文化率60% + 生存12人)。実 run の最小獲得点は 42(46,42,46,46,44,46,54,46,60,46,42,46,90,82,96)",
+      "detail": "代表周回 = GDD 10.3(到達E3 + 成文化率60% + 生存12人)。実 run の最小獲得点は 42(46,44,46,46,44,46,54,46,60,46,42,46,75,71,69)",
       "gddRef": "GDD 11.4-6",
       "id": "gdd-11.4-6c",
       "inequality": "代表周回の継承点(84) >= 第1段コスト",
@@ -258,11 +258,11 @@
     },
     {
       "comparator": "<",
-      "detail": "全 run の全標本で最大 0.000000。**注意: content の `storage.baseCapacity` が空 = 保管上限が無いためオーバーフロー機構自体が走らない。よってこの assert は現在ほぼ恒真である**(保管庫 content 投入後に再評価が要る)",
+      "detail": "全 run の全標本で最大 0.110607。content の storage.baseCapacity に上限が定義されている",
       "gddRef": "GDD 11.4-7",
       "id": "gdd-11.4-7c",
       "inequality": "max_(run, 標本) オーバーフロー損失率 < 0.15",
-      "measured": 0,
+      "measured": 110607,
       "owner": "balance",
       "status": "pass",
       "threshold": 150000,
@@ -274,11 +274,11 @@
     },
     {
       "comparator": "<=",
-      "detail": "窓 N = 4320 tick(3 ゲーム日)。最大低下は greedy/nightly-a era→2 @tick 11520: 80.00 → 26.67",
+      "detail": "窓 N = 4320 tick(3 ゲーム日)。最大低下は greedy/nightly-a era→2 @tick 11520: 80.00 → 0.00",
       "gddRef": "GDD 11.4-7",
       "id": "gdd-11.4-7d",
       "inequality": "max_(run, era移行) 低下率(‰) <= 閾値",
-      "measured": 667,
+      "measured": 1000,
       "owner": "balance",
       "status": "unverifiable",
       "threshold": 0,
@@ -290,11 +290,11 @@
     },
     {
       "comparator": "in-range",
-      "detail": "sim/board.ts の代表10パターン × 8 seed。判定単位は盤面平均(裁定B9)。パターン別レンジ 0.0000〜4.9375",
+      "detail": "sim/board.ts の代表10パターン × 8 seed。判定単位は盤面平均(裁定B9)。パターン別レンジ 0.0000〜4.8750",
       "gddRef": "GDD 11.4-8",
       "id": "gdd-11.4-8a",
       "inequality": "1 <= 回/住民/週 <= 3",
-      "measured": 2.825,
+      "measured": 2.50625,
       "owner": "balance",
       "status": "pass",
       "threshold": 1,
@@ -306,13 +306,13 @@
     },
     {
       "comparator": "in-range",
-      "detail": "5戦略bot の実 run(縮約でない content・15 run)で 2001 件 / 595.71 住民週。bot 別: greedy/nightly-a=3.500 greedy/nightly-b=3.815 greedy/nightly-c=3.054 researchFirst/nightly-a=2.653 researchFirst/nightly-b=3.261 researchFirst/nightly-c=2.537 explorationFirst/nightly-a=4.384 explorationFirst/nightly-b=4.570 explorationFirst/nightly-c=3.413 placementVariant/nightly-a=3.500 placementVariant/nightly-b=3.815 placementVariant/nightly-c=3.054 codifyFirst/nightly-a=2.681 codifyFirst/nightly-b=3.201 codifyFirst/nightly-c=2.960",
+      "detail": "5戦略bot の実 run(縮約でない content・15 run)で 1609 件 / 604.57 住民週。bot 別: greedy/nightly-a=2.794 greedy/nightly-b=2.728 greedy/nightly-c=2.208 researchFirst/nightly-a=2.089 researchFirst/nightly-b=2.425 researchFirst/nightly-c=1.997 explorationFirst/nightly-a=3.986 explorationFirst/nightly-b=3.897 explorationFirst/nightly-c=2.917 placementVariant/nightly-a=2.794 placementVariant/nightly-b=2.603 placementVariant/nightly-c=2.208 codifyFirst/nightly-a=2.117 codifyFirst/nightly-b=2.480 codifyFirst/nightly-c=2.419",
       "gddRef": "GDD 11.4-8",
       "id": "gdd-11.4-8b",
       "inequality": "1 <= 回/住民/週 <= 3",
-      "measured": 3.358992805755396,
+      "measured": 2.661389413988658,
       "owner": "balance",
-      "status": "fail",
+      "status": "pass",
       "threshold": 1,
       "thresholdUpper": 3,
       "title": "想起困難頻度(**実 run** 盤面・盤面平均)",
@@ -322,11 +322,11 @@
     },
     {
       "comparator": ">=",
-      "detail": "最小余裕は greedy/nightly-b @tick 56160: 人口 5 / 下限 4(寝床上限 8)。**大移動(乗員選抜)は対象外**([2026-08-02裁定・台帳v12 必-2] GDD 7.6 の下限保証は周回内の死亡経路のみ)。本 assert の run は exodus を行わない(runStrategyBot の既定)",
+      "detail": "最小余裕は greedy/nightly-b @tick 31680: 人口 5 / 下限 3(寝床上限 6)。**大移動(乗員選抜)は対象外**([2026-08-02裁定・台帳v12 必-2] GDD 7.6 の下限保証は周回内の死亡経路のみ)。本 assert の run は exodus を行わない(runStrategyBot の既定)",
       "gddRef": "GDD 11.4-9",
       "id": "gdd-11.4-9",
       "inequality": "min_(run, 標本) (生存人口 − 人口下限) >= 0",
-      "measured": 1,
+      "measured": 2,
       "owner": "structural",
       "status": "pass",
       "threshold": 0,
@@ -354,7 +354,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "唯一保持者 21 人 / (B)レア資産 1 件 / 派遣延べ 42 人。唯一保持者率 = 0.500。GDD 11.4-11 は『頻度の観測』であって上限値を与えていないため、本 assert は「観測が成立していること」を不等式にしている(頻度そのものは detail の実測値)",
+      "detail": "唯一保持者 19 人 / (B)レア資産 0 件 / 派遣延べ 42 人。唯一保持者率 = 0.452。GDD 11.4-11 は『頻度の観測』であって上限値を与えていないため、本 assert は「観測が成立していること」を不等式にしている(頻度そのものは detail の実測値)",
       "gddRef": "GDD 11.4-11",
       "id": "gdd-11.4-11a",
       "inequality": "貪欲botの派遣延べ人数 >= 1(= 頻度の分母が立っている)",
@@ -370,11 +370,11 @@
     },
     {
       "comparator": ">",
-      "detail": "greedy/nightly-a:reskaya rareAssetCount=1 期待B喪失損失raw=2000000000",
+      "detail": "greedy/nightly-a:reskaya rareAssetCount=1 期待B喪失損失raw=20000000",
       "gddRef": "GDD 11.4-11",
       "id": "gdd-11.4-11b",
       "inequality": "(B)資産を持つ住民を含むチームの期待B喪失損失 > 0",
-      "measured": 2000000000,
+      "measured": 20000000,
       "owner": "structural",
       "status": "pass",
       "threshold": 0,
@@ -401,7 +401,7 @@
       "unverifiableReason": null
     }
   ],
-  "failCount": 3,
+  "failCount": 2,
   "options": {
     "determinismRuns": 1000,
     "determinismTicks": 2880,
@@ -411,7 +411,7 @@
     "runTicks": 57600,
     "strategySeeds": ["nightly-a", "nightly-b", "nightly-c"]
   },
-  "passCount": 16,
+  "passCount": 17,
   "profile": "full",
   "runObservations": [
     {
@@ -432,14 +432,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 37955010,
+      "finalBoardOutputScoreRaw": 20855010,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 124,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 99,
+      "reclaimCount": 12,
       "seed": "nightly-a"
     },
     {
@@ -460,14 +460,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38085023,
+      "finalBoardOutputScoreRaw": 21085023,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 127,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 99,
+      "reclaimCount": 12,
       "seed": "nightly-b"
     },
     {
@@ -488,41 +488,41 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38084133,
-      "finalCodifiedRecordCount": 0,
-      "finalCompletedResearchCount": 24,
-      "finalReachedEraOrder": 3,
-      "minLivingPopulation": 6,
-      "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 130,
-      "reclaimCount": 32,
-      "seed": "nightly-c"
-    },
-    {
-      "botId": "researchFirst",
-      "builtFacilityDefIds": [
-        "bed",
-        "charcoalKiln",
-        "explorationHq",
-        "forge",
-        "hearth",
-        "infirmary",
-        "kitchenGarden",
-        "researchDesk",
-        "scriptorium",
-        "watchtower",
-        "waterTank",
-        "workbench"
-      ],
-      "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38237229,
+      "finalBoardOutputScoreRaw": 21084133,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 94,
-      "reclaimCount": 31,
+      "reclaimCount": 12,
+      "seed": "nightly-c"
+    },
+    {
+      "botId": "researchFirst",
+      "builtFacilityDefIds": [
+        "bed",
+        "charcoalKiln",
+        "explorationHq",
+        "forge",
+        "hearth",
+        "infirmary",
+        "kitchenGarden",
+        "researchDesk",
+        "scriptorium",
+        "watchtower",
+        "waterTank",
+        "workbench"
+      ],
+      "dispatchCount": 7,
+      "finalBoardOutputScoreRaw": 21837229,
+      "finalCodifiedRecordCount": 0,
+      "finalCompletedResearchCount": 24,
+      "finalReachedEraOrder": 3,
+      "minLivingPopulation": 6,
+      "recallGuardBlockCount": 0,
+      "recallOccurrenceCount": 74,
+      "reclaimCount": 12,
       "seed": "nightly-a"
     },
     {
@@ -542,14 +542,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38178338,
+      "finalBoardOutputScoreRaw": 20768889,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 109,
-      "reclaimCount": 31,
+      "recallOccurrenceCount": 88,
+      "reclaimCount": 11,
       "seed": "nightly-b"
     },
     {
@@ -569,14 +569,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38163766,
+      "finalBoardOutputScoreRaw": 21744899,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 108,
-      "reclaimCount": 31,
+      "recallOccurrenceCount": 85,
+      "reclaimCount": 12,
       "seed": "nightly-c"
     },
     {
@@ -595,14 +595,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 38100000,
+      "finalBoardOutputScoreRaw": 26119448,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 176,
-      "reclaimCount": 31,
+      "recallOccurrenceCount": 160,
+      "reclaimCount": 16,
       "seed": "nightly-a"
     },
     {
@@ -621,14 +621,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 38100000,
+      "finalBoardOutputScoreRaw": 21490551,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 190,
-      "reclaimCount": 31,
+      "recallOccurrenceCount": 162,
+      "reclaimCount": 11,
       "seed": "nightly-b"
     },
     {
@@ -647,14 +647,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 38100000,
+      "finalBoardOutputScoreRaw": 29981133,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 234,
-      "reclaimCount": 31,
+      "recallOccurrenceCount": 200,
+      "reclaimCount": 20,
       "seed": "nightly-c"
     },
     {
@@ -675,14 +675,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 37338896,
+      "finalBoardOutputScoreRaw": 20338896,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 124,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 99,
+      "reclaimCount": 12,
       "seed": "nightly-a"
     },
     {
@@ -703,14 +703,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 37281102,
+      "finalBoardOutputScoreRaw": 19866125,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 127,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 87,
+      "reclaimCount": 12,
       "seed": "nightly-b"
     },
     {
@@ -731,14 +731,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 37262266,
+      "finalBoardOutputScoreRaw": 19846399,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 130,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 94,
+      "reclaimCount": 12,
       "seed": "nightly-c"
     },
     {
@@ -758,14 +758,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 39311687,
-      "finalCodifiedRecordCount": 21,
+      "finalBoardOutputScoreRaw": 23137229,
+      "finalCodifiedRecordCount": 14,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 95,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 75,
+      "reclaimCount": 13,
       "seed": "nightly-a"
     },
     {
@@ -785,14 +785,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 39135014,
-      "finalCodifiedRecordCount": 18,
+      "finalBoardOutputScoreRaw": 22178338,
+      "finalCodifiedRecordCount": 13,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 107,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 90,
+      "reclaimCount": 12,
       "seed": "nightly-b"
     },
     {
@@ -802,7 +802,6 @@
         "charcoalKiln",
         "explorationHq",
         "forge",
-        "foundry",
         "hearth",
         "infirmary",
         "kitchenGarden",
@@ -813,14 +812,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 38150564,
-      "finalCodifiedRecordCount": 24,
+      "finalBoardOutputScoreRaw": 22163766,
+      "finalCodifiedRecordCount": 11,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 126,
-      "reclaimCount": 32,
+      "recallOccurrenceCount": 103,
+      "reclaimCount": 12,
       "seed": "nightly-c"
     }
   ],

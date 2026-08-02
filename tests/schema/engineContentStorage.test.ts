@@ -296,13 +296,18 @@ describe("(c) balance.storage(GDD 6.7)", () => {
     expect(content.storage?.wasteResourceId).toBe("waste");
     expect(toRaw(content.storage?.wasteToResearchRatioFix ?? (0 as never))).toBe(100_000);
     expect(toRaw(content.storage?.buildCostWasteSubstitutionMaxFix ?? (0 as never))).toBe(200_000);
+    // [M39] 廃材スポンジ(wasteConversionRatio)は**一時的に空**である。
+    // baseCapacity を全資源へ入れた結果、上限に当たった資源が毎 tick 廃材を生む
+    // ようになり、waste の resource entity を持たない fixture(sim/board.ts の
+    // 縮約盤面・conformance シナリオ・本テスト群)が production.ts の
+    // 「生んだ廃材を黙って捨てない」ガードで例外停止するため。
+    // 復活には fixture 側への waste entity 追加が要る(M39 報告の裁定事項)。
+    expect(content.storage?.wasteConversionRatioByResourceId.size).toBe(0);
+    // [M39] 基礎容量 = 全資源 400(ユーザー裁定 2026-08-02)。
+    expect(content.storage?.baseCapacityByResourceId.size).toBe(8);
     expect(
-      toRaw(
-        content.storage?.wasteConversionRatioByResourceId.get("firewood" as never) ?? (0 as never),
-      ),
-    ).toBe(500_000);
-    // 基礎容量は未設定 = どの資源も上限なし(既定の不活性)。
-    expect(content.storage?.baseCapacityByResourceId.size).toBe(0);
+      toRaw(content.storage?.baseCapacityByResourceId.get("firewood" as never) ?? (0 as never)),
+    ).toBe(400_000_000);
   });
 
   it("storage ブロックが無ければ undefined(上限判定が走らない)", () => {

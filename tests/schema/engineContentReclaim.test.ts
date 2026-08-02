@@ -67,9 +67,11 @@ function issuePaths(reclaim: unknown): readonly string[] {
 describe("balance.reclaim が engine 内部表現へ写る", () => {
   it("実 content の値が 1e6 化されて写る", () => {
     const params = requireReclaimParams(load(rawBundle()));
-    expect(toRaw(params.baseCostFix)).toBe(40_000_000);
+    // [M39] 開始薪の下限 = baseCost なので 40 → 60(ロードマップ M39 ①)。
+    // cap は保管上限 400 の下で到達可能な 300 へ(2000 は在庫に載らず開墾が止まる)。
+    expect(toRaw(params.baseCostFix)).toBe(60_000_000);
     expect(toRaw(params.costGrowthFix)).toBe(1_150_000);
-    expect(toRaw(params.costCapFix)).toBe(2_000_000_000);
+    expect(toRaw(params.costCapFix)).toBe(300_000_000);
     expect(params.costResourceId).toBe("firewood");
   });
 
@@ -83,10 +85,10 @@ describe("balance.reclaim が engine 内部表現へ写る", () => {
 
   it("実 content のコスト曲線は 1.15 冪で増え、最後の 1 枚までに cap へ達する", () => {
     const params = requireReclaimParams(load(rawBundle()));
-    expect(toRaw(reclaimCostFix(params, 0))).toBe(40_000_000);
-    expect(toRaw(reclaimCostFix(params, 1))).toBe(46_000_000);
-    // 36 枚目(解放数 35)は cap 2000 に張り付いている(GDD 9.1 の到達可能な上限)。
-    expect(toRaw(reclaimCostFix(params, 35))).toBe(2_000_000_000);
+    expect(toRaw(reclaimCostFix(params, 0))).toBe(60_000_000);
+    expect(toRaw(reclaimCostFix(params, 1))).toBe(69_000_000);
+    // 36 枚目(解放数 35)は cap 300 に張り付いている(GDD 9.1 の到達可能な上限)。
+    expect(toRaw(reclaimCostFix(params, 35))).toBe(300_000_000);
   });
 
   it("ブロックを省略した content には reclaim キーが生えない(M52 以前と同一)", () => {
