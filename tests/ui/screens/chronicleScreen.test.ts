@@ -54,10 +54,18 @@ describe("memoirEntryText(GDD 7.3・事実だけの文言・網羅switch)", () =
     ).toBe("遠隔探索で ARescued を保護した。");
   });
 
-  it("bio 3種(候補番号のみ・実文言は捏造しない)", () => {
-    expect(memoirEntryText({ kind: "bioCatchphrase", tick: 0, variantIndex: 3 })).toContain("口癖");
-    expect(memoirEntryText({ kind: "bioFear", tick: 0, variantIndex: 1 })).toContain("恐れ");
-    expect(memoirEntryText({ kind: "bioOrigin", tick: 0, variantIndex: 2 })).toContain("出自");
+  it("[M62/FC4・R2-A07] bio 3種は事実だけを伝え、内部の抽選インデックスを露出しない(実文言は捏造しない)", () => {
+    const catchphrase = memoirEntryText({ kind: "bioCatchphrase", tick: 0, variantIndex: 3 });
+    const fear = memoirEntryText({ kind: "bioFear", tick: 0, variantIndex: 1 });
+    const origin = memoirEntryText({ kind: "bioOrigin", tick: 0, variantIndex: 2 });
+    expect(catchphrase).toBe("口癖が記録された。");
+    expect(fear).toBe("恐れが記録された。");
+    expect(origin).toBe("出自が記録された。");
+    // 内部インデックス("候補#N")の露出が無いこと(R2-A07 の再発防止)。
+    for (const text of [catchphrase, fear, origin]) {
+      expect(text).not.toContain("#");
+      expect(text).not.toContain("候補");
+    }
   });
 });
 

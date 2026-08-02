@@ -108,8 +108,12 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     const text = flattenText(vnode);
     expect(text).toContain("Lv2");
     expect(text).toContain("Lv5");
-    expect(text).toContain("1.50");
+    // [M62/FC4] formatResourceAmount 経由(整数部3桁区切り+小数第1位のみ表示)。
+    expect(text).toContain("1.5");
     expect(text).toContain("薪");
+    // [M62/FC4・R2-D01] 内部語「/tick」ではなく「/分」(tick=1分)。
+    expect(text).toContain("/分");
+    expect(text).not.toContain("/tick");
     // [束B/B-3] 住民IDは residentDisplayName(先頭大文字化)を通して表示する。
     expect(text).toContain("ARui");
   });
@@ -121,8 +125,10 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
       nextLevelOutputApprox: 115,
     });
     const text = flattenText(vnode);
-    expect(text).toContain("100.00");
-    expect(text).toContain("→ 115.00");
+    // [M62/FC4] formatResourceAmount は整数値の末尾 ".00" を出さない。
+    expect(text).toContain("100");
+    expect(text).toContain("→ 115");
+    expect(text).not.toContain("100.00");
   });
 
   it("nextLevelOutputApprox 省略時は矢印を出さない(後方互換)", () => {

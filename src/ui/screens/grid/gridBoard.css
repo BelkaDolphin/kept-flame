@@ -181,9 +181,19 @@
 
 /* --- [M19] 配置プレビュー(GDD 6.5 MVP必須) --------------------------------- */
 
-.kf-cell--preview {
-  position: relative;
-}
+/*
+ * [M62/FC10・R2-FC10] `position: relative` は `.kf-cell` の `position: absolute`
+ * (盤面上の絶対座標配置。left/top は GridBoard.tsx が cellIndex から算出して
+ * インラインで渡す)を打ち消していた。プレビュー中のセル(2×2 施設等・複数
+ * セルが同時にプレビューされる)は `position:relative` になった瞬間フロー
+ * 配置(ドキュメントの通常の流れ)へ切り替わり、絶対座標を無視して互いの並び
+ * 順どおりに積まれるため、盤面上で斜め/ずれた位置に描画されていた(タップ
+ * 判定 `hitTestCell` は座標計算のみで DOM 位置を見ないため常に正しい——実害は
+ * 描画だけだが、見た目の位置と実際にタップが解決するセルが食い違って見える)。
+ * `.kf-cell` の `absolute` を継承させるだけでよいので、このセレクタ自体を
+ * 削除する(このブロックの子要素 __preview-symbol/__preview-value は絶対配置の
+ * 基準を要求せず、`.kf-cell` の flex 中央寄せだけで済んでいる)。
+ */
 
 .kf-cell__preview-symbol {
   font-size: var(--kf-fs-title, 17px);

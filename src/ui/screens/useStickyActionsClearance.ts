@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------------------
-// 継ぐ火 -Kept Flame- sticky確定バーの重なり解消(M61/FC3・R1-C03/C04)
+// 継ぐ火 -Kept Flame- sticky確定バーの重なり解消(M61/FC3・R1-C03/C04・
+// M62/FC3・R2-E01/R2-A03 で補正式を絶対値ベースへ改訂)
 //
 // ===========================================================================
 // 1. なぜ CSS だけでは足りないか(実機検証で判明した追加知見)
@@ -21,9 +22,12 @@
 //   位置を動かさない・後ろに足しても前の要素は動かない)解消できない。
 //
 //   よって「直前コンテンツの実際の描画矩形」と「sticky バーの実際の描画矩形」
-//   を **実測**し、重なっていれば直前コンテンツの `margin-top` を重なり分だけ
-//   増やして押し下げる、という補正が要る(axisCE の fixSuggestions が
-//   「ResizeObserver 等で実測」と明記していた理由)。
+//   を **実測**し、重なっていれば直前コンテンツの `margin-top` を補正する、
+//   という仕組みが要る(axisCE の fixSuggestions が「ResizeObserver 等で実測」
+//   と明記していた理由)。**[M62/FC3改訂]** 「重なり分だけ増やす」という当初の
+//   式は、直前コンテンツが sticky 帯を完全に内包するケース(候補が非常に
+//   多く画面が長い場合)で収束しないと R2-E01/R2-A03 が実測した。
+//   `clearanceMarginPx` の doc(下記)に理由と正しい式を記す。
 //
 // ===========================================================================
 // 2. テスト方針
@@ -48,9 +52,57 @@ export function verticalOverlapPx(a: VerticalRect, b: VerticalRect): number {
   return Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 }
 
-/** 重なりが有る場合に足す `margin-top` の値(px・余裕分を上乗せ)。 */
-export function clearanceMarginPx(overlapPx: number): number {
-  return overlapPx > 0 ? overlapPx + 4 : 0;
+/** 余裕として上乗せする px(浮動小数の丸め誤差で 0.数px 残るのを防ぐ)。 */
+const CLEARANCE_SAFETY_MARGIN_PX = 4;
+
+/**
+ * [M62/FC3・R2-E01] 重なりが有る場合に `contentRect` へ足す `margin-top` の値。
+ *
+ * ===========================================================================
+ * なぜ「重なり分を足す」旧式(`overlapPx + 4`)では収束しないケースがあるか
+ * ===========================================================================
+ *   `.kf-sticky-actions` は `position:sticky` で、内容がビューポートより高い
+ *   (= オーバーフローする)とき、**ビューポート相対に固定された** 1 つの矩形
+ *   [top, bottom] として描画される——`contentRect`(直前要素)に `margin-top`
+ *   を足しても、その矩形は 1px も動かない(margin を足すたびに測り直しても
+ *   不変)。これが「収束しない」の実体である。
+ *
+ *   `contentRect` 側は margin ぶんだけ丸ごと下へ平行移動する
+ *   (`[top+margin, bottom+margin]`)。よって新しい重なりは
+ *
+ *     overlap(margin) = min(bottom+margin, stickyRect.bottom)
+ *                      − max(top+margin, stickyRect.top)
+ *
+ *   直前コンテンツが sticky 帯を**完全に内包する**とき
+ *   (`contentRect.top < stickyRect.top` かつ `contentRect.bottom > stickyRect.bottom`)、
+ *   margin をどれだけ足しても contentRect は stickyRect を内包し続ける
+ *   (margin は両側を同じだけ動かすだけで、内包関係そのものは変わらない)。
+ *   内包している限り overlap(margin) = stickyRect の高さ**で不変**になる
+ *   ——これが「overlapPx + 4」がこのケースで無効な理由(算出した margin を
+ *   何度足しても実測の重なりが変わらない・scratchpad r2-axisCE の実測どおり)。
+ *
+ * ===========================================================================
+ * 解:「重なり分を足す」ではなく「sticky 帯の下端まで絶対値で押し下げる」
+ * ===========================================================================
+ *   sticky はビューポート相対に固定されている(margin の影響を受けない)ので、
+ *   重なりを 0 にする唯一の到達点は
+ *
+ *     contentRect.top + margin >= stickyRect.bottom
+ *
+ *   である(1 つの矩形である contentRect は sticky 帯の「途中に穴を開ける」
+ *   ことができないため、内包を破るには contentRect 全体を sticky 帯の外側
+ *   ——下端より下——へ出すしかない)。よって
+ *
+ *     margin = max(0, stickyRect.bottom − contentRect.top) + 余裕
+ *
+ *   この式は「部分的にしか重ならない」旧来のケースでも正しく解ける
+ *   (旧式はそのケースでもわずかに重なりを悪化させていたことがテストで判明
+ *   している——sticky が固定されている限り、margin を「重なり分」だけ足す
+ *   というアプローチ自体が符号を取り違えていた)。
+ */
+export function clearanceMarginPx(contentRect: VerticalRect, stickyRect: VerticalRect): number {
+  if (verticalOverlapPx(contentRect, stickyRect) <= 0) return 0;
+  return Math.max(0, stickyRect.bottom - contentRect.top) + CLEARANCE_SAFETY_MARGIN_PX;
 }
 
 export interface StickyActionsClearanceRefs {
@@ -86,7 +138,7 @@ export function useStickyActionsClearance(
       content.style.marginTop = "";
       const contentRect = content.getBoundingClientRect();
       const stickyRect = sticky.getBoundingClientRect();
-      const margin = clearanceMarginPx(verticalOverlapPx(contentRect, stickyRect));
+      const margin = clearanceMarginPx(contentRect, stickyRect);
       content.style.marginTop = margin > 0 ? `${String(margin)}px` : "";
     }
     recompute();

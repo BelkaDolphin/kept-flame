@@ -47,12 +47,19 @@ export function memoirEntryText(entry: MemoirEntry): string {
       return `絆を結んでいた ${residentDisplayName(entry.partnerId)} を喪った。`;
     case "explorationRescue":
       return `${distanceBandLabel(entry.band)}探索で ${residentDisplayName(entry.rescuedId)} を保護した。`;
+    // [M62/FC4・R2-A07] `variantIndex` は engine 内部の抽選インデックス(§概要
+    // コメント参照)であり、実際の文言テンプレはまだ実装されていない
+    // (`rules/memoir.ts` §1)。以前は「(候補#N)」として index をそのまま
+    // 露出していたが、これは実装詳細のプレイヤーへの漏出である。かといって
+    // 24 種の flavor text を UI 層で捏造するのはこのプロジェクトの一貫した
+    // 方針(存在しない情報を作らない)に反するため、ここでは index を出さず
+    // 「何が記録されたか」という事実だけを伝える。
     case "bioCatchphrase":
-      return `口癖が記録された(候補#${String(entry.variantIndex)})。`;
+      return "口癖が記録された。";
     case "bioFear":
-      return `恐れが記録された(候補#${String(entry.variantIndex)})。`;
+      return "恐れが記録された。";
     case "bioOrigin":
-      return `出自が記録された(候補#${String(entry.variantIndex)})。`;
+      return "出自が記録された。";
     default: {
       const unhandled: never = entry;
       throw new TypeError(`未知の memoir kind ${JSON.stringify(unhandled)}`);

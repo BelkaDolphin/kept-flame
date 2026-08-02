@@ -143,6 +143,8 @@ export function HomeHub({ store, onNavigate }: ScreenProps) {
   useScreenMount(store, "home", { activate: false });
   const alerts = useSignalValue(store.derived.homeAlerts);
   const badges = useSignalValue(store.derived.homeBadges);
+  // [M62/FC6b・R2-A08] 寝床上限の現在値表示(engine の既存 derived 呼びのみ)。
+  const population = useSignalValue(store.derived.populationSummary);
 
   return (
     <section class="kf-home" aria-labelledby="kf-home-alerts-title">
@@ -161,11 +163,49 @@ export function HomeHub({ store, onNavigate }: ScreenProps) {
         </ul>
       )}
 
+      {/* [M62/FC9・R2-C02] 緊急度バッジは問題がある時だけ点く(GDD 2.2 の
+          「限定点灯」)ため、研究/成文化は止まっていない限りホームから直接
+          飛べる導線が無かった(効率のヒューリスティックで指摘)。バッジの
+          有無に関わらず常設の近道を置く(ナビバー経由の遠回りをしなくてよい
+          ようにする)。 */}
+      <h2 class="kf-home__section-title">よく使う画面へ</h2>
+      <ul class="kf-home__quicklinks">
+        <li>
+          <button
+            type="button"
+            class="kf-home__quicklink-button"
+            onClick={() => onNavigate("research")}
+          >
+            研究ツリーへ
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            class="kf-home__quicklink-button"
+            onClick={() => onNavigate("codify")}
+          >
+            成文化キューへ
+          </button>
+        </li>
+      </ul>
+
       <h2 class="kf-home__section-title">コロニーの様子</h2>
       <ul class="kf-stats">
         <li class="kf-stats__item">
           <span class="kf-stats__label">住民</span>
           <span class="kf-stats__value">{badges.residentCount}</span>
+        </li>
+        {/* [M62/FC6b・R2-A08] 寝床上限の現在値表示。寝床は実は結線済み
+            (人口下限保証・晴天漂着の上限に効く・facilityEffect.ts §2「寝床」)
+            だが、以前はどの画面にも現在値が出ておらず伝わっていなかった。
+            `population.living` は生存住民のみ(`badges.residentCount` は死亡
+            tombstone を含む全件で意味が異なるため、値は混ぜず並べて出す)。 */}
+        <li class="kf-stats__item">
+          <span class="kf-stats__label">生存人口/寝床上限</span>
+          <span class="kf-stats__value">
+            {population.living}/{population.bedCapacity}
+          </span>
         </li>
         <li class="kf-stats__item">
           <span class="kf-stats__label">施設</span>

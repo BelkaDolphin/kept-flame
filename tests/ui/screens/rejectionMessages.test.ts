@@ -148,6 +148,29 @@ describe("rejectionMessages: 主要 code のスポットチェック", () => {
     ).toBe("継承点が足りません(必要 50 点 / 残高 10 点)。");
   });
 
+  it("[M62/FC5b・R2-A05] entityIdInUse: codify record ID から techId+媒体を逆算し「既にキューにあります」を返す(開発者向け誤診断文言を出さない)", () => {
+    const message = playerRejectionMessage(
+      rejection({ code: "entityIdInUse", subjectId: id("techFireStartingRecordStone") }),
+    );
+    expect(message).toBe("「火起こし」の記録(石板)は既にキューにあります。");
+    expect(message).not.toContain("識別子");
+  });
+
+  it("entityIdInUse: research entity ID から techId を逆算し「既に研究中か解禁済み」を返す", () => {
+    const message = playerRejectionMessage(
+      rejection({ code: "entityIdInUse", subjectId: id("research_techFireStarting") }),
+    );
+    expect(message).toBe("「火起こし」は既に研究中か解禁済みです。");
+  });
+
+  it("entityIdInUse: どちらの ID 規則にも合わなければ汎用文へ倒す(捏造しない・識別子という語も出さない)", () => {
+    const message = playerRejectionMessage(
+      rejection({ code: "entityIdInUse", subjectId: id("dispatchNear1") }),
+    );
+    expect(message).toBe("この操作は既に行われています。もう一度操作をやり直してください。");
+    expect(message).not.toContain("識別子");
+  });
+
   it("notImplemented: ownerTask(タスクID等の開発語彙)を文言に含めない", () => {
     const message = playerRejectionMessage(rejection({ code: "notImplemented", ownerTask: "M99" }));
     expect(message).not.toContain("M99");

@@ -183,6 +183,21 @@ async function boot(): Promise<void> {
     onWorldLoaded: (state) => {
       handleWorldLoaded(state);
     },
+    // [M62/FC2] プレイヤー操作(engine コマンド)をセーブのトリガへ結線する
+    // 唯一の口。以前は画面から直接 `store.dispatch({type:"commandApplied"})`
+    // を呼ぶ経路が 10 箇所以上あり、どこも `scheduler.recordCommandOutcome`
+    // を呼んでいなかった(プレイテスト R2-FC2・M54 発見の既知ギャップ)。
+    // ×1(倍速なし)では最大 15 秒(絶対フラッシュの締切)まで、操作の直後に
+    // タブを閉じる等すると直近の操作が黙って失われる窓があった。
+    // `handleWorldLoaded` と同じ理由で「ストアの唯一の書き込み口 dispatch の
+    // 中」に置く(画面ごとの呼び忘れが構造的に起きなくなる)。`scheduler` は
+    // この下で定義されるが、このコールバック自体はコマンドが実際に dispatch
+    // された時点(boot() のこの同期区間よりずっと後)まで呼ばれないので
+    // 参照して問題ない(`handleWorldLoaded` の前方参照と同型)。
+    // `recordCommandOutcome` 自身が拒否/無変化を弾くので、ここでは分岐しない。
+    onCommandApplied: (result) => {
+      scheduler?.recordCommandOutcome(result);
+    },
   });
 
   const router = createHashRouter<ScreenId>(createBrowserRouterHost(), {
@@ -370,11 +385,13 @@ async function boot(): Promise<void> {
   // データ条件(`BackupReminderTracker`・M4 実装済み)AND 表示頻度
   // (`PromotionPromptTracker`・M34 と同型)の 2 層 AND を、Add-to-Home/通知と
   // 同じ「起動時に 1 回だけ判定する」形で結線する(backupReminder.ts §3)。
-  // **commandsSinceExport 軸は今回未結線**(★非ブロッキング・最終報告参照):
-  // プレイヤー操作は画面から `store.dispatch` を直接呼ぶため、この
-  // composition root がコマンド発行 1 件ごとに介入する経路が無い
-  // (`SaveScheduler` も同じ制約=`recordCommandOutcome` は現状どこからも
-  // 呼ばれていない・architecture.md §4-1 の記述と実装の差異は別途申し送り)。
+  // **commandsSinceExport 軸は本タスク(M62/FC2)でも未結線のまま**(★非
+  // ブロッキング・最終報告参照): `BackupReminderTracker` 自身が持つ独立した
+  // コマンドカウンタ(`recordCommands`)を指しており、`store` の
+  // `onCommandApplied` 通知(M62 で新設・上の `createGameStore` 呼び出し参照)
+  // とは別物。~~`SaveScheduler.recordCommandOutcome` も同じ制約で未結線~~
+  // **[M62/FC2 で解消]** `SaveScheduler` 側は上で結線済み。
+  // `BackupReminderTracker.recordCommands` の結線は引き続き別タスクの担当。
   // 経過実時間(既定 24h)軸のみで周期表示を成立させている。
   const backupReminderTracker = createBackupReminderTracker({ storage: promotionStorage });
   const backupReminderPromptTracker = createBackupReminderPromptTracker({

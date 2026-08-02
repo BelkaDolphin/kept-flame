@@ -15,6 +15,7 @@ import {
   CodifySuggestionRow,
   CodifyTechRow,
   mediumLabel,
+  seedMissingMediumDefaults,
 } from "../../../src/ui/screens/codify/CodifyScreen";
 
 const id = entityIdFromString;
@@ -48,6 +49,57 @@ function suggestion(overrides: Partial<CodifySuggestionView> = {}): CodifySugges
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// [M62/FC5a] seedMissingMediumDefaults: 媒体既定値の「初回だけ計算・以後固定」
+//
+// R2-FC5(a) の再現+修正の固定: ある行をキュー投入して在庫が動いても、
+// 既に既定値が割り当て済みの**他行**は変わらない。
+// ---------------------------------------------------------------------------
+describe("[M62/FC5a] seedMissingMediumDefaults(他行の媒体セレクタが勝手に変わるバグの修正)", () => {
+  const techA = techEntry({ techId: id("techFireStarting") });
+  const techB = techEntry({ techId: id("techPottery") });
+
+  it("初めて見た techId には defaultFor の結果を割り当てる", () => {
+    const result = seedMissingMediumDefaults(new Map(), [techA, techB], () => "stoneTablet");
+    expect(result.get(techA.techId)).toBe("stoneTablet");
+    expect(result.get(techB.techId)).toBe("stoneTablet");
+  });
+
+  it("[R2-FC5a の再現] 既に値がある techId は defaultFor の戻り値が変わっても上書きしない", () => {
+    // 1 回目: 両方とも石板が既定(在庫が足りている状態を模す)。
+    const seeded = seedMissingMediumDefaults(new Map(), [techA, techB], () => "stoneTablet");
+    expect(seeded.get(techA.techId)).toBe("stoneTablet");
+    expect(seeded.get(techB.techId)).toBe("stoneTablet");
+
+    // techA をキュー投入した結果、在庫が減って defaultFor が「紙」を返すように
+    // なった(=バグ発生時の状況)。しかし techB は一度も操作していない。
+    const reseeded = seedMissingMediumDefaults(seeded, [techA, techB], () => "paper");
+
+    // 両方とも stoneTablet のまま(defaultFor の新しい戻り値に引きずられない)。
+    expect(reseeded.get(techA.techId)).toBe("stoneTablet");
+    expect(reseeded.get(techB.techId)).toBe("stoneTablet");
+  });
+
+  it("新しく増えた techId だけ既定値が足される(既存 techId は不変)", () => {
+    const seeded = seedMissingMediumDefaults(new Map(), [techA], () => "stoneTablet");
+    const withNewTech = seedMissingMediumDefaults(seeded, [techA, techB], () => "paper");
+    expect(withNewTech.get(techA.techId)).toBe("stoneTablet");
+    expect(withNewTech.get(techB.techId)).toBe("paper");
+  });
+
+  it("変化が無ければ同じ参照を返す(不要な再描画を起こさない)", () => {
+    const seeded = seedMissingMediumDefaults(new Map(), [techA, techB], () => "stoneTablet");
+    const again = seedMissingMediumDefaults(seeded, [techA, techB], () => "paper");
+    expect(again).toBe(seeded);
+  });
+
+  it("空の techs 一覧では何も足さない(既存の選択もそのまま)", () => {
+    const seeded = seedMissingMediumDefaults(new Map(), [techA], () => "stoneTablet");
+    const result = seedMissingMediumDefaults(seeded, [], () => "paper");
+    expect(result).toBe(seeded);
+  });
+});
 
 /** vnode ツリーから全テキストを区切り無しで集める(facilityScreen.test.ts と同型)。 */
 function flattenText(node: unknown): string {

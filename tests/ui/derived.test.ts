@@ -27,6 +27,7 @@ import {
 import { CODIFY_NO_DEADLINE_TICKS, suggestCodification } from "../../src/engine/assist/codify";
 import { explorationRoi } from "../../src/engine/rules/exploration";
 import { outpostNetworkRoi, outpostRoi } from "../../src/engine/rules/outpost";
+import { populationViewOf } from "../../src/engine/rules/population";
 import { activeLaborFix, facilityOutputPerTick } from "../../src/engine/rules/production";
 import { recallRiskPerDay } from "../../src/engine/rules/recall";
 import { reclaimCostFix } from "../../src/engine/rules/reclaim";
@@ -71,6 +72,7 @@ import {
   outpostOf,
 } from "./m32Fixtures";
 import { FORGE, META, research, stateOf } from "../engine/fixtures";
+import { BUNKS_ID, townContent } from "../engine/lifespanFixtures";
 import {
   CELL_CENTER,
   CELL_EAST,
@@ -1650,5 +1652,30 @@ describe("[M32] previewExplorationRoi(GDD 8.6・explorationRoi をそのまま�
     const actual = previewExplorationRoi(state, content, "near", [member.id]);
     expect(actual).toEqual(expected);
     expect(toRaw(expected.expectedRareLossFix)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("[M62/FC6b・R2-A08] populationSummary(GDD 7.6/7.7・populationViewOf をそのまま呼ぶ)", () => {
+  it("engine の populationViewOf と 1 対 1 で一致する(congruence・寝床上限あり)", () => {
+    const content = townContent();
+    const state = stateOf([
+      resident("aRui"),
+      resident("aKaya"),
+      facility("bunksA", BUNKS_ID, 0, [], 2),
+    ]);
+    const store = createGameStore({ state, content });
+
+    const expected = populationViewOf(state, content);
+    const actual = store.derived.populationSummary.value;
+    expect(actual).toEqual(expected);
+    expect(actual.living).toBe(2);
+    expect(actual.bedCapacity).toBe(4); // BUNKS の Lv2 = 4(bedCapacityByLevel 参照)。
+  });
+
+  it("寝床施設が無い盤面(既存 content 相当)は寝床上限0・下限0", () => {
+    const { store } = createTestStore();
+    const summary = store.derived.populationSummary.value;
+    expect(summary.bedCapacity).toBe(0);
+    expect(summary.floor).toBe(0);
   });
 });

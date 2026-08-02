@@ -38,12 +38,22 @@
 //   **見張り台/療養所**: `content/facility.json` にこの種の追加フィールドが
 //   一切無く、engine 側の参照も確認できなかった(統率者側でも再確認済み)。
 //   「効果は未実装(建設しても資源を消費するのみ)」のまま。
+//
+// ===========================================================================
+// 3. [M62/FC9・R2-C01] カタログ効果ヒントの非対称の解消
+// ===========================================================================
+//   R2-C01: `GridScreen.tsx` の建設前ヒント(`effectHintByDefId`)は寝床/保管庫/
+//   非稼働(見張り台・療養所)の 3 kind にしか文言を出さず、通常稼働(worker)系
+//   施設だけヒントが無い非対称があった。`workerEffectHintText` は Lv1 時点の
+//   基礎産出(隣接乗数・稼働就労者数を含まない近似値。カタログは建設前で盤面
+//   位置が未定のため)を示す、対称な第4のヒント文言。
 // ---------------------------------------------------------------------------
 
 import type { FacilityDef } from "../../engine/rules/types";
 import { toApproxNumber } from "../../engine/fp";
 import type { EntityId } from "../../engine/state/state";
-import { formatResourceAmount } from "./format";
+import { resourceLabel } from "./contentLabels";
+import { formatRatePerMinute, formatResourceAmount } from "./format";
 
 export type FacilityEffectKind = "worker" | "bedCapacity" | "storageCapacity" | "none";
 
@@ -130,3 +140,30 @@ export const STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT =
 
 /** 効果未実装の施設に添える固定文言(見張り台/療養所のみ・§2)。 */
 export const DORMANT_FACILITY_EFFECT_TEXT = "効果は未実装(建設しても資源を消費するのみ)";
+
+/**
+ * [M62/FC9・R2-C01] `level`(1始まり)時点の基礎産出(`outputPerTickByLevel` の
+ * その段。隣接乗数・稼働就労者数は含まない近似値・`bedCapacityAt` と同じ
+ * 「配列より大きい Lv は最後の段」規約)。基礎産出を持たない(=配列が空の
+ * 縮約 `FacilityDef`)場合は null。
+ */
+export function workerBaseOutputAt(def: FacilityDef, level: number): number | null {
+  const curve = def.outputPerTickByLevel;
+  if (curve.length === 0) return null;
+  const fix = curve[level - 1] ?? curve[curve.length - 1];
+  return fix === undefined ? null : toApproxNumber(fix);
+}
+
+/**
+ * worker系(通常稼働)施設のカタログ/詳細向け効果ヒント(§3)。寝床/保管庫/
+ * 非稼働(§2)と対称に、建設前でも「何を産出するか」の目安を示す。
+ *
+ * 基礎産出が 0(=このタグでは実質稼働しない縮約施設等)なら null(捏造しない・
+ * `nextLevelOutputApproxOf` の「基礎産出0は出さない」判断と同じ立場)。
+ */
+export function workerEffectHintText(def: FacilityDef, level = 1): string | null {
+  const value = workerBaseOutputAt(def, level);
+  if (value === null || value === 0) return null;
+  const target = def.output.kind === "resource" ? resourceLabel(def.output.resourceId) : "研究点";
+  return `Lv${String(level)}基礎産出 ${formatRatePerMinute(value)}${target}(就労者が必要・隣接ボーナスで変動)`;
+}

@@ -39,6 +39,7 @@ import {
   STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
   storageCapacityEffectText,
   storageCapacityWouldCapExistingStock,
+  workerEffectHintText,
 } from "../facilityEffect";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -254,6 +255,12 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
         }
       } else if (kind === "none") {
         hints.set(defId, DORMANT_FACILITY_EFFECT_TEXT);
+      } else {
+        // [M62/FC9・R2-C01] worker系(通常稼働)施設にも対称にヒントを出す
+        // (以前は寝床/保管庫/非稼働の3 kindだけで、通常施設だけヒントが
+        // 無い非対称があった)。基礎産出0(捏造しない対象外)なら出さない。
+        const text = workerEffectHintText(def, 1);
+        if (text !== null) hints.set(defId, text);
       }
     }
     return hints;

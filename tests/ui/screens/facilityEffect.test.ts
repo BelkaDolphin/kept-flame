@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { fixFromInt } from "../../../src/engine/fp";
+import { fixFromInt, fixFromRaw } from "../../../src/engine/fp";
 import type { FacilityDef } from "../../../src/engine/rules/types";
 import { entityIdFromString } from "../../../src/engine/state/state";
 import {
@@ -24,6 +24,8 @@ import {
   storageCapacityEffectText,
   storageCapacityWouldCapExistingStock,
   storageTargetResourceIds,
+  workerBaseOutputAt,
+  workerEffectHintText,
 } from "../../../src/ui/screens/facilityEffect";
 
 const id = entityIdFromString;
@@ -201,6 +203,60 @@ describe("[M61/FC6・2026-08-02差し戻し] STORAGE_CAPACITY_EXCEEDED_WARNING_T
   it("在庫が上限超であることと産出への影響を伝える文言を持つ", () => {
     expect(STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT).toContain("上限");
     expect(STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT).toContain("頭打ち");
+  });
+});
+
+describe("[M62/FC9・R2-C01] workerBaseOutputAt / workerEffectHintText(カタログ効果ヒントの対称化)", () => {
+  const worker = baseDef({
+    workerSlotsByLevel: [1, 1, 1, 1, 1],
+    outputPerTickByLevel: [1_000_000, 1_150_000, 1_322_500, 1_520_875, 1_749_006].map(fixFromRaw),
+    output: { kind: "resource", resourceId: id("firewood") },
+  });
+
+  it("Lv別の基礎産出を返す(Lv1=1、配列より大きいLvは最後の段)", () => {
+    expect(workerBaseOutputAt(worker, 1)).toBe(1);
+    expect(workerBaseOutputAt(worker, 9)).toBeCloseTo(1.749006, 6);
+  });
+
+  it("outputPerTickByLevel が空なら null", () => {
+    expect(workerBaseOutputAt(baseDef({ outputPerTickByLevel: [] }), 1)).toBeNull();
+  });
+
+  it("worker系(資源産出)は「Lv1基礎産出 X/分 資源名」の文言を返す", () => {
+    const text = workerEffectHintText(worker, 1);
+    expect(text).toContain("Lv1基礎産出");
+    expect(text).toContain("/分");
+    expect(text).toContain("薪");
+    expect(text).toContain("就労者が必要");
+  });
+
+  it("研究点産出(output.kind='research')は「研究点」と表示する", () => {
+    const researchWorker = baseDef({
+      workerSlotsByLevel: [1, 1, 1, 1, 1],
+      outputPerTickByLevel: [2, 2, 2, 2, 2].map(fixFromInt),
+      output: { kind: "research" },
+    });
+    expect(workerEffectHintText(researchWorker, 1)).toContain("研究点");
+  });
+
+  it("基礎産出が0(または無い)なら null(捏造しない)", () => {
+    const zeroOutput = baseDef({
+      workerSlotsByLevel: [1, 1, 1, 1, 1],
+      outputPerTickByLevel: [0, 0, 0, 0, 0].map(fixFromInt),
+      output: { kind: "resource", resourceId: id("firewood") },
+    });
+    expect(workerEffectHintText(zeroOutput, 1)).toBeNull();
+    expect(workerEffectHintText(baseDef({ outputPerTickByLevel: [] }), 1)).toBeNull();
+  });
+
+  it("Lv省略時はLv1として扱う(カタログ=建設前の既定表示)", () => {
+    expect(workerEffectHintText(worker)).toBe(workerEffectHintText(worker, 1));
+  });
+
+  it("寝床/保管庫/非稼働の3種と同じ「効果ヒント」の枠に収まる文言(短すぎない・空文字でない)", () => {
+    const text = workerEffectHintText(worker, 1);
+    expect(text).not.toBeNull();
+    expect(text?.length).toBeGreaterThan(0);
   });
 });
 

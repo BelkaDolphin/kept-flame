@@ -22,6 +22,7 @@
 //      空きセルかどうかだけで決まること(architecture.md §6 の7箇条目)
 // ---------------------------------------------------------------------------
 
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { cellIdOf, GRID_CELL_COUNT, type Tag } from "../../../src/engine/adjacency";
@@ -340,6 +341,39 @@ describe("[M19] 配置プレビュー(GDD 6.5 MVP必須)", () => {
       preview: null,
     });
     expect(countElementNodes(vnode)).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M62/FC10・R2-FC10] 2×2施設の配置プレビューが斜めにずれて描画されるバグの
+// 回帰テスト(CSS 静的解析・tapTargetSize.test.ts と同じ手法)。
+//
+// jsdom が無い(ADR-001)ため実レイアウトは計測できないが、原因(`.kf-cell`
+// (position:absolute)を `.kf-cell--preview`(position:relative)が打ち消す)は
+// CSS の宣言だけで機械的に検出できる——`.kf-cell--preview` が `position` を
+// 宣言していないこと(= `.kf-cell` の `absolute` をそのまま継承すること)を
+// 固定する。
+// ---------------------------------------------------------------------------
+describe("[M62/FC10] gridBoard.css: .kf-cell--preview が position を打ち消さない(回帰テスト)", () => {
+  // vitest の cwd はプロジェクトルート(tapTargetSize.test.ts の readCss と同じ
+  // 相対パス方式)。
+  const cssText = readFileSync("src/ui/screens/grid/gridBoard.css", "utf8");
+
+  it(".kf-cell の基準は position:absolute である(前提の固定)", () => {
+    const match = /\.kf-cell\s*\{([^}]*)\}/.exec(cssText);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toMatch(/position:\s*absolute/);
+  });
+
+  it(".kf-cell--preview は position を宣言しない(絶対配置を打ち消さない)", () => {
+    const match = /\.kf-cell--preview\s*\{([^}]*)\}/.exec(cssText);
+    // ルール自体が無い(セレクタごと削除)/ 中身が position を含まない、の
+    // どちらでも合格(このセレクタが単独ルールとして残っていないのが望ましい
+    // 修正だが、将来別プロパティのために再追加されても position だけは
+    // 打ち消さないことを検出できるようにしておく)。
+    if (match !== null) {
+      expect(match[1]).not.toMatch(/position\s*:/);
+    }
   });
 });
 

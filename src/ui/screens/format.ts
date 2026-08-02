@@ -89,6 +89,25 @@ export function formatApproxDecimal1(approx: number): string {
 }
 
 /**
+ * [M62/FC4] tick 単位のレート表記(産出/供給/維持費等)を「/分」へ変換する
+ * 表示ヘルパ。1 tick = 1 分(GDD 11.1)なので数値の再計算は不要——単位表記の
+ * 日本語化だけを行う。
+ *
+ * 桁の整形は `formatResourceAmount` へ委譲する(独自の `toFixed(2)` を持たない)
+ * ——プレイテスト R2-FC9 が指摘した「薪だけ小数第1位が付いて他のレート表示と
+ * 体裁が揃わない」不統一は、レート表示(旧: 素の `toFixed(2)`)と資源在庫表示
+ * (HUD 等・`formatResourceAmount`)とで整形ヘルパが分かれていたことが原因
+ * だった。ここで一本化することで、桁区切り・小数の出し分けルールが資源在庫と
+ * 常に一致する(FacilityScreen.tsx/OutpostsScreen.tsx の /tick 表記 7 箇所を
+ * 本ヘルパ経由へ置換)。
+ *
+ * @throws {RangeError} 有限数でない場合(`formatResourceAmount` が投げる)
+ */
+export function formatRatePerMinute(approx: number): string {
+  return `${formatResourceAmount(approx)}/分`;
+}
+
+/**
  * 経過 tick を「○日○時間」形式にする(⑫帰還ダイジェストの不在時間)。
  * 1 時間未満は「○分」。
  *

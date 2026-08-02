@@ -9,7 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatApproxDecimal1, formatResourceAmount } from "../../../src/ui/screens/format";
+import {
+  formatApproxDecimal1,
+  formatRatePerMinute,
+  formatResourceAmount,
+} from "../../../src/ui/screens/format";
 
 describe("[M61/FC11] formatResourceAmount: 3桁区切り + 小数第1位", () => {
   it("1000未満は区切りなし(既存挙動を維持)", () => {
@@ -32,6 +36,22 @@ describe("[M61/FC11] formatResourceAmount: 3桁区切り + 小数第1位", () =>
   it("有限数でなければ例外", () => {
     expect(() => formatResourceAmount(Number.NaN)).toThrow(RangeError);
     expect(() => formatResourceAmount(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+});
+
+describe("[M62/FC4] formatRatePerMinute: /tick の内部語を /分 へ(GDD 11.1・R2-D01)", () => {
+  it("formatResourceAmount と同じ桁整形に「/分」を付ける", () => {
+    expect(formatRatePerMinute(1.5)).toBe("1.5/分");
+    expect(formatRatePerMinute(100)).toBe("100/分");
+    expect(formatRatePerMinute(0)).toBe("0/分");
+  });
+
+  it("3桁区切りも資源在庫表示(HUD)と一致する(R2-FC9: 薪だけ体裁が揃わない不統一の解消)", () => {
+    expect(formatRatePerMinute(1620004.7)).toBe("1,620,004.7/分");
+  });
+
+  it("内部語 tick を含まない", () => {
+    expect(formatRatePerMinute(42)).not.toContain("tick");
   });
 });
 

@@ -47,6 +47,7 @@
 
 import { useEffect, useRef, useState } from "preact/hooks";
 
+import { ARRIVAL_RESIDENT_ID_PREFIX } from "../engine/rules/population";
 import type { EntityId } from "../engine/state/state";
 import "./appShell.css";
 import { BackupReminderBanner } from "./BackupReminderBanner";
@@ -54,7 +55,7 @@ import { InstallPromotionBanner } from "./InstallPromotionBanner";
 import { LoadFailureBanner } from "./LoadFailureBanner";
 import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
-import { resourceLabel, techLabel } from "./screens/contentLabels";
+import { residentDisplayName, resourceLabel, techLabel } from "./screens/contentLabels";
 import { formatGameClock, formatResourceAmount } from "./screens/format";
 import { labelizeLogText } from "./screens/idLabelize";
 import { SCREEN_META, type ScreenId } from "./screens";
@@ -306,6 +307,54 @@ export function ResearchCompletionWatcher({ store, onComplete }: ResearchComplet
   return null;
 }
 
+/**
+ * [M62/FC6a・R2-A06] 晴天漂着(GDD 7.7)の通知。上の 2 つ(帰還/研究完了)と
+ * 同じ差分検知方式(前回の描画時点の集合 ↔ 今の集合・M61/FC7 の前例)。
+ *
+ * 「新しく増えた住民」の判定に memoir 等の解釈を持ち込まず、
+ * `ARRIVAL_RESIDENT_ID_PREFIX`(`residentDrift<tick>`・晴天漂着で加入した住民
+ * だけがこの接頭辞を持つ・`rules/population.ts` §4)の ID 規則だけで判定する
+ * ——探索での保護加入(`rescueResidentIdOf` が別の ID 規則を発行・GDD 7.6
+ * [2026-07-30裁定]③)と混同しない。探索での保護は
+ * `ExpeditionReturnWatcher` の帰還ログ本文が既に伝えている(GDD 8.4「Xを
+ * 保護した」)ため、ここで重複して通知しない。
+ */
+/** `rejectionMessages.ts` の `techIdFromResearchEntityId` と同じ書き方
+ * (ID 規則の判定は `string` へ明示的に幅を広げてから行う・ブランド型への cast
+ * を書かない)。 */
+function isArrivalResidentId(entityId: EntityId): boolean {
+  const raw: string = entityId;
+  return raw.startsWith(ARRIVAL_RESIDENT_ID_PREFIX);
+}
+
+export interface ArrivalWatcherProps {
+  readonly store: GameStore;
+  readonly onArrival: (text: string) => void;
+}
+
+export function ArrivalWatcher({ store, onArrival }: ArrivalWatcherProps) {
+  const residents = useSignalValue(store.derived.residents);
+  const previousArrivalIdsRef = useRef<ReadonlySet<EntityId> | null>(null);
+
+  useEffect(() => {
+    const arrivalIdsNow = new Set(
+      residents.map((entry) => entry.entityId).filter((entityId) => isArrivalResidentId(entityId)),
+    );
+    const previous = previousArrivalIdsRef.current;
+    if (previous !== null) {
+      for (const entityId of arrivalIdsNow) {
+        if (!previous.has(entityId)) {
+          onArrival(`${residentDisplayName(entityId)}が晴天漂着で加入した`);
+        }
+      }
+    }
+    previousArrivalIdsRef.current = arrivalIdsNow;
+    // 依存配列は意図的に `residents` だけ(上の 2 つの Watcher と同じ理由)。
+  }, [residents]);
+
+  return null;
+}
+
 // --- 2. ナビゲーション(5グループ・[束A] F-5) -------------------------------
 
 export interface ScreenNavProps {
@@ -550,6 +599,7 @@ export function AppShell({
           ScreenHost の外(シェル直下)に置く。 */}
       <ExpeditionReturnWatcher store={store} onReturn={globalToasts.push} />
       <ResearchCompletionWatcher store={store} onComplete={globalToasts.push} />
+      <ArrivalWatcher store={store} onArrival={globalToasts.push} />
       <ToastStackView toasts={globalToasts.toasts} />
       {installPromotion && (
         <InstallPromotionBanner

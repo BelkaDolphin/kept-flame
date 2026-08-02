@@ -15,6 +15,7 @@ import { TICK_MS, advance, createAdvanceContext } from "../../src/engine/advance
 import { apply } from "../../src/engine/commands";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "../../src/platform/catchUp";
 import { createTickDriver, type MonotonicClock } from "../../src/platform/clock";
+import { SaveScheduler } from "../../src/platform/saveScheduler";
 import { toSerializable } from "../../src/engine/state/serialize";
 import { getEntity, requireEntity } from "../../src/engine/state/state";
 import { StoreError, createGameStore, type StoreEvent } from "../../src/ui/store";
@@ -291,6 +292,144 @@ describe("commandApplied(engine コマンド層の単一入口・M49)", () => {
     const direct = apply(state, content, command);
     const viaStore = store.dispatch({ type: "commandApplied", command });
     expect(viaStore.command).toEqual(direct);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M62/FC2] onCommandApplied: セーブの操作トリガ結線(R2-FC2)
+//
+// プレイテスト Round 2 で発見: `SaveScheduler.recordCommandOutcome` が
+// どこからも呼ばれておらず(main.tsx のコメントが自認していた既知ギャップ・
+// M54 発見)、×1 では最大 15 秒(絶対フラッシュの締切)ぶんの操作が黙って
+// 失われうる窓があった。`onWorldLoaded`(R1 fatal の修正で導入済み)と同じ
+// 「唯一の書き込み口 dispatch の中で 1 本通知する」設計を踏襲する
+// (画面ごとの呼び忘れが構造的に起きない)。ここではストア単体で
+// 「コマンド成功 → 通知が発火する」を固定する(main.tsx 自体は composition
+// root でブラウザでしか動かないためテスト対象外・ファイル冒頭コメントどおり)。
+// ---------------------------------------------------------------------------
+describe("[M62/FC2] onCommandApplied 通知(セーブの操作トリガ結線・R2-FC2)", () => {
+  it("コマンド成功で 1 回だけ通知され、engine の CommandResult がそのまま渡る", () => {
+    const state = boardState();
+    const content = boardContent();
+    const notified: unknown[] = [];
+    const store = createGameStore({
+      state,
+      content,
+      onCommandApplied: (result) => {
+        notified.push(result);
+      },
+    });
+
+    const command = placeHearth("fSouth", CELL_SOUTHEAST);
+    const result = store.dispatch({ type: "commandApplied", command });
+
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toEqual(result.command);
+    expect((notified[0] as { readonly ok: boolean }).ok).toBe(true);
+  });
+
+  it("拒否されたコマンドでも通知は発火する(recordCommandOutcome 側で弾く設計・§ doc)", () => {
+    const state = boardState();
+    const content = boardContent();
+    const notified: unknown[] = [];
+    const store = createGameStore({
+      state,
+      content,
+      onCommandApplied: (result) => {
+        notified.push(result);
+      },
+    });
+
+    // セル 14 は既に fHearth が建っている(GDD 6.1: 1 セル = 1 施設)。
+    store.dispatch({ type: "commandApplied", command: placeHearth("fBlocked", CELL_CENTER) });
+
+    expect(notified).toHaveLength(1);
+    expect((notified[0] as { readonly ok: boolean }).ok).toBe(false);
+  });
+
+  it("commandApplied 以外のイベントでは呼ばれない", () => {
+    const state = boardState();
+    const content = boardContent();
+    let calls = 0;
+    const store = createGameStore({
+      state,
+      content,
+      onCommandApplied: () => {
+        calls++;
+      },
+    });
+
+    store.dispatch({ type: "ticked", toTick: 10 });
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_CENTER });
+    expect(calls).toBe(0);
+  });
+
+  it("列コマンド(原子適用)でも 1 dispatch = 1 回の通知(commandCount は engine 側が持つ)", () => {
+    const state = boardState();
+    const content = boardContent();
+    const notified: unknown[] = [];
+    const store = createGameStore({
+      state,
+      content,
+      onCommandApplied: (result) => {
+        notified.push(result);
+      },
+    });
+
+    store.dispatch({
+      type: "commandApplied",
+      command: [placeHearth("fSouth", CELL_SOUTHEAST), placeHearth("fWest", 13)],
+    });
+
+    expect(notified).toHaveLength(1);
+    expect((notified[0] as { readonly ok: boolean; readonly commandCount?: number }).ok).toBe(true);
+    expect(
+      (notified[0] as { readonly ok: boolean; readonly commandCount?: number }).commandCount,
+    ).toBe(2);
+  });
+
+  it("onCommandApplied を渡さなくても動く(既存呼び出し互換)", () => {
+    const { store } = createTestStore();
+    expect(() =>
+      store.dispatch({
+        type: "commandApplied",
+        command: placeHearth("fSouth", CELL_SOUTHEAST),
+      }),
+    ).not.toThrow();
+  });
+
+  it("main.tsx と同じ配線(scheduler.recordCommandOutcome)でコマンド成功が実際にセーブを dirty にする", () => {
+    // `src/main.tsx` の `onCommandApplied: (result) => scheduler?.recordCommandOutcome(result)`
+    // を実物の SaveScheduler で再現する(composition root 自体はブラウザでしか
+    // 動かないため、ここが「トリガ発火」を固定する実質的なテストになる)。
+    const state = boardState();
+    const content = boardContent();
+    let writeCount = 0;
+    const scheduler = new SaveScheduler({
+      write: () => {
+        writeCount++;
+        return Promise.resolve();
+      },
+    });
+    const store = createGameStore({
+      state,
+      content,
+      onCommandApplied: (result) => {
+        scheduler.recordCommandOutcome(result);
+      },
+    });
+
+    expect(scheduler.isDirty).toBe(false);
+    store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
+    expect(scheduler.isDirty).toBe(true);
+    expect(scheduler.pendingCommandCount).toBe(1);
+    expect(writeCount).toBe(0); // デバウンス前(まだ書いていない)。
+
+    // 拒否は数えない(§ recordCommandOutcome の契約どおり・pendingCommands 不変)。
+    store.dispatch({ type: "commandApplied", command: placeHearth("fBlocked", CELL_CENTER) });
+    expect(scheduler.pendingCommandCount).toBe(1);
+
+    scheduler.dispose();
   });
 });
 

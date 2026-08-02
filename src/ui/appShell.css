@@ -481,6 +481,31 @@
   font-size: var(--kf-fs-body);
 }
 
+/* [M62/FC9・R2-C02] ①ホームの常設近道(研究/成文化)。他画面の __nav-button
+   (ExpeditionScreen.tsx 等)と同じ見た目のトークンを使う(勝手に新しい色を
+   作らない)。 */
+.kf-home__quicklinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-home__quicklink-button {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--kf-line-grid);
+  border-radius: 4px;
+  background: var(--kf-surface-page);
+  color: var(--kf-ink-body);
+  cursor: pointer;
+}
+
 .kf-stats {
   display: flex;
   flex-wrap: wrap;

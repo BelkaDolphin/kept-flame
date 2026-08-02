@@ -37,7 +37,7 @@ import {
   residentDisplayName,
   resourceLabel,
 } from "../contentLabels";
-import { formatGameClock } from "../format";
+import { formatGameClock, formatRatePerMinute } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useToastStack, ToastStackView } from "../Toast";
@@ -139,12 +139,15 @@ export function OutpostCard({
         </button>
       </div>
       <p class="kf-outpost-card__established">設置: {formatGameClock(outpost.establishedTick)}</p>
+      {/* [M62/FC4・R2-D01] 内部語「/tick」を「/分」へ(tick=1分・GDD 11.1)。
+          formatRatePerMinute 経由で資源在庫表示(formatResourceAmount)と桁の
+          整形を統一する(R2-FC9: 薪だけ小数第1位が付く不統一の解消)。 */}
       <p class="kf-outpost-card__supply">
-        供給: {outpost.supplyApprox.toFixed(2)}/tick {resourceLabel(outpost.resourceId)}
+        供給: {formatRatePerMinute(outpost.supplyApprox)} {resourceLabel(outpost.resourceId)}
       </p>
-      <p class="kf-outpost-card__upkeep">維持費: {outpost.upkeepApprox.toFixed(2)}/tick</p>
+      <p class="kf-outpost-card__upkeep">維持費: {formatRatePerMinute(outpost.upkeepApprox)}</p>
       <p class="kf-outpost-card__net">
-        ネット収益: {outpost.netRevenueApprox.toFixed(2)}/tick
+        ネット収益: {formatRatePerMinute(outpost.netRevenueApprox)}
         {outpost.netRevenueApprox < 0 ? "(維持費が供給を上回っています・放棄を検討)" : ""}
       </p>
       <p class="kf-outpost-card__hazard">
@@ -440,13 +443,13 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
       <section class="kf-outposts-screen__network" aria-label="拠点網の採算">
         <p class="kf-outposts-screen__network-count">拠点数: {overview.network.outpostCount}</p>
         <p class="kf-outposts-screen__network-supply">
-          合計供給: {overview.network.totalSupplyApprox.toFixed(2)}/tick
+          合計供給: {formatRatePerMinute(overview.network.totalSupplyApprox)}
         </p>
         <p class="kf-outposts-screen__network-upkeep">
-          合計維持費: {overview.network.totalUpkeepApprox.toFixed(2)}/tick
+          合計維持費: {formatRatePerMinute(overview.network.totalUpkeepApprox)}
         </p>
         <p class="kf-outposts-screen__network-net">
-          合計ネット収益: {overview.network.totalNetRevenueApprox.toFixed(2)}/tick
+          合計ネット収益: {formatRatePerMinute(overview.network.totalNetRevenueApprox)}
         </p>
         <p class="kf-outposts-screen__network-loss" data-testid="outpost-network-b-loss">
           拠点網の(B)喪失リスク合計: {overview.network.totalExpectedRareLossApprox.toFixed(2)}

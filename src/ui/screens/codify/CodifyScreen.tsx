@@ -31,7 +31,7 @@
 //   engine の `duplicateRecord`/`insufficientResource` 等の reject に委ねる。
 // ---------------------------------------------------------------------------
 
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 
 import type { CommandRejection } from "../../../engine/commands";
 import { codifyRecordId } from "../../../engine/assist/codify";
@@ -240,6 +240,37 @@ export function CodifySuggestionPanel({
   );
 }
 
+// --- 3b. [M62/FC5a] 媒体既定値の「初回だけ計算・以後は固定」(純関数) ---------
+//
+// R2-FC5(a) で発見されたバグ: 「ある行をキュー投入すると、操作していない
+// 別の行の媒体セレクタが石板→紙へ勝手に変わる」。
+//
+// 原因は `mediumFor` が **毎レンダー** `defaultMediumFor`(§3 の「在庫が足りる
+// 方」ヒューリスティック)を呼び直していたことにある。ある行をキューへ投入
+// すると資源が減り、その資源を使う**別の行**の `defaultMediumFor` が
+// 再評価されて別の結果(石板→紙)を返すようになる——ユーザーがその行を一度も
+// 触っていなくても、である。
+//
+// 修正: 各 techId の既定値は**その行を最初に見た瞬間に一度だけ**計算して
+// `mediumSelections` map へ書き込み、以後は明示的な `onMediumChange` でしか
+// 変えない。既に値が入っている techId は絶対に上書きしない(=在庫が動いても
+// 触っていない行の表示は変わらない)。
+export function seedMissingMediumDefaults(
+  previous: ReadonlyMap<EntityId, RecordMedium>,
+  techs: readonly CodifyTechEntry[],
+  defaultFor: (entry: CodifyTechEntry) => RecordMedium,
+): ReadonlyMap<EntityId, RecordMedium> {
+  let changed = false;
+  const next = new Map(previous);
+  for (const entry of techs) {
+    if (next.has(entry.techId)) continue;
+    next.set(entry.techId, defaultFor(entry));
+    changed = true;
+  }
+  // 値が変わらなければ同じ参照を返す(不要な再描画/effect の再発火を避ける)。
+  return changed ? next : previous;
+}
+
 // --- 4. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 export function CodifyScreen({ store, onNavigate }: ScreenProps) {
@@ -250,7 +281,10 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
   const suggestions = useSignalValue(store.derived.codifySuggestions);
   const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
-  const [mediumOverrides, setMediumOverrides] = useState<ReadonlyMap<EntityId, RecordMedium>>(
+  // [M62/FC5a] 「行ごとの現在の選択」(既定値を含む)。旧 `mediumOverrides` から
+  // 改名——以前はユーザーの明示的な変更**だけ**を持つ差分マップだったが、今は
+  // 初めて見た techId の既定値もここへ書き込んで固定する(§3b の doc 参照)。
+  const [mediumSelections, setMediumSelections] = useState<ReadonlyMap<EntityId, RecordMedium>>(
     new Map(),
   );
   const [suggestionOutcome, setSuggestionOutcome] = useState<CodifySuggestionApplyOutcome | null>(
@@ -290,8 +324,24 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
     return assistPreferredMedium(entry.uniqueHolder);
   }
 
+  // [M62/FC5a] techs の一覧が変わるたび(在庫変化での再計算含む)、まだ選択が
+  // 無い techId にだけ既定値を割り当てる。既存の選択(ユーザー操作/以前の
+  // 既定値)は絶対に上書きしない——これが R2-FC5(a) の「他行が勝手に変わる」
+  // バグの直接の修正である。
+  useEffect(() => {
+    setMediumSelections((previous) => seedMissingMediumDefaults(previous, techs, defaultMediumFor));
+    // 依存は意図的に `techs` だけ(ExpeditionReturnWatcher 等・AppShell.tsx と
+    // 同じ規律)。defaultMediumFor は content/store.peekState()/resources を
+    // 毎回閉じ込めた新しい関数だが、techs が変わらない限り「初めて見た
+    // techId」は増えないので、この effect が無駄に発火しても実質 no-op
+    // (seedMissingMediumDefaults が changed=false のとき同じ参照を返す)。
+  }, [techs]);
+
   function mediumFor(entry: CodifyTechEntry): RecordMedium {
-    return mediumOverrides.get(entry.techId) ?? defaultMediumFor(entry);
+    // 効果が既に selections にあればそれを使う。effect が走る前の 1 フレームだけ
+    // 起こりうる未セット状態のフォールバックとして defaultMediumFor を残す
+    // (フォールバックの結果は selections へは書き込まない=1 回性の表示専用)。
+    return mediumSelections.get(entry.techId) ?? defaultMediumFor(entry);
   }
 
   /**
@@ -315,7 +365,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
   }
 
   function handleMediumChange(techId: EntityId, medium: RecordMedium): void {
-    setMediumOverrides((previous) => {
+    setMediumSelections((previous) => {
       const next = new Map(previous);
       next.set(techId, medium);
       return next;

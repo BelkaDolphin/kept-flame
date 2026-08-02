@@ -129,7 +129,26 @@ const MESSAGE_BUILDERS: { readonly [K in CommandRejectionCode]: MessageBuilder }
   notImplemented: () => "この機能は今後のアップデートで対応予定です。",
   entityNotFound: () =>
     "対象が見つかりませんでした(表示が古くなっている可能性があります。画面を開き直してください)。",
-  entityIdInUse: () => "内部の識別子が重複しています。もう一度操作をやり直してください。",
+  // [M62/FC5b・R2-A05] 「内部の識別子が重複しています」は開発者向けの誤診断
+  // 文言だった——CodifyScreen.tsx が同一 tech+媒体には常に同じ ID
+  // (`codifyRecordId`)を発行するため、同一技術の二重投入は実質ここ
+  // (`entityIdInUse`)で reject される(`duplicateRecord` の重複チェックへは
+  // 到達しない・commands.ts の `applyBeginCodification` 参照)。プレイヤーが
+  // 実際に踏むのは「もうキューにある/もう研究中」という状況であり、ID の
+  // 衝突という実装詳細ではない。§2 のデコーダ(codify/research の ID 規則の
+  // 逆算)を entityIdInUse へも適用し、合わない場合だけ汎用文へ倒す
+  // (捏造しない・duplicateRecord/researchAlreadyCompleted と同じ立場)。
+  entityIdInUse: (r) => {
+    const codifyFound = techAndMediumFromCodifyRecordId(r.subjectId);
+    if (codifyFound !== null) {
+      return `${techNameOrFallback(codifyFound.techId)}の記録(${mediumLabel(codifyFound.medium)})は既にキューにあります。`;
+    }
+    const researchTechId = techIdFromResearchEntityId(r.subjectId);
+    if (researchTechId !== null) {
+      return `${techNameOrFallback(researchTechId)}は既に研究中か解禁済みです。`;
+    }
+    return "この操作は既に行われています。もう一度操作をやり直してください。";
+  },
   unknownContentDef: () => "指定された定義が見つかりません(データの不整合の可能性があります)。",
   contentUnsupported: () => "この機能は現在のデータでは使えません(必要な設定が不足しています)。",
   cellOutOfRange: () => "セルの指定が盤面の範囲外です。",

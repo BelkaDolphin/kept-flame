@@ -279,6 +279,22 @@ export interface CreateGameStoreInput {
    * 呼び返さないこと**(再入は想定していない)。
    */
   readonly onWorldLoaded?: (state: GameState, source: WorldLoadSource) => void;
+  /**
+   * [M62/FC2] `commandApplied` を適用し終えた直後に 1 回だけ呼ばれる通知
+   * (`onWorldLoaded` と同じ設計・§5 の理由がそのまま当てはまる)。渡さなければ
+   * 何も起きない(テスト・部品単体での利用)。
+   *
+   * 拒否も含め、engine の判定結果(`CommandResult`)をそのまま渡す
+   * ——「記録するかどうか」の判定(拒否は数えない・列は要素数ぶん数える)は
+   * `saveScheduler.recordCommandOutcome` 自身が持つので、ここでは分岐しない。
+   * `src/main.tsx` はこれで `SaveScheduler.recordCommandOutcome` を呼ぶ
+   * (architecture.md §4-1 が元々指していた結線点。**呼び出し箇所が
+   * 画面ごとに散っていると呼び忘れが起きる**——`onWorldLoaded` が R1 fatal
+   * 2 件で証明した教訓と同型なので、同じ「唯一の書き込み口 dispatch の中で
+   * 通知する」形を踏襲する)。**このコールバックから `dispatch` を呼び返さない
+   * こと**(再入は想定していない)。
+   */
+  readonly onCommandApplied?: (result: CommandResult) => void;
 }
 
 /**
@@ -529,6 +545,12 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
         // 世界の入れ替えを外へ 1 本だけ通知する(§5)。batch の外なので、
         // 受け手が見る signal は全て新しい世界のものに揃っている。
         input.onWorldLoaded?.(sources.state.peek(), event.source);
+      }
+      if (event.type === "commandApplied" && result.command !== null) {
+        // [M62/FC2] コマンド適用の結果を外へ 1 本だけ通知する(onWorldLoaded と
+        // 同型・batch の外)。`result.command` は `applyCommand` が必ず埋める
+        // ので commandApplied イベントでは非 null(store.ts §1 の doc どおり)。
+        input.onCommandApplied?.(result.command);
       }
       return result;
     },

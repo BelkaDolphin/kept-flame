@@ -54,7 +54,7 @@ import {
   storageCapacityWouldCapExistingStock,
   type FacilityEffectKind,
 } from "../facilityEffect";
-import { formatApproxDecimal1 } from "../format";
+import { formatApproxDecimal1, formatResourceAmount } from "../format";
 import { CellBreakdownView } from "../grid/CellBreakdownView";
 import "../grid/gridBoard.css";
 import { TagChip } from "../grid/TagChip";
@@ -177,9 +177,13 @@ export function FacilityDetailPanel({
       ) : (
         <>
           <p class="kf-facility-detail__output">
-            産出: {detail.outputPerTickApprox.toFixed(2)}
+            {/* [M62/FC4・R2-D01] 内部語「/tick」を「/分」へ(tick=1分・GDD 11.1)。
+                数値整形も formatResourceAmount へ統一する(R2-FC9: 薪だけ小数第1位が
+                付く不統一の解消)。 */}
+            産出: {formatResourceAmount(detail.outputPerTickApprox)}
             {/* [M61/FC11・R1-A14] 増築前に効果(産出の伸び)を見せる。 */}
-            {nextLevelOutputApprox !== null && ` → ${nextLevelOutputApprox.toFixed(2)}`}/tick・
+            {nextLevelOutputApprox !== null && ` → ${formatResourceAmount(nextLevelOutputApprox)}`}
+            /分・
             {detail.outputKind === "resource" && detail.outputResourceId !== null
               ? resourceLabel(detail.outputResourceId)
               : "研究点"}

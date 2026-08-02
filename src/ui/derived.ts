@@ -74,6 +74,7 @@ import { isCodified, recordMediaOfTech } from "../engine/rules/codify";
 import { residentCombatPower } from "../engine/rules/combat";
 import { explorationRoi, type ExplorationRoiReport } from "../engine/rules/exploration";
 import { outpostNetworkRoi } from "../engine/rules/outpost";
+import { populationViewOf, type PopulationView } from "../engine/rules/population";
 import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
 import { recallRiskPerDay } from "../engine/rules/recall";
@@ -905,6 +906,13 @@ export interface StoreDerived {
   readonly renderedLog: ReadonlyComputed<RenderedLogState>;
   /** [M32] ⑨衛星拠点の一覧 + 拠点網 ROI(GDD 9.2 / 11.4-7)。 */
   readonly outpostOverview: ReadonlyComputed<OutpostOverviewView>;
+  /**
+   * [M62/FC6b・R2-A08] 人口/寝床上限(GDD 7.6/7.7)。engine の
+   * `populationViewOf` をそのまま返す(新規判定なし)。①ホームハブが
+   * 「住民 N/寝床上限 M」の形で表示する(以前はどの画面にも寝床上限の
+   * 現在値が出ておらず、寝床が実際に機能していることが伝わらなかった)。
+   */
+  readonly populationSummary: ReadonlyComputed<PopulationView>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -1385,6 +1393,13 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     () => buildOutpostOverview(sources.state.value, sources.content.value),
     { name: "outpostOverview" },
   );
+  // [M62/FC6b・R2-A08] 人口/寝床上限の表示(engine の既存 derived 呼びのみ・
+  // 新規判定なし)。`populationViewOf` をそのまま呼ぶだけで、下限判定
+  // (`scarce`)も含めて engine 側の 1 実装を使い回す。
+  const populationSummary = computed<PopulationView>(
+    () => populationViewOf(sources.state.value, sources.content.value),
+    { name: "populationSummary" },
+  );
 
   return {
     adjacencyMatrix,
@@ -1415,6 +1430,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     memoirFeed,
     renderedLog,
     outpostOverview,
+    populationSummary,
   };
 }
 
