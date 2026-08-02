@@ -16,6 +16,12 @@
 #   7 -> `sim/creep.ts`(Z-score + MAD 修正Z の外れ値監視・GDD 12.4)
 # どちらも閾値超過で非ゼロ終了する = ジョブが実際に赤くなる。
 #
+# 5(content-diff-gate)は M46 時点では git index の**構文**(symlink/非通常
+# ファイル reject)のみで、既存 ID の削除/リネーム/意味変更 reject・tombstone
+# 逆参照チェックは「未実装」と正直申告されていたが、**[M51] で実体を差し込み
+# 済み**: `scripts/content-semantics-gate.ts` が canonicalize 後の JSON
+# 意味論比較で判定する(GDD 12.5-2/3)。
+#
 # 8(bot作成PRをhuman承認merge)はこの workflow のジョブではなく、ブランチ保護
 # (require_code_owner_reviews)+ CODEOWNERS(ADR-030・本タスクで新設)+
 # scripts/bot-token.mjs / scripts/bot-pr.mjs(M45)で構成される手続き。
@@ -158,16 +164,28 @@ jobs:
 
   # ---------------------------------------------------------------------
   # 5. content-diff-gate: symlink すり抜け対策 + 通常ファイル型限定チェック
-  # (ADR-015(1)・本タスクで新設した scripts/content-diff-gate.mjs)。
+  # (ADR-015(1)・M46 で新設した scripts/content-diff-gate.mjs)に加え、
+  # [M51] additive 意味論 diff(scripts/content-semantics-gate.ts)を同じ段へ
+  # 結線する: 既存 ID の削除/リネーム/意味変更 reject + tombstone 逆参照
+  # チェック(GDD 12.5-2/3)。前者は git index の**構文**(mode)、後者は
+  # canonicalize 後の JSON**意味論**を見る、性質の異なる2チェックだが、
+  # 「content-diff-gate 段」という ADR-015 正準順序上の1ステップとして扱う
+  # (タスク指示: 「guardrail の content-diff-gate 段へ結線する」)。
+  #
+  # fetch-depth: 0 は additive 意味論 diff が base ブランチの content/*.json を
+  # `git show <base_sha>:content/x.json` で読む(= 意味論比較の base 側入力)
+  # ために必要(detect-scope ジョブと同じ理由)。
   # ---------------------------------------------------------------------
   content-diff-gate:
-    name: "5. content-diff-gate(symlink/非通常ファイル reject)"
+    name: "5. content-diff-gate(symlink/非通常ファイル reject + additive意味論diff)"
     needs: sim-1000
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Node (from .nvmrc)
         uses: actions/setup-node@v4
         with:
@@ -175,8 +193,18 @@ jobs:
           cache: "npm"
       - name: Install dependencies
         run: npm ci
-      - name: Run content-diff-gate
+      - name: "Run content-diff-gate(symlink/非通常ファイル reject・ADR-015(1))"
         run: npm run content:diff-gate
+      - name: "[M51] additive 意味論 diff の base SHA を fetch(pull_request のみ)"
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+      - name: "[M51] Run content-semantics-gate(既存ID削除/リネーム/意味変更 reject + tombstone逆参照チェック)"
+        if: github.event_name == 'pull_request'
+        env:
+          CONTENT_SEMANTICS_GATE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: npm run content:semantics-gate
 
   # ---------------------------------------------------------------------
   # 6. conformance 3ブラウザ(ADR-017)。Chromium/Firefox/WebKit で
@@ -320,7 +348,7 @@ jobs:
             echo "| 2 | canonicalize | job: schema-canonicalize-idregistry(同一パイプライン) |"
             echo "| 3 | id-registry検証 | job: schema-canonicalize-idregistry(同一パイプライン) |"
             echo "| 4 | 段階sim1000 | job: sim-1000(実体 = sim/stagedSim.ts・[M38]で差し込み済み) |"
-            echo "| 5 | content-diff-gate | job: content-diff-gate |"
+            echo "| 5 | content-diff-gate | job: content-diff-gate(symlink/非通常ファイル reject・ADR-015(1)) + [M51] additive意味論diff(scripts/content-semantics-gate.ts・既存ID削除/リネーム/意味変更 reject + tombstone逆参照チェック) |"
             echo "| 6 | conformance 3ブラウザ | job: conformance-3browsers |"
             echo "| 7 | 統計クリープ検出 | job: statistical-creep-detection(実体 = sim/creep.ts・[M38]で差し込み済み) |"
             echo "| 8 | bot作成PRをhuman承認merge | このworkflow外: ブランチ保護 + CODEOWNERS + bot-token.mjs/bot-pr.mjs(M45) |"

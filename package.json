@@ -16,6 +16,7 @@
     "preflight": "node scripts/preflight.mjs",
     "check:llm-paths": "node scripts/check-llm-paths.mjs",
     "content:diff-gate": "node scripts/content-diff-gate.mjs",
+    "content:semantics-gate": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs scripts/content-semantics-gate.ts",
     "bot:token": "node scripts/bot-token.mjs",
     "bot:pr": "node scripts/bot-pr.mjs",
     "measure:contrast": "node bench/tags-contrast.mjs",
