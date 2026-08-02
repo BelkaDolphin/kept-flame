@@ -74,6 +74,29 @@ export function formatResourceAmount(approx: number): string {
 }
 
 /**
+ * [2026-08-02 実プレイ報告] 資源「在庫」専用の整数整形(切り捨て+3桁区切り)。
+ *
+ * 内部経済は 1e6 固定小数点で、産出レートが非整数(lvCurve 9.2/分 等)のため
+ * 在庫は本当に端数を持つ。しかし在庫表示の端数はプレイヤーには意味のない
+ * ノイズである(×720 実プレイでの報告「資材数は整数だと思うが小数点が出る」)
+ * ため、在庫系の表示(HUD チップ・トーストの増減句)だけ整数へ切り捨てる。
+ *
+ * **切り捨て(floor)であって四捨五入ではない** —— 「足りて見えるのに払えない」
+ * 偽りを作らないため、所持量は決して多く見せない。逆にコスト・レート表示は
+ * 実際に請求/産出される端数をそのまま出す(`formatResourceAmount`)——
+ * 「43 払ったのに 43.2 減る」不信を作らないため。端数の根本解消(コスト曲線の
+ * 整数化等)は M39 バランス調整の領分。
+ *
+ * @throws {RangeError} 有限数でない場合
+ */
+export function formatResourceStock(approx: number): string {
+  if (!Number.isFinite(approx)) {
+    throw new RangeError(`資源量 ${String(approx)} が有限数でない`);
+  }
+  return withThousandsSeparator(Math.floor(approx).toFixed(0));
+}
+
+/**
  * [M61/FC11] 小数第 1 位までの汎用整形(戦力・士気など資源以外の近似値)。
  * `formatResourceAmount` と違い3桁区切りは付けない(戦力・士気は3桁を超えない
  * 値域のため過剰装飾になる)。常に小数第1位まで出す(整数でも ".0" を出す —

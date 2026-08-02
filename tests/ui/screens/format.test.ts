@@ -13,6 +13,7 @@ import {
   formatApproxDecimal1,
   formatRatePerMinute,
   formatResourceAmount,
+  formatResourceStock,
 } from "../../../src/ui/screens/format";
 
 describe("[M61/FC11] formatResourceAmount: 3桁区切り + 小数第1位", () => {
@@ -36,6 +37,30 @@ describe("[M61/FC11] formatResourceAmount: 3桁区切り + 小数第1位", () =>
   it("有限数でなければ例外", () => {
     expect(() => formatResourceAmount(Number.NaN)).toThrow(RangeError);
     expect(() => formatResourceAmount(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+});
+
+describe("[2026-08-02 実プレイ報告] formatResourceStock: 在庫は整数切り捨て+3桁区切り", () => {
+  it("端数は切り捨てる(四捨五入しない —— 所持量を多く見せない)", () => {
+    expect(formatResourceStock(43.9)).toBe("43");
+    expect(formatResourceStock(0.7)).toBe("0");
+    expect(formatResourceStock(1620004.7)).toBe("1,620,004");
+  });
+
+  it("整数はそのまま(小数点を出さない)", () => {
+    expect(formatResourceStock(0)).toBe("0");
+    expect(formatResourceStock(400)).toBe("400");
+    expect(formatResourceStock(1000000)).toBe("1,000,000");
+  });
+
+  it("コスト表示(formatResourceAmount)とは役割が別 —— 同じ入力で端数の有無が異なり得る", () => {
+    expect(formatResourceAmount(43.2)).toBe("43.2");
+    expect(formatResourceStock(43.2)).toBe("43");
+  });
+
+  it("有限数でなければ例外", () => {
+    expect(() => formatResourceStock(Number.NaN)).toThrow(RangeError);
+    expect(() => formatResourceStock(Number.POSITIVE_INFINITY)).toThrow(RangeError);
   });
 });
 

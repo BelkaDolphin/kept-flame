@@ -16,7 +16,7 @@ import { useCallback, useRef, useState } from "preact/hooks";
 import { toApproxNumber } from "../../engine/fp";
 import { entitiesOfKind, type EntityId, type GameState } from "../../engine/state/state";
 import { resourceLabel } from "./contentLabels";
-import { formatResourceAmount } from "./format";
+import { formatResourceStock } from "./format";
 import "./toast.css";
 
 const TOAST_DURATION_MS = 3000;
@@ -83,6 +83,10 @@ export function resourceDeltaPhrase(
   afterApprox: number | null,
 ): string {
   if (resourceId === null || beforeApprox === null || afterApprox === null) return "";
-  if (beforeApprox === afterApprox) return "";
-  return `${resourceLabel(resourceId)} ${formatResourceAmount(beforeApprox)}→${formatResourceAmount(afterApprox)}`;
+  const before = formatResourceStock(beforeApprox);
+  const after = formatResourceStock(afterApprox);
+  // 在庫は整数切り捨て表示(format.ts の formatResourceStock 参照)のため、
+  // 端数だけの変動は表示上同値になる —— その場合も句を出さない。
+  if (before === after) return "";
+  return `${resourceLabel(resourceId)} ${before}→${after}`;
 }

@@ -206,7 +206,7 @@
     "output": { "kind": "research" },
     "buildCost": { "resourceId": "firewood", "amount": 35 },
     "upgradeCostCurve": [20, 24, 28.8, 34.56, 41.472],
-    "storageCapacityCurve": [400, 460, 529, 608.35, 699.6025]
+    "storageCapacityCurve": [40000, 46000, 52900, 60835, 69960]
   },
   {
     "id": "watchtower",

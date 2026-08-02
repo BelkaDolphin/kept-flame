@@ -58,7 +58,7 @@ import { NotificationOptInBanner } from "./NotificationOptInBanner";
 import { OnboardingGuide } from "./onboarding/OnboardingGuide";
 import { ONBOARDING_STEPS } from "./onboarding/steps";
 import { residentDisplayName, resourceLabel, techLabel } from "./screens/contentLabels";
-import { formatGameClock, formatResourceAmount } from "./screens/format";
+import { formatGameClock, formatResourceStock } from "./screens/format";
 import { labelizeLogText } from "./screens/idLabelize";
 import { SCREEN_META, type ScreenId } from "./screens";
 import { SCREEN_REGISTRY } from "./screens/registry";
@@ -120,7 +120,8 @@ export interface ResourceHudProps {
  * 全資源の在庫チップ。1e6 固定小数点 → 人間可読値の換算は
  * `derived.ts` が `toApproxNumber`(engine の fp.ts)で済ませた `stockApprox`
  * を使う(UI 側で固定小数点の割り算を発明しない)。桁の整形だけ
- * `formatResourceAmount`(screens/format.ts)が持つ。
+ * `formatResourceStock`(screens/format.ts)が持つ —— 在庫は整数切り捨て表示
+ * (2026-08-02 実プレイ報告「整数のはずの資材数に小数点が出る」への対応)。
  */
 export function ResourceHud({ store }: ResourceHudProps) {
   const resources = useSignalValue(store.derived.resources);
@@ -130,7 +131,7 @@ export function ResourceHud({ store }: ResourceHudProps) {
       {orderHudResources(resources).map((resource) => (
         <li key={resource.entityId} class="kf-hud__chip" data-resource-id={resource.resourceId}>
           <span class="kf-hud__chip-label">{resourceLabel(resource.resourceId)}</span>
-          <span class="kf-hud__chip-value">{formatResourceAmount(resource.stockApprox)}</span>
+          <span class="kf-hud__chip-value">{formatResourceStock(resource.stockApprox)}</span>
         </li>
       ))}
     </ul>
