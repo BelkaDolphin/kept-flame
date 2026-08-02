@@ -118,6 +118,7 @@ content-diff-gate はパース済みオブジェクト比較ゆえ原理的に�
 manifest source-text ハッシュはコメント/リネーム/空白でも無差別 bump 強制する一方、意味的に危険な変更を保証できず「安全なつもりの変更が旧セーブ未来 tick を変える」fatal が形を変えて残る欠陥を修正する。決定論の権威ゲートをソーステキストでなく観測挙動へ移す:
 (1) `algoVersion` bump の必要十分条件を「**golden vector(代表 seed 群の N tick 後状態ハッシュ + 主要中間値)が変化すること**」と定義。CI で「golden vector が変化 ⟺ algoVersion bump」を機械強制(golden 差分あり + bump 無しは fail、逆も監査)。挙動を変えない編集は golden 不変ゆえ bump 不要=偽陽性 bump を排除。
 (2) manifest hash は正準化後(TS コンパイラでコメント/空白除去・変数名は保持)のソースを hash する**助言的 tripwire に格下げ** — 決定論 critical ファイルが変更されたのに golden vector を再生成し忘れた事故を検知する二次警告に用途限定。権威は golden vector。
+(3) **[2026-08-02裁定・台帳v15 必-1] golden vector の content 入力はスナップショット凍結**: conformance シナリオの base content は実 `content/*.json` の直読みではなく `conformance/content-snapshot/`(golden 生成時点の凍結コピー)を読む。M39 で「バランス数値の変更が 55/77 本の golden を連動変化させる」構造が実測で判明したため(「conformance は自前 fixture」という従来説明は誤りだった)、golden を本来の「engine の見張り番」に限定し、content の健全性は schema 検証 + M51 additive 意味論ゲート + 夜間ゲートが担う分業とする。これにより (1) の「golden 変化 ⟺ bump」は content 変更と無関係に engine 挙動のみを検知する。スナップショットの更新は「シナリオが新 content 機能を必要とする場合」に限り、golden 再生成 + algoVersion 判定とセットで統率者検分の下で行う。
 
 **選択肢**
 (a) 生ソーステキスト hash を権威(旧):偽陽性 bump と「安全なつもり」の見逃しが両立、撤回。(b) golden vector 権威 + 正準化 manifest tripwire:**採用**。
