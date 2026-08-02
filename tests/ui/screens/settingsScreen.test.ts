@@ -20,6 +20,7 @@ import { exportSaveText, importSaveText } from "../../../src/platform/exchange";
 import {
   ExportPanel,
   ImportPanel,
+  OnboardingHelpSection,
   ResetGameSection,
   TestplaySpeedSection,
   type ImportOutcomeView,
@@ -219,6 +220,25 @@ describe("[M59] TestplaySpeedSection(テストプレイ加速モード・×1/×6
   it("×1 以外のときは戻し忘れ警告文を出す", () => {
     const vnode = TestplaySpeedSection({ speed: 720, onSetSpeed: () => undefined });
     expect(flattenText(vnode)).toContain("戻すことを推奨");
+  });
+});
+
+describe("[M57] OnboardingHelpSection(初回ガイド・用語辞典の再表示導線)", () => {
+  it("2つのボタンを表示し、それぞれ対応するコールバックを呼ぶ", () => {
+    const onOpenGuide = vi.fn();
+    const onOpenGlossary = vi.fn();
+    const vnode = OnboardingHelpSection({ onOpenGuide, onOpenGlossary });
+
+    const buttons: { onClick: () => void; text: string; pressed: unknown }[] = [];
+    findButtonsWithLabel(vnode, buttons);
+    expect(buttons.map((b) => b.text)).toEqual(["初回ガイドをもう一度見る", "用語ミニ辞典を開く"]);
+
+    buttons[0]?.onClick();
+    expect(onOpenGuide).toHaveBeenCalledTimes(1);
+    expect(onOpenGlossary).not.toHaveBeenCalled();
+
+    buttons[1]?.onClick();
+    expect(onOpenGlossary).toHaveBeenCalledTimes(1);
   });
 });
 

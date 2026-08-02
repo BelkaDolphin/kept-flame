@@ -1,0 +1,156 @@
+/*
+ * 継ぐ火 -Kept Flame- 初回ガイド + 用語ミニ辞典(M57)スタイル。
+ *
+ * ライトテーマ固定(CLAUDE.md 絶対ルール)。色トークンは appShell.css の
+ * 中立色(--kf-ink-body 系)をそのまま使い、新しい色は作らない
+ * (LossClassBadge.tsx/BackupReminderBanner.tsx 等と同じ方針)。
+ *
+ * どちらも全画面オーバーレイの軽いモーダル(タスク指示「数ステップの軽い
+ * モーダル/カード列」)。既存の sticky ヘッダ(z-index:20)・sticky ナビ
+ * (z-index:20)・トースト(z-index:25)より確実に手前に出す必要があるため、
+ * z-index はこのアプリで最大の 30 を割り当てる。
+ */
+
+.kf-onboarding,
+.kf-glossary {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(36, 32, 28, 0.55);
+  box-sizing: border-box;
+}
+
+.kf-onboarding__card,
+.kf-glossary__card {
+  width: 100%;
+  max-width: 420px;
+  max-height: min(80vh, 640px);
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #c9c3b8;
+  border-radius: 8px;
+  padding: 1.1rem 1.2rem;
+  box-sizing: border-box;
+  box-shadow: 0 8px 24px rgba(36, 32, 28, 0.28);
+}
+
+.kf-onboarding__progress {
+  font-size: var(--kf-fs-micro, 12px);
+  font-variant-numeric: tabular-nums;
+  color: #5b534b;
+  margin: 0 0 0.4rem;
+}
+
+.kf-onboarding__title,
+.kf-glossary__title {
+  font-size: var(--kf-fs-title, 17px);
+  margin: 0 0 0.5rem;
+  color: #24201c;
+}
+
+.kf-onboarding__body {
+  font-size: var(--kf-fs-body, 15px);
+  line-height: 1.7;
+  color: #24201c;
+  margin: 0 0 0.8rem;
+}
+
+.kf-onboarding__dots {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0 0 0.9rem;
+  padding: 0;
+  list-style: none;
+}
+
+.kf-onboarding__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c9c3b8;
+}
+
+.kf-onboarding__dot--active {
+  background: #24201c;
+}
+
+.kf-onboarding__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.kf-onboarding__skip,
+.kf-onboarding__next,
+.kf-onboarding__finish,
+.kf-glossary__close {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub, 13px);
+  padding: 0.3rem 0.9rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.kf-onboarding__skip {
+  border: 1px solid #8a857d;
+  background: #ffffff;
+  color: #5b534b;
+}
+
+.kf-onboarding__next,
+.kf-onboarding__finish,
+.kf-glossary__close {
+  border: 1px solid #24201c;
+  background: #24201c;
+  color: #ffffff;
+}
+
+/* 用語ミニ辞典 */
+
+.kf-glossary__card {
+  max-width: 520px;
+}
+
+.kf-glossary__intro {
+  font-size: var(--kf-fs-sub, 13px);
+  color: #5b534b;
+  margin: 0 0 0.8rem;
+}
+
+.kf-glossary__list {
+  margin: 0 0 0.9rem;
+}
+
+.kf-glossary__entry {
+  padding: 0.5rem 0;
+  border-top: 1px solid #e3ddd4;
+}
+
+.kf-glossary__entry:first-child {
+  border-top: none;
+}
+
+.kf-glossary__term {
+  font-size: var(--kf-fs-body, 15px);
+  font-weight: 600;
+  color: #24201c;
+  margin: 0 0 0.25rem;
+}
+
+.kf-glossary__definition {
+  font-size: var(--kf-fs-sub, 13px);
+  line-height: 1.7;
+  color: #24201c;
+  margin: 0;
+}
+
+.kf-glossary__close {
+  display: block;
+  width: 100%;
+}

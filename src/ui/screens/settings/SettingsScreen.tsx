@@ -25,6 +25,9 @@
 //       バックアップリマインド、難度シード表示」): `saveCapacity.ts` の
 //       {@link checkSaveCapacity}(「UI 表示は後続タスク」と明記済み = 本タスク)
 //       と `state.worldSeed` をそのまま表示する。
+//   (e) [M57] 初回ガイド・用語ミニ辞典の再表示導線: `onboarding/OnboardingGuide.tsx`
+//       と `onboarding/TermsGlossary.tsx` をトラッカーを介さず直接開閉する
+//       (検収条件「後から設定画面で再表示可能」)。
 //
 // ===========================================================================
 // 2. 新規 platform ファイルを追加しない(タスク制約)
@@ -44,6 +47,9 @@ import { resolveLocalStorage } from "../../../platform/localStorageMirror";
 import { encodeSaveRecord } from "../../../platform/persistence";
 import { checkSaveCapacity, type SaveCapacityCheck } from "../../../platform/saveCapacity";
 import { createNewGameState } from "../../../newGame";
+import { OnboardingGuide } from "../../onboarding/OnboardingGuide";
+import { ONBOARDING_STEPS } from "../../onboarding/steps";
+import { TermsGlossary } from "../../onboarding/TermsGlossary";
 import { TESTPLAY_SPEEDS, type TestplaySpeed } from "../../testplaySpeed";
 import type { ScreenProps } from "../screenProps";
 import { useToastStack, ToastStackView } from "../Toast";
@@ -294,6 +300,38 @@ export function TestplaySpeedSection({ speed, onSetSpeed }: TestplaySpeedSection
   );
 }
 
+// --- 2d. [M57] ガイド・用語辞典(hooks 不使用・直接テスト可能) ----------------
+//
+// 検収条件「後から設定画面で再表示可能」の入口。トラッカー(表示済みフラグ)は
+// 一切介さない——設定画面から開く行為は「もう1度見たい」という明示操作であり、
+// `OnboardingGuide`(タスク指示「初回起動でのみ出る」)側の自動表示判定とは
+// 独立している(`ResetGameSection`/`TestplaySpeedSection` と同じ「値と
+// コールバックだけを props で受ける」形)。
+
+export interface OnboardingHelpSectionProps {
+  readonly onOpenGuide: () => void;
+  readonly onOpenGlossary: () => void;
+}
+
+export function OnboardingHelpSection({ onOpenGuide, onOpenGlossary }: OnboardingHelpSectionProps) {
+  return (
+    <section class="kf-settings__onboarding" aria-label="ガイド・用語辞典">
+      <h3 class="kf-settings__section-title">ガイド・用語辞典</h3>
+      <p class="kf-settings__section-note">
+        最初のガイドや、ゲーム内でよく出てくる言葉の意味は、ここからいつでも見直せます。
+      </p>
+      <div class="kf-settings__onboarding-buttons">
+        <button type="button" class="kf-settings__onboarding-button" onClick={onOpenGuide}>
+          初回ガイドをもう一度見る
+        </button>
+        <button type="button" class="kf-settings__onboarding-button" onClick={onOpenGlossary}>
+          用語ミニ辞典を開く
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // --- 3. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 function downloadTextFile(filename: string, text: string): void {
@@ -319,6 +357,10 @@ export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   // [M54] 「最初からやり直す」の確認 2 段(0=未着手/1=第1確認/2=最終確認)。
   const [resetStep, setResetStep] = useState<0 | 1 | 2>(0);
+  // [M57] 手動再表示(トラッカーを介さない・§2d のコメント参照)。
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideStepIndex, setGuideStepIndex] = useState(0);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const toastStack = useToastStack();
 
   const state = store.peekState();
@@ -447,6 +489,24 @@ export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps
         onConfirm={handleResetConfirm}
         onCancel={handleResetCancel}
       />
+
+      <OnboardingHelpSection
+        onOpenGuide={() => {
+          setGuideStepIndex(0);
+          setGuideOpen(true);
+        }}
+        onOpenGlossary={() => setGlossaryOpen(true)}
+      />
+      <OnboardingGuide
+        visible={guideOpen}
+        stepIndex={guideStepIndex}
+        onNext={() =>
+          setGuideStepIndex((index) => Math.min(index + 1, ONBOARDING_STEPS.length - 1))
+        }
+        onSkip={() => setGuideOpen(false)}
+        onFinish={() => setGuideOpen(false)}
+      />
+      <TermsGlossary visible={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
 
       <div class="kf-settings-screen__nav">
         <button

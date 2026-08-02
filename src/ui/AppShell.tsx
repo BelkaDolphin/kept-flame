@@ -55,6 +55,8 @@ import { InstallPromotionBanner } from "./InstallPromotionBanner";
 import { LoadFailureBanner } from "./LoadFailureBanner";
 import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
+import { OnboardingGuide } from "./onboarding/OnboardingGuide";
+import { ONBOARDING_STEPS } from "./onboarding/steps";
 import { residentDisplayName, resourceLabel, techLabel } from "./screens/contentLabels";
 import { formatGameClock, formatResourceAmount } from "./screens/format";
 import { labelizeLogText } from "./screens/idLabelize";
@@ -509,6 +511,18 @@ export interface LoadFailureViewModel {
   readonly visible: boolean;
 }
 
+/**
+ * [M57] 初回ガイドの自動表示。`visible` は composition root(`main.tsx`)が
+ * 「初回起動か(`booted.source === "newGame"`。セーブ復帰では出さない=検収
+ * 条件)」**かつ**「まだ1度も表示していないか」(既存 `PromotionPromptTracker`
+ * を再利用・`platform/` へ新規ファイルを追加しない)を AND した最終値。
+ * カード送り自体の状態(`stepIndex`)はシェルが持つ揮発 UI 状態(セーブに載らない・
+ * ナビ展開状態と同じ扱い)。
+ */
+export interface OnboardingViewModel {
+  readonly visible: boolean;
+}
+
 // --- 5. シェル本体 -----------------------------------------------------------
 
 export interface AppShellProps {
@@ -525,6 +539,8 @@ export interface AppShellProps {
   readonly backupReminder?: BackupReminderViewModel;
   /** 起動失敗のその場通知(M54)。省略時は描かない。 */
   readonly loadFailure?: LoadFailureViewModel;
+  /** [M57] 初回ガイドの自動表示。省略時は描かない。 */
+  readonly onboarding?: OnboardingViewModel;
   /** [M59] テストプレイ加速モード。ヘッダのインジケータと＋設定画面の両方が使う。 */
   readonly testplaySpeed: TestplaySpeedController;
 }
@@ -538,12 +554,18 @@ export function AppShell({
   testplaySpeed,
   backupReminder,
   loadFailure,
+  onboarding,
 }: AppShellProps) {
   const [screenId, setScreenId] = useState<ScreenId>(() => session.screen());
   const [installBannerClosed, setInstallBannerClosed] = useState(false);
   const [notificationBannerClosed, setNotificationBannerClosed] = useState(false);
   const [backupReminderClosed, setBackupReminderClosed] = useState(false);
   const [loadFailureClosed, setLoadFailureClosed] = useState(false);
+  // [M57] 初回ガイドのカード送り(揮発 UI 状態)。スキップ/最終カード確定の
+  // どちらでも「このセッション中は隠す」(表示すべきかの永続判定は composition
+  // root 側で済み・§4 と同じ「セッション中の閉鎖だけをシェルが持つ」規律)。
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingStepIndex, setOnboardingStepIndex] = useState(0);
   // ナビの展開状態は**セーブにも URL にも載らない揮発 UI 状態**(バナーの
   // 閉鎖状態と同じ扱い)。現在地の権威はあくまでルータ側にある。
   const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
@@ -628,6 +650,17 @@ export function AppShell({
           visible={backupReminder.visible && !backupReminderClosed}
           onGoToSettings={() => navigate("settings")}
           onClose={() => setBackupReminderClosed(true)}
+        />
+      )}
+      {onboarding && (
+        <OnboardingGuide
+          visible={onboarding.visible && !onboardingDismissed}
+          stepIndex={onboardingStepIndex}
+          onNext={() =>
+            setOnboardingStepIndex((index) => Math.min(index + 1, ONBOARDING_STEPS.length - 1))
+          }
+          onSkip={() => setOnboardingDismissed(true)}
+          onFinish={() => setOnboardingDismissed(true)}
         />
       )}
       <ScreenHost

@@ -62,6 +62,11 @@ import {
   saveGameState,
   SaveNotFoundError,
 } from "./platform/persistence";
+import {
+  loadPromotionPromptSnapshot,
+  PromotionPromptTracker,
+  savePromotionPromptSnapshot,
+} from "./platform/promotionPrompt";
 import { createBrowserRouterHost, createHashRouter } from "./platform/router";
 import { SaveScheduler, attachLifecycleFlush } from "./platform/saveScheduler";
 import { createScaledClock } from "./platform/timeScale";
@@ -73,6 +78,7 @@ import {
   type InstallPromotionViewModel,
   type LoadFailureViewModel,
   type NotificationOptInViewModel,
+  type OnboardingViewModel,
 } from "./ui/AppShell";
 import {
   DEFAULT_SCREEN_ID,
@@ -94,6 +100,15 @@ const installPromptController = createInstallPromptController(window);
 
 /** 復帰時に⑫帰還ダイジェストを出す tick 差のしきい値(1 ゲーム時間)。 */
 const DIGEST_MIN_ELAPSED_TICKS = 60;
+
+/**
+ * [M57] 初回ガイドの表示済みフラグ(localStorage キー)。`promotionPrompt.ts`
+ * §4 の永続化ヘルパは「キー1本ぶん・複数バナー種で共有する実装」として
+ * 汎用化済みなので、`platform/` へ新規ファイルを追加せず(タスク制約)
+ * `PromotionPromptTracker` をそのまま再利用する(installPromotion.ts/
+ * notificationCapability.ts/backupReminder.ts の 3 種に続く 4 種類目)。
+ */
+const ONBOARDING_PROMPT_STORAGE_KEY = "kept-flame:onboarding-guide";
 
 function loadContent(): EngineContent {
   const raw: RawContentBundle = {
@@ -410,6 +425,35 @@ async function boot(): Promise<void> {
   // view model へ写すだけ(main.tsx はこれ以上の判定を持たない)。
   const loadFailure: LoadFailureViewModel = { visible: booted.loadFailed };
 
+  // --- 初回ガイドの自動表示(M57・台帳v9 必-3・UXレポート M-5 正面対応)-------
+  // **検収条件「初回起動でのみ出る(セーブ復帰では出ない)」**を
+  // `booted.source === "newGame"` で機械的に満たす(⑫帰還ダイジェストが
+  // `booted.source === "save"` を条件にしているのと対称)。加えて
+  // `PromotionPromptTracker`(`maxShowCount: 1`)を AND することで、同一
+  // ブラウザで「セーブがまだ一度も書かれていない newGame 状態のままリロード」
+  // を繰り返しても 2 度目以降は出ない(スキップ/最終カード確定のどちらでも
+  // シェル側は `recordShown` を待たず、表示すると決めた直後にここで記録する
+  // ——Add-to-Home/通知/バックアップ推奨の 3 バナーと同じ規約)。
+  const onboardingPromptSnapshot = loadPromotionPromptSnapshot(
+    promotionStorage,
+    ONBOARDING_PROMPT_STORAGE_KEY,
+  );
+  const onboardingPromptTracker = new PromotionPromptTracker({
+    maxShowCount: 1,
+    ...(onboardingPromptSnapshot === null ? {} : { initialSnapshot: onboardingPromptSnapshot }),
+  });
+  const onboardingVisible =
+    booted.source === "newGame" && onboardingPromptTracker.status().shouldShow;
+  if (onboardingVisible) {
+    onboardingPromptTracker.recordShown();
+    savePromotionPromptSnapshot(
+      promotionStorage,
+      ONBOARDING_PROMPT_STORAGE_KEY,
+      onboardingPromptTracker.snapshot(),
+    );
+  }
+  const onboarding: OnboardingViewModel = { visible: onboardingVisible };
+
   // --- 初期画面(GDD 4.2「復帰時に必ず最初に表示」)---------------------------
   // 判定は **plan の targetTick** で行う。長期不在(> 600 tick)は Worker 経路が
   // 非同期に適用されるので、この時点の `store.peekState().tick` はまだ動いておらず、
@@ -428,6 +472,7 @@ async function boot(): Promise<void> {
       notificationOptIn={notificationOptIn}
       backupReminder={backupReminder}
       loadFailure={loadFailure}
+      onboarding={onboarding}
       testplaySpeed={testplaySpeed}
     />,
     root,

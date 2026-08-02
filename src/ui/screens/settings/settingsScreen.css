@@ -263,6 +263,36 @@
   color: #24201c;
 }
 
+/* [M57] ガイド・用語辞典の再表示導線 */
+
+.kf-settings__onboarding {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #ffffff;
+  margin: 0 0 0.6rem;
+}
+
+.kf-settings__onboarding-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-settings__onboarding-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #8a857d;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
 .kf-settings-screen__nav {
   display: flex;
   gap: 0.5rem;
