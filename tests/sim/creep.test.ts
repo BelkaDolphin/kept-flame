@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyzeGroup,
+  KNOWN_CREEP_SUPPRESSIONS,
   MIN_GROUP_SIZE,
   RELATIVE_DEVIATION_THRESHOLD,
   runCreepDetection,
@@ -22,6 +23,11 @@ describe("統計クリープ検出", () => {
   it("現行 content では外れ値ゼロ(偽陽性が出ない)", () => {
     const report = runCreepDetection();
     expect(report.outlierCount).toBe(0);
+    // [台帳v15 必-4] 抑止は「名前つき既知例外」経由でのみ起きる。閾値は不変。
+    expect(report.zThreshold).toBe(Z_THRESHOLD);
+    expect(report.suppressedCount).toBe(KNOWN_CREEP_SUPPRESSIONS.length);
+    // 登録したのに検出されない例外(消し忘れ)が残っていないこと。
+    expect(report.staleSuppressions).toEqual([]);
     expect(report.groups.length).toBeGreaterThan(0);
     // 実測値(max|z|)と閾値の両方がレポートに載っている(bool ではない)。
     for (const group of report.groups) {
@@ -30,6 +36,38 @@ describe("統計クリープ検出", () => {
     }
     expect(report.zThreshold).toBe(Z_THRESHOLD);
     expect(report.relativeDeviationThreshold).toBe(RELATIVE_DEVIATION_THRESHOLD);
+  });
+
+  it("[台帳v15 必-4] 既知例外は黙殺でなく suppressed として実測値ごとレポートに残る", () => {
+    const report = runCreepDetection();
+    const suppressed = report.groups.flatMap((group) => group.suppressedOutliers);
+    expect(suppressed).toHaveLength(KNOWN_CREEP_SUPPRESSIONS.length);
+    for (const entry of suppressed) {
+      // 判定そのものは通常どおり行われている(閾値超えの実測値が入っている)。
+      expect(Math.abs(entry.leaveOneOutZ)).toBeGreaterThan(Z_THRESHOLD);
+      expect(entry.relativeDeviation).toBeGreaterThan(RELATIVE_DEVIATION_THRESHOLD);
+      // 理由と解除期限が空でない(「とりあえず黙らせた」を許さない)。
+      expect(entry.suppression.reason.length).toBeGreaterThan(20);
+      expect(entry.suppression.expiresAtMilestone.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("既知例外に載っていない外れ値は抑止されない", () => {
+    const samples = [
+      { id: "a", value: 10 },
+      { id: "b", value: 10 },
+      { id: "c", value: 11 },
+      { id: "d", value: 10 },
+      { id: "e", value: 11 },
+      { id: "f", value: 10 },
+      { id: "g", value: 11 },
+      { id: "h", value: 10 },
+      { id: "hearth", value: 40 },
+    ];
+    // entityId は既知例外と同じ "hearth" でも、groupId/metric が違えば抑止されない。
+    const group = analyzeGroup("some/other/group", "some-metric", samples);
+    expect(group.outliers.map((outlier) => outlier.entityId)).toEqual(["hearth"]);
+    expect(group.suppressedOutliers).toEqual([]);
   });
 
   it("外れ値(1 件だけ極端に効率の良い entity)を仕込むと検出される", () => {

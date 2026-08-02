@@ -1,0 +1,242 @@
+[
+  {
+    "id": "techFireStarting",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": [],
+    "researchCost": 30,
+    "fieldRequirement": { "facility": "hearth", "recipe": "recipeKindling", "count": 3 },
+    "unlocks": ["techPottery", "techBasketWeaving", "techStoneTools", "techWaterDrawing"],
+    "leaf": false
+  },
+  {
+    "id": "techPottery",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 36,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeClayPot", "count": 2 },
+    "unlocks": ["techStorage"],
+    "leaf": false
+  },
+  {
+    "id": "techBasketWeaving",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 40,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeBasket", "count": 2 },
+    "unlocks": ["techGatheringHut"],
+    "leaf": true
+  },
+  {
+    "id": "techStorage",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techPottery"],
+    "researchCost": 43,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeStorageJar", "count": 3 },
+    "unlocks": ["techBedding", "techCharcoalKiln"],
+    "leaf": false
+  },
+  {
+    "id": "techStoneTools",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 40,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeStoneAxe", "count": 3 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techWaterDrawing",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techFireStarting"],
+    "researchCost": 39,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeWaterSkin", "count": 2 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techGatheringHut",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techBasketWeaving"],
+    "researchCost": 41,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeForageBasket", "count": 2 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techBedding",
+    "era": "e1",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techStorage"],
+    "researchCost": 52,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeStrawMat", "count": 2 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techCharcoalKiln",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techStorage"],
+    "researchCost": 60,
+    "fieldRequirement": { "facility": "hearth", "recipe": "recipeCharcoal", "count": 4 },
+    "unlocks": ["techAgriculture", "techBoneHideWorking", "techCeramics"],
+    "leaf": false
+  },
+  {
+    "id": "techCeramics",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techCharcoalKiln"],
+    "researchCost": 72,
+    "fieldRequirement": { "facility": "hearth", "recipe": "recipeFiredWare", "count": 4 },
+    "unlocks": ["techBasicMedicine", "techSmelting"],
+    "leaf": false
+  },
+  {
+    "id": "techSmelting",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techCeramics"],
+    "researchCost": 86,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipeCopperIngot", "count": 5 },
+    "unlocks": ["techBlastFurnace"],
+    "leaf": false
+  },
+  {
+    "id": "techAgriculture",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techCharcoalKiln"],
+    "researchCost": 80,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeSeedBed", "count": 4 },
+    "unlocks": ["techIrrigation"],
+    "leaf": false
+  },
+  {
+    "id": "techBoneHideWorking",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techCharcoalKiln"],
+    "researchCost": 82,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeTannedHide", "count": 4 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techBasicMedicine",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techCeramics"],
+    "researchCost": 90,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeHerbalSalve", "count": 3 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techIrrigation",
+    "era": "e2",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techAgriculture"],
+    "researchCost": 85,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeChannelDitch", "count": 3 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techBlastFurnace",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techSmelting"],
+    "researchCost": 120,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipePigIron", "count": 6 },
+    "unlocks": ["techBlacksmithing"],
+    "leaf": false
+  },
+  {
+    "id": "techBlacksmithing",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techBlastFurnace"],
+    "researchCost": 144,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipeIronTool", "count": 6 },
+    "unlocks": ["techGlass", "techMachineParts", "techMetalCasting"],
+    "leaf": false
+  },
+  {
+    "id": "techMachineParts",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techBlacksmithing"],
+    "researchCost": 173,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipeGearSet", "count": 6 },
+    "unlocks": ["techPrinting", "techSteamEngine", "techWaterWheel"],
+    "leaf": false
+  },
+  {
+    "id": "techSteamEngine",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techMachineParts"],
+    "researchCost": 207,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipeBoiler", "count": 8 },
+    "unlocks": [],
+    "leaf": false
+  },
+  {
+    "id": "techGlass",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techBlacksmithing"],
+    "researchCost": 200,
+    "fieldRequirement": { "facility": "hearth", "recipe": "recipeGlassPane", "count": 5 },
+    "unlocks": ["techLens"],
+    "leaf": false
+  },
+  {
+    "id": "techMetalCasting",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techBlacksmithing"],
+    "researchCost": 205,
+    "fieldRequirement": { "facility": "forge", "recipe": "recipeCastMold", "count": 5 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techWaterWheel",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techMachineParts"],
+    "researchCost": 210,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeWaterWheelHub", "count": 5 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techPrinting",
+    "era": "e3",
+    "lossClass": "criticalRecoverable",
+    "prereqs": ["techMachineParts"],
+    "researchCost": 220,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipePrintBlock", "count": 5 },
+    "unlocks": [],
+    "leaf": true
+  },
+  {
+    "id": "techLens",
+    "era": "e3",
+    "lossClass": "rareIrreversible",
+    "prereqs": ["techGlass"],
+    "researchCost": 214,
+    "fieldRequirement": { "facility": "workbench", "recipe": "recipeGroundLens", "count": 4 },
+    "unlocks": [],
+    "leaf": true
+  }
+]

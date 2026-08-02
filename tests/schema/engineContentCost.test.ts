@@ -162,7 +162,7 @@ describe("[M50] facility の建設/増築コスト — ローダー段(必須)",
     const lv5 = cost.upgradeByLevel[4];
     if (lv1to2 === undefined || lv5 === undefined) throw new Error("Lv 別増築コストが欠けている");
     expect(toRaw(lv1to2)).toBe(36_000_000);
-    expect(toRaw(lv5)).toBe(74_649_600); // 74.6496
+    expect(toRaw(lv5)).toBe(75_000_000); // [M39] 端数を整数へ丸めた(ロードマップ M39 ⑬)
   });
 
   it("buildCost 欠落を reject する(欠落を既定値で埋めない)", () => {

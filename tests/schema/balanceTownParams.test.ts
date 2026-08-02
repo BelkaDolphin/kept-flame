@@ -206,7 +206,9 @@ describe("[M11] facility.bedCapacityCurve", () => {
     if (!loaded.ok) return;
     for (const [defId, def] of loaded.value.facilityDefs) {
       if (defId === "bed") {
-        expect(def.bedCapacityByLevel).toEqual([2, 3, 4, 5, 6]);
+        // [M39] 寝床上限 = 就労可能人口の上限。2 だと nightly-b seed で
+        // 人口 4 に張り付き粘土の就労枠が埋まらず GDD 11.4-2a が落ちるため 3 へ。
+        expect(def.bedCapacityByLevel).toEqual([3, 4, 5, 6, 7]);
         continue;
       }
       expect(def.bedCapacityByLevel).toBeUndefined();

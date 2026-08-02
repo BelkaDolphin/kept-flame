@@ -5,7 +5,7 @@
   "offlineClampTick": 4320,
   "safetyFactor": 1.5,
   "recallRiskParams": {
-    "base_p": 0.036,
+    "base_p": 0.05,
     "p_max": 0.35,
     "loadWHarsh": 2.0,
     "loadWNormal": 0.5,
@@ -23,16 +23,7 @@
   },
   "storage": {
     "wasteResourceId": "waste",
-    "baseCapacity": {
-      "charcoal": 400,
-      "clay": 400,
-      "copper": 400,
-      "firewood": 400,
-      "grain": 400,
-      "iron": 400,
-      "paper": 400,
-      "waste": 400
-    },
+    "baseCapacity": {},
     "wasteConversionRatio": { "firewood": 0.5 },
     "wasteToResearchRatio": 0.1,
     "buildCostWasteSubstitutionMax": 0.2,
@@ -111,8 +102,8 @@
     "withdrawInjuryThreshold": 30,
     "equipmentBonus": 0,
     "travelSpeedupMax": 0.3,
-    "forgoneOutputPerWorkerTick": 0.03,
-    "rareAssetValue": 200,
+    "forgoneOutputPerWorkerTick": 1,
+    "rareAssetValue": 20000,
     "wipeMaxP": 0.35,
     "bands": {
       "near": {
@@ -122,7 +113,7 @@
         "difficultyMin": 135,
         "difficultyMax": 225,
         "rollRange": 90,
-        "rewardPerNode": 45,
+        "rewardPerNode": 1500,
         "rewardResourceId": "firewood",
         "injuryPerFailure": 8,
         "casualtyInjuryThreshold": 60,
@@ -136,7 +127,7 @@
         "difficultyMin": 160,
         "difficultyMax": 260,
         "rollRange": 110,
-        "rewardPerNode": 90,
+        "rewardPerNode": 3000,
         "rewardResourceId": "firewood",
         "injuryPerFailure": 12,
         "casualtyInjuryThreshold": 55,
@@ -150,19 +141,13 @@
         "difficultyMin": 200,
         "difficultyMax": 268,
         "rollRange": 140,
-        "rewardPerNode": 165,
+        "rewardPerNode": 5500,
         "rewardResourceId": "firewood",
         "injuryPerFailure": 16,
         "casualtyInjuryThreshold": 50,
         "rescueChance": 0.03,
         "wipeBaseP": 0.35
       }
-    },
-    "rewardOverflow": {
-      "policy": "discard",
-      "capacity": 200,
-      "convertTo": null,
-      "ratio": 0
     }
   },
   "outpost": {
@@ -173,9 +158,9 @@
     }
   },
   "reclaim": {
-    "baseCost": 60,
+    "baseCost": 40,
     "costGrowth": 1.15,
-    "costCap": 300,
+    "costCap": 2000,
     "costResourceId": "firewood",
     "initialRubbleCells": [
       12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,

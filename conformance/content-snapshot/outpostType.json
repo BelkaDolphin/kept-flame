@@ -1,0 +1,29 @@
+[
+  {
+    "id": "outpostMine",
+    "resource": "iron",
+    "baseSupply": 40,
+    "capacityCurve": [40, 46, 52.9, 60.835, 69.96025],
+    "upkeepFormula": { "baseFood": 20, "baseMoraleCare": 5 },
+    "hazard": { "intensity": 0.05, "growth": 0.01, "min": 0.05, "max": 0.6 },
+    "shadeSensitivity": 0.8
+  },
+  {
+    "id": "outpostFarm",
+    "resource": "grain",
+    "baseSupply": 60,
+    "capacityCurve": [60, 69, 79.35, 91.2525, 104.940375],
+    "upkeepFormula": { "baseFood": 15, "baseMoraleCare": 4 },
+    "hazard": { "intensity": 0.03, "growth": 0.008, "min": 0.03, "max": 0.5 },
+    "shadeSensitivity": 1.2
+  },
+  {
+    "id": "outpostForest",
+    "resource": "firewood",
+    "baseSupply": 50,
+    "capacityCurve": [50, 57.5, 66.125, 76.04375, 87.450312],
+    "upkeepFormula": { "baseFood": 18, "baseMoraleCare": 4.5 },
+    "hazard": { "intensity": 0.04, "growth": 0.009, "min": 0.04, "max": 0.55 },
+    "shadeSensitivity": 0.9
+  }
+]

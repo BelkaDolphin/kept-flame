@@ -296,13 +296,18 @@ describe("(c) balance.storage(GDD 6.7)", () => {
     expect(content.storage?.wasteResourceId).toBe("waste");
     expect(toRaw(content.storage?.wasteToResearchRatioFix ?? (0 as never))).toBe(100_000);
     expect(toRaw(content.storage?.buildCostWasteSubstitutionMaxFix ?? (0 as never))).toBe(200_000);
+    // [台帳v15 必-3] 廃材スポンジ(GDD 6.7)は fixture へ waste 受け皿を
+    // 足したうえで復活済み(sim/board.ts の buildPatternBoard)。
     expect(
       toRaw(
         content.storage?.wasteConversionRatioByResourceId.get("firewood" as never) ?? (0 as never),
       ),
     ).toBe(500_000);
-    // 基礎容量は未設定 = どの資源も上限なし(既定の不活性)。
-    expect(content.storage?.baseCapacityByResourceId.size).toBe(0);
+    // [M39] 基礎容量 = 全資源 400(ユーザー裁定 2026-08-02)。
+    expect(content.storage?.baseCapacityByResourceId.size).toBe(8);
+    expect(
+      toRaw(content.storage?.baseCapacityByResourceId.get("firewood" as never) ?? (0 as never)),
+    ).toBe(400_000_000);
   });
 
   it("storage ブロックが無ければ undefined(上限判定が走らない)", () => {

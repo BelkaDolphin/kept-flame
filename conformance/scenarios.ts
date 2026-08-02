@@ -74,14 +74,43 @@ export interface Scenario {
 // 2. base content の読み込み(呼ぶたびに disk から新規に読む = 呼び出し間で
 //    可変参照を共有しない)
 // ===========================================================================
+//
+// **[2026-08-02裁定・台帳v15 必-1] golden vector は `conformance/content-snapshot/`
+// の凍結 content に対して定義される。`content/` の変更は golden に影響しない。**
+//
+//   経緯: 本モジュールは以前 `content/*.json` を直接読んでいた。そのため
+//   `contentPatch = null` の base content シナリオ(sc01/sc02/sc05/sc06/sc07/
+//   sc08/sc10 系)は運営側のバランス調整(既存 ID の**数値変更**)で必ず動き、
+//   M39(E1 到達収束)の再校正で 77 本中 55 本が差分になった。ADR-016 の
+//   「golden 変化 ⟺ algoVersion bump」は **engine の観測挙動**を捕まえるための
+//   規則であり、content のバランス値を変えただけで bump を強制するのは
+//   ADR-025 の sunset 機構(旧セーブを凍結ビルドへ退役)を空振りさせる。
+//
+//   よって golden の入力 content を凍結スナップショットへ切り離した。
+//   スナップショットは M39 着手前(コミット `4730ee7`)の `content/*.json` を
+//   そのままコピーしたもので、**現行 golden 77 本を green にする入力そのもの**
+//   である。engine の挙動が変われば golden は従来どおり動く(= bump 判定は
+//   生きている)。スナップショットを更新するときは golden 再生成と
+//   algoVersion 判定を同時に行うこと。
+//
+//   なお ADR-017 の「週次 content が実際に踏む代表 seed 群で golden と bit 一致」
+//   を検証する経路(in-browser conformance)は**実 content を入力にする別系統**で
+//   あり、本スナップショットはそれを置き換えない。
 
-const CONTENT_DIR = fileURLToPath(new URL("../content/", import.meta.url));
+const CONTENT_DIR = fileURLToPath(new URL("./content-snapshot/", import.meta.url));
 
 function readContentJson(fileName: string): unknown {
   return JSON.parse(readFileSync(`${CONTENT_DIR}${fileName}`, "utf8")) as unknown;
 }
 
-/** `content/*.json` を素の JSON として読む(patch 前の入力)。呼ぶたびに新規オブジェクト。 */
+/**
+ * golden vector 用の凍結 content(`conformance/content-snapshot/*.json`)を
+ * 素の JSON として読む(patch 前の入力)。呼ぶたびに新規オブジェクト。
+ *
+ * **この関数を sim(夜間ゲート・校正)から呼んではいけない。** sim は運営が
+ * 実際に配る `content/*.json` を検証する側なので {@link loadLiveRawContentBundle}
+ * を使う(`sim/board.ts` の `resolveSimContent` がそうしている)。
+ */
 export function loadBaseRawContentBundle(): RawContentBundle {
   return {
     tech: readContentJson("tech.json") as readonly unknown[],
@@ -89,6 +118,32 @@ export function loadBaseRawContentBundle(): RawContentBundle {
     trait: readContentJson("trait.json") as readonly unknown[],
     adjacency: readContentJson("adjacency.json"),
     balance: readContentJson("balance.json"),
+  };
+}
+
+const LIVE_CONTENT_DIR = fileURLToPath(new URL("../content/", import.meta.url));
+
+function readLiveContentJson(fileName: string): unknown {
+  return JSON.parse(readFileSync(`${LIVE_CONTENT_DIR}${fileName}`, "utf8")) as unknown;
+}
+
+/**
+ * **実 content**(`content/*.json`)を素の JSON として読む。
+ *
+ * golden の入力を凍結スナップショットへ切り離した([2026-08-02裁定・台帳v15 必-1])
+ * のは golden だけであり、sim(夜間ゲート・校正・クリープ検出)は従来どおり
+ * 運営が配る実 content を入力にしなければならない —— さもないと
+ * 「バランス調整したのに夜間ゲートは旧 content を測っている」という
+ * 最悪の見せかけ収束になる。読み込み先が 2 系統あることを 1 箇所で見せるため、
+ * 実 content 側のローダーも本モジュールに置いてある。
+ */
+export function loadLiveRawContentBundle(): RawContentBundle {
+  return {
+    tech: readLiveContentJson("tech.json") as readonly unknown[],
+    facility: readLiveContentJson("facility.json") as readonly unknown[],
+    trait: readLiveContentJson("trait.json") as readonly unknown[],
+    adjacency: readLiveContentJson("adjacency.json"),
+    balance: readLiveContentJson("balance.json"),
   };
 }
 

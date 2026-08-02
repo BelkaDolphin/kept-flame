@@ -207,9 +207,23 @@ export const OVERFLOW_LOSS_RATE_MAX_FIX_RAW = 150_000;
 /** GDD 11.4-8 のレンジ(回/住民/週)。 */
 export const RECALL_PER_RESIDENT_WEEK_MIN = 1;
 export const RECALL_PER_RESIDENT_WEEK_MAX = 3;
-/** GDD 11.4-3 の E3 到達レンジ(日)。 */
-export const ERA3_REACH_DAYS_MIN = 8;
-export const ERA3_REACH_DAYS_MAX = 16;
+/**
+ * GDD 11.4-3 の E3 到達レンジ(日)。
+ *
+ * **[2026-08-02裁定・台帳v15 必-2] [8,16] → [7,18] へ改訂。** M39 の実測で、
+ * E3 到達日の律速が「研究点の供給 vs コスト」ではなく **bot が壁テックまでに
+ * 踏破する tech の本数**(1 ゲーム日 1 本の意思決定 cadence)であることが判明した。
+ * researchFirst はクリティカルパス 7 本 = 7 日、greedy/placementVariant は ID 昇順で
+ * E1 8 本 + E2 7 本 + blastFurnace = 16 本 = 16〜18 日。**本数比 2.29 に対し
+ * 旧レンジの窓は 16/8 = 2.0 倍しかなく、content 側の数値だけでは原理的に
+ * 収められない**(下限を満たすには研究点を律速化する必要があるが、研究優先bot の
+ * 研究レートは貪欲bot の約 3.1 倍なので比は約 7 倍へ広がる。実測でも研究施設
+ * lvCurve を 1/1600 にすると 7〜18 日 → 7〜27 日へ悪化した)。
+ * 証明と実証データは docs/measurements/balance-m39-e1-convergence-2026-08-02.json。
+ * **レンジ狭化(bot 側の研究決定 cadence 見直しを含む)は M40/M41 で再訪する。**
+ */
+export const ERA3_REACH_DAYS_MIN = 7;
+export const ERA3_REACH_DAYS_MAX = 18;
 /** GDD 11.4-6 の「全系統上限 10〜18 周」。 */
 export const ALL_TRACK_MAX_CYCLES_MIN = 10;
 export const ALL_TRACK_MAX_CYCLES_MAX = 18;

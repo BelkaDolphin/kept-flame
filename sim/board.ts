@@ -10,10 +10,13 @@
 //   (先行計測計画 §2.1 P2「sim/runner.ts sim/calibrate.ts」の行)。
 //
 //   content の読み込みは conformance/scenarios.ts が既に持つ
-//   `loadBaseRawContentBundle`(content/*.json を raw JSON として読むだけの
+//   `loadLiveRawContentBundle`(content/*.json を raw JSON として読むだけの
 //   汎用関数・シナリオ固有ロジックを含まない)を再利用し、正規経路
 //   (validateContentBundle → loadEngineContentOrThrow)だけをここで組み立てる
-//   (conformance 側ファイルの変更は禁止のため、Scenario 型は使わず薄く自前で書く)。
+//   (Scenario 型は使わず薄く自前で書く)。
+//   **[2026-08-02・台帳v15 必-1]** golden 側は `conformance/content-snapshot/` の
+//   凍結 content(`loadBaseRawContentBundle`)へ切り離されたが、sim は運営が実際に
+//   配る `content/*.json` を測る側なので `loadLiveRawContentBundle` を使う。
 //
 // ===========================================================================
 // 2. 代表10パターン(GDD 11.2 の recallRisk 変数を軸にする)
@@ -25,7 +28,7 @@
 //   10点に絞ってある(「代表」であり全数ではないことを明示)。
 // ---------------------------------------------------------------------------
 
-import { loadBaseRawContentBundle } from "../conformance/scenarios";
+import { loadLiveRawContentBundle } from "../conformance/scenarios";
 import { validateContentBundle, type RawContentBundle } from "../schema/contentBundle";
 import { loadEngineContentOrThrow } from "../schema/engineContent";
 
@@ -72,10 +75,15 @@ export function patchCoarseTickMinutes(coarseTickMinutes: number): ContentPatch 
  * sim 用 content を正規経路(validateContentBundle → loadEngineContentOrThrow)で
  * 解決する。`patch` が null なら content/*.json のままの EngineContent を返す。
  *
+ * **[2026-08-02・台帳v15 必-1] 入力は必ず実 content(`loadLiveRawContentBundle`)。**
+ * golden vector 側は `conformance/content-snapshot/` の凍結 content を使うように
+ * 切り離されたが、sim は運営が実際に配る content を検証する側なので凍結側を
+ * 読んではならない。
+ *
  * @throws {SimBoardError} 検証/ロードに失敗した場合
  */
 export function resolveSimContent(patch: ContentPatch | null = null): EngineContent {
-  const raw = loadBaseRawContentBundle();
+  const raw = loadLiveRawContentBundle();
   const patched = patch === null ? raw : patch(raw);
   const validated = validateContentBundle(patched);
   if (!validated.ok) {
@@ -344,6 +352,25 @@ export function buildPatternBoard(worldSeed: string, content: EngineContent): Ga
       stock: fixFromInt(0),
     },
   ];
+
+  // [2026-08-02・台帳v15 必-3] 廃材の受け皿。`balance.storage.baseCapacity` が
+  // 入った content(M39 の保管上限 400)では、上限に当たった資源が毎 tick
+  // 廃材スポンジ(GDD 6.7)を回すため、waste の resource entity が state に
+  // 無いと `rules/production.ts` の creditWaste が「生んだ廃材を黙って捨てない」
+  // ガードで RulesError を投げる(実ゲーム経路は R2-A01 の
+  // `worldGen.ensureWasteResourceEntity` で既に手当て済み。ここはその
+  // sim fixture 側の横展開)。content が廃材を持たない(`wasteResourceId` が
+  // null / storage ブロックごと不在)なら 1 entity も足さない = 従来と 1 bit も
+  // 変わらない。
+  const wasteResourceId = content.storage?.wasteResourceId;
+  if (wasteResourceId !== undefined && wasteResourceId !== null) {
+    resources.push({
+      kind: "resource",
+      id: eid("resourceWasteSim"),
+      resourceId: wasteResourceId,
+      stock: fixFromInt(0),
+    });
+  }
 
   const researchIds = ["researchSimA", "researchSimB", "researchSimC"] as const;
   const research: ResearchState[] = [];

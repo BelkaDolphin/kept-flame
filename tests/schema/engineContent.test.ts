@@ -226,8 +226,9 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
     if (!result.ok) return;
     const hearth = result.value.facilityDefs.get("hearth" as never);
     expect(hearth).toBeDefined();
+    // [M39] 保管上限 400 スケールへの再校正(かまど Lv1 = 0.035/tick ≈ 50/ゲーム日)。
     expect(hearth?.outputPerTickByLevel.map(toRaw)).toEqual([
-      100_000_000, 115_000_000, 132_250_000, 152_087_500, 174_900_625,
+      35_000, 40_250, 46_287, 53_231, 61_215,
     ]);
   });
 
@@ -260,7 +261,8 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const p = result.value.recallRisk;
-    expect(toRaw(p.basePFix)).toBe(50_000);
+    // [M39] 実 run 想起頻度 3.359 → 2.66 回/住民/週(GDD 11.4-8 レンジ [1,3])へ校正。
+    expect(toRaw(p.basePFix)).toBe(36_000);
     expect(toRaw(p.pMaxFix)).toBe(350_000);
     expect(toRaw(p.loadWHarshFix)).toBe(2_000_000);
     expect(toRaw(p.loadWNormalFix)).toBe(500_000);

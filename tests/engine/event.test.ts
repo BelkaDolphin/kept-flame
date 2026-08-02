@@ -427,8 +427,8 @@ describe("event ランタイム — branches と帰還ログ", () => {
     const snapshot = snapshotOf(withdrawEvent, EVENT_ID);
     expect(snapshot.nodes).toHaveLength(1);
     expect(snapshot.withdrawn).toBe(true);
-    // 1 ノード成功ぶんの報酬(1500)の半分。
-    expect(toRaw(snapshot.rewardFix)).toBe(toRaw(fixFromInt(750)));
+    // [M39] 1 ノード成功ぶんの報酬(near = 45)の半分。
+    expect(toRaw(snapshot.rewardFix)).toBe(22_500_000);
   });
 });
 
@@ -659,13 +659,14 @@ describe("item overflow(GDD 12.1 / 6.7)", () => {
         ...balance,
         exploration: {
           ...exploration,
-          rewardOverflow: { policy: "discard", capacity: 1000, convertTo: null, ratio: 0 },
+          // [M39] 実 content の報酬スケール(near 45/ノード)に合わせて 100 へ。
+          rewardOverflow: { policy: "discard", capacity: 100, convertTo: null, ratio: 0 },
         },
       };
     });
     const state = boardOf();
     const snapshot = snapshotOf(capped, id("destUnknown"), "cautious", state);
-    expect(toRaw(snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(1000)));
+    expect(toRaw(snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(100)));
 
     const withDispatch = createGameState(
       {
@@ -684,11 +685,17 @@ describe("item overflow(GDD 12.1 / 6.7)", () => {
     const ctx = createAdvanceContext(withDispatch, capped);
     const resolved = resolveExpedition(withDispatch, ctx, DISPATCH_ID, snapshot.returnTick);
     const stock = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
-    expect(toRaw(stock)).toBe(toRaw(fixFromInt(1000)));
+    expect(toRaw(stock)).toBe(toRaw(fixFromInt(100)));
   });
 
   it("rewardOverflow が無ければ全量が入る(M21 と同一)", () => {
-    const plain = loadWith([]);
+    // [M39] 実 content は rewardOverflow(capacity 200)を持つようになったので、
+    // 「無ければ」の条件をこのテスト自身が patch で作る。
+    const plain = loadWith([], (balance) => {
+      const exploration = { ...(balance["exploration"] as Record<string, unknown>) };
+      delete exploration["rewardOverflow"];
+      return { ...balance, exploration };
+    });
     const state = boardOf();
     const snapshot = snapshotOf(plain, id("destUnknown"), "cautious", state);
     const withDispatch = createGameState(

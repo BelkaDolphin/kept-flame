@@ -22,7 +22,14 @@ describe("sim/board", () => {
     expect(entitiesOfKind(state, "resident").length).toBe(RESIDENT_COUNT);
     expect(entitiesOfKind(state, "research").length).toBe(3);
     expect(entitiesOfKind(state, "facility").length).toBe(2);
-    expect(entitiesOfKind(state, "resource").length).toBe(2);
+    // 薪 + 鉄 + 廃材の受け皿([2026-08-02・台帳v15 必-3]。content が
+    // storage.wasteResourceId を持つときだけ 3 本目が生える)。
+    expect(entitiesOfKind(state, "resource").length).toBe(3);
+    expect(
+      entitiesOfKind(state, "resource").some(
+        (resource) => resource.resourceId === content.storage?.wasteResourceId,
+      ),
+    ).toBe(true);
   });
 
   it("maps every resident id back to a valid pattern (round-trip)", () => {

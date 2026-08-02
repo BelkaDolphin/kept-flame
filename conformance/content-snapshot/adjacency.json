@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "tagMatrix": {
+    "heat|heat": { "effect": "forgeYield", "target": "forge", "valueFP": 0.2 },
+    "damp|heat": { "effect": "efficiency", "target": "heat", "valueFP": -0.1 }
+  },
+  "overcrowd": { "threshold": 3, "penaltyPerExcessFP": -0.1, "clampFP": 0.6 },
+  "seedOffsetRange": { "min": -0.2, "max": 0.2 }
+}
