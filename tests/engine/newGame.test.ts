@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { advance, createAdvanceContext } from "../../src/engine/advance";
 import { explorationTeamCandidates } from "../../src/engine/assist/exploration";
 import { fixFromInt, fixFromRaw, toRaw } from "../../src/engine/fp";
 import {
@@ -23,10 +24,16 @@ import {
   type FacilityDef,
   type ReclaimParams,
   type RecordMediaParams,
+  type StorageParams,
 } from "../../src/engine/rules/types";
 import { placeStartingFacilities } from "../../src/engine/rules/worldGen";
 import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
-import { entitiesOfKind, isAliveResident } from "../../src/engine/state/state";
+import {
+  entitiesOfKind,
+  isAliveResident,
+  type EntityId,
+  type GameState,
+} from "../../src/engine/state/state";
 import {
   DEFAULT_DIFFICULTY_SEED_ID,
   DIFFICULTY_SEED_IDS,
@@ -164,6 +171,22 @@ const RECORD_MEDIA: RecordMediaParams = {
 
 const TECH_FIRE_STARTING = id("techFireStarting");
 
+/** [R2-A01] 廃材(GDD 6.7)を宣言した content。薪だけ上限つき + スポンジ 50%。 */
+const WASTE = id("waste");
+const STORAGE: StorageParams = {
+  wasteResourceId: WASTE,
+  baseCapacityByResourceId: new Map([[WOOD, fixFromInt(100)]]),
+  wasteConversionRatioByResourceId: new Map([[WOOD, fixFromRaw(500_000)]]),
+  wasteToResearchRatioFix: fixFromRaw(100_000),
+  buildCostWasteSubstitutionMaxFix: fixFromRaw(200_000),
+  codifyWasteSubstitutionMaxFix: fixFromRaw(50_000),
+};
+
+/** state から resourceId 一致の resource entity を引く(無ければ undefined)。 */
+function resourceOf(state: GameState, resourceId: EntityId) {
+  return entitiesOfKind(state, "resource").find((r) => r.resourceId === resourceId);
+}
+
 /** 開始施設・寿命どちらも活性化する content(HEARTH は fixtures.ts と同じ ID)。 */
 function fullContent(overrides: Partial<EngineContent> = {}): EngineContent {
   const base = baseContent({
@@ -253,6 +276,45 @@ describe("rules/worldGen.ts: placeStartingFacilities", () => {
     const wood = [...entitiesOfKind(next, "resource")].find((r) => r.resourceId === WOOD);
     expect(wood).toBeDefined();
   });
+
+  // --- [R2-A01] 廃材の受け皿(§2(a'))-----------------------------------------
+
+  it("storage.wasteResourceId があれば廃材の resource entity を在庫0で作る", () => {
+    const c = fullContent({ storage: STORAGE });
+    const bare = stateOf([resident("alpha"), resident("beta")]);
+    const next = placeStartingFacilities(bare, c);
+    const waste = resourceOf(next, WASTE);
+    expect(waste).toBeDefined();
+    // ID は engine の採番規約(stock + 先頭大文字化)。migration v6→v7 が補填する
+    // ID と一致していること(= 新規/既存セーブで同じ受け皿になる)。
+    expect(waste?.id).toBe(id("stockWaste"));
+    expect(toRaw(waste!.stock)).toBe(0);
+  });
+
+  it("廃材の在庫が既にあれば触らない(大移動の継承・救済済みセーブを潰さない)", () => {
+    const c = fullContent({ storage: STORAGE });
+    const bare = stateOf([
+      resident("alpha"),
+      { kind: "resource", id: id("resourceWaste"), resourceId: WASTE, stock: fixFromInt(7) },
+    ]);
+    const next = placeStartingFacilities(bare, c);
+    const wastes = entitiesOfKind(next, "resource").filter((r) => r.resourceId === WASTE);
+    expect(wastes.length).toBe(1);
+    expect(toRaw(wastes[0]!.stock)).toBe(toRaw(fixFromInt(7)));
+  });
+
+  it("storage を持たない content では廃材 entity を作らない(省略時は不活性・§3)", () => {
+    const c = fullContent();
+    expect(c.storage).toBeUndefined();
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
+    expect(resourceOf(next, WASTE)).toBeUndefined();
+  });
+
+  it("wasteResourceId が null なら作らない(廃材変換を行わない content)", () => {
+    const c = fullContent({ storage: { ...STORAGE, wasteResourceId: null } });
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
+    expect(entitiesOfKind(next, "resource").some((r) => r.resourceId === WASTE)).toBe(false);
+  });
 });
 
 // --- 生成器本体(src/newGame.ts)---------------------------------------------
@@ -317,6 +379,23 @@ describe("src/newGame.ts: createNewGameState", () => {
   it("content に workbench 定義が無い場合は RulesError(起動要件・§0)", () => {
     const c = fullContent({ facilityDefs: new Map([[HEARTH.id, HEARTH]]) });
     expect(() => createNewGameState(c, { algoVersion: 3 })).toThrow(RulesError);
+  });
+
+  it("[R2-A01] 保管上限を超えて生産し続けても止まらず、廃材が実際に積み上がる", () => {
+    // プレイテスト評価 Round 2 の fatal の再現形: 上限つき資源 + スポンジ機構が
+    // 有効な content で新規ゲームを作り、上限を超えるまで advance する。
+    // 修正前はここで「廃材 "waste" の resource entity が state に無い」で停止した。
+    const c = fullContent({ storage: STORAGE });
+    const state = createNewGameState(c, { algoVersion: 3 });
+    expect(toRaw(resourceOf(state, WASTE)!.stock)).toBe(0);
+
+    const ctx = createAdvanceContext(state, c);
+    const after = advance(state, ctx, 300);
+
+    expect(after.tick).toBe(300);
+    // 薪は上限で頭打ち、超過分の 50% が廃材として積まれている。
+    expect(toRaw(resourceOf(after, WOOD)!.stock)).toBe(toRaw(fixFromInt(100)));
+    expect(toRaw(resourceOf(after, WASTE)!.stock)).toBeGreaterThan(0);
   });
 
   it("content に townParams が無い場合は RulesError(life が生成できない・GDD 7.5)", () => {

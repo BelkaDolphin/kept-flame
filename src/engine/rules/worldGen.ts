@@ -31,6 +31,17 @@
 //       元々どの resource entity も持たないため、content の全 facility 定義が
 //       産出しうる resourceId ぶんを**在庫 0 で先に作っておく**(旧 `newGame.ts`
 //       が個別にやっていたことの一般化)。
+//   (a') **廃材の受け皿の存在**(同じ安全網の廃材版・[2026-08-02 / R2-A01]):
+//       (a) は「facility が産出する資源」しか作らない。廃材(GDD 6.7 のスポンジ
+//       機構が生む資源)は**どの facility も産出しない**ので (a) の網から漏れる。
+//       漏れたまま保管庫が建って在庫が上限を超えると、`rules/production.ts` の
+//       `creditWaste` が「生んだ廃材を黙って捨てない」ために毎 tick 例外で止まり、
+//       時計・産出・オートセーブが停止する(プレイテスト評価 Round 2 の fatal
+//       R2-A01。M5 のスポンジ導入時から潜伏し、保管庫 content が揃った M58 以降に
+//       初めて到達可能になった)。よって `content.storage.wasteResourceId` が
+//       宣言されていれば、その resource entity を**在庫 0 で先に作っておく**。
+//       engine 側の例外(黙って捨てない防御)は正しいので変更しない —— 直すのは
+//       「受け皿を作り忘れている生成器」の側である。
 //   (b) **開始施設(かまど・作業台)の設置**: `content.facilityDefs` に両方の定義
 //       (`hearth`/`workbench`)が**揃っているときだけ**行う(§3 参照)。生存住民を
 //       ID 昇順に先頭から割り当てる(先頭 = かまど、次 = 作業台)。
@@ -125,6 +136,31 @@ function ensureProducibleResourceEntities(state: GameState, content: EngineConte
     next = putEntity(next, entity);
   }
   return next;
+}
+
+/**
+ * [R2-A01] 廃材(`content.storage.wasteResourceId`)の resource entity を
+ * **在庫 0 で無ければ作る**(既存の在庫は一切変更しない)。
+ *
+ * {@link ensureProducibleResourceEntities} と同じ「受け皿を先回りで用意する」
+ * 安全網だが、廃材はどの facility 定義の産出先にも現れないため別建てになる
+ * (§2(a'))。`content.storage` が無い / `wasteResourceId` が null の content では
+ * 何もしない(本リポジトリ共通の「省略時は不活性」規約 = 縮約 content や既存
+ * conformance シナリオの盤面を 1 bit も変えない)。
+ */
+function ensureWasteResourceEntity(state: GameState, content: EngineContent): GameState {
+  const wasteResourceId = content.storage?.wasteResourceId;
+  if (wasteResourceId === undefined || wasteResourceId === null) return state;
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId === wasteResourceId) return state;
+  }
+  const entity: ResourceState = {
+    kind: "resource",
+    id: stockEntityIdFor(wasteResourceId),
+    resourceId: wasteResourceId,
+    stock: fixFromInt(0),
+  };
+  return putEntity(state, entity);
 }
 
 // --- 2. 開始施設の設置(§2(b)) -----------------------------------------------
@@ -227,12 +263,14 @@ function ensureReclaimFloor(state: GameState, content: EngineContent): GameState
  *
  * 何もしない場合があることに注意(§3): `hearth`/`workbench` の定義が
  * どちらか欠けていれば施設は置かない。`content.reclaim` が無ければ開墾資源の
- * 最低保証も行わない(= それぞれ既存の「省略時は不活性」規約どおり)。
+ * 最低保証も行わず、`content.storage.wasteResourceId` が無ければ廃材の受け皿も
+ * 作らない(= それぞれ既存の「省略時は不活性」規約どおり)。
  *
  * @throws {RulesError} 既に facility entity がある / 開始セルが瓦礫の場合
  */
 export function placeStartingFacilities(state: GameState, content: EngineContent): GameState {
   let next = ensureProducibleResourceEntities(state, content);
+  next = ensureWasteResourceEntity(next, content);
   next = placeHearthAndWorkbench(next, content);
   next = ensureReclaimFloor(next, content);
   return next;

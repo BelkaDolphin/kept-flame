@@ -1,0 +1,144 @@
+{
+  "protocol": "docs/design/playtest-protocol.md",
+  "round": 2,
+  "date": "2026-08-02",
+  "commit": "6a7dedb (M61+M38統合後)",
+  "agents": "axisA/B=Opus(390x844) / axisC/E=Sonnet(13画面x3VP) / axisD=Sonnet(13画面)",
+  "verdict": "不合格(新fatal 1件。ただしRound 1指摘の修正はほぼ全て実効確認・スコア悪化0件)",
+  "verdictReasons": [
+    "fatal 1所見(R2-A01 保管庫→waste entity欠落で時計凍結・セーブ汚染=M5+M58から潜伏、R2で初顕在化)",
+    "軸A平均 1.58 ≥ 1.5(基準クリア。R1 1.17から改善)",
+    "軸D 4/5 pass(残存=レート表記の/tick単位語8箇所のみ)",
+    "軸E 5/6 pass(E5残存=migration@768のみ69px重なり。R1の249pxから大幅減)"
+  ],
+  "scores": {
+    "A_task": 1.58,
+    "A_task_detail": {
+      "T1": 2,
+      "T2": 2,
+      "T3": 2,
+      "T4": 1,
+      "T5": 1,
+      "T6": 2,
+      "T7": 2,
+      "T8": 2,
+      "T9": 1,
+      "T10": 2,
+      "T11": 1,
+      "T12": 1
+    },
+    "C_heuristics": 1.86,
+    "C_groupAverages": {
+      "home_hud": 1.8,
+      "base": 1.8,
+      "research_codify": 1.9,
+      "expedition": 1.9,
+      "cycle_settings": 1.9
+    },
+    "D_wording": "4/5 pass (D1のみfail=/tick単位語)",
+    "E_layout": "5/6 pass (E5のみfail=migration@768 69px)"
+  },
+  "comparison": {
+    "A_task": "1.17 → 1.58 (改善4/不変7/悪化0。T10=R1 fatal経路が0→2で完全回復)",
+    "C_heuristics": "1.80 → 1.86 (悪化セル0)",
+    "D_wording": "2/5 → 4/5 (D3帰還ログ和名化・D4警告系が解消)",
+    "E_layout": "E5重なり最大249px → 69px(1組のみ)",
+    "consoleErrors": "R1=2件(fatal起因) → R2=0件(新fatal経路を除く全経路)"
+  },
+  "B_health": {
+    "fatalFindings": 1,
+    "notes": [
+      "R2-A01: 保管庫建設→在庫が上限400超で『廃材\"waste\"のresource entityがstateに無い』例外が毎tick(console 421件)→時計・産出・オートセーブ停止。保管庫はセーブに載るためリロードでも凍結継続。真因=balance.jsonのwasteResourceId宣言に対しnewGame/新周回の初期stateにwaste entity不在(M5+M58から潜伏)。M61 scheduler防御によりrAF自体は生存",
+      "T10完全回復: tick差729のインポート→時計進行+リロード永続化を実測(R1 fatalの解消実証)",
+      "晴天漂着を初観測(寝床8棟=上限16・人口6→第10日6→7・第13日7→8=3日グリッドどおり)。ただし加入は完全無通知(R2-A06)",
+      "想起困難・死亡は13ゲーム日で0件のまま(M38の40日実測では発生する=序盤の研究進行に依存)",
+      "資源は薪3,202,407.9まで桁破綻なし・3桁区切りあり(薪のみ小数1桁付きの不統一)"
+    ]
+  },
+  "findingClusters": [
+    {
+      "key": "R2-FC1",
+      "severity": "fatal",
+      "title": "waste resource entity欠落: 保管庫+在庫超過で時計凍結+セーブ汚染",
+      "members": ["R2-A01"],
+      "cause": "newGame/新周回生成がbalance.wasteResourceIdのentityを作らない(M5スポンジ機構は『黙って捨てない』設計どおり停止)",
+      "disposition": "修正済み(同日: worldGen ensureWasteResourceEntity=新規/新周回両経路+saveSchemaVersion v6→v7 repair migrationで凍結セーブも救済。Playwrightで修正前凍結→修正後進行+救済を実証。廃材自身も保管上限400対象になる点はM39材料)"
+    },
+    {
+      "key": "R2-FC2",
+      "severity": "major",
+      "title": "セーブがプレイヤー操作をトリガにしない(×1で最大60秒の操作が黙って失われうる)=SaveScheduler.recordCommandOutcome未結線(M54発見の既知ギャップ)",
+      "members": ["R2-A02"],
+      "disposition": "束F候補"
+    },
+    {
+      "key": "R2-FC3",
+      "severity": "major",
+      "title": "sticky確定バー残件: migration@768で69px重なり(補正式が内包ケースで無効)+expeditionでROI(B)損失項をボタンが覆う(elementsFromPoint実測)",
+      "members": ["R2-E01", "R2-A03"],
+      "disposition": "束F候補"
+    },
+    {
+      "key": "R2-FC4",
+      "severity": "major",
+      "title": "セーブ焼き込み文字列の内部語の残り: 冒険記『候補#1』(FC4と同型)+レート表記の/tick単位語8箇所",
+      "members": ["R2-A07", "R2-D01"],
+      "disposition": "束F候補(表示時変換の適用拡大)"
+    },
+    {
+      "key": "R2-FC5",
+      "severity": "major",
+      "title": "成文化キューUI: 他行の媒体セレクタが勝手に変わる+二重投入rejectが開発者向け誤診断文言",
+      "members": ["R2-A04", "R2-A05"],
+      "disposition": "束F候補"
+    },
+    {
+      "key": "R2-FC6",
+      "severity": "major",
+      "title": "晴天漂着が完全無通知+寝床上限の現在値がどこにも表示されない",
+      "members": ["R2-A06", "R2-A08"],
+      "disposition": "束F候補"
+    },
+    {
+      "key": "R2-FC7",
+      "severity": "major",
+      "title": "新周回は粘土0で石板成文化が構造的に不可能(開始資源に粘土なし)",
+      "members": ["R2-A10"],
+      "disposition": "M39(開始資源量の再評価に束ね・v9必-2既登録の具体化)"
+    },
+    {
+      "key": "R2-FC8",
+      "severity": "major",
+      "title": "継承点26<最安50で初回周回購入不能(FC9残)+薪産出の無説明半減(FC10残)",
+      "members": ["R1-A12", "R1-A11"],
+      "disposition": "M39(登録済み・変化なし)"
+    },
+    {
+      "key": "R2-FC9",
+      "severity": "minor",
+      "title": "minor 12件+R2-C01〜C03(カタログヒント非対称/ホーム導線/おまかせ欠け)+格子の未開墾ラベルがクリック阻害(軸D申し送り)+薪のみ小数1桁不統一",
+      "members": ["R2-C01", "R2-C02", "R2-C03"],
+      "disposition": "束F候補(軽微分)"
+    },
+    {
+      "key": "R2-FC10",
+      "severity": "major",
+      "title": "2×2施設の配置プレビューが斜めにずれて描画される(gridBoard.css:184の.kf-cell--preview{position:relative}が.kf-cell{position:absolute}を打ち消す。タップ判定は正常=描画のみ)",
+      "members": ["fix-agent発見"],
+      "disposition": "束F候補"
+    }
+  ],
+  "passObservations": [
+    "FC1(R1 fatal)完全解消の実測実証(インポート/最初からやり直し/永続化)",
+    "FC2 HUD分離・FC4帰還ログ和名化(過去ログ含む)・FC5掃討(GDD番号0件/座標和名/3桁区切り)・FC6効果表示4種・FC7通知(9操作トースト)・FC8拠点放棄確認=全て実効確認",
+    "M58実測: 貯水槽→粘土90/tick・写字室→紙85/tick",
+    "リグレッション(スコア悪化項目)0件"
+  ],
+  "unmeasured": [
+    "想起困難・死亡の実UI観測(13日未発火)",
+    "継承点購入の実行後挙動(残高不足で到達不能)",
+    "遠隔/深部探索・鍛冶場/製錬炉/炭焼き窯/菜園の産出",
+    "保管庫の在庫超過警告の実トリガー(axisDは開始資源が届かず/axisAはfatalで到達)",
+    "E4深掘り・加速下C軸評価"
+  ]
+}

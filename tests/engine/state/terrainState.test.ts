@@ -48,6 +48,17 @@ function stateOf(): GameState {
   return createGameState(META, [...ENTITIES]);
 }
 
+/**
+ * [R2-A01] v6→v7 の migration が補填する「廃材の受け皿」を足した state
+ * (旧セーブを現行版へ引き上げた結果と比較するための期待値)。
+ */
+function stateWithWasteReceptacle(): GameState {
+  return createGameState(META, [
+    ...ENTITIES,
+    { kind: "resource", id: idOf("stockWaste"), resourceId: idOf("waste"), stock: fixFromInt(0) },
+  ]);
+}
+
 // --- 1. 既定は「瓦礫ゼロ」= キーごと省略 ------------------------------------
 
 describe("既定の地形(縮約互換)", () => {
@@ -70,18 +81,19 @@ describe("既定の地形(縮約互換)", () => {
     expect(JSON.stringify(toSerializable(restored))).toBe(JSON.stringify(json));
   });
 
-  it("v4 の payload(terrain キー無し)は版だけ進み、全セル開墾済みで読める", () => {
+  it("v4 の payload(terrain キー無し)は地形を触られず、全セル開墾済みで読める", () => {
     const v4 = { ...(toSerializable(stateOf()) as unknown as Record<string, unknown>) };
     v4["saveSchemaVersion"] = 4;
     const migrated = migrateSavePayload(v4);
-    // [M28] v4→v5(地形)+ v5→v6(周回/継承点)の 2 段。
-    expect(migrated.appliedSteps).toHaveLength(2);
+    // [M28] v4→v5(地形)+ v5→v6(周回/継承点)+ [R2-A01] v6→v7(廃材の受け皿)の 3 段。
+    expect(migrated.appliedSteps).toHaveLength(3);
     const restored = fromSerializable(migrated.value);
     expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
     expect(restored.terrain).toEqual(EMPTY_TERRAIN);
-    // 現行ビルドが同じ内容を書いたセーブと 1 bit も違わない。
+    // 現行ビルドが同じ内容(+ v7 が補填する廃材の受け皿)を書いたセーブと
+    // 1 bit も違わない。
     expect(JSON.stringify(toSerializable(restored))).toBe(
-      JSON.stringify(toSerializable(stateOf())),
+      JSON.stringify(toSerializable(stateWithWasteReceptacle())),
     );
   });
 });

@@ -42,9 +42,9 @@ import { createGameState } from "../../src/engine/state/update";
 export const id = (value: string): EntityId => entityIdFromString(value);
 
 export const META: GameStateMeta = {
-  // [M28] 現行のセーブスキーマ版(src/platform/migration.ts の SAVE_SCHEMA_VERSION)。
+  // [R2-A01] 現行のセーブスキーマ版(src/platform/migration.ts の SAVE_SCHEMA_VERSION)。
   // ここが現行版でないと「現行版はそのまま通す」経路のテストが移行段を走ってしまう。
-  saveSchemaVersion: 6,
+  saveSchemaVersion: 7,
   contentVersion: 1,
   algoVersion: 1,
   worldSeed: "seedAlpha",

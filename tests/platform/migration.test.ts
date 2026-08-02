@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { toRaw } from "../../src/engine/fp";
 import { DOMAIN_TAGS } from "../../src/engine/rng/domainTags";
 import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
 import type { GameState } from "../../src/engine/state/state";
@@ -58,6 +59,15 @@ const STATE = stateOf([
   facility("facilityHearth", HEARTH.id, 0, [id("residentA")], 2),
   research("researchBronze", id("techBronze"), 3),
   resource("resourceWood", WOOD, 12),
+]);
+
+/**
+ * [R2-A01] v6→v7 の段が補填する「廃材の受け皿」を {@link STATE} へ足した state。
+ * v6 以前のセーブを現行版へ引き上げた結果は、この entity 集合と一致する。
+ */
+const STATE_WITH_WASTE = stateOf([
+  ...STATE.entityStateById.values(),
+  resource("stockWaste", id("waste"), 0),
 ]);
 
 /** rngState を実際に持つ state(B4 の「空でないなら書く」側)。 */
@@ -351,13 +361,13 @@ describe("migrateSavePayload", () => {
 //   固定するのは「版が進むこと」と「移行後のバイト列が現行ビルドの出力と同一で
 //   あること」の 2 点である。
 
-describe("v1 → v2 → v3 → v4 → v5 → v6(saveSchemaVersion・M16 / M21 / M22 / M52 / M28)", () => {
-  /** v1 のセーブ(= 現行より 5 つ古いスキーマ版を名乗る payload)。 */
+describe("v1 → … → v7(saveSchemaVersion・M16 / M21 / M22 / M52 / M28 / R2-A01)", () => {
+  /** v1 のセーブ(= 現行より 6 つ古いスキーマ版を名乗る payload)。 */
   const V1_STATE = stateOf([...STATE.entityStateById.values()], { saveSchemaVersion: 1 });
 
-  it("現行版は 6 で、連鎖は v1→v2→v3→v4→v5→v6 の 5 段", () => {
-    expect(SAVE_SCHEMA_VERSION).toBe(6);
-    expect(PAYLOAD_MIGRATIONS).toHaveLength(5);
+  it("現行版は 7 で、連鎖は v1→…→v7 の 6 段", () => {
+    expect(SAVE_SCHEMA_VERSION).toBe(7);
+    expect(PAYLOAD_MIGRATIONS).toHaveLength(6);
     expect(PAYLOAD_MIGRATIONS[0]?.from).toBe(1);
     expect(PAYLOAD_MIGRATIONS[0]?.to).toBe(2);
     expect(PAYLOAD_MIGRATIONS[1]?.from).toBe(2);
@@ -368,12 +378,14 @@ describe("v1 → v2 → v3 → v4 → v5 → v6(saveSchemaVersion・M16 / M21 / 
     expect(PAYLOAD_MIGRATIONS[3]?.to).toBe(5);
     expect(PAYLOAD_MIGRATIONS[4]?.from).toBe(5);
     expect(PAYLOAD_MIGRATIONS[4]?.to).toBe(6);
+    expect(PAYLOAD_MIGRATIONS[5]?.from).toBe(6);
+    expect(PAYLOAD_MIGRATIONS[5]?.to).toBe(7);
   });
 
-  it("v1 の payload は 5 段適用されて現行版を名乗る", () => {
+  it("v1 の payload は 6 段適用されて現行版を名乗る", () => {
     const result = migrateSavePayload(plainSerialized(V1_STATE));
     expect(result.fromVersion).toBe(1);
-    expect(result.appliedSteps).toHaveLength(5);
+    expect(result.appliedSteps).toHaveLength(6);
     expect((result.value as Record<string, unknown>)["saveSchemaVersion"]).toBe(
       SAVE_SCHEMA_VERSION,
     );
@@ -386,20 +398,29 @@ describe("v1 → v2 → v3 → v4 → v5 → v6(saveSchemaVersion・M16 / M21 / 
     expect(JSON.stringify(parsed)).toBe(snapshot);
   });
 
-  it("v1 以外のキーは触らない(§1(c) 意味を解釈しない)", () => {
+  it("版と廃材の受け皿以外は触らない(§1(c) 意味を解釈しない)", () => {
     const parsed = plainSerialized(V1_STATE);
     parsed["futureField"] = 7;
     const migrated = migrateSavePayload(parsed).value as Record<string, unknown>;
     expect(migrated["futureField"]).toBe(7);
-    expect(migrated["entityStateById"]).toEqual(parsed["entityStateById"]);
+    // [R2-A01] v6→v7 は受け皿を 1 つ足す(それ以外の entity は 1 bit も動かない)。
+    const before = parsed["entityStateById"] as Record<string, unknown>;
+    const after = migrated["entityStateById"] as Record<string, unknown>;
+    expect(Object.keys(after).sort()).toEqual([...Object.keys(before), "stockWaste"].sort());
+    for (const key of Object.keys(before)) {
+      expect(after[key]).toEqual(before[key]);
+    }
   });
 
   it("v1 セーブ → 現行版の往復が現行ビルドの出力とバイト同一(検収条件)", () => {
     const migrated = migrateSavePayload(plainSerialized(V1_STATE)).value;
     const restored = fromSerializable(migrated);
     expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
-    // 同じ entity 集合を現行版として書いたセーブと 1 bit も違わない。
-    expect(JSON.stringify(toSerializable(restored))).toBe(encodeSaveRecord(STATE).payload);
+    // 同じ entity 集合(+ v7 が補填する廃材の受け皿)を現行版として書いたセーブと
+    // 1 bit も違わない。
+    expect(JSON.stringify(toSerializable(restored))).toBe(
+      encodeSaveRecord(STATE_WITH_WASTE).payload,
+    );
   });
 
   it("v1 セーブの全施設は 1×1 のまま(既定値が現行挙動と厳密一致)", () => {
@@ -417,8 +438,12 @@ describe("v1 → v2 → v3 → v4 → v5 → v6(saveSchemaVersion・M16 / M21 / 
   it("エンベロープ v0 かつ スキーマ v1 の旧セーブは 2 軸が連鎖してロードできる", () => {
     const restored = decodeSaveRecord(legacySave(V1_STATE));
     expect(restored.saveSchemaVersion).toBe(SAVE_SCHEMA_VERSION);
-    expect([...restored.entityStateById.keys()]).toEqual([...STATE.entityStateById.keys()]);
-    expect(JSON.stringify(toSerializable(restored))).toBe(encodeSaveRecord(STATE).payload);
+    expect([...restored.entityStateById.keys()]).toEqual([
+      ...STATE_WITH_WASTE.entityStateById.keys(),
+    ]);
+    expect(JSON.stringify(toSerializable(restored))).toBe(
+      encodeSaveRecord(STATE_WITH_WASTE).payload,
+    );
   });
 
   it("v2 セーブは 1 段も走らない(現行版はそのまま通す)", () => {
@@ -431,5 +456,92 @@ describe("v1 → v2 → v3 → v4 → v5 → v6(saveSchemaVersion・M16 / M21 / 
   it("payload がオブジェクトでなければ v1 段は拒否する", () => {
     expect(() => PAYLOAD_MIGRATIONS[0]?.migrate("text")).toThrow(SaveMigrationError);
     expect(() => PAYLOAD_MIGRATIONS[0]?.migrate(null)).toThrow(SaveMigrationError);
+  });
+});
+
+// --- 8. [R2-A01] v6 → v7(廃材の受け皿の補填)--------------------------------
+//
+//   本連鎖で初めて**構造を直す**段。プレイテスト評価 Round 2 の fatal
+//   (保管庫を建てて在庫が上限を超えると毎 tick 例外 → 時計・産出・オートセーブ
+//   停止。保管庫はセーブに載るのでリロードしても凍結継続)を、既存セーブ側で
+//   救済するのがこの段である。
+
+describe("v6 → v7: 廃材の受け皿の補填(R2-A01)", () => {
+  const V6 = (state: GameState): Record<string, unknown> =>
+    plainSerialized(stateOf([...state.entityStateById.values()], { saveSchemaVersion: 6 }));
+
+  const step = PAYLOAD_MIGRATIONS[5];
+
+  it("受け皿を持たない v6 セーブへ在庫 0 の stockWaste を足す(凍結セーブの救済)", () => {
+    const migrated = migrateSavePayload(V6(STATE)).value as Record<string, unknown>;
+    const entities = migrated["entityStateById"] as Record<string, unknown>;
+    expect(entities["stockWaste"]).toEqual({
+      kind: "resource",
+      id: "stockWaste",
+      resourceId: "waste",
+      stock: 0,
+    });
+    // 復元しても在庫 0 の廃材 resource として読める(会計フィールドは持たない)。
+    const restored = fromSerializable(migrated);
+    const waste = [...restored.entityStateById.values()].find(
+      (entity) => entity.kind === "resource" && entity.resourceId === id("waste"),
+    );
+    expect(waste?.kind).toBe("resource");
+    if (waste?.kind !== "resource") throw new Error("kind が resource でない");
+    expect(toRaw(waste.stock)).toBe(0);
+    expect(waste.cumulativeProduced).toBeUndefined();
+    expect(waste.cumulativeOverflow).toBeUndefined();
+  });
+
+  it("既に廃材の resource entity があれば足さない(冪等・在庫も触らない)", () => {
+    const withWaste = stateOf([
+      ...STATE.entityStateById.values(),
+      resource("resourceWaste", id("waste"), 42),
+    ]);
+    const migrated = migrateSavePayload(V6(withWaste)).value as Record<string, unknown>;
+    const entities = migrated["entityStateById"] as Record<string, unknown>;
+    expect(entities["stockWaste"]).toBeUndefined();
+    expect(entities["resourceWaste"]).toEqual({
+      kind: "resource",
+      id: "resourceWaste",
+      resourceId: "waste",
+      stock: 42_000_000,
+    });
+    // 2 度通しても同じ(構造で判定しているので冪等)。
+    expect(step?.migrate(migrated)).toEqual({ ...migrated, saveSchemaVersion: 7 });
+  });
+
+  it("入力の payload を破壊しない(純関数)", () => {
+    const parsed = V6(STATE);
+    const snapshot = JSON.stringify(parsed);
+    migrateSavePayload(parsed);
+    expect(JSON.stringify(parsed)).toBe(snapshot);
+  });
+
+  it("stockWaste が廃材以外で使われていれば黙って上書きせず停止する", () => {
+    const collided = V6(STATE);
+    const entities = collided["entityStateById"] as Record<string, unknown>;
+    entities["stockWaste"] = { kind: "resource", id: "stockWaste", resourceId: "clay", stock: 5 };
+    expect(() => migrateSavePayload(collided)).toThrow(SaveMigrationError);
+  });
+
+  it("entityStateById が無い / オブジェクトでない payload は版だけ進めて素通しする", () => {
+    expect(step?.migrate({ saveSchemaVersion: 6 })).toEqual({ saveSchemaVersion: 7 });
+    expect(step?.migrate({ saveSchemaVersion: 6, entityStateById: 3 })).toEqual({
+      saveSchemaVersion: 7,
+      entityStateById: 3,
+    });
+  });
+
+  it("payload がオブジェクトでなければ拒否する", () => {
+    expect(() => step?.migrate("text")).toThrow(SaveMigrationError);
+    expect(() => step?.migrate(null)).toThrow(SaveMigrationError);
+  });
+
+  it("v6 セーブ → 現行版の往復が現行ビルドの出力とバイト同一", () => {
+    const restored = fromSerializable(migrateSavePayload(V6(STATE)).value);
+    expect(JSON.stringify(toSerializable(restored))).toBe(
+      encodeSaveRecord(STATE_WITH_WASTE).payload,
+    );
   });
 });

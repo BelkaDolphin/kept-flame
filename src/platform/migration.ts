@@ -295,7 +295,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
 // --- 4. 軸 (ii): セーブスキーマ版 -------------------------------------------
 
 /**
- * payload の中身の版(ADR 3軸(a))。現行 = 6([M28] 周回 / 継承点の導入)。
+ * payload の中身の版(ADR 3軸(a))。現行 = 7([R2-A01] 廃材の受け皿の補填)。
  *
  * `tests/engine/fixtures.ts` の `META.saveSchemaVersion` はこの値と一致させてある
  * (= 現行ビルドが書くセーブの形)。
@@ -306,7 +306,7 @@ export function migrateStoredSave(stored: unknown): SaveMigrationResult {
  * 40 本のベクタは **v1 セーブの実物corpus**として機能し、v1→v2 の移行が壊れれば
  * それらを読む経路のテストが落ちる。
  */
-export const SAVE_SCHEMA_VERSION = 6;
+export const SAVE_SCHEMA_VERSION = 7;
 
 /**
  * [M16] v1 → v2: facility の `footprint`(GDD 6.1 の 2×1 / 2×2)導入。
@@ -518,6 +518,134 @@ const migratePayloadV5ToV6: SaveMigrationStep = {
   },
 };
 
+// --- 4b. v6 → v7: 廃材の受け皿の補填(本連鎖で最初の「構造を直す」段)---------
+//
+//   ここまでの 5 段は全て「版だけを進める」段だったが、この段は **payload の
+//   entity を 1 つ増やす**。連鎖に構造変換の段が入るのは初めてなので、線引きを
+//   明示しておく:
+//
+//   - §1(c)「構造の変換だけを行い、意味を解釈しない」に反しない。禁じているのは
+//     **現行スキーマの目で旧セーブを読むこと**(段の中で `fromSerializable` を
+//     呼ぶこと)であって、その版の直列化形が持つ形そのものを触ることではない。
+//     本段が読み書きするのは「v6 の resource entity の形」(`serialize.ts` の
+//     `SerializedResource` = `{kind, id, resourceId, stock}`)であり、これは v6 で
+//     **凍結された過去の形**として下のリテラルに書き下してある。将来 resource の
+//     形が変わっても本段の出力は変わらない(その差は v7→v8 以降の段が担う)。
+//   - 資源 ID を content から読まない。migration は純関数(§1(a))であり、
+//     content は運営 LLM が週次で足せる可変物である。可変物を読む段は
+//     「同じ旧セーブから常に同じ結果が出る」性質を失うので、**v7 を切った時点の
+//     `content/balance.json` の宣言値をリテラルで凍結**する(下の 2 定数)。
+
+/**
+ * [R2-A01] v7 時点の `content/balance.json` が宣言していた廃材の resource 定義 ID。
+ * **歴史的定数**であり、content 側が将来別の ID に変わっても書き換えない。
+ */
+const V7_WASTE_RESOURCE_ID = "waste";
+
+/**
+ * [R2-A01] 補填する resource entity の ID。engine 側の採番規約
+ * (`rules/worldGen.ts` の `stockEntityIdFor` = `"stock" + 先頭大文字化`)に一致
+ * させてあるので、新規ゲームが作る受け皿と**同じ ID**になる。
+ */
+const V7_WASTE_ENTITY_ID = "stockWaste";
+
+/** payload の `entityStateById` に廃材の resource entity が既に居るか。 */
+function hasWasteResourceEntity(entities: Record<string, unknown>): boolean {
+  for (const key of Object.keys(entities)) {
+    const entity = entities[key];
+    if (!isRecordObject(entity)) continue;
+    if (entity["kind"] !== "resource") continue;
+    if (entity["resourceId"] === V7_WASTE_RESOURCE_ID) return true;
+  }
+  return false;
+}
+
+/**
+ * [R2-A01] v6 → v7: 廃材(GDD 6.7 のスポンジ機構が生む資源)の resource entity を
+ * **セーブの不変条件へ格上げ**し、持っていない v6 セーブへ在庫 0 の受け皿を足す。
+ *
+ * **何が壊れていたか**: `content/balance.json` は `storage.wasteResourceId` を
+ * 宣言しているのに、新規ゲーム生成(`src/newGame.ts` → `rules/worldGen.ts`)が
+ * その resource entity を作っていなかった。保管庫が建って在庫が上限を超えた
+ * 瞬間から `rules/production.ts` の `creditWaste` が
+ * 「生んだ廃材を黙って捨てない」ために毎 tick 例外で止まり、時計・産出・
+ * オートセーブが停止する(プレイテスト評価 Round 2 の fatal R2-A01)。
+ * **保管庫はセーブに載る**ので、リロードしても凍結したままになる ——
+ * つまり生成器側(engine)を直すだけでは既存セーブが救われない。この段が
+ * その救済であり、ロードすれば直る唯一の経路である。
+ *
+ * **bump 要否の判断(ADR-012 [2026-07-30追記] の線引きへの当てはめ)**
+ *
+ * これまでの 5 段の理由(= 旧ビルドが新セーブを読むと黙って壊れる)は、
+ * **本段には当てはまらない**。v7 のセーブを M61 以前のビルドが読んでも、
+ * 見えるのは「在庫 0 の廃材 entity が 1 つ増えている」だけであり、壊れるどころか
+ * 旧ビルドの凍結条件そのものが解消される。それでも版を上げるのは理由が違う:
+ *
+ *   ① **版差が救済の運搬手段そのもの**である。マイグレーション連鎖は版でしか
+ *      段を選べない(`runMigrationChain`)。「既存セーブをロードで直す」を
+ *      この連鎖に載せる以上、載せる場所として版境界が要る。
+ *   ② **セーブの不変条件が 1 つ増えたことの記録**になる。v7 以降のセーブは
+ *      「content が廃材を宣言しているなら受け皿を持つ」を満たす前提で読める。
+ *      v6 以前にはその保証が無く、両者は目視で区別できない。
+ *   ③ ①②のいずれも、**構造検査(受け皿があるか)だけでも代替はできる**。実際
+ *      本段は版に加えて構造も見るので冪等である(受け皿がある v6 セーブには
+ *      entity を足さない)。版を上げないという選択も成立したが、その場合
+ *      「いつからこの不変条件があるか」がコードのどこにも残らないため採らない。
+ *
+ * **なぜ在庫 0 か**: 凍結中に失われたぶんの廃材を遡って復元することはできない
+ * (どれだけ超過したかは `cumulativeOverflow` に残るが、そこから復元した値は
+ * 「その時そう計算されたはずの値」であって観測値ではない)。セーブに書いていない
+ * 数字を migration が発明しないという原則を優先し、受け皿だけを 0 で用意する。
+ *
+ * **entityStateById が無い / オブジェクトでない payload**: 版だけ進めて素通しする。
+ * その形の判定と拒否は `fromSerializable`(serialize.ts)の仕事であり、ここで
+ * 二重に拒否すると壊れ方の説明が 2 箇所に分かれる(§1(c))。
+ */
+const migratePayloadV6ToV7: SaveMigrationStep = {
+  from: 6,
+  to: 7,
+  summary:
+    "廃材(storage.wasteResourceId)の resource entity をセーブの不変条件へ格上げ。" +
+    "受け皿を持たない v6 セーブへ在庫 0 の stockWaste を足し(R2-A01 の凍結セーブ救済)、" +
+    "saveSchemaVersion を 7 へ進める",
+  migrate(value: unknown): unknown {
+    if (!isRecordObject(value)) {
+      throw new SaveMigrationError(`v6 の payload がオブジェクトでない(実際: ${describe(value)})`);
+    }
+    const next: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      next[key] = value[key];
+    }
+    next["saveSchemaVersion"] = 7;
+
+    const entities = value["entityStateById"];
+    if (!isRecordObject(entities)) return next;
+    if (hasWasteResourceEntity(entities)) return next;
+    if (V7_WASTE_ENTITY_ID in entities) {
+      // 廃材以外の entity が同じ ID を使っている = このセーブは本リポジトリの
+      // 採番規約の外にある。上書きすると別の entity が黙って消えるので停止する。
+      throw new SaveMigrationError(
+        `entity ID "${V7_WASTE_ENTITY_ID}" が廃材以外で使われているため受け皿を作れない`,
+      );
+    }
+    const added: Record<string, unknown> = {};
+    for (const key of Object.keys(entities)) {
+      added[key] = entities[key];
+    }
+    added[V7_WASTE_ENTITY_ID] = {
+      kind: "resource",
+      id: V7_WASTE_ENTITY_ID,
+      resourceId: V7_WASTE_RESOURCE_ID,
+      // 1e6 固定小数点の raw 整数(`serialize.ts` の `SerializedResource.stock`)。
+      // オーバーフロー会計(cumulativeProduced / cumulativeOverflow)は
+      // **対でキーごと省略**が正準形なので書かない(serialize.ts §4)。
+      stock: 0,
+    };
+    next["entityStateById"] = added;
+    return next;
+  },
+};
+
 /**
  * セーブスキーマ版の連鎖(`from` 昇順)。
  *
@@ -530,6 +658,7 @@ export const PAYLOAD_MIGRATIONS: readonly SaveMigrationStep[] = [
   migratePayloadV3ToV4,
   migratePayloadV4ToV5,
   migratePayloadV5ToV6,
+  migratePayloadV6ToV7,
 ];
 
 assertMigrationChain(PAYLOAD_MIGRATIONS, SAVE_SCHEMA_VERSION, "saveSchemaVersion");

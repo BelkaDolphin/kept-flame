@@ -1,0 +1,235 @@
+{
+  "baseline": {
+    "coarseTickMinutes": 10,
+    "label": "baseline-10min",
+    "measured": [
+      { "elapsedMs": 355.42013499999985, "seed": "calibrate-baseline-10min-2" },
+      { "elapsedMs": 289.3893790000002, "seed": "calibrate-baseline-10min-3" },
+      { "elapsedMs": 321.9887100000001, "seed": "calibrate-baseline-10min-4" },
+      { "elapsedMs": 297.5666799999999, "seed": "calibrate-baseline-10min-5" },
+      { "elapsedMs": 342.17987700000003, "seed": "calibrate-baseline-10min-6" }
+    ],
+    "measuredSecPerRun": 0.32198871000000007,
+    "nightly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 708.3751620000002,
+      "runsPerShard": 2200,
+      "shards": 1,
+      "totalRuns": 2200,
+      "withinCap": true
+    },
+    "totalTicksPerRun": 23040,
+    "warmup": [
+      { "elapsedMs": 439.007919, "seed": "calibrate-baseline-10min-0" },
+      { "elapsedMs": 299.76043700000014, "seed": "calibrate-baseline-10min-1" }
+    ],
+    "weekly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1770.9379050000005,
+      "runsPerShard": 5500,
+      "shards": 2,
+      "totalRuns": 11000,
+      "withinCap": true
+    }
+  },
+  "bots11": {
+    "botCount": 11,
+    "coarseTickMinutes": 10,
+    "label": "bots11-strategy5-plus-adversarial6",
+    "measuredSecPerRun": 0.1375539749999989,
+    "nightly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 302.6187449999976,
+      "runsPerShard": 2200,
+      "shards": 1,
+      "totalRuns": 2200,
+      "withinCap": true
+    },
+    "samples": [
+      {
+        "botId": "greedy",
+        "elapsedMs": 144.52074800000264,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "researchFirst",
+        "elapsedMs": 119.58552500000224,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "explorationFirst",
+        "elapsedMs": 170.96070300000065,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "placementVariant",
+        "elapsedMs": 134.4793009999994,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "codifyFirst",
+        "elapsedMs": 145.7990260000006,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "soleHolderExpeditionWipe",
+        "elapsedMs": 95.03459999999905,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "codifyNeglect",
+        "elapsedMs": 159.53790800000206,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "rareHolderFastestLoss",
+        "elapsedMs": 161.3299079999997,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "traitConcentration",
+        "elapsedMs": 156.64313000000038,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "turtleNoExploration",
+        "elapsedMs": 157.1012789999986,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "clockForwardExploit",
+        "elapsedMs": 155.30745500000194,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-a"
+      },
+      {
+        "botId": "greedy",
+        "elapsedMs": 100.38217199999781,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "researchFirst",
+        "elapsedMs": 107.45206899999903,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "explorationFirst",
+        "elapsedMs": 142.61287099999754,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "placementVariant",
+        "elapsedMs": 96.04846600000019,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "codifyFirst",
+        "elapsedMs": 111.48569299999872,
+        "kind": "strategy",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "soleHolderExpeditionWipe",
+        "elapsedMs": 51.755799999999,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "codifyNeglect",
+        "elapsedMs": 137.48366299999907,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "rareHolderFastestLoss",
+        "elapsedMs": 138.8864539999995,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "traitConcentration",
+        "elapsedMs": 137.62428699999873,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "turtleNoExploration",
+        "elapsedMs": 136.19944499999838,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      },
+      {
+        "botId": "clockForwardExploit",
+        "elapsedMs": 136.29229900000064,
+        "kind": "adversarial",
+        "seed": "calibrate-bots11-b"
+      }
+    ],
+    "slowestBotId": "explorationFirst",
+    "slowestSecPerRun": 0.17096070300000066,
+    "totalTicksPerRun": 23040,
+    "weekly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1513.0937249999881,
+      "runsPerShard": 11000,
+      "shards": 1,
+      "totalRuns": 11000,
+      "withinCap": true
+    },
+    "weeklyWorstCase": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 940.2838665000036,
+      "runsPerShard": 5500,
+      "shards": 2,
+      "totalRuns": 11000,
+      "withinCap": true
+    }
+  },
+  "fallback": {
+    "coarseTickMinutes": 1,
+    "label": "fallback-1min",
+    "measured": [
+      { "elapsedMs": 2923.234326, "seed": "calibrate-fallback-1min-2" },
+      { "elapsedMs": 3152.773444999999, "seed": "calibrate-fallback-1min-3" },
+      { "elapsedMs": 3079.732807000002, "seed": "calibrate-fallback-1min-4" },
+      { "elapsedMs": 3033.0943990000014, "seed": "calibrate-fallback-1min-5" },
+      { "elapsedMs": 2910.582687000002, "seed": "calibrate-fallback-1min-6" }
+    ],
+    "measuredSecPerRun": 3.033094399000001,
+    "nightly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1668.2019194500006,
+      "runsPerShard": 550,
+      "shards": 4,
+      "totalRuns": 2200,
+      "withinCap": true
+    },
+    "totalTicksPerRun": 23040,
+    "warmup": [
+      { "elapsedMs": 3057.7628270000005, "seed": "calibrate-fallback-1min-0" },
+      { "elapsedMs": 3022.704477, "seed": "calibrate-fallback-1min-1" }
+    ],
+    "weekly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1756.1616570210008,
+      "runsPerShard": 579,
+      "shards": 19,
+      "totalRuns": 11000,
+      "withinCap": true
+    }
+  }
+}

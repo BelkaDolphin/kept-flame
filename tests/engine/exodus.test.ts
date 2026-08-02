@@ -815,6 +815,30 @@ describe("新周回の開始状態(M53)", () => {
     expect(toRaw(wood!.stock)).toBeGreaterThanOrEqual(toRaw(RECLAIM.baseCostFix));
   });
 
+  it("[R2-A01] storage を宣言した content では、次周の開始状態にも廃材の受け皿がある", () => {
+    // 大移動後の新周回も `placeStartingFacilities`(worldGen.ts)を通るので、
+    // 新規ゲームと同じ受け皿が作られる(= 2 周目以降でも保管庫で凍結しない)。
+    const withStorage: EngineContent = {
+      ...CONTENT_WITH_STARTER_FACILITIES,
+      storage: {
+        wasteResourceId: id("waste"),
+        baseCapacityByResourceId: new Map([[WOOD, fixFromInt(100)]]),
+        wasteConversionRatioByResourceId: new Map([[WOOD, fixFromRaw(500_000)]]),
+        wasteToResearchRatioFix: fixFromRaw(100_000),
+        buildCostWasteSubstitutionMaxFix: fixFromRaw(200_000),
+        codifyWasteSubstitutionMaxFix: fixFromRaw(50_000),
+      },
+    };
+    const after = executeExodus(board(), withStorage, {
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    const waste = entitiesOfKind(after, "resource").find((r) => r.resourceId === id("waste"));
+    expect(waste).toBeDefined();
+    expect(waste?.id).toBe(id("stockWaste"));
+    expect(toRaw(waste!.stock)).toBe(0);
+  });
+
   it("hearth のみ(workbench 定義なし)の CONTENT では新周回でも施設は増えない(既存互換)", () => {
     // CONTENT(既存フィクスチャ)は workbench を持たないので、M53 追加後も
     // 施設ゼロの盤面のままである(このファイルの他の全テストの前提が動かない
