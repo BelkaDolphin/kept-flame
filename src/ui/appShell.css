@@ -32,6 +32,18 @@
   /* [束A/F-5] sticky ナビの実効高さ。画面内の sticky アクションバー
      (`.kf-sticky-actions`)がナビの上に重ならないための唯一の出典。 */
   --kf-nav-height: 60px;
+
+  /* [M61/FC3・R1-C03/C04] `.kf-sticky-actions` の確保すべき最大想定高さ
+     (確認ダイアログ展開時: 説明文2〜3行 + ボタン2つの行 + パディング/枠線)。
+     `min-height:100%` + `margin-top:auto`(appShell.css 側)は「ページ全体が
+     ビューポートより低い」場合の重なりは解消するが、**その画面自体の内容が
+     ビューポートより高い**場合(候補が多い⑦/⑩等)は、初期スクロール位置
+     (scrollY=0)でもこの分だけ sticky バーが「まだスクロールしていない直前の
+     内容」に重なって描画されうる(sticky の性質上、要素の静的位置が画面外でも
+     bottom オフセットへ引き寄せられるため)。sticky バーの**直前の要素**へこの
+     変数ぶんの余白を足すことで、重なりが原理的に起きない量まで押し下げる
+     (実測: 確認ダイアログ込みで最大 ~140px・安全側に 10rem=160px)。 */
+  --kf-sticky-actions-reserve: 10rem;
 }
 
 .kf-app {
@@ -113,10 +125,17 @@
   color: var(--kf-ink-muted);
 }
 
-/* --- 資源HUD(ヘッダ常設・[束A] F-3) --------------------------------------
+/* --- 資源HUD(ヘッダ常設・[束A] F-3・[M61/FC2] 固定枠+スクロール枠に分離) ---
    1e6 固定小数点 → 人間可読値の換算は derived.ts の `toApproxNumber`(engine の
    fp.ts)が済ませた `stockApprox` を使い、ここでは桁の整形だけを行う
-   (`formatResourceAmount`)。狭い画面ではこの帯だけが横スクロールする。 */
+   (`formatResourceAmount`)。
+
+   [M61/FC2・R1-A04/R1-C01] 以前は時計/研究チップ/加速インジケータ/資源チップ
+   すべてを 1 本の横スクロール行に並べていたため、390px 幅では資源が増えるほど
+   研究チップ・加速インジケータまでもが画面外へ押し出されていた。
+   `.kf-app__hud` 自体はもう overflow を持たず、**常時可視の固定チップ**
+   (時計・研究チップ・加速インジケータ)を直接の子として並べたあと、資源だけを
+   `.kf-app__hud-scroll` という**内側のスクロール領域**へ隔離する。 */
 
 .kf-app__hud {
   flex: 1 1 auto;
@@ -124,11 +143,29 @@
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+  /* [M61/FC2] 固定チップ(時計/研究/加速)だけでも極狭幅では収まりきらない
+     ことがある。折り返し無しだとヘッダごと横へはみ出し、ページ全体の横スク
+     ロール(E3)を誘発しかねないので、最後の保険として折り返しを許す
+     (通常幅では 1 行に収まり、折り返しは事実上発生しない)。 */
+  flex-wrap: wrap;
+  row-gap: 0.2rem;
+}
+
+/* [M61/FC2] 資源チップだけがここで横スクロールする(固定チップを巻き込まない)。
+   右端にフェード(スクロール手がかり)を出す——JS のオーバーフロー検出を持ち
+   込まず、mask-image だけで実装する(内容が収まっている場合は右端の数px が
+   軽く透けるだけで実害が無い・★判断)。iOS Safari 向けに -webkit- 接頭辞も
+   併記する。 */
+.kf-app__hud-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   /* iOS の慣性スクロール中にヘッダ全体が動かないようにする。 */
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 18px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 18px), transparent 100%);
 }
 
 .kf-app__hud-list {
@@ -312,11 +349,25 @@
    「派遣する」「大移動を実行」のような**その画面の確定操作**を、長い一覧を
    スクロールしても押せる位置に留める。ナビ(sticky bottom:0)の直上に置く。 */
 
+/* [M61/FC3・R1-C03/C04] `position:sticky; bottom:` は「その画面の内容が
+   ビューポートよりあまり高くない」ときに、素の(非stickyな)位置より上へ
+   引き上げられる——ページ全体がスクロール不要な短さだと、初期表示
+   (scrollY=0)の時点で直前の兄弟要素(ROI パネル/積み込みプレビュー=不可逆
+   操作の確認情報)へ重なってしまっていた(束A/M-3導入時からの既存不具合)。
+   `.kf-expedition-screen`/`.kf-migration-screen` 側を
+   `display:flex; flex-direction:column; min-height:100%` にしたうえで
+   `margin-top:auto` を足すと、内容が短い画面ではこのバーが画面の実際の下端
+   まで押し下げられて事前に確保された空間に収まり(重ならない)、内容が長い
+   画面では通常どおり sticky として振る舞う(内容が min-height を上回れば
+   flex は縮めない)。他の画面(このクラスを使わない/親が flex column でない
+   画面)には影響しない(margin:auto は非flexコンテキストでは 0 として扱われる
+   安全なデフォルト)。 */
 .kf-sticky-actions {
   position: sticky;
   bottom: var(--kf-nav-height);
   z-index: 10;
   margin: 0.6rem 0;
+  margin-top: auto;
   padding: 0.4rem 0;
   background: var(--kf-surface-page);
   border-top: 1px solid var(--kf-line-soft);
@@ -655,7 +706,18 @@
 
 /* --- [M30] コマンド拒否バナー(②③④共通・src/ui/screens/RejectionBanner.tsx) -- */
 
+/* [M61/FC11・R1-A23] 長い一覧の下部(住民一覧の6人目等)で拒否が起きると、
+   バナーは一覧の最上部に出るためスクロール位置の外で気づけなかった。
+   sticky でヘッダ直下に留め、一覧のどこを操作していても視界に入るようにする
+   (JS の scrollIntoView は使わない——このリポジトリの vitest 環境は jsdom を
+   持たず DOM 実測に依存できないため、CSS だけで解決できる構造的な保証を選ぶ
+   ・appShell.css 内の他の sticky 解法と同じ方針)。`top` の値はヘッダの実測
+   ではなく概算(44px=このコードベース全体の最小タップ領域と同じ数値を流用し、
+   通常 1 行に収まるヘッダの高さをやや上回る安全側の見積り・★実機で要確認)。 */
 .kf-rejection-banner {
+  position: sticky;
+  top: 2.75rem;
+  z-index: 15;
   margin: 0 0 0.6rem;
   padding: 0.5rem 0.7rem;
   border: 1px solid var(--kf-urgency-critical-line);

@@ -28,7 +28,9 @@ import { useState } from "preact/hooks";
 import type { CommandRejection } from "../../../engine/commands";
 import { entityIdFromString, type EntityId } from "../../../engine/state/state";
 import type { FacilityRosterEntry, ResidentView } from "../../derived";
+import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, residentDisplayName, traitLabel } from "../contentLabels";
+import { formatApproxDecimal1 } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
@@ -74,11 +76,11 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
         {badges.length > 0 && <span class="kf-resident-row__badges">{badges.join("・")}</span>}
       </div>
       <ul class="kf-resident-row__stats">
-        <li>体力{resident.stats.vigorApprox}</li>
-        <li>器用{resident.stats.dexterityApprox}</li>
-        <li>知性{resident.stats.intellectApprox}</li>
-        <li>頑健{resident.stats.fortitudeApprox}</li>
-        <li>意志{resident.stats.willApprox}</li>
+        <li>体力{formatApproxDecimal1(resident.stats.vigorApprox)}</li>
+        <li>器用{formatApproxDecimal1(resident.stats.dexterityApprox)}</li>
+        <li>知性{formatApproxDecimal1(resident.stats.intellectApprox)}</li>
+        <li>頑健{formatApproxDecimal1(resident.stats.fortitudeApprox)}</li>
+        <li>意志{formatApproxDecimal1(resident.stats.willApprox)}</li>
       </ul>
       {resident.traitIds.length > 0 && (
         <p class="kf-resident-row__traits">
@@ -95,7 +97,7 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
           <option value="">(無配属)</option>
           {facilityRoster.map((facility) => (
             <option key={facility.facilityId} value={facility.facilityId}>
-              {facilityLabel(facility.defId)}({facility.cellId})
+              {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})
             </option>
           ))}
         </select>
@@ -169,14 +171,14 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
           class="kf-residents-screen__nav-button"
           onClick={() => onNavigate("grid")}
         >
-          ②格子ビューへ
+          格子ビューへ
         </button>
         <button
           type="button"
           class="kf-residents-screen__nav-button"
           onClick={() => onNavigate("facility")}
         >
-          ③施設詳細へ
+          施設詳細へ
         </button>
       </div>
     </section>

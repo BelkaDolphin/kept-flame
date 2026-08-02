@@ -44,7 +44,8 @@ import {
 import type { RecordMedium } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import type { CodifySuggestionView, CodifyTechEntry } from "../../derived";
-import { mediumLabel, techLabel } from "../contentLabels";
+import { mediumLabel, resourceLabel, techLabel } from "../contentLabels";
+import { formatTickSpan } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -73,6 +74,13 @@ export interface CodifyTechRowProps {
    * 描かない(既存テストの呼び出し互換・タスク指示の対象=進行中の記録のみ)。
    */
   readonly onCancel?: (codifyId: EntityId) => void;
+  /**
+   * [M61/FC11・R1-A15] 選択中媒体(`selectedMedium`)の必要資源(キューに入れる
+   * 前のプレビュー)。`null` = 出さない(content に recordMedia が無い等)。
+   * 在庫が足りるかどうかの判定はしない(表示のみ・engine の
+   * `insufficientResource` reject に委ねる方針は維持)。
+   */
+  readonly costPreview?: { readonly resourceId: EntityId; readonly amountApprox: number } | null;
 }
 
 export function CodifyTechRow({
@@ -81,6 +89,7 @@ export function CodifyTechRow({
   onMediumChange,
   onEnqueue,
   onCancel,
+  costPreview = null,
 }: CodifyTechRowProps) {
   function handleMediumChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as RecordMedium;
@@ -100,7 +109,9 @@ export function CodifyTechRow({
 
       {entry.holderIds.length > 0 && (
         <p class="kf-codify-row__risk">
-          残存想定: {entry.hasDeadline ? `約${entry.residualTick}tick` : "無期限(寿命モデル未設定)"}
+          {/* [M61/FC5⑤] 生tick("約127830tick")を formatTickSpan へ。
+              「寿命モデル未設定」は実装用語のため落とす("無期限"はそのまま残す)。 */}
+          残存想定: {entry.hasDeadline ? `約${formatTickSpan(entry.residualTick)}` : "無期限"}
           {entry.maxRecallRiskPercentApprox !== null &&
             `・想起リスク約${entry.maxRecallRiskPercentApprox.toFixed(1)}%/日`}
         </p>
@@ -143,6 +154,11 @@ export function CodifyTechRow({
           <option value="paper">紙</option>
         </select>
       </label>
+      {costPreview !== null && (
+        <p class="kf-codify-row__cost-preview">
+          必要資源: {resourceLabel(costPreview.resourceId)} {costPreview.amountApprox.toFixed(1)}
+        </p>
+      )}
       <button
         type="button"
         class="kf-codify-row__enqueue-button"
@@ -158,15 +174,21 @@ export function CodifyTechRow({
 
 export interface CodifySuggestionRowProps {
   readonly suggestion: CodifySuggestionView;
-  readonly order: number;
 }
 
-export function CodifySuggestionRow({ suggestion, order }: CodifySuggestionRowProps) {
+/**
+ * [M61/FC11・R1-A21] 手書きの連番("{order}. ")を削除した——描画先が `<ol>`
+ * (`CodifySuggestionPanel` の `kf-codify-assist__list`)なのでブラウザが既に
+ * マーカー番号を出しており、二重表示("1. 1. 土器…")になっていた。
+ * [M61/FC5⑤] 所要/累積/残存の生 tick 表示("所要720tick")を
+ * `formatTickSpan`(「12時間」等)へ。
+ */
+export function CodifySuggestionRow({ suggestion }: CodifySuggestionRowProps) {
   return (
     <li class="kf-codify-assist__row" data-tech-id={suggestion.techId}>
-      {order}. {techLabel(suggestion.techId)}({mediumLabel(suggestion.medium)})・所要
-      {suggestion.durationTicks}tick・累積{suggestion.cumulativeTicks}tick・
-      {suggestion.hasDeadline ? `残存約${suggestion.residualTick}tick` : "無期限"}・
+      {techLabel(suggestion.techId)}({mediumLabel(suggestion.medium)})・所要
+      {formatTickSpan(suggestion.durationTicks)}・累積{formatTickSpan(suggestion.cumulativeTicks)}・
+      {suggestion.hasDeadline ? `残存約${formatTickSpan(suggestion.residualTick)}` : "無期限"}・
       {suggestion.onSchedule ? "間に合う見込み" : "間に合わない見込み"}
     </li>
   );
@@ -199,12 +221,8 @@ export function CodifySuggestionPanel({
       ) : (
         <>
           <ol class="kf-codify-assist__list">
-            {suggestions.map((suggestion, index) => (
-              <CodifySuggestionRow
-                key={suggestion.codifyId}
-                suggestion={suggestion}
-                order={index + 1}
-              />
+            {suggestions.map((suggestion) => (
+              <CodifySuggestionRow key={suggestion.codifyId} suggestion={suggestion} />
             ))}
           </ol>
           <button type="button" class="kf-codify-assist__apply-button" onClick={onApply}>
@@ -274,6 +292,26 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
 
   function mediumFor(entry: CodifyTechEntry): RecordMedium {
     return mediumOverrides.get(entry.techId) ?? defaultMediumFor(entry);
+  }
+
+  /**
+   * [M61/FC11・R1-A15] 「キューに入れる」前に必要資源を見せる(以前は
+   * `insufficientResource` reject で拒否されて初めて分かった)。
+   * `planCodification` を呼ぶだけで、投入判定そのものは行わない(§既存の
+   * 「判定は書かない」規律を維持・実際に足りるかは engine の reject に委ねる)。
+   */
+  function costPreviewFor(
+    entry: CodifyTechEntry,
+  ): { readonly resourceId: EntityId; readonly amountApprox: number } | null {
+    if (content.recordMedia === undefined) return null;
+    const medium = mediumFor(entry);
+    const plan = planCodification(
+      content,
+      entry.techId,
+      medium,
+      isPrintingUnlocked(store.peekState(), content),
+    );
+    return { resourceId: plan.costResourceId, amountApprox: toApproxNumber(plan.costFix) };
   }
 
   function handleMediumChange(techId: EntityId, medium: RecordMedium): void {
@@ -391,7 +429,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
 
       {techs.length === 0 ? (
         <p class="kf-codify-screen__empty">
-          解禁済みの技術がありません(先に⑤研究ツリーで研究を進めてください)。
+          解禁済みの技術がありません(先に研究ツリーで研究を進めてください)。
         </p>
       ) : (
         <ul class="kf-codify-screen__list">
@@ -403,6 +441,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
               onMediumChange={handleMediumChange}
               onEnqueue={handleEnqueue}
               onCancel={handleCancel}
+              costPreview={costPreviewFor(entry)}
             />
           ))}
         </ul>
@@ -414,14 +453,14 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
           class="kf-codify-screen__nav-button"
           onClick={() => onNavigate("residents")}
         >
-          ④住民一覧へ
+          住民一覧へ
         </button>
         <button
           type="button"
           class="kf-codify-screen__nav-button"
           onClick={() => onNavigate("research")}
         >
-          ⑤研究ツリーへ
+          研究ツリーへ
         </button>
       </div>
     </section>

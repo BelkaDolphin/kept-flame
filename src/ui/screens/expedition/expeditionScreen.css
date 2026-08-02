@@ -8,6 +8,15 @@
  * ならい、⑦専用の警告色をこのファイル内に閉じる)。
  */
 
+/* [M61/FC3・R1-C03] appShell.css の .kf-sticky-actions が margin-top:auto を
+   持つための土台(doc は appShell.css 側参照)。`.kf-app__screen`(親)は
+   flex:1 1 auto でビューポート残り高さぶんの実高を持つので、100% で拾える。 */
+.kf-expedition-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 .kf-expedition-screen__title {
   font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
@@ -157,12 +166,15 @@
   border-radius: 4px;
   padding: 0.5rem 0.6rem;
   background: #ffffff;
-  margin: 0 0 0.6rem;
+  /* [M61/FC3・R1-C03] .kf-sticky-actions の直前要素。appShell.css の
+     --kf-sticky-actions-reserve の doc 参照(内容が長い画面での重なり対策)。 */
+  margin: 0 0 var(--kf-sticky-actions-reserve, 0.6rem);
 }
 
 .kf-expedition__roi-inactive {
   font-size: var(--kf-fs-sub);
   color: #5b534b;
+  margin: 0 0 var(--kf-sticky-actions-reserve, 0.6rem);
 }
 
 .kf-expedition__roi-reward,

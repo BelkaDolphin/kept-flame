@@ -12,7 +12,9 @@ import {
   distanceBandLabel,
   eraLabel,
   facilityLabel,
+  outpostDisplayLabel,
   outpostTypeLabel,
+  residentDisplayName,
   resourceLabel,
   techLabel,
   traitLabel,
@@ -128,6 +130,62 @@ describe("contentLabels: 既知 ID の日本語名", () => {
 describe("contentLabels: [M32] outpostType の未登録 ID も捏造せず raw ID を返す", () => {
   it("outpostTypeLabel", () => {
     expect(outpostTypeLabel(id("outpostQuarry"))).toBe("outpostQuarry");
+  });
+});
+
+describe("[M61/FC4] residentDisplayName: 機械生成IDの読みやすい名前", () => {
+  it("開始住民ID(res[a-z]+)は従来どおり先頭大文字化のみ", () => {
+    expect(residentDisplayName(id("reshazu"))).toBe("Hazu");
+    expect(residentDisplayName(id("resrui"))).toBe("Rui");
+  });
+
+  it("res[a-z]+規則に合わない任意ID(テストフィクスチャ等)は先頭大文字化のみに留める(捏造しない)", () => {
+    expect(residentDisplayName(id("aKaya"))).toBe("AKaya");
+    expect(residentDisplayName(id("aRescued"))).toBe("ARescued");
+  });
+
+  it("晴天漂着の機械生成ID(residentDrift<tick>)は固定音節表から名前を合成する", () => {
+    const name = residentDisplayName(id("residentDrift4901"));
+    expect(name).not.toContain("residentDrift");
+    expect(name).not.toContain("4901");
+    expect(/^[A-Z][a-z]+$/.test(name)).toBe(true);
+  });
+
+  it("探索保護の機械生成ID(<dispatchId>Rescue<tick>n<index>)も名前を合成する", () => {
+    const name = residentDisplayName(id("dispatchNear1Rescue4901n2"));
+    expect(name).not.toContain("Rescue");
+    expect(name).not.toContain("dispatchNear1");
+    expect(/^[A-Z][a-z]+$/.test(name)).toBe(true);
+  });
+
+  it("同一IDは常に同一名(決定論・pure関数)", () => {
+    const a = residentDisplayName(id("residentDrift4901"));
+    const b = residentDisplayName(id("residentDrift4901"));
+    expect(a).toBe(b);
+    const c = residentDisplayName(id("dispatchFar3Rescue200n0"));
+    const d = residentDisplayName(id("dispatchFar3Rescue200n0"));
+    expect(c).toBe(d);
+  });
+
+  it("異なるIDは(高確率で)異なる名前になる", () => {
+    const names = new Set(
+      [0, 1, 2, 3, 4, 5, 6, 7].map((tick) =>
+        residentDisplayName(id(`residentDrift${String(tick)}`)),
+      ),
+    );
+    expect(names.size).toBeGreaterThan(1);
+  });
+});
+
+describe("[M61/FC5] outpostDisplayLabel: 衛星拠点IDの表示専用整形", () => {
+  it("農園1号(outpostFarm1)のように型名+連番+号で表示する", () => {
+    expect(outpostDisplayLabel(id("outpostFarm1"), id("outpostFarm"))).toBe("農園 1号");
+    expect(outpostDisplayLabel(id("outpostMine2"), id("outpostMine"))).toBe("鉱山 2号");
+  });
+
+  it("規則に合わないID(接頭辞不一致・連番でない残り)はraw IDを併記する(捏造しない)", () => {
+    expect(outpostDisplayLabel(id("weirdId"), id("outpostFarm"))).toBe("農園(weirdId)");
+    expect(outpostDisplayLabel(id("outpostFarmX"), id("outpostFarm"))).toBe("農園(outpostFarmX)");
   });
 });
 

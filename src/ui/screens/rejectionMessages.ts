@@ -149,8 +149,13 @@ const MESSAGE_BUILDERS: { readonly [K in CommandRejectionCode]: MessageBuilder }
     r.limit !== null && r.actual !== null
       ? `同時に派遣できる隊は ${String(r.limit)} 隊までです(現在 ${String(r.actual)} 隊)。`
       : "これ以上同時に派遣できません。",
+  // [M61/FC5・R1-A10] 「寿命モデル未設定」は稀な内部状態(engine
+  // テストフィクスチャ等の異常系)で、プレイヤーには何を指すか伝わらない。
+  // 実プレイで起こり得る2つの理由(死亡/派遣中)だけを挙げ、それ以外の
+  // 内部的な理由は「等の理由」で正直に一括りにする(捏造しない・実装詳細を
+  // そのまま列挙しない)。
   residentUnavailable: (r) =>
-    `${residentName(r.subjectId)}は今この操作を行えません(死亡・探索派遣中・寿命モデル未設定のいずれか)。`,
+    `${residentName(r.subjectId)}は今この操作を行えません(死亡・探索派遣中等の理由)。`,
   alreadyAssigned: (r) => `${residentName(r.subjectId)}は既にこの施設で就労しています。`,
   notAssigned: (r) => `${residentName(r.subjectId)}はどの施設にも就労していません。`,
   duplicateRecord: (r) => {

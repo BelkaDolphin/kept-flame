@@ -48,6 +48,34 @@
   margin: 0 0 0.3rem;
 }
 
+/* [M61/FC6] 非稼働施設の正直表示。寝床/保管庫は実効果(通常の産出行と同じ
+   トーン)、見張り台/療養所は「効果は未実装」を控えめだが埋もれない色で示す。 */
+.kf-facility-detail__bed-capacity,
+.kf-facility-detail__storage-capacity {
+  font-size: var(--kf-fs-body);
+  margin: 0 0 0.3rem;
+}
+
+/* [M61/FC6・2026-08-02差し戻し] 保管庫: 現在庫が上限を超えている警告。 */
+.kf-facility-detail__storage-capacity-warning {
+  font-size: var(--kf-fs-sub);
+  color: #a11334;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.kf-facility-detail__dormant {
+  font-size: var(--kf-fs-body);
+  color: #7a5a00;
+  margin: 0 0 0.3rem;
+}
+
+.kf-facility-detail__dormant-upgrade-warning {
+  font-size: var(--kf-fs-sub);
+  color: #7a5a00;
+  margin: 0 0 0.4rem;
+}
+
 .kf-facility-detail__workers {
   list-style: none;
   margin: 0 0 0.6rem;

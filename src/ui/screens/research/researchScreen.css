@@ -55,6 +55,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* [M61/FC11・R1-A28] 開閉の視覚的手がかり(summary を display:flex にすると
+   既定の開閉三角マーカーが消えるため、明示的に描く)。details の [open] 属性
+   はブラウザがネイティブに管理するので、ここは CSS だけで追随できる。 */
+.kf-research-era__caret {
+  flex: 0 0 auto;
+  color: #5b534b;
+}
+
+.kf-research-era__caret::before {
+  content: "▸";
+}
+
+.kf-research-era[open] > .kf-research-era__summary .kf-research-era__caret::before {
+  content: "▾";
+}
+
 .kf-research-era__list {
   list-style: none;
   margin: 0;

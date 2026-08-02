@@ -454,7 +454,7 @@ export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps
           class="kf-settings-screen__nav-button"
           onClick={() => onNavigate("home")}
         >
-          ①ホームハブへ
+          ホームハブへ
         </button>
       </div>
     </section>

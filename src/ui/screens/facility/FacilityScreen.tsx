@@ -39,8 +39,22 @@
 import { useState } from "preact/hooks";
 
 import type { CommandRejection } from "../../../engine/commands";
+import { toApproxNumber } from "../../../engine/fp";
+import type { EngineContent } from "../../../engine/rules/types";
+import type { EntityId } from "../../../engine/state/state";
 import type { FacilityDetailView, FacilityRosterEntry, FacilityWorkerView } from "../../derived";
+import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, residentDisplayName, resourceLabel } from "../contentLabels";
+import {
+  bedCapacityEffectText,
+  DORMANT_FACILITY_EFFECT_TEXT,
+  facilityEffectKind,
+  STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
+  storageCapacityEffectText,
+  storageCapacityWouldCapExistingStock,
+  type FacilityEffectKind,
+} from "../facilityEffect";
+import { formatApproxDecimal1 } from "../format";
 import { CellBreakdownView } from "../grid/CellBreakdownView";
 import "../grid/gridBoard.css";
 import { TagChip } from "../grid/TagChip";
@@ -66,7 +80,9 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
   return (
     <li class="kf-facility-detail__worker">
       <span class="kf-facility-detail__worker-id">{residentDisplayName(worker.residentId)}</span>
-      <span class="kf-facility-detail__worker-morale">士気{worker.moraleApprox}</span>
+      <span class="kf-facility-detail__worker-morale">
+        士気{formatApproxDecimal1(worker.moraleApprox)}
+      </span>
       {badges.length > 0 && (
         <span class="kf-facility-detail__worker-badges">{badges.join("・")}</span>
       )}
@@ -79,14 +95,51 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
 export interface FacilityDetailPanelProps {
   readonly detail: FacilityDetailView;
   readonly onUpgrade: () => void;
+  /**
+   * [M61/FC6] 施設の効果種別(`facilityEffect.ts`)。省略時は "worker"
+   * (=既存の通常施設と同じ表示)——既存呼び出し元/既存テストとの後方互換。
+   */
+  readonly effectKind?: FacilityEffectKind;
+  /** [M61/FC6] `effectKind === "bedCapacity"` のときの効果文言。省略時は非表示。 */
+  readonly bedEffectText?: string | null;
+  /**
+   * [M61/FC6・2026-08-02差し戻し] `effectKind === "storageCapacity"`
+   * (保管庫)のときの効果文言。「効果は未実装」ではなく実効果(保管上限の設定
+   * + 超過分喪失)を正直に見せる(facilityEffect.ts §2「保管庫」参照)。
+   */
+  readonly storageEffectText?: string | null;
+  /** [同上] 現在の在庫が既に保管上限を上回っている資源がある(=建てると
+   * すぐ頭打ちになる)ときに追加で出す警告の表示可否。 */
+  readonly storageCapacityWarningVisible?: boolean;
+  /**
+   * [M61/FC11・R1-A14] 増築後の産出見込み(実行前プレビュー)。`null` = 出さない
+   * (上限Lv・寝床/非稼働・content にLv曲線が無い等)。値は「増築ボタンを押す前に
+   * 効果が分かる」ための表示専用近似値であり、engine 側の再計算(§3 の規律)は
+   * 行わない——呼び出し元(FacilityScreen 本体)が
+   * `outputPerTickApprox × (次Lv基礎産出/現Lv基礎産出)` という比率だけで求める
+   * (隣接乗数・稼働就労者数は増築で変わらないため、この比率適用は近似ではなく
+   * 厳密に一致する)。
+   */
+  readonly nextLevelOutputApprox?: number | null;
 }
 
-export function FacilityDetailPanel({ detail, onUpgrade }: FacilityDetailPanelProps) {
+export function FacilityDetailPanel({
+  detail,
+  onUpgrade,
+  effectKind = "worker",
+  bedEffectText = null,
+  storageEffectText = null,
+  storageCapacityWarningVisible = false,
+  nextLevelOutputApprox = null,
+}: FacilityDetailPanelProps) {
+  const isDormant = effectKind === "none";
+  const isBedCapacity = effectKind === "bedCapacity";
+  const isStorageCapacity = effectKind === "storageCapacity";
   return (
     <section class="kf-facility-detail" aria-label="施設詳細">
       <TagIconDefs />
       <h3 class="kf-facility-detail__name">
-        {facilityLabel(detail.defId)}({detail.cellId})
+        {facilityLabel(detail.defId)}({cellCoordinateLabel(detail.cellId)})
       </h3>
       <ul class="kf-facility-detail__tags">
         {detail.tags.map((tag) => (
@@ -98,26 +151,55 @@ export function FacilityDetailPanel({ detail, onUpgrade }: FacilityDetailPanelPr
       <p class="kf-facility-detail__level">
         Lv{detail.level} / 上限 Lv{detail.maxLevel}
       </p>
-      <p class="kf-facility-detail__output">
-        産出: {detail.outputPerTickApprox.toFixed(2)}/tick・
-        {detail.outputKind === "resource" && detail.outputResourceId !== null
-          ? resourceLabel(detail.outputResourceId)
-          : "研究点"}
-        (隣接乗数 ×{detail.multiplierApprox.toFixed(2)})
-      </p>
-      <p class="kf-facility-detail__slots">
-        就労: {detail.workers.length}
-        {detail.slotsMax !== null ? `/${String(detail.slotsMax)}` : "(上限なし)"}
-      </p>
-      <ul class="kf-facility-detail__workers">
-        {detail.workers.length === 0 ? (
-          <li class="kf-facility-detail__no-workers">就労者がいません</li>
-        ) : (
-          detail.workers.map((worker) => (
-            <FacilityWorkerRow key={worker.residentId} worker={worker} />
-          ))
-        )}
-      </ul>
+      {/* [M61/FC6・R1-A08/C02] 就労スロットを持たない施設(寝床/保管庫/見張り台/
+          療養所)は「産出0.00/tick・就労0/0」を出さない——あたかも空きスロットが
+          埋まれば動くかのように誤解させるため。寝床/保管庫は実効果を、
+          見張り台/療養所は「効果は未実装」を明示する(facilityEffect.ts §2)。 */}
+      {isDormant ? (
+        <p class="kf-facility-detail__dormant" data-effect-kind="none">
+          {DORMANT_FACILITY_EFFECT_TEXT}
+        </p>
+      ) : isBedCapacity ? (
+        <p class="kf-facility-detail__bed-capacity" data-effect-kind="bedCapacity">
+          {bedEffectText}
+        </p>
+      ) : isStorageCapacity ? (
+        <>
+          <p class="kf-facility-detail__storage-capacity" data-effect-kind="storageCapacity">
+            {storageEffectText}
+          </p>
+          {storageCapacityWarningVisible && (
+            <p class="kf-facility-detail__storage-capacity-warning">
+              {STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p class="kf-facility-detail__output">
+            産出: {detail.outputPerTickApprox.toFixed(2)}
+            {/* [M61/FC11・R1-A14] 増築前に効果(産出の伸び)を見せる。 */}
+            {nextLevelOutputApprox !== null && ` → ${nextLevelOutputApprox.toFixed(2)}`}/tick・
+            {detail.outputKind === "resource" && detail.outputResourceId !== null
+              ? resourceLabel(detail.outputResourceId)
+              : "研究点"}
+            (隣接乗数 ×{detail.multiplierApprox.toFixed(2)})
+          </p>
+          <p class="kf-facility-detail__slots">
+            就労: {detail.workers.length}
+            {detail.slotsMax !== null ? `/${String(detail.slotsMax)}` : "(上限なし)"}
+          </p>
+          <ul class="kf-facility-detail__workers">
+            {detail.workers.length === 0 ? (
+              <li class="kf-facility-detail__no-workers">就労者がいません</li>
+            ) : (
+              detail.workers.map((worker) => (
+                <FacilityWorkerRow key={worker.residentId} worker={worker} />
+              ))
+            )}
+          </ul>
+        </>
+      )}
       <div class="kf-facility-detail__upgrade">
         <p class="kf-facility-detail__upgrade-cost">
           {detail.upgradeCostApprox === null || detail.upgradeCostResourceId === null
@@ -126,6 +208,11 @@ export function FacilityDetailPanel({ detail, onUpgrade }: FacilityDetailPanelPr
               : "増築コストはかかりません。"
             : `増築コスト: ${resourceLabel(detail.upgradeCostResourceId)} ${detail.upgradeCostApprox}`}
         </p>
+        {isDormant && detail.level < detail.maxLevel && (
+          <p class="kf-facility-detail__dormant-upgrade-warning">
+            この施設は効果が未実装のため、増築しても効果は変わりません。
+          </p>
+        )}
         <button type="button" class="kf-facility-detail__upgrade-button" onClick={onUpgrade}>
           Lv{detail.level + 1}へ増築
         </button>
@@ -149,14 +236,14 @@ export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
   if (roster.length === 0) {
     return (
       <p class="kf-facility-screen__empty">
-        まだ施設がありません。②格子ビューでまず施設を建ててください。
+        まだ施設がありません。格子ビューでまず施設を建ててください。
       </p>
     );
   }
   return (
     <section class="kf-facility-picker" aria-label="施設を選ぶ">
       <p class="kf-screen-intro">
-        施設が選択されていません。一覧から選ぶか、②格子ビューで施設をタップして選択してください。
+        施設が選択されていません。一覧から選ぶか、格子ビューで施設をタップして選択してください。
       </p>
       <ul class="kf-facility-picker__list">
         {roster.map((facility) => (
@@ -166,13 +253,67 @@ export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
               class="kf-facility-picker__button"
               onClick={() => onPick(facility.cellIndex)}
             >
-              {facilityLabel(facility.defId)}({facility.cellId})・Lv{facility.level}
+              {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})・Lv
+              {facility.level}
             </button>
           </li>
         ))}
       </ul>
     </section>
   );
+}
+
+// --- 2c. [M61/FC6] content から効果種別/寝床効果文言を引く(hooks 不使用) ----
+
+/** `content.facilityDefs` に定義が無い(理論上は起きない)場合は "worker" 扱い
+ * (§3 の bLossImminentTechIds 等と同じ防御的フォールバック=通常表示に倒す)。 */
+function facilityEffectKindOf(content: EngineContent, defId: EntityId): FacilityEffectKind {
+  const def = content.facilityDefs.get(defId);
+  return def === undefined ? "worker" : facilityEffectKind(def);
+}
+
+function bedEffectTextOf(content: EngineContent, defId: EntityId, level: number): string | null {
+  const def = content.facilityDefs.get(defId);
+  return def === undefined ? null : bedCapacityEffectText(def, level);
+}
+
+function storageEffectTextOf(
+  content: EngineContent,
+  defId: EntityId,
+  level: number,
+): string | null {
+  const def = content.facilityDefs.get(defId);
+  return def === undefined ? null : storageCapacityEffectText(def, level);
+}
+
+function storageCapacityWarningOf(
+  content: EngineContent,
+  defId: EntityId,
+  level: number,
+  resources: readonly { readonly resourceId: EntityId; readonly stockApprox: number }[],
+): boolean {
+  const def = content.facilityDefs.get(defId);
+  return def === undefined ? false : storageCapacityWouldCapExistingStock(def, level, resources);
+}
+
+/**
+ * [M61/FC11・R1-A14] 増築後の産出見込み(`FacilityDetailPanel` の doc 参照)。
+ * `outputPerTickApprox × (次Lv基礎産出 / 現Lv基礎産出)`。基礎産出が 0(非稼働
+ * 施設・寝床)・Lv曲線が欠けている・既に上限Lv、のいずれかなら null(捏造しない)。
+ */
+function nextLevelOutputApproxOf(
+  content: EngineContent,
+  detail: FacilityDetailView,
+): number | null {
+  if (detail.level >= detail.maxLevel) return null;
+  const def = content.facilityDefs.get(detail.defId);
+  if (def === undefined) return null;
+  const currentBase = def.outputPerTickByLevel[detail.level - 1];
+  const nextBase = def.outputPerTickByLevel[detail.level];
+  if (currentBase === undefined || nextBase === undefined) return null;
+  const currentBaseApprox = toApproxNumber(currentBase);
+  if (currentBaseApprox === 0) return null;
+  return detail.outputPerTickApprox * (toApproxNumber(nextBase) / currentBaseApprox);
 }
 
 // --- 3. 画面本体(hooks を持つのはここだけ) ----------------------------------
@@ -184,8 +325,14 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
   const detail = useSignalValue(store.derived.selectedFacilityDetail);
   const breakdown = useSignalValue(store.derived.selectedCellBreakdown);
   const facilityRoster = useSignalValue(store.derived.facilityRoster);
+  // [M61/FC6・2026-08-02差し戻し] 保管庫の「現在の在庫が上限を超えている」
+  // 警告に使う(§2「保管庫」)。
+  const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり・
+  // ExpeditionScreen.tsx §2)。[M61/FC6] 非稼働施設の判定に facility 定義が要る。
+  const content = store.peekContent();
 
   function handleUpgrade(current: FacilityDetailView): void {
     const beforeStockApprox =
@@ -234,7 +381,20 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
         <FacilityPicker roster={facilityRoster} onPick={handlePickFacility} />
       ) : (
         <>
-          <FacilityDetailPanel detail={detail} onUpgrade={() => handleUpgrade(detail)} />
+          <FacilityDetailPanel
+            detail={detail}
+            onUpgrade={() => handleUpgrade(detail)}
+            effectKind={facilityEffectKindOf(content, detail.defId)}
+            bedEffectText={bedEffectTextOf(content, detail.defId, detail.level)}
+            storageEffectText={storageEffectTextOf(content, detail.defId, detail.level)}
+            storageCapacityWarningVisible={storageCapacityWarningOf(
+              content,
+              detail.defId,
+              detail.level,
+              resources,
+            )}
+            nextLevelOutputApprox={nextLevelOutputApproxOf(content, detail)}
+          />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />
         </>
       )}
@@ -245,14 +405,14 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
           class="kf-facility-screen__nav-button"
           onClick={() => onNavigate("grid")}
         >
-          ②格子ビューへ戻る
+          格子ビューへ戻る
         </button>
         <button
           type="button"
           class="kf-facility-screen__nav-button"
           onClick={() => onNavigate("residents")}
         >
-          ④住民配置へ
+          住民配置へ
         </button>
       </div>
     </section>

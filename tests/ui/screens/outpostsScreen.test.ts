@@ -87,7 +87,7 @@ function residentView(entityId = id("bKaya")): ResidentView {
   };
 }
 
-/** [M54] 呼ばれなければ失敗させる用の no-op コールバック一式。 */
+/** [M54・M61/FC8で拡張] 呼ばれなければ失敗させる用の no-op コールバック一式。 */
 function cardHandlers() {
   return {
     residentOptions: [residentView()],
@@ -95,7 +95,10 @@ function cardHandlers() {
     onStationSelectChange: vi.fn(),
     onStation: vi.fn(),
     onUnstation: vi.fn(),
-    onAbandon: vi.fn(),
+    confirmingAbandon: false,
+    onAbandonStart: vi.fn(),
+    onAbandonConfirm: vi.fn(),
+    onAbandonCancel: vi.fn(),
   };
 }
 
@@ -150,16 +153,63 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
     expect(handlers.onUnstation).toHaveBeenCalledWith(id("aRui"));
   });
 
-  it("[M54] 放棄ボタンを押すと onAbandon が呼ばれる", () => {
+  it("[M61/FC8・R1-D05] 放棄は確認1段: 初回タップは onAbandonStart のみ(まだ実行しない)", () => {
     const handlers = cardHandlers();
     const vnode = OutpostCard({ outpost: outpost(), ...handlers });
     const buttons: FoundElement[] = [];
     collectByType(vnode, "button", buttons);
+    // confirmingAbandon=false のときは abandon-button だけが出て、
+    // 確認パネル(実行する/キャンセル)は出ない。
+    expect(
+      buttons.some(
+        (b) =>
+          typeof b.props.class === "string" && b.props.class.includes("abandon-confirm-button"),
+      ),
+    ).toBe(false);
     const abandonButton = buttons.find(
-      (b) => typeof b.props.class === "string" && b.props.class.includes("abandon-button"),
+      (b) =>
+        typeof b.props.class === "string" &&
+        b.props.class.includes("abandon-button") &&
+        !b.props.class.includes("confirm"),
     );
     (abandonButton?.props.onClick as () => void)();
-    expect(handlers.onAbandon).toHaveBeenCalledOnce();
+    expect(handlers.onAbandonStart).toHaveBeenCalledOnce();
+    expect(handlers.onAbandonConfirm).not.toHaveBeenCalled();
+  });
+
+  it("[M61/FC8] confirmingAbandon=true: 確認パネルが出て、実行するを押すと onAbandonConfirm が呼ばれる", () => {
+    const handlers = { ...cardHandlers(), confirmingAbandon: true };
+    const vnode = OutpostCard({ outpost: outpost(), ...handlers });
+    const text = flattenText(vnode);
+    expect(text).toContain("取り消せません");
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    // 初段の「放棄する」ボタンは出ない(確認中は差し替わる)。
+    expect(
+      buttons.some(
+        (b) =>
+          typeof b.props.class === "string" &&
+          b.props.class.includes("abandon-button") &&
+          !b.props.class.includes("confirm"),
+      ),
+    ).toBe(false);
+    const confirmButton = buttons.find(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("abandon-confirm-button"),
+    );
+    (confirmButton?.props.onClick as () => void)();
+    expect(handlers.onAbandonConfirm).toHaveBeenCalledOnce();
+  });
+
+  it("[M61/FC8] 確認パネルのキャンセルで onAbandonCancel が呼ばれる", () => {
+    const handlers = { ...cardHandlers(), confirmingAbandon: true };
+    const vnode = OutpostCard({ outpost: outpost(), ...handlers });
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const cancelButton = buttons.find(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("abandon-cancel-button"),
+    );
+    (cancelButton?.props.onClick as () => void)();
+    expect(handlers.onAbandonCancel).toHaveBeenCalledOnce();
   });
 
   it("[M54] 駐在させるセレクトの変更で onStationSelectChange、ボタンで onStation が呼ばれる", () => {

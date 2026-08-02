@@ -57,8 +57,10 @@ import {
 } from "../contentLabels";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
-import { formatGameClock } from "../format";
+import { useStickyActionsClearance } from "../useStickyActionsClearance";
+import { formatApproxDecimal1, formatGameClock, formatTickSpan } from "../format";
 import { nextDispatchId } from "./dispatchId";
 import { proceduralDestinationId } from "./destinationOptions";
 import "./expeditionScreen.css";
@@ -188,8 +190,12 @@ export function CandidateRow({ candidate, selected, disabled, onToggle }: Candid
         onClick={() => onToggle(candidate.entityId)}
       >
         <span class="kf-expedition__candidate-id">{residentDisplayName(candidate.entityId)}</span>
-        <span class="kf-expedition__candidate-power">戦力{candidate.combatPowerApprox}</span>
-        <span class="kf-expedition__candidate-morale">士気{candidate.moraleApprox}</span>
+        <span class="kf-expedition__candidate-power">
+          戦力{formatApproxDecimal1(candidate.combatPowerApprox)}
+        </span>
+        <span class="kf-expedition__candidate-morale">
+          士気{formatApproxDecimal1(candidate.moraleApprox)}
+        </span>
         {candidate.traitIds.length > 0 && (
           <span class="kf-expedition__candidate-traits">
             {candidate.traitIds.map((traitId) => traitLabel(traitId)).join("・")}
@@ -234,7 +240,7 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
       <p class="kf-expedition__roi-value">
         ROI: {report.roiFix === null ? "算出不可(分母0)" : toApproxNumber(report.roiFix).toFixed(2)}
       </p>
-      <p class="kf-expedition__roi-travel">往復所要: {report.travelTicks} tick</p>
+      <p class="kf-expedition__roi-travel">往復所要: {formatTickSpan(report.travelTicks)}</p>
     </section>
   );
 }
@@ -286,6 +292,12 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
   const [teamSizeForSuggestion, setTeamSizeForSuggestion] = useState<number>(3);
   const [suggestion, setSuggestion] = useState<TeamPlan | null>(null);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  // [M61/FC7] R1-D07: この画面は成功トースト基盤(Toast.tsx)を import していな
+  // かった(束B以降の他画面は全て導入済み)。派遣確定の成功フィードバックを追加。
+  const toastStack = useToastStack();
+  // [M61/FC3] 候補一覧の件数(=画面の総高さに影響)が変わるたびに sticky バーとの
+  // 重なりを測り直す。
+  const stickyClearance = useStickyActionsClearance([candidates.length, dispatches.length]);
 
   const destinationOptions = useMemo(
     () => explorationDestinationsForBand(content, band),
@@ -337,6 +349,7 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
 
   function handleDispatch(): void {
     const dispatchId = nextDispatchId(store.peekState(), band);
+    const teamSize = selectedMemberIds.length;
     const result = store.dispatch({
       type: "commandApplied",
       command: {
@@ -350,6 +363,10 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
     });
     if (result.command === null) return;
     if (result.command.ok) {
+      // [M61/FC7] R1-D07: 派遣確定の成功トースト(他画面の建設/増築等と同じ形)。
+      toastStack.push(
+        `${distanceBandLabel(band)}・${destinationDisplayName(effectiveDestinationId)}へ${String(teamSize)}名を派遣した`,
+      );
       setSelectedMemberIds([]);
       setSuggestion(null);
       setLastRejection(null);
@@ -372,6 +389,8 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       <p class="kf-expedition-screen__slots">
         派遣枠: {slots.used}/{slots.max}
       </p>
+
+      <ToastStackView toasts={toastStack.toasts} />
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
@@ -435,8 +454,10 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
         {proposedSuggestion !== null && (
           <div class="kf-expedition__template-preview">
             <p class="kf-expedition__template-members">
-              提案: {proposedSuggestion.memberIds.join("・")}(戦力{" "}
-              {toApproxNumber(proposedSuggestion.teamPowerFix).toFixed(1)} / 目標{" "}
+              {/* [M61/FC5・R1-A09] 住民IDの生露出("提案: resrui・resseri")を
+                  residentDisplayName で和名化する。 */}
+              提案: {proposedSuggestion.memberIds.map((id) => residentDisplayName(id)).join("・")}
+              (戦力 {toApproxNumber(proposedSuggestion.teamPowerFix).toFixed(1)} / 目標{" "}
               {toApproxNumber(proposedSuggestion.targetTeamPowerFix).toFixed(1)} / 理論最大{" "}
               {toApproxNumber(proposedSuggestion.bestTeamPowerFix).toFixed(1)})
             </p>
@@ -448,15 +469,20 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       </section>
 
       <h3 class="kf-expedition-screen__subtitle">派遣前の見込み(ROI)</h3>
-      <RoiPanel
-        report={roiReport}
-        rewardResourceId={rewardResourceId}
-        teamSize={selectedMemberIds.length}
-      />
+      {/* [M61/FC3・R1-C03] sticky確定バーとの実測重なり補正(§1のdoc参照)。
+          候補一覧の件数が変わると内容の総高さも変わるので、それを
+          recomputeKey にして測り直す。 */}
+      <div ref={stickyClearance.contentRef}>
+        <RoiPanel
+          report={roiReport}
+          rewardResourceId={rewardResourceId}
+          teamSize={selectedMemberIds.length}
+        />
+      </div>
 
       {/* [束A/M-3] 確定操作(派遣する)は画面下部の sticky バーへ。候補一覧が
           長くても、選びながら常に押せる位置に留まる(ナビの直上に固定)。 */}
-      <div class="kf-sticky-actions">
+      <div class="kf-sticky-actions" ref={stickyClearance.stickyRef}>
         <button
           type="button"
           class="kf-expedition__dispatch-button"
@@ -484,21 +510,21 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
           class="kf-expedition-screen__nav-button"
           onClick={() => onNavigate("residents")}
         >
-          ④住民一覧へ
+          住民一覧へ
         </button>
         <button
           type="button"
           class="kf-expedition-screen__nav-button"
           onClick={() => onNavigate("chronicle")}
         >
-          ⑧冒険記へ
+          冒険記へ
         </button>
         <button
           type="button"
           class="kf-expedition-screen__nav-button"
           onClick={() => onNavigate("outposts")}
         >
-          ⑨衛星拠点へ
+          衛星拠点へ
         </button>
       </div>
     </section>

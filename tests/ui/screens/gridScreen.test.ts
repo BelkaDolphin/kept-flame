@@ -149,6 +149,28 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
     });
     expect(flattenText(vnode)).toContain("コストなし");
   });
+
+  it("[M61/FC6] effectHint があれば建設前ヒントを添える(寝床の実効果/保管庫の実効果/非稼働の未実装)", () => {
+    const vnode = FacilityCatalogButton({
+      entry: catalogEntry(),
+      active: false,
+      insufficient: false,
+      onPick: () => undefined,
+      effectHint: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+    });
+    expect(flattenText(vnode)).toContain("保管上限を設定");
+  });
+
+  it("effectHint 省略時は何も添えない(通常施設・後方互換)", () => {
+    const vnode = FacilityCatalogButton({
+      entry: catalogEntry(),
+      active: false,
+      insufficient: false,
+      onPick: () => undefined,
+    });
+    expect(flattenText(vnode)).not.toContain("保管上限");
+    expect(flattenText(vnode)).not.toContain("効果は未実装");
+  });
 });
 
 describe("FacilityCatalogPanel(②の施設カタログ全体)", () => {

@@ -5,6 +5,14 @@
  * と共通のトークンをそのまま使う(勝手に新しい色を作らない)。
  */
 
+/* [M61/FC3・R1-C04] appShell.css の .kf-sticky-actions が margin-top:auto を
+   持つための土台(doc は appShell.css / expeditionScreen.css 側参照)。 */
+.kf-migration-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 .kf-migration-screen__title {
   font-size: var(--kf-fs-title);
   margin: 0 0 0.3rem;
@@ -138,7 +146,10 @@
   display: block;
   font-size: var(--kf-fs-sub);
   color: #5b534b;
-  margin: 0 0 0.6rem;
+  /* [M61/FC3・R1-C04] .kf-sticky-actions の直前要素。appShell.css の
+     --kf-sticky-actions-reserve の doc 参照(候補が多く画面が長くなりやすい
+     大移動画面での重なり対策。1280×800 実測で解消を確認)。 */
+  margin: 0 0 var(--kf-sticky-actions-reserve, 0.6rem);
 }
 
 .kf-migration-screen__seed-input {

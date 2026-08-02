@@ -853,13 +853,38 @@ describe("44px 最小タップ領域 — [M54] ⑨衛星拠点の操作 UI", () 
       onStationSelectChange: () => undefined,
       onStation: () => undefined,
       onUnstation: () => undefined,
-      onAbandon: () => undefined,
+      confirmingAbandon: false,
+      onAbandonStart: () => undefined,
+      onAbandonConfirm: () => undefined,
+      onAbandonCancel: () => undefined,
     });
     const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
     expect(found.some((e) => e.class.includes("kf-outpost-card__unstation-button"))).toBe(true);
     expect(found.some((e) => e.class.includes("kf-outpost-card__station-button"))).toBe(true);
     expect(found.some((e) => e.tag === "select")).toBe(true);
     expect(found.some((e) => e.class.includes("kf-outpost-card__abandon-button"))).toBe(true);
+  });
+
+  it("[M61/FC8] OutpostCard(放棄確認パネル=実行する/キャンセルも44px)", () => {
+    const vnode = OutpostCard({
+      outpost: outpostEntry,
+      residentOptions: [residentA],
+      stationSelectValue: "",
+      onStationSelectChange: () => undefined,
+      onStation: () => undefined,
+      onUnstation: () => undefined,
+      confirmingAbandon: true,
+      onAbandonStart: () => undefined,
+      onAbandonConfirm: () => undefined,
+      onAbandonCancel: () => undefined,
+    });
+    const found = assertAllInteractiveElementsMeetMinTapTarget(vnode);
+    expect(found.some((e) => e.class.includes("kf-outpost-card__abandon-confirm-button"))).toBe(
+      true,
+    );
+    expect(found.some((e) => e.class.includes("kf-outpost-card__abandon-cancel-button"))).toBe(
+      true,
+    );
   });
 
   it("OutpostEstablishForm(タイプ選択/距離帯/住民トグル/設置ボタン)", () => {

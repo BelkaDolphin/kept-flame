@@ -191,6 +191,25 @@ export function distanceBandLabel(band: DistanceBand): string {
 }
 
 /**
+ * [M61/FC5] 衛星拠点IDの表示専用整形(R1-A17「農園(outpostFarm1)」の
+ * outpostId 生露出への対応)。`outposts/outpostId.ts` の `nextOutpostId` が
+ * 発行する ID は `<outpostTypeId><連番>`(接頭辞の再プレフィックスをしない
+ * 命名規約・同ファイルの doc)なので、`outpostTypeId` を先頭から取り除いた
+ * 残りが連番になる。取り除けない(規則に合わない)場合は raw ID をそのまま
+ * 残す(捏造しない・contentLabels.ts 全体の方針)。
+ */
+export function outpostDisplayLabel(outpostId: EntityId, outpostTypeId: EntityId): string {
+  const raw: string = outpostId;
+  const typeRaw: string = outpostTypeId;
+  if (!raw.startsWith(typeRaw)) return `${outpostTypeLabel(outpostTypeId)}(${raw})`;
+  const sequence = raw.slice(typeRaw.length);
+  if (sequence.length === 0 || !/^\d+$/.test(sequence)) {
+    return `${outpostTypeLabel(outpostTypeId)}(${raw})`;
+  }
+  return `${outpostTypeLabel(outpostTypeId)} ${sequence}号`;
+}
+
+/**
  * [M33] 継承系統(`INHERIT_TRACKS`・GDD 10.3)の日本語名。全件を必ず埋める
  * (型で強制)。engine 側の英字 ID(`caravanCapacity`/`crewCapacity`/
  * `startingStock`)と GDD 10.2/10.3 の用語(キャラバン容量/乗員定員/開始備蓄)の対応。
@@ -264,7 +283,7 @@ export function eventLabel(eventId: EntityId): string {
 }
 
 // ===========================================================================
-// [束B/B-3] 住民の内部ID → 表示専用の整形名
+// [束B/B-3・M61/FC4で拡張] 住民の内部ID → 表示専用の整形名
 // ===========================================================================
 //
 // `ResidentState` に name 系フィールドは無い(state.ts で確認済み)。正式な
@@ -273,16 +292,96 @@ export function eventLabel(eventId: EntityId): string {
 //
 // 現行の開始住民 ID は `src/newGame.ts` の命名規則「"res" + 名前(小文字ローマ字。
 // 例 "reshazu" = "res" + "hazu")」に従う。この規則にちょうど合う ID だけ
-// prefix を外して先頭を大文字化し、規則に合わない ID(晴天漂着で生成される
-// "arrival<tick>" 等)はそのまま先頭を大文字化するだけに留める——存在しない
-// 情報を捏造しない(未登録 ID を raw のまま返す既存方針と同じ姿勢)。
+// prefix を外して先頭を大文字化する。
+//
+// [M61/FC4] プレイテスト R1-A06 が機械生成 ID の生露出(例
+// "DispatchNear1Rescue0n2")を指摘した。該当する 2 形——
+//   - 晴天漂着: `residentDrift<tick>`(`rules/population.ts` の
+//     `ARRIVAL_RESIDENT_ID_PREFIX`)
+//   - 探索保護: `<dispatchId>Rescue<dispatchTick>n<nodeIndex>`
+//     (`rules/exploration.ts` の `rescueResidentIdOf`。dispatchId 自体は
+//     `dispatch<Band大文字化><連番>`・`expedition/dispatchId.ts` の
+//     `nextDispatchId`)
+// ——は、固定音節表からの決定論的 pure 関数(`syntheticResidentName`)で
+// 読みやすい名を生成する(同一IDは常に同一名・Math.random/Date.now不使用)。
+// この 2 形に合わない ID(上記の "res..." 規則にも合わない、テストフィクスチャ
+// 等の任意 ID)は従来どおり先頭大文字化のみに留める——存在しない情報を捏造
+// しない(未登録 ID を raw のまま返す既存方針と同じ姿勢。過剰に「それらしい
+// 名前」を当てはめない対象を機械生成 ID の既知 2 形だけに絞る★判断)。
 
 const STARTING_RESIDENT_ID_PATTERN = /^res[a-z]+$/;
 
-/** [束B/B-3] 住民 ID の表示専用整形(機械的写像。名前の正式生成は M53)。 */
+/** `rules/population.ts` の `ARRIVAL_RESIDENT_ID_PREFIX` と同じ規則(値の複製は
+ * せず形だけを見る——engine 定数を re-export すると engine→ui 依存の向きが
+ * 増えるため、ここでは正規表現でパターンだけ照合する)。 */
+const DRIFT_RESIDENT_ID_PATTERN = /^residentDrift\d+$/;
+/** `rules/exploration.ts` の `rescueResidentIdOf` + `expedition/dispatchId.ts`
+ * の `nextDispatchId` が組み立てる ID の形。 */
+const RESCUE_RESIDENT_ID_PATTERN = /^dispatch[A-Za-z]+\d+Rescue\d+n\d+$/;
+
+function isMachineGeneratedResidentId(raw: string): boolean {
+  return DRIFT_RESIDENT_ID_PATTERN.test(raw) || RESCUE_RESIDENT_ID_PATTERN.test(raw);
+}
+
+/**
+ * [M61/FC4] 読みやすい表示名の材料になる固定音節表(ローマ字・和風の響き。
+ * 既存の開始住民名 Hazu/Kaya/Mio/Rui/Seri/Tou と語感を揃える)。
+ */
+// prettier-ignore
+const NAME_SYLLABLES: readonly string[] = [
+  "ka", "ki", "ku", "ke", "ko",
+  "sa", "shi", "su", "se", "so",
+  "ta", "chi", "tsu", "te", "to",
+  "na", "ni", "nu", "ne", "no",
+  "ha", "hi", "fu", "he", "ho",
+  "ma", "mi", "mu", "me", "mo",
+  "ya", "yu", "yo",
+  "ra", "ri", "ru", "re", "ro",
+  "wa", "zu",
+];
+
+/**
+ * FNV-1a 32bit 相当のハッシュ(決定論・純関数)。UI 表示専用のヘルパであり
+ * engine の PRNG(xoshiro128**)を再利用する対象ではない——ここに要るのは
+ * 「同じ文字列は常に同じ数値」という一様分布未満の弱い性質だけで、ゲーム内の
+ * 抽選(GDD 11.5 等)には一切使わない(engine の決定論規則=CLAUDE.md 絶対
+ * ルールは `src/engine` 配下限定であり、このファイルは対象外)。
+ */
+function hashStringToUint32(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/** 機械生成 ID から決定論的に音節 2〜3 個の名前を合成する(同一IDは常に同一名)。 */
+function syntheticResidentName(rawId: string): string {
+  const hash = hashStringToUint32(rawId);
+  const syllableCount = 2 + (hash % 2);
+  const parts: string[] = [];
+  let cursor = hash;
+  for (let i = 0; i < syllableCount; i++) {
+    const index = cursor % NAME_SYLLABLES.length;
+    parts.push(NAME_SYLLABLES[index] as string);
+    // 次の音節は桁をずらした値から選ぶ(同じ音節の連打を避ける・依然として
+    // rawId のみから決まる決定論的な導出)。
+    cursor = Math.floor(cursor / NAME_SYLLABLES.length) + hash * (i + 1);
+    cursor = cursor >>> 0;
+  }
+  const raw = parts.join("");
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+/** [束B/B-3・M61/FC4] 住民 ID の表示専用整形(名前の正式生成は M53)。 */
 export function residentDisplayName(residentId: EntityId): string {
   const raw: string = residentId;
-  const body = STARTING_RESIDENT_ID_PATTERN.test(raw) ? raw.slice(3) : raw;
-  if (body.length === 0) return raw;
-  return body.charAt(0).toUpperCase() + body.slice(1);
+  if (STARTING_RESIDENT_ID_PATTERN.test(raw)) {
+    const body = raw.slice(3);
+    return body.length === 0 ? raw : body.charAt(0).toUpperCase() + body.slice(1);
+  }
+  if (isMachineGeneratedResidentId(raw)) return syntheticResidentName(raw);
+  if (raw.length === 0) return raw;
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
 }

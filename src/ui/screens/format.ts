@@ -34,12 +34,32 @@ export function formatGameClock(tick: number): string {
 }
 
 /**
- * [束A] 資源在庫の桁整形(ヘッダの資源HUD)。
+ * [M61/FC11] 整数部へ3桁区切りのカンマを入れる(符号维持)。
+ *
+ * `toLocaleString` は実行環境のロケールに依存する(CLAUDE.md
+ * 「ロケール依存の書式化は使わない」の精神をゲーム内時計だけでなく数値表示にも
+ * 適用する・書式が実行環境で変わるとスクリーンショット由来の不具合報告が読め
+ * なくなる)ため、桁区切りは自前の文字列処理で行う。小数部・符号はここでは
+ * 触らない(呼び出し側が既に分離した整数部の文字列を渡す)。
+ */
+function withThousandsSeparator(integerPart: string): string {
+  const negative = integerPart.startsWith("-");
+  const digits = negative ? integerPart.slice(1) : integerPart;
+  const groups: string[] = [];
+  for (let end = digits.length; end > 0; end -= 3) {
+    groups.unshift(digits.slice(Math.max(0, end - 3), end));
+  }
+  return (negative ? "-" : "") + groups.join(",");
+}
+
+/**
+ * [束A][M61/FC11で3桁区切り追加] 資源在庫の桁整形(ヘッダの資源HUD等)。
  *
  * **1e6 固定小数点からの換算はここでやらない**。引数は `derived.ts` が
  * `toApproxNumber`(engine の `fp.ts`)で人間可読値へ直した `stockApprox` で
  * あり、ここが持つのは「チップに入る桁数へ丸める」表示上の都合だけである。
- * 小数第 1 位まで(整数なら小数点を出さない)。
+ * 小数第 1 位まで(整数なら小数点を出さない)+ 整数部は3桁区切り(プレイテスト
+ * R1-A22「戦力59.5125」「firewood 1,620,004.7 に桁区切りなし」への対応)。
  *
  * @throws {RangeError} 有限数でない場合
  */
@@ -48,7 +68,24 @@ export function formatResourceAmount(approx: number): string {
     throw new RangeError(`資源量 ${String(approx)} が有限数でない`);
   }
   const rounded = Math.round(approx * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const [integerPart, decimalPart] = rounded.toFixed(1).split(".");
+  const groupedInteger = withThousandsSeparator(integerPart ?? "0");
+  return decimalPart === "0" ? groupedInteger : `${groupedInteger}.${decimalPart ?? "0"}`;
+}
+
+/**
+ * [M61/FC11] 小数第 1 位までの汎用整形(戦力・士気など資源以外の近似値)。
+ * `formatResourceAmount` と違い3桁区切りは付けない(戦力・士気は3桁を超えない
+ * 値域のため過剰装飾になる)。常に小数第1位まで出す(整数でも ".0" を出す —
+ * 「近似値である」ことを一貫して示すため。桁の丸め自体は `toApproxNumber` 側)。
+ *
+ * @throws {RangeError} 有限数でない場合
+ */
+export function formatApproxDecimal1(approx: number): string {
+  if (!Number.isFinite(approx)) {
+    throw new RangeError(`数値 ${String(approx)} が有限数でない`);
+  }
+  return approx.toFixed(1);
 }
 
 /**

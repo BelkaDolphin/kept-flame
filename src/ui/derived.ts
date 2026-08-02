@@ -816,6 +816,12 @@ export interface StoreDerived {
   readonly gridSummary: ReadonlyComputed<GridSummary>;
 
   readonly tick: ReadonlyComputed<number>;
+  /**
+   * [M61/FC11・R1-A26] 完了した大移動の回数(`state.progression.runCount`・
+   * 0 = 1 周目)。ColonyClock の「周回N・第M日」表記に使う(tick は周回を跨いで
+   * リセットしない設計=GDD/裁定どおり。表記だけで誤解を解く)。
+   */
+  readonly runCount: ReadonlyComputed<number>;
   readonly resources: ReadonlyComputed<readonly ResourceView[]>;
   readonly research: ReadonlyComputed<readonly ResearchView[]>;
   /**
@@ -1059,6 +1065,9 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
   );
 
   const tick = computed<number>(() => sources.state.value.tick, { name: "tick" });
+  const runCount = computed<number>(() => sources.state.value.progression.runCount, {
+    name: "runCount",
+  });
 
   const resources = computed<readonly ResourceView[]>(
     () => {
@@ -1383,6 +1392,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     cellView,
     gridSummary,
     tick,
+    runCount,
     resources,
     research,
     researchChip,

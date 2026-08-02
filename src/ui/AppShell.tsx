@@ -45,8 +45,9 @@
 //   どちらも意匠は CSS 側(appShell.css)にあり、ここが持つのは構造と状態だけ。
 // ---------------------------------------------------------------------------
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
+import type { EntityId } from "../engine/state/state";
 import "./appShell.css";
 import { BackupReminderBanner } from "./BackupReminderBanner";
 import { InstallPromotionBanner } from "./InstallPromotionBanner";
@@ -55,8 +56,10 @@ import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
 import { resourceLabel, techLabel } from "./screens/contentLabels";
 import { formatGameClock, formatResourceAmount } from "./screens/format";
+import { labelizeLogText } from "./screens/idLabelize";
 import { SCREEN_META, type ScreenId } from "./screens";
 import { SCREEN_REGISTRY } from "./screens/registry";
+import { ToastStackView, useToastStack, type ToastStackApi } from "./screens/Toast";
 import { useSignalValue } from "./screens/useStoreSignal";
 import type { ResearchChipView, ResourceView } from "./derived";
 import type { ShellSession } from "./shellSession";
@@ -71,9 +74,13 @@ export interface ColonyClockProps {
 
 export function ColonyClock({ store }: ColonyClockProps) {
   const tick = useSignalValue(store.derived.tick);
+  const runCount = useSignalValue(store.derived.runCount);
   return (
     <div class="kf-hud__chip kf-clock">
-      <span class="kf-hud__chip-label">時刻</span>
+      {/* [M61/FC11・R1-A26] tick は大移動を跨いでリセットしない(仕様どおり)。
+          「周回N」を常に添えて、新周回なのに日数がゼロへ戻らないことの誤解を
+          表記だけで解く(仕様変更ではない・runCount=0 が1周目)。 */}
+      <span class="kf-hud__chip-label">周回{runCount + 1}・時刻</span>
       <span class="kf-hud__chip-value">{formatGameClock(tick)}</span>
     </div>
   );
@@ -207,6 +214,96 @@ export function TestplaySpeedIndicator({ controller }: TestplaySpeedIndicatorPro
       <span class="kf-hud__chip-value">⏩×{speed}</span>
     </div>
   );
+}
+
+// --- 1-5. 帰還・研究完了の通知トースト(M61/FC7) -----------------------------
+//
+//   R1-A05「探索隊の帰還が一切通知されない」/ R1-A16「研究完了時のフィードバック
+//   が皆無」への対応。どちらも**プレイヤー操作の結果ではなく tick 進行の結果**
+//   (帰還・研究完了は scheduler が advance 中に決める)なので、個々の画面の
+//   成功トースト(Toast.tsx・コマンド成功時にその画面が push する形)には乗らない
+//   ——どの画面を見ていても、あるいは Worker catch-up で一気に進んだ直後でも
+//   気づけるよう、常時マウントされているシェル(AppShell)側に置く。
+//
+//   検知方式は「前回の描画時点の集合」と「今の集合」を比較する差分検知
+//   (`useRef` で前回値を保持)。dispatch/commandApplied のような明示イベントが
+//   無い(帰還・完了は state の受動的な結果でしかない)ため、この形が最小実装。
+//   初回マウント時(前回値が無い時)は基準を取るだけで通知しない——起動直後に
+//   「もう解禁済みの tech」まで完了扱いで鳴らさないため。
+
+/**
+ * [M61/FC7] 探索帰還の通知。`store.derived.renderedLog`(GDD 8.4 のレンダリング
+ * 済み帰還ログ)の総件数(表示中 + 畳んだ件数)が増えるたびに、新しく増えた
+ * ぶんの本文を通知する。表示直前に `labelizeLogText` を通す(FC4 と同じ表示時
+ * 変換・ChronicleScreen.tsx と同じ扱い)。
+ *
+ * 長期不在からの復帰で一気に何件も積まれることがある(Worker catch-up)ため、
+ * 4 件を超える分は個別に出さず「ほかN件」の要約1本にまとめる(通知の洪水を
+ * 避ける・★判断)。
+ */
+export interface ExpeditionReturnWatcherProps {
+  readonly store: GameStore;
+  readonly onReturn: (text: string) => void;
+}
+
+const MAX_INDIVIDUAL_RETURN_TOASTS = 3;
+
+export function ExpeditionReturnWatcher({ store, onReturn }: ExpeditionReturnWatcherProps) {
+  const renderedLog = useSignalValue(store.derived.renderedLog);
+  const previousTotalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const total = renderedLog.entries.length + renderedLog.foldedCount;
+    const previous = previousTotalRef.current;
+    if (previous !== null) {
+      const newCount = total - previous;
+      if (newCount > 0) {
+        const newest = renderedLog.entries.slice(-newCount);
+        if (newCount <= MAX_INDIVIDUAL_RETURN_TOASTS) {
+          for (const entry of newest) onReturn(labelizeLogText(entry.text));
+        } else {
+          const shown = newest.slice(-MAX_INDIVIDUAL_RETURN_TOASTS);
+          for (const entry of shown) onReturn(labelizeLogText(entry.text));
+          onReturn(`ほか${String(newCount - MAX_INDIVIDUAL_RETURN_TOASTS)}件の探索が帰還した`);
+        }
+      }
+    }
+    previousTotalRef.current = total;
+    // 依存配列は意図的に `renderedLog` だけ(`onReturn` は毎レンダー新しい
+    // 関数参照になり得るが、比較の基準は renderedLog の値そのものだけでよい)。
+  }, [renderedLog]);
+
+  return null;
+}
+
+/**
+ * [M61/FC7] 研究完了の通知。`store.derived.researchTree` を監視し、
+ * 各行の `status` が新たに `"completed"` になった techId を通知する。
+ */
+export interface ResearchCompletionWatcherProps {
+  readonly store: GameStore;
+  readonly onComplete: (text: string) => void;
+}
+
+export function ResearchCompletionWatcher({ store, onComplete }: ResearchCompletionWatcherProps) {
+  const tree = useSignalValue(store.derived.researchTree);
+  const previousCompletedRef = useRef<ReadonlySet<EntityId> | null>(null);
+
+  useEffect(() => {
+    const completedNow = new Set(
+      tree.filter((entry) => entry.status === "completed").map((entry) => entry.techId),
+    );
+    const previous = previousCompletedRef.current;
+    if (previous !== null) {
+      for (const techId of completedNow) {
+        if (!previous.has(techId)) onComplete(`「${techLabel(techId)}」の研究が完了した`);
+      }
+    }
+    previousCompletedRef.current = completedNow;
+    // 依存配列は意図的に `tree` だけ(上の ExpeditionReturnWatcher と同じ理由)。
+  }, [tree]);
+
+  return null;
 }
 
 // --- 2. ナビゲーション(5グループ・[束A] F-5) -------------------------------
@@ -401,6 +498,8 @@ export function AppShell({
   // ナビの展開状態は**セーブにも URL にも載らない揮発 UI 状態**(バナーの
   // 閉鎖状態と同じ扱い)。現在地の権威はあくまでルータ側にある。
   const [openGroupId, setOpenGroupId] = useState<NavGroupId | null>(null);
+  // [M61/FC7] 帰還・研究完了の通知トースト(どの画面にいても届く・§1-5)。
+  const globalToasts: ToastStackApi = useToastStack();
 
   useEffect(() => {
     // 購読を張る前にルータが動いていた可能性があるので、まず現在地へ揃える。
@@ -430,12 +529,28 @@ export function AppShell({
           <span class="kf-app__title-sub">継ぐ火 -Kept Flame-</span>
         </h1>
         <div class="kf-app__hud">
+          {/* [2026-08-02裁定・台帳v12 必-1・FC2] 390px でチップ列が全体で
+              横スクロールしていたため、時刻/研究チップ/加速インジケータが
+              画面外へ押し出されていた(研究チップは台帳v10 必-1 で「作業台から
+              人を外して研究が止まっていても気づけない」ことへの対策として
+              入れたばかりで、見えなくては意味が無い)。この3つは**常時可視の
+              固定枠**に置き、資源チップだけを横スクロール領域(下の
+              kf-app__hud-scroll)へ切り出す★判断(2択案のうちの「研究チップ+⏩
+              固定+資源のみスクロール」を採用)。 */}
           <ColonyClock store={store} />
-          <ResourceHud store={store} />
           <ResearchChip store={store} />
           <TestplaySpeedIndicator controller={testplaySpeed} />
+          <div class="kf-app__hud-scroll">
+            <ResourceHud store={store} />
+          </div>
         </div>
       </header>
+      {/* [M61/FC7] 監視だけを行い何も描かない(§1-5)。トースト自体はこの下の
+          ToastStackView が表示する——画面遷移しても張り直る心配が無いよう、
+          ScreenHost の外(シェル直下)に置く。 */}
+      <ExpeditionReturnWatcher store={store} onReturn={globalToasts.push} />
+      <ResearchCompletionWatcher store={store} onComplete={globalToasts.push} />
+      <ToastStackView toasts={globalToasts.toasts} />
       {installPromotion && (
         <InstallPromotionBanner
           visible={installPromotion.visible && !installBannerClosed}

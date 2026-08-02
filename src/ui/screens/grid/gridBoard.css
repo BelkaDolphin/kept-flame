@@ -503,6 +503,13 @@
   font-weight: 600;
 }
 
+/* [M61/FC6・R1-C02] 建設前の効果ヒント(寝床の実効果/非稼働の「効果は未実装」)。 */
+.kf-catalog__effect-hint {
+  display: block;
+  font-size: var(--kf-fs-micro, 12px);
+  color: #7a5a00;
+}
+
 .kf-catalog__cancel {
   min-width: 44px;
   min-height: 44px;

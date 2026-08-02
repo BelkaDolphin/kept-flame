@@ -15,6 +15,7 @@
 
 import { cellIdOf } from "../../../engine/adjacency";
 import { toApproxNumber } from "../../../engine/fp";
+import { cellCoordinateLabel } from "../cellCoordinate";
 import type { CellAdjacencyBreakdown } from "./adjacencyBreakdown";
 import { TagChip } from "./TagChip";
 import { TagIconDefs } from "./TagIcons";
@@ -38,7 +39,9 @@ export function CellBreakdownView({
       style={`font-family:${TYPOGRAPHY.stack};`}
     >
       {includeIconDefs && <TagIconDefs />}
-      <h2 class="kf-breakdown__title">内訳{cellId !== null ? `(${cellId})` : ""}</h2>
+      <h2 class="kf-breakdown__title">
+        内訳{cellId !== null ? `(${cellCoordinateLabel(cellId)})` : ""}
+      </h2>
       {breakdown === null ? (
         <p class="kf-breakdown__empty">施設を選択すると内訳が表示されます。</p>
       ) : (
@@ -67,13 +70,16 @@ export function CellBreakdownView({
                   <ul class="kf-breakdown__contributions">
                     {bucket.contributions.map((c, i) => (
                       <li key={i} class="kf-breakdown__contribution">
-                        {cellIdOf(c.neighborAnchorCellIndex)} × 自タグ{TAG_VISUALS[c.selfTag].ja}
+                        {/* [M61/FC5・R1-A17] 内部セルID("c00")と実装寄りの語("ルール無し"
+                            "target不一致")を人間可読な座標/文言へ。 */}
+                        {cellCoordinateLabel(cellIdOf(c.neighborAnchorCellIndex))} × 自タグ
+                        {TAG_VISUALS[c.selfTag].ja}
                         {" → "}
                         {c.effect === null
-                          ? "ルール無し"
+                          ? "この隣接は影響しません"
                           : c.applied
                             ? formatRawPercent(toApproxNumber(c.effect.valueFix))
-                            : "対象外(target不一致)"}
+                            : "対象外(タグが合わない)"}
                       </li>
                     ))}
                     {bucket.excessAnchors.map((anchor) => (
@@ -81,7 +87,7 @@ export function CellBreakdownView({
                         key={`excess-${String(anchor)}`}
                         class="kf-breakdown__contribution kf-breakdown__contribution--excess"
                       >
-                        {cellIdOf(anchor)} — 超過(ボーナス無効化)
+                        {cellCoordinateLabel(cellIdOf(anchor))} — 超過(ボーナス無効化)
                       </li>
                     ))}
                   </ul>

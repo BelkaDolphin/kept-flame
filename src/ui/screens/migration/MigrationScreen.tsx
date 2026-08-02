@@ -56,10 +56,12 @@ import {
 } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import { mediumLabel, residentDisplayName, techLabel, traitLabel } from "../contentLabels";
+import { formatApproxDecimal1 } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
+import { useStickyActionsClearance } from "../useStickyActionsClearance";
 import "./migrationScreen.css";
 
 // --- 1. 表示文言(判定は engine・ここは文言だけ) -----------------------------
@@ -132,7 +134,9 @@ export function ExodusCrewRow({ resident, selected, onToggle }: ExodusCrewRowPro
         onClick={() => onToggle(resident.id)}
       >
         <span class="kf-exodus__crew-id">{residentDisplayName(resident.id)}</span>
-        <span class="kf-exodus__crew-morale">士気{resident.moraleApprox}</span>
+        <span class="kf-exodus__crew-morale">
+          士気{formatApproxDecimal1(resident.moraleApprox)}
+        </span>
         {resident.traitIds.length > 0 && (
           <span class="kf-exodus__crew-traits">
             {resident.traitIds.map((traitId) => traitLabel(traitId)).join("・")}
@@ -230,6 +234,13 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
   const [confirming, setConfirming] = useState(false);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const [completedEarnedPoints, setCompletedEarnedPoints] = useState<number | null>(null);
+  // [M61/FC3] プール件数・確認ダイアログの開閉(=sticky バー自身の高さも変わる)
+  // のいずれかが変わるたびに sticky バーとの重なりを測り直す。
+  const stickyClearance = useStickyActionsClearance([
+    codifyViews.length,
+    residentViews.length,
+    confirming,
+  ]);
 
   const recordPool: readonly ExodusRecordOption[] = codifyViews
     .filter((entry) => entry.completed)
@@ -380,8 +391,13 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
         </ul>
       )}
 
+      {/* [M61/FC11・R1-A27] 見出しの分母(生存住民の総数=選べる上限)と、下の
+          積み込みプレビューが出す「乗員: X / 定員」の分母(次周へ運べる乗員
+          定員)は**別の数値**だが、どちらも「X/Y」表記だったため矛盾に見えた
+          (大移動直後は定員が住民総数より小さくなりうる)。ラベルを分けて
+          明示する。 */}
       <h3 class="kf-migration-screen__subtitle">
-        乗員プール(生存住民・{validCrewIds.length}/{crewPool.length}名選択)
+        乗員プール(生存住民 {crewPool.length}名中 {validCrewIds.length}名を選択)
       </h3>
       {crewPool.length === 0 ? (
         <p class="kf-migration-screen__empty">連れて行ける住民がいません。</p>
@@ -399,22 +415,26 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
       )}
 
       <h3 class="kf-migration-screen__subtitle">積み込みプレビュー</h3>
-      <ExodusPreviewPanel resolution={resolution} />
+      {/* [M61/FC3・R1-C04] sticky確定バーとの実測重なり補正(プレビュー+シード
+          指定欄をまとめて1つの塊として押し下げる対象にする)。 */}
+      <div ref={stickyClearance.contentRef}>
+        <ExodusPreviewPanel resolution={resolution} />
 
-      <label class="kf-migration-screen__seed-label">
-        次の周回のシードを指定(任意)
-        <input
-          type="text"
-          class="kf-migration-screen__seed-input"
-          value={worldSeedOverride}
-          onChange={(event) => setWorldSeedOverride((event.target as HTMLInputElement).value)}
-          placeholder="空欄なら自動で決まります"
-        />
-      </label>
+        <label class="kf-migration-screen__seed-label">
+          次の周回のシードを指定(任意)
+          <input
+            type="text"
+            class="kf-migration-screen__seed-input"
+            value={worldSeedOverride}
+            onChange={(event) => setWorldSeedOverride((event.target as HTMLInputElement).value)}
+            placeholder="空欄なら自動で決まります"
+          />
+        </label>
+      </div>
 
       {/* [束A/M-3] 確定操作(大移動を実行 → 確認)は画面下部の sticky バーへ。
           記録/乗員の一覧が長くても、選びながら常に押せる位置に留まる。 */}
-      <div class="kf-sticky-actions">
+      <div class="kf-sticky-actions" ref={stickyClearance.stickyRef}>
         {!confirming ? (
           <button
             type="button"
@@ -456,7 +476,7 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
           class="kf-migration-screen__nav-button"
           onClick={() => onNavigate("inheritance")}
         >
-          ⑪継承点購入へ
+          継承点購入へ
         </button>
         <button
           type="button"

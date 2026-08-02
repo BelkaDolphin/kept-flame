@@ -34,6 +34,7 @@ import { useMemo } from "preact/hooks";
 
 import { buildReturnDigest, type DigestLeadKind, type DigestRowId } from "../../derived";
 import { formatGameClock, formatTickSpan } from "../format";
+import { labelizeLogText } from "../idLabelize";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import type { ScreenProps } from "../screenProps";
 
@@ -141,8 +142,12 @@ export function ReturnDigest({ store, onNavigate, bootTick }: ScreenProps) {
         </button>
       </div>
 
+      {/* [M61/FC11・R1-A24] 「不在のあいだ」は連続プレイ中(特にテストプレイ加速中)に
+          ⑫を開くと実態と異なる(離席していないのに「不在」と言われる)。
+          離席を主張しない「経過」表現へ言い換える(オフライン復帰・連続プレイの
+          どちらでも文として成立する)。 */}
       <p class="kf-digest__meta">
-        不在のあいだ {formatTickSpan(digest.elapsedTicks)} が過ぎました(
+        前回の確認から {formatTickSpan(digest.elapsedTicks)} が経過しました(
         {formatGameClock(digest.sinceTick)} → {formatGameClock(digest.nowTick)})。
       </p>
 
@@ -181,7 +186,8 @@ export function ReturnDigest({ store, onNavigate, bootTick }: ScreenProps) {
           {digest.logEntries.map((entry) => (
             <li class="kf-digest__log" key={`${String(entry.tick)}:${entry.text}`}>
               <span class="kf-digest__log-tick">{formatGameClock(entry.tick)}</span>
-              {entry.text}
+              {/* [M61/FC4] ChronicleScreen.tsx と同じ表示時ID変換。 */}
+              {labelizeLogText(entry.text)}
             </li>
           ))}
         </ul>

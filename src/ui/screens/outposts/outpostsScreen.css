@@ -122,6 +122,47 @@
   color: #a11334;
 }
 
+/* [M61/FC8] 拠点放棄の確認1段(MigrationScreen.tsx の kf-migration__confirm* と
+   同じ意匠)。 */
+.kf-outpost-card__abandon-confirm {
+  border: 2px solid #a11334;
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  margin: 0.4rem 0 0;
+  background: #faf8f5;
+}
+
+.kf-outpost-card__abandon-confirm-message {
+  font-size: var(--kf-fs-sub);
+  margin: 0 0 0.5rem;
+}
+
+.kf-outpost-card__abandon-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.kf-outpost-card__abandon-confirm-button,
+.kf-outpost-card__abandon-cancel-button {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-sub);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #a11334;
+  cursor: pointer;
+}
+
+.kf-outpost-card__abandon-cancel-button {
+  border-color: #8a857d;
+  color: #24201c;
+}
+
 /* [M54] 駐在させる住民の選択行 */
 .kf-outpost-card__station-row {
   display: flex;

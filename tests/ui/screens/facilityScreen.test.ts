@@ -114,6 +114,76 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     expect(text).toContain("ARui");
   });
 
+  it("[M61/FC11・R1-A14] nextLevelOutputApprox があれば「現在 → 増築後」を実行前に見せる", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ outputPerTickApprox: 100 }),
+      onUpgrade: () => undefined,
+      nextLevelOutputApprox: 115,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("100.00");
+    expect(text).toContain("→ 115.00");
+  });
+
+  it("nextLevelOutputApprox 省略時は矢印を出さない(後方互換)", () => {
+    const vnode = FacilityDetailPanel({ detail: detailView(), onUpgrade: () => undefined });
+    expect(flattenText(vnode)).not.toContain("→");
+  });
+
+  it("[M61/FC6] effectKind='none' は産出/就労を出さず「効果は未実装」を出す", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView(),
+      onUpgrade: () => undefined,
+      effectKind: "none",
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("効果は未実装");
+    expect(text).not.toContain("就労");
+  });
+
+  it("[M61/FC6] effectKind='bedCapacity' は bedEffectText をそのまま出す", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView(),
+      onUpgrade: () => undefined,
+      effectKind: "bedCapacity",
+      bedEffectText: "寝床上限 +2(住民の漂着加入の上限を増やす)",
+    });
+    expect(flattenText(vnode)).toContain("寝床上限 +2");
+  });
+
+  it("[M61/FC6・2026-08-02差し戻し] effectKind='storageCapacity' は storageEffectText を出し「効果は未実装」を出さない", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView(),
+      onUpgrade: () => undefined,
+      effectKind: "storageCapacity",
+      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("保管上限を設定");
+    expect(text).not.toContain("効果は未実装");
+    expect(text).not.toContain("就労");
+  });
+
+  it("[M61/FC6・2026-08-02差し戻し] storageCapacityWarningVisible=true で在庫超過の警告を追加表示する", () => {
+    const withWarning = FacilityDetailPanel({
+      detail: detailView(),
+      onUpgrade: () => undefined,
+      effectKind: "storageCapacity",
+      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+      storageCapacityWarningVisible: true,
+    });
+    expect(flattenText(withWarning)).toContain("頭打ち");
+
+    const withoutWarning = FacilityDetailPanel({
+      detail: detailView(),
+      onUpgrade: () => undefined,
+      effectKind: "storageCapacity",
+      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+      storageCapacityWarningVisible: false,
+    });
+    expect(flattenText(withoutWarning)).not.toContain("頭打ち");
+  });
+
   it("研究点産出(resourceId=null)は「研究点」と表示する", () => {
     const vnode = FacilityDetailPanel({
       detail: detailView({ outputKind: "research", outputResourceId: null }),

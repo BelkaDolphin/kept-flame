@@ -206,6 +206,30 @@ describe("CodifyTechRow: 保持者・唯一保持・記録済み・作業中", (
     expect(text).toContain("5.0");
     expect(text).toContain("20.0");
   });
+
+  it("[M61/FC11・R1-A15] costPreview があればキューに入れる前に必要資源を見せる", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry(),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      costPreview: { resourceId: id("clay"), amountApprox: 12 },
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("必要資源");
+    expect(text).toContain("粘土");
+    expect(text).toContain("12.0");
+  });
+
+  it("costPreview 省略時は「必要資源」欄を出さない(後方互換)", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry(),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+    });
+    expect(flattenText(vnode)).not.toContain("必要資源");
+  });
 });
 
 describe("CodifyTechRow: 媒体トグル + キュー投入(ロードマップ M31 行 [2026-07-27追補])", () => {
@@ -324,29 +348,30 @@ describe("[M54] CodifyTechRow: 作業中の記録の取消(返金なし・GDD 6.
 });
 
 describe("CodifySuggestionRow(おまかせ成文化 1 件・GDD 2.1)", () => {
-  it("順番・媒体・所要/累積tick・間に合う見込みを表示する", () => {
+  // [M61/FC11・R1-A21] 手書きの連番(order プロップ)は削除した——描画先が
+  // <ol> なのでブラウザのマーカー番号と二重表示("1. 1. 土器…")になっていた。
+  it("媒体・所要/累積・間に合う見込みを表示する(手書きの連番は付けない)", () => {
     const vnode = CodifySuggestionRow({
       suggestion: suggestion({ onSchedule: true, durationTicks: 40, cumulativeTicks: 90 }),
-      order: 3,
     });
     const text = flattenText(vnode);
-    expect(text).toContain("3.");
     expect(text).toContain("火起こし");
     expect(text).toContain("石板");
-    expect(text).toContain("40");
-    expect(text).toContain("90");
     expect(text).toContain("間に合う見込み");
+    // [M61/FC5⑤] 所要/累積は formatTickSpan 経由(40tick=40分・90tick=1時間30分)。
+    expect(text).toContain("40分");
+    expect(text).toContain("1時間30分");
+    expect(text).not.toContain("tick");
   });
 
   it("onSchedule=false は「間に合わない見込み」", () => {
-    const vnode = CodifySuggestionRow({ suggestion: suggestion({ onSchedule: false }), order: 1 });
+    const vnode = CodifySuggestionRow({ suggestion: suggestion({ onSchedule: false }) });
     expect(flattenText(vnode)).toContain("間に合わない見込み");
   });
 
   it("無期限(hasDeadline=false)は tick 数を出さない", () => {
     const vnode = CodifySuggestionRow({
       suggestion: suggestion({ hasDeadline: false, residualTick: 9007199254740991 }),
-      order: 1,
     });
     const text = flattenText(vnode);
     expect(text).toContain("無期限");

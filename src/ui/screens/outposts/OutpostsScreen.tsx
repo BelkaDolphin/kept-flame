@@ -32,6 +32,7 @@ import { type EntityId } from "../../../engine/state/state";
 import type { OutpostRosterEntry, ResidentView } from "../../derived";
 import {
   distanceBandLabel,
+  outpostDisplayLabel,
   outpostTypeLabel,
   residentDisplayName,
   resourceLabel,
@@ -60,7 +61,18 @@ export interface OutpostCardProps {
   readonly onStationSelectChange: (residentId: EntityId | "") => void;
   readonly onStation: () => void;
   readonly onUnstation: (residentId: EntityId) => void;
-  readonly onAbandon: () => void;
+  /**
+   * [M61/FC8] 放棄の確認1段(`MigrationScreen.tsx` の `confirming` と同型)。
+   * このコンポーネント自身は hooks を持たない(既存方針を維持)ので、確認中か
+   * どうかの状態は親(`OutpostsScreen`)が持ち、拠点IDごとの開閉を props で渡す。
+   */
+  readonly confirmingAbandon: boolean;
+  /** 「この拠点を放棄する」の初回タップ(確認パネルを開くだけ・まだ実行しない)。 */
+  readonly onAbandonStart: () => void;
+  /** 確認パネルの「実行する」。 */
+  readonly onAbandonConfirm: () => void;
+  /** 確認パネルの「キャンセル」。 */
+  readonly onAbandonCancel: () => void;
 }
 
 export function OutpostCard({
@@ -70,7 +82,10 @@ export function OutpostCard({
   onStationSelectChange,
   onStation,
   onUnstation,
-  onAbandon,
+  confirmingAbandon,
+  onAbandonStart,
+  onAbandonConfirm,
+  onAbandonCancel,
 }: OutpostCardProps) {
   function handleStationSelectChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
@@ -80,7 +95,9 @@ export function OutpostCard({
   return (
     <li class="kf-outpost-card">
       <h4 class="kf-outpost-card__title">
-        {outpostTypeLabel(outpost.outpostTypeId)}({outpost.outpostId})・Lv{outpost.level}・
+        {/* [M61/FC5・R1-A17] outpostId の生露出("農園(outpostFarm1)")を
+            outpostDisplayLabel(和名+連番+号)へ。 */}
+        {outpostDisplayLabel(outpost.outpostId, outpost.outpostTypeId)}・Lv{outpost.level}・
         {distanceBandLabel(outpost.band)}
       </h4>
       {outpost.residentIds.length === 0 ? (
@@ -141,9 +158,42 @@ export function OutpostCard({
       <p class="kf-outpost-card__roi">
         採算(ROI): {outpost.roiApprox === null ? "算出不可(分母0)" : outpost.roiApprox.toFixed(2)}
       </p>
-      <button type="button" class="kf-outpost-card__abandon-button" onClick={onAbandon}>
-        この拠点を放棄する
-      </button>
+      {/* [M61/FC8・R1-D05] 拠点放棄が確認0段(即時実行)だった。大移動(1段)・
+          最初からやり直す(2段)と同じ「取り消せない操作は必ず確認を挟む」形へ
+          揃える。1段(大移動と同型)を採用——拠点放棄は個々の拠点1件の喪失で、
+          全周回データを失う「最初からやり直す」ほどの重大度ではない★判断。 */}
+      {!confirmingAbandon ? (
+        <button type="button" class="kf-outpost-card__abandon-button" onClick={onAbandonStart}>
+          この拠点を放棄する
+        </button>
+      ) : (
+        <section
+          class="kf-outpost-card__abandon-confirm"
+          role="alertdialog"
+          aria-label="拠点放棄の確認"
+        >
+          <p class="kf-outpost-card__abandon-confirm-message">
+            本当によろしいですか。この操作は取り消せません。常駐中の住民は解除され、この拠点からの
+            供給は無くなります。
+          </p>
+          <div class="kf-outpost-card__abandon-confirm-actions">
+            <button
+              type="button"
+              class="kf-outpost-card__abandon-confirm-button"
+              onClick={onAbandonConfirm}
+            >
+              実行する(取り消せません)
+            </button>
+            <button
+              type="button"
+              class="kf-outpost-card__abandon-cancel-button"
+              onClick={onAbandonCancel}
+            >
+              キャンセル
+            </button>
+          </div>
+        </section>
+      )}
     </li>
   );
 }
@@ -263,6 +313,10 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
   const [stationSelections, setStationSelections] = useState<ReadonlyMap<EntityId, EntityId | "">>(
     () => new Map(),
   );
+  // [M61/FC8] 放棄確認が開いている拠点ID(1件だけ・MigrationScreen.tsxの
+  // confirmingと同じくbooleanでもよいが、拠点は複数枚のカードが並ぶため
+  // 「どのカードが開いているか」をIDで持つ)。
+  const [confirmingAbandonId, setConfirmingAbandonId] = useState<EntityId | null>(null);
 
   const effectiveEstablishTypeId = establishTypeId ?? outpostTypeIds[0] ?? null;
 
@@ -294,20 +348,32 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
     }
     setLastRejection(null);
     setEstablishResidentIds(new Set());
-    toastStack.push(`${outpostTypeLabel(effectiveEstablishTypeId)}(${outpostId})を設置した`);
+    // [M61/FC5] outpostId の生露出("outpostFarm1")を outpostDisplayLabel へ。
+    toastStack.push(`${outpostDisplayLabel(outpostId, effectiveEstablishTypeId)}を設置した`);
   }
 
-  function handleAbandon(outpostId: EntityId): void {
+  // [M61/FC8] 「放棄する」初回タップ = 確認パネルを開くだけ(まだ dispatch しない)。
+  function handleAbandonStart(outpostId: EntityId): void {
+    setConfirmingAbandonId(outpostId);
+    setLastRejection(null);
+  }
+
+  function handleAbandonCancel(): void {
+    setConfirmingAbandonId(null);
+  }
+
+  function handleAbandonConfirm(outpost: OutpostRosterEntry): void {
     const result = store.dispatch({
       type: "commandApplied",
-      command: { kind: "abandonOutpost", outpostId },
+      command: { kind: "abandonOutpost", outpostId: outpost.outpostId },
     });
+    setConfirmingAbandonId(null);
     if (result.command !== null && !result.command.ok) {
       setLastRejection(result.command.rejection);
       return;
     }
     setLastRejection(null);
-    toastStack.push(`拠点(${outpostId})を放棄した`);
+    toastStack.push(`${outpostDisplayLabel(outpost.outpostId, outpost.outpostTypeId)}を放棄した`);
   }
 
   function handleUnstation(residentId: EntityId): void {
@@ -348,7 +414,14 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
       next.delete(outpostId);
       return next;
     });
-    toastStack.push(`${residentDisplayName(residentId)}を拠点(${outpostId})へ駐在させた`);
+    // [M61/FC5] outpostId の生露出を outpostDisplayLabel へ(型が引けない
+    // 万一のケースは raw ID を出さず「この拠点」に倒す・捏造しない)。
+    const outpostTypeId = overview.roster.find(
+      (entry) => entry.outpostId === outpostId,
+    )?.outpostTypeId;
+    const outpostLabel =
+      outpostTypeId === undefined ? "この拠点" : outpostDisplayLabel(outpostId, outpostTypeId);
+    toastStack.push(`${residentDisplayName(residentId)}を${outpostLabel}へ駐在させた`);
   }
 
   return (
@@ -413,7 +486,10 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
               }
               onStation={() => handleStation(outpost.outpostId)}
               onUnstation={handleUnstation}
-              onAbandon={() => handleAbandon(outpost.outpostId)}
+              confirmingAbandon={confirmingAbandonId === outpost.outpostId}
+              onAbandonStart={() => handleAbandonStart(outpost.outpostId)}
+              onAbandonConfirm={() => handleAbandonConfirm(outpost)}
+              onAbandonCancel={handleAbandonCancel}
             />
           ))}
         </ul>
@@ -425,14 +501,14 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
           class="kf-outposts-screen__nav-button"
           onClick={() => onNavigate("residents")}
         >
-          ④住民一覧へ
+          住民一覧へ
         </button>
         <button
           type="button"
           class="kf-outposts-screen__nav-button"
           onClick={() => onNavigate("expedition")}
         >
-          ⑦探索本部へ
+          探索本部へ
         </button>
       </div>
     </section>

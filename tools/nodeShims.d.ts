@@ -23,6 +23,14 @@ declare module "node:fs" {
     path: string,
     options?: { readonly recursive?: boolean; readonly force?: boolean },
   ): void;
+  // M61: tests/ui/screens/gddNumberSweep.test.ts が src/ui/**/*.tsx を再帰的に
+  // 列挙するために使用(withFileTypes 経由の最小サブセットのみ宣言)。
+  export interface Dirent {
+    readonly name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }
+  export function readdirSync(path: string, options: { readonly withFileTypes: true }): Dirent[];
 }
 
 declare module "node:url" {

@@ -112,6 +112,14 @@
   color: #24201c;
 }
 
+/* [M61/FC11・R1-A15] キュー投入前の必要資源プレビュー。 */
+.kf-codify-row__cost-preview {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0 0 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .kf-codify-row__enqueue-button {
   min-width: 44px;
   min-height: 44px;

@@ -30,7 +30,16 @@ import type { CommandRejection, CommandResult } from "../../../engine/commands";
 import { toApproxNumber } from "../../../engine/fp";
 import type { EntityId } from "../../../engine/state/state";
 import type { CellViewModel, FacilityCatalogEntry, ReclaimInfo, ResourceView } from "../../derived";
+import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, resourceLabel } from "../contentLabels";
+import {
+  bedCapacityEffectText,
+  DORMANT_FACILITY_EFFECT_TEXT,
+  facilityEffectKind,
+  STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
+  storageCapacityEffectText,
+  storageCapacityWouldCapExistingStock,
+} from "../facilityEffect";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
@@ -62,6 +71,13 @@ export interface FacilityCatalogButtonProps {
   /** [束B/B-4] 建設コストの資源が現在の在庫で足りないか。 */
   readonly insufficient: boolean;
   readonly onPick: (defId: EntityId) => void;
+  /**
+   * [M61/FC6] 建設前に見せる効果の一言(寝床の実効果 / 非稼働施設の「効果は
+   * 未実装」)。`null`/省略 = 通常施設(何も添えない・既存呼び出し元との後方
+   * 互換)。R1-C02「非稼働4施設が通常施設と同一の見た目でカタログに並ぶ」への
+   * 対応。
+   */
+  readonly effectHint?: string | null;
 }
 
 /**
@@ -75,6 +91,7 @@ export function FacilityCatalogButton({
   active,
   insufficient,
   onPick,
+  effectHint = null,
 }: FacilityCatalogButtonProps) {
   const classes = ["kf-catalog__button"];
   if (active) classes.push("kf-catalog__button--active");
@@ -97,6 +114,7 @@ export function FacilityCatalogButton({
             ? "コストなし"
             : `${insufficient ? "▲ " : ""}コスト ${entry.buildCostApprox} ${resourceLabel(entry.buildCostResourceId)}`}
         </span>
+        {effectHint !== null && <span class="kf-catalog__effect-hint">{effectHint}</span>}
       </button>
     </li>
   );
@@ -110,6 +128,8 @@ export interface FacilityCatalogPanelProps {
   readonly resources: readonly ResourceView[];
   readonly onPick: (defId: EntityId) => void;
   readonly onCancel: () => void;
+  /** [M61/FC6] defId → 建設前の効果ヒント(`null`/未指定=通常施設は何も無し)。 */
+  readonly effectHintByDefId?: ReadonlyMap<EntityId, string>;
 }
 
 /** 「タップ選択 → 配置先タップ」の 1 ステップ目。 */
@@ -119,6 +139,7 @@ export function FacilityCatalogPanel({
   resources,
   onPick,
   onCancel,
+  effectHintByDefId,
 }: FacilityCatalogPanelProps) {
   return (
     <section class="kf-catalog" aria-label="施設カタログ">
@@ -131,6 +152,7 @@ export function FacilityCatalogPanel({
             active={entry.defId === pendingDefId}
             insufficient={isCatalogEntryInsufficient(entry, resources)}
             onPick={onPick}
+            effectHint={effectHintByDefId?.get(entry.defId) ?? null}
           />
         ))}
       </ul>
@@ -164,7 +186,7 @@ export function ReclaimPanel({ cell, info, onReclaim }: ReclaimPanelProps) {
     (info.availableStockApprox ?? 0) < info.nextCostApprox;
   return (
     <section class="kf-reclaim" aria-label="瓦礫の開墾">
-      <h3 class="kf-reclaim__title">未開墾({cell.cellId})</h3>
+      <h3 class="kf-reclaim__title">未開墾({cellCoordinateLabel(cell.cellId)})</h3>
       {!info.available ? (
         <p class="kf-reclaim__inactive">この盤面では開墾システムが無効です。</p>
       ) : (
@@ -207,10 +229,35 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
   const adjacencyMatrix = useSignalValue(store.derived.adjacencyMatrix);
   const summary = useSignalValue(store.derived.gridSummary);
   const resources = useSignalValue(store.derived.resources);
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり)。
+  // [M61/FC6] カタログの建設前ヒント(寝床の実効果/非稼働の未実装表示)に使う。
+  const content = store.peekContent();
 
   const [pendingDefId, setPendingDefId] = useState<EntityId | null>(null);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
+
+  const effectHintByDefId = useMemo(() => {
+    const hints = new Map<EntityId, string>();
+    for (const [defId, def] of content.facilityDefs) {
+      const kind = facilityEffectKind(def);
+      if (kind === "bedCapacity") {
+        const text = bedCapacityEffectText(def, 1);
+        if (text !== null) hints.set(defId, text);
+      } else if (kind === "storageCapacity") {
+        // [M61/FC6・2026-08-02差し戻し] 保管庫: 「効果は未実装」ではなく実効果
+        // (facilityEffect.ts §2「保管庫」)。現在庫が既に上限超なら一言足す。
+        const text = storageCapacityEffectText(def, 1);
+        if (text !== null) {
+          const exceeded = storageCapacityWouldCapExistingStock(def, 1, resources);
+          hints.set(defId, exceeded ? `${text} ${STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT}` : text);
+        }
+      } else if (kind === "none") {
+        hints.set(defId, DORMANT_FACILITY_EFFECT_TEXT);
+      }
+    }
+    return hints;
+  }, [content, resources]);
 
   // 採番は「選んだ瞬間の state」から 1 度だけ行い、配置が済む/キャンセルされる
   // までは同じ候補 ID を保つ(pendingDefId が変わらない限り再計算しない)。
@@ -268,7 +315,11 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
     const afterStockApprox =
       costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
     const diff = resourceDeltaPhrase(costResourceId, beforeStockApprox, afterStockApprox);
-    toastStack.push(`${selectedCell.cellId}を開墾した${diff.length > 0 ? `(${diff})` : ""}`);
+    // [M61/FC5・R1-A17] トースト本文の cellId 生露出("c12を開墾した")を
+    // 人間可読座標へ。
+    toastStack.push(
+      `${cellCoordinateLabel(selectedCell.cellId)}を開墾した${diff.length > 0 ? `(${diff})` : ""}`,
+    );
   }
 
   const overcrowd: LegendOvercrowdInfo = {
@@ -307,6 +358,7 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
             resources={resources}
             onPick={pickCatalogEntry}
             onCancel={cancelPending}
+            effectHintByDefId={effectHintByDefId}
           />
         </div>
 

@@ -23,6 +23,7 @@ import type { MemoirEntry } from "../../../engine/state/state";
 import type { MemoirFeedEntry } from "../../derived";
 import { distanceBandLabel, residentDisplayName } from "../contentLabels";
 import { formatGameClock } from "../format";
+import { labelizeLogText } from "../idLabelize";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./chronicleScreen.css";
@@ -85,7 +86,7 @@ export function ChronicleScreen({ store, onNavigate }: ScreenProps) {
   return (
     <section class="kf-chronicle-screen" aria-labelledby="kf-chronicle-screen-title">
       <h2 class="kf-chronicle-screen__title" id="kf-chronicle-screen-title">
-        冒険記ビューア
+        冒険記
       </h2>
       <p class="kf-screen-intro">
         探索の帰還記録と、住民一人ひとりに起きた出来事を時系列で振り返ります。
@@ -99,7 +100,10 @@ export function ChronicleScreen({ store, onNavigate }: ScreenProps) {
           {renderedLog.entries.map((entry) => (
             <li class="kf-chronicle__log-row" key={`${String(entry.tick)}:${entry.text}`}>
               <span class="kf-chronicle__log-tick">{formatGameClock(entry.tick)}</span>
-              <span class="kf-chronicle__log-text">{entry.text}</span>
+              {/* [M61/FC4] 保存済み文字列は engine が埋め込んだ内部ID(event/資源)を
+                  含むことがある。表示直前に labelizeLogText で和名へ変換する
+                  (state自体は書き換えない・既存セーブの過去ログも直る)。 */}
+              <span class="kf-chronicle__log-text">{labelizeLogText(entry.text)}</span>
             </li>
           ))}
         </ul>
@@ -130,7 +134,7 @@ export function ChronicleScreen({ store, onNavigate }: ScreenProps) {
           class="kf-chronicle-screen__nav-button"
           onClick={() => onNavigate("residents")}
         >
-          ④住民一覧へ
+          住民一覧へ
         </button>
       </div>
     </section>

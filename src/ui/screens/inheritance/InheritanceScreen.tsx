@@ -134,7 +134,7 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
             class="kf-inheritance-screen__nav-button"
             onClick={() => onNavigate("migration")}
           >
-            ⑩大移動へ
+            大移動へ
           </button>
         </div>
       </section>
@@ -206,7 +206,7 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
           class="kf-inheritance-screen__nav-button"
           onClick={() => onNavigate("migration")}
         >
-          ⑩大移動へ
+          大移動へ
         </button>
       </div>
     </section>

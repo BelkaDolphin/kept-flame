@@ -204,6 +204,13 @@ export function ResearchEraSection({
         <span class="kf-research-era__count">
           解禁 {completed}/{group.entries.length}
         </span>
+        {/* [M61/FC11・R1-A28] details/summary は開閉の視覚的手がかりが無かった
+            (summary を display:flex にすると既定の▶マーカーが消える)。ナビの
+            ▾/▴(AppShell.tsx の kf-nav__caret)と同じ記号を明示的に足す。
+            開/閉の切替は details の [open] 属性を CSS 側(researchScreen.css)
+            で見て記号を差し替える(JS 状態を持たない・ブラウザネイティブの
+            開閉に追随)。 */}
+        <span class="kf-research-era__caret" aria-hidden="true" />
       </summary>
       <ul class="kf-research-era__list">
         {group.entries.map((entry) => (
@@ -279,7 +286,7 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
           class="kf-research-screen__nav-button"
           onClick={() => onNavigate("codify")}
         >
-          ⑥成文化キューへ
+          成文化キューへ
         </button>
       </div>
     </section>

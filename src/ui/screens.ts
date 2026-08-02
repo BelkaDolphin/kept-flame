@@ -34,9 +34,9 @@ export const SCREEN_IDS = [
   "research", // ⑤ 研究ツリー
   "codify", // ⑥ 成文化キュー
   "expedition", // ⑦ 探索本部
-  "chronicle", // ⑧ 冒険記ビューア
+  "chronicle", // ⑧ 冒険記
   "outposts", // ⑨ 衛星拠点管理
-  "migration", // ⑩ 大移動ナップサックUI
+  "migration", // ⑩ 大移動
   "inheritance", // ⑪ 継承点購入
   "digest", // ⑫ 帰還ダイジェスト(復帰専用)
   "settings", // ＋ セーブ/設定(番号なし)
@@ -54,7 +54,14 @@ export interface ScreenMeta {
   readonly id: ScreenId;
   /** GDD 6.6 の丸数字。設定画面は番号を持たない。 */
   readonly order: number | null;
-  /** 日本語表示名(GDD 6.6 の表記そのまま)。 */
+  /**
+   * プレイヤー向け表示名。原則 GDD 6.6 の表記のままだが、[M61/FC5]
+   * chronicle("冒険記ビューア"→"冒険記")/migration("大移動ナップサックUI"→
+   * "大移動")の2件は R1-A18(内部設計名の露出)への対応でプレイヤー向けに
+   * 短縮した——GDD 6.6 の表はスクリーンカタログとしての設計上の呼称であり、
+   * "ビューア"/"ナップサックUI" はゲームUI実装の内部用語(GDD自体は変更しない・
+   * 表示専用の言い換え)。各画面の見出し(h2)側もこの表記に揃えてある。
+   */
   readonly label: string;
 }
 
@@ -67,9 +74,9 @@ export const SCREEN_META: { readonly [K in ScreenId]: ScreenMeta } = {
   research: { id: "research", order: 5, label: "研究ツリー" },
   codify: { id: "codify", order: 6, label: "成文化キュー" },
   expedition: { id: "expedition", order: 7, label: "探索本部" },
-  chronicle: { id: "chronicle", order: 8, label: "冒険記ビューア" },
+  chronicle: { id: "chronicle", order: 8, label: "冒険記" },
   outposts: { id: "outposts", order: 9, label: "衛星拠点管理" },
-  migration: { id: "migration", order: 10, label: "大移動ナップサックUI" },
+  migration: { id: "migration", order: 10, label: "大移動" },
   inheritance: { id: "inheritance", order: 11, label: "継承点購入" },
   digest: { id: "digest", order: 12, label: "帰還ダイジェスト" },
   settings: { id: "settings", order: null, label: "セーブ/設定" },
