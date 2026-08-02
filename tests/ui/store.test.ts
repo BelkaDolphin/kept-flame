@@ -11,9 +11,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { advance, createAdvanceContext } from "../../src/engine/advance";
+import { TICK_MS, advance, createAdvanceContext } from "../../src/engine/advance";
 import { apply } from "../../src/engine/commands";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "../../src/platform/catchUp";
+import { createTickDriver, type MonotonicClock } from "../../src/platform/clock";
 import { toSerializable } from "../../src/engine/state/serialize";
 import { getEntity, requireEntity } from "../../src/engine/state/state";
 import { StoreError, createGameStore, type StoreEvent } from "../../src/ui/store";
@@ -357,5 +358,145 @@ describe("診断カウンタ", () => {
     expect(after.dispatchCount).toBe(before.dispatchCount + 2);
     expect(after.placementChangeCount).toBe(before.placementChangeCount + 1);
     expect(after.stateInstallCount).toBe(before.stateInstallCount + 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [R1-A01/A02] 世界の入れ替え(worldLoaded)の外部通知と tick 駆動の結線
+//
+// AIプレイテスト Round 1 の fatal 2 件:
+//   A01 ×720 で長く進めた後に過去のセーブをインポートすると、以後ゲーム内時刻が
+//       永久に止まる(StoreError「tick 差 698 は前景経路の上限 600 を超える」)。
+//   A02 「最初からやり直す」でも同じ(tick 差 4901)。
+// 原因は「state を丸ごと差し替えたのに tick 駆動のアンカーを引き直していない」
+// ことだった(store.ts §5 / clock.ts §6)。ここでは `src/main.tsx` と同じ形に
+// 結線したうえで、入れ替え後も前景 tick が進み続けることを固定する。
+// ---------------------------------------------------------------------------
+
+describe("[R1-A01/A02] worldLoaded の通知と tick 駆動の再アンカー", () => {
+  function fakeClock(): MonotonicClock & { advance(ms: number): void } {
+    let now = 0;
+    return {
+      now: () => now,
+      advance: (ms: number) => {
+        now += ms;
+      },
+    };
+  }
+
+  /**
+   * `src/main.tsx` と同じ形にストアと tick driver を繋ぐ。
+   *
+   * `reanchor: false` は**修正前の結線**(通知を受けても `syncTo` を呼ばない)の
+   * 再現であり、世界を入れ替えると次の pump がストア例外で落ちる = 何が壊れて
+   * いたのかをテストの中に残しておくために使う。
+   */
+  function wireLikeMain(reanchor: boolean) {
+    const clock = fakeClock();
+    const swaps: number[] = [];
+    const store = createGameStore({
+      state: boardState([], { tick: 0 }),
+      content: boardContent(),
+      onWorldLoaded: (next) => {
+        swaps.push(next.tick);
+        if (reanchor) driver.syncTo(next.tick);
+      },
+    });
+    const driver = createTickDriver({
+      startTick: store.peekState().tick,
+      clock,
+      onAdvance: (toTick) => {
+        store.dispatch({ type: "ticked", toTick });
+      },
+      // 駆動源は自前で回す(このテストは実タイマを 1 つも使わない)。
+      schedule: () => () => undefined,
+    });
+    return { clock, store, driver, swaps };
+  }
+
+  /** 前景経路の上限(600 tick)を超えないように刻んで `toTick` まで進める。 */
+  function playForward(
+    wiring: ReturnType<typeof wireLikeMain>,
+    tickCount: number,
+    stepTicks = LIVE_ADVANCE_MAX_TICK_DELTA / 2,
+  ): void {
+    for (let done = 0; done < tickCount; done += stepTicks) {
+      wiring.clock.advance(Math.min(stepTicks, tickCount - done) * TICK_MS);
+      wiring.driver.pump();
+    }
+  }
+
+  it("worldLoaded は「据えた後の state」で 1 回だけ通知する", () => {
+    const { store, swaps } = wireLikeMain(true);
+    store.dispatch({
+      type: "worldLoaded",
+      state: boardState([], { tick: 123 }),
+      content: boardContent(),
+      source: "import",
+    });
+    expect(swaps).toEqual([123]);
+    expect(store.peekState().tick).toBe(123);
+  });
+
+  it("世界を入れ替えない他のイベントでは通知しない", () => {
+    const wiring = wireLikeMain(true);
+    playForward(wiring, 3);
+    wiring.store.dispatch({
+      type: "commandApplied",
+      command: placeHearth("fSouth", CELL_SOUTHEAST),
+    });
+    wiring.store.dispatch({ type: "cellSelected", cellIndex: 1 });
+    wiring.store.dispatch({ type: "screenOpened", screen: "settings" });
+    expect(wiring.swaps).toEqual([]);
+  });
+
+  it("11 ゲーム時間前のセーブをインポートしても、以後の tick が進み続ける(A01)", () => {
+    const wiring = wireLikeMain(true);
+    playForward(wiring, 700);
+    expect(wiring.store.peekState().tick).toBe(700);
+
+    // 660 tick(11 ゲーム時間)前のセーブ = 修正前に 698 差で凍結した状況。
+    wiring.store.dispatch({
+      type: "worldLoaded",
+      state: boardState([], { tick: 40 }),
+      content: boardContent(),
+      source: "import",
+    });
+    expect(wiring.store.peekState().tick).toBe(40);
+
+    // 以後の前景 advance は**新しい世界の tick 基準**で進む。
+    wiring.clock.advance(2 * TICK_MS);
+    expect(() => wiring.driver.pump()).not.toThrow();
+    expect(wiring.store.peekState().tick).toBe(42);
+    expect(wiring.driver.anchor().anchorTick).toBe(42);
+  });
+
+  it("「最初からやり直す」(tick 0 の新規世界)でも時刻が進む(A02)", () => {
+    const wiring = wireLikeMain(true);
+    playForward(wiring, 4901);
+    expect(wiring.store.peekState().tick).toBe(4901);
+
+    wiring.store.dispatch({
+      type: "worldLoaded",
+      state: boardState([], { tick: 0 }),
+      content: boardContent(),
+      source: "newGame",
+    });
+    wiring.clock.advance(5 * TICK_MS);
+    expect(() => wiring.driver.pump()).not.toThrow();
+    expect(wiring.store.peekState().tick).toBe(5);
+  });
+
+  it("再アンカーしないと次の pump がストア例外で落ちる(修正前の挙動の固定)", () => {
+    const wiring = wireLikeMain(false);
+    playForward(wiring, 700);
+    wiring.store.dispatch({
+      type: "worldLoaded",
+      state: boardState([], { tick: 40 }),
+      content: boardContent(),
+      source: "import",
+    });
+    wiring.clock.advance(2 * TICK_MS);
+    expect(() => wiring.driver.pump()).toThrow(StoreError);
   });
 });

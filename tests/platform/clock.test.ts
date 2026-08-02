@@ -14,14 +14,16 @@
 // 触らない = テスト自体が実時間に依存しない。
 // ---------------------------------------------------------------------------
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TICK_MS } from "../../src/engine/advance";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "../../src/platform/catchUp";
 import {
   ClockError,
   createTickDriver,
+  defaultTickScheduler,
   planTick,
+  TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES,
   type MonotonicClock,
   type TickAnchor,
 } from "../../src/platform/clock";
@@ -225,5 +227,179 @@ describe("TickDriver(発火回数非依存・M29 検分観点)", () => {
       schedule: () => () => undefined,
     });
     expect(() => driver.syncTo(1.5)).toThrow(ClockError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [R1-A01/A02] 駆動源は pump の例外で死なない(clock.ts §5)
+//
+// AIプレイテスト Round 1 の fatal 2 件は、`pump()` が投げると
+// `requestAnimationFrame(loop)` の再予約に到達せず rAF 連鎖が永久に切れる
+// ——「ゲーム内時刻が二度と進まない」——という構造が原因だった。ここでは
+// **rAF を偽物に差し替えて**、投げ続けても予約が続くこと/連続失敗では自ら
+// 止まること/1 回でも成功すればカウンタが戻ることを固定する。
+// ---------------------------------------------------------------------------
+
+interface FakeRaf {
+  /** 予約済みコールバックを 1 フレームぶん実行する。 */
+  frame(): void;
+  /** 予約待ちのコールバック数(0 なら連鎖が切れている)。 */
+  pendingCount(): number;
+  restore(): void;
+}
+
+type RafGlobal = typeof globalThis & {
+  requestAnimationFrame?: (callback: FrameRequestCallback) => number;
+  cancelAnimationFrame?: (handle: number) => void;
+};
+
+function installFakeRaf(): FakeRaf {
+  const target = globalThis as RafGlobal;
+  const originalRequest = target.requestAnimationFrame;
+  const originalCancel = target.cancelAnimationFrame;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let nextHandle = 1;
+
+  target.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+    const handle = nextHandle++;
+    callbacks.set(handle, callback);
+    return handle;
+  };
+  target.cancelAnimationFrame = (handle: number): void => {
+    callbacks.delete(handle);
+  };
+
+  return {
+    frame(): void {
+      const pending = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of pending) callback(0);
+    },
+    pendingCount: () => callbacks.size,
+    restore(): void {
+      if (originalRequest === undefined) delete target.requestAnimationFrame;
+      else target.requestAnimationFrame = originalRequest;
+      if (originalCancel === undefined) delete target.cancelAnimationFrame;
+      else target.cancelAnimationFrame = originalCancel;
+    },
+  };
+}
+
+describe("defaultTickScheduler(pump が投げても連鎖が切れない・§5)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("pump が毎回投げても、上限に達するまでは次フレームの予約が続く", () => {
+    const raf = installFakeRaf();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      let calls = 0;
+      const stop = defaultTickScheduler(() => {
+        calls++;
+        throw new Error("pump が壊れている");
+      });
+      expect(raf.pendingCount()).toBe(1);
+
+      // 上限の 1 つ手前まで: 毎フレーム呼ばれ、毎フレーム予約し直される。
+      for (let i = 1; i < TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES; i++) {
+        raf.frame();
+        expect(calls).toBe(i);
+        expect(raf.pendingCount()).toBe(1);
+      }
+      // ログは「1 連続につき 2 行まで」の 1 行目だけが出ている。
+      expect(errors).toHaveBeenCalledTimes(1);
+      stop();
+    } finally {
+      errors.mockRestore();
+      raf.restore();
+    }
+  });
+
+  it("連続失敗が上限に達したら自ら止まる(無限エラーループにしない)", () => {
+    const raf = installFakeRaf();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      let calls = 0;
+      defaultTickScheduler(() => {
+        calls++;
+        throw new Error("pump が壊れている");
+      });
+      for (let i = 0; i < TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES + 3; i++) raf.frame();
+
+      expect(calls).toBe(TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES);
+      expect(raf.pendingCount()).toBe(0);
+      // 1 行目(最初の失敗)+ 停止の 1 行 = 2 行だけ(毎フレーム吐かない)。
+      expect(errors).toHaveBeenCalledTimes(2);
+    } finally {
+      errors.mockRestore();
+      raf.restore();
+    }
+  });
+
+  it("1 回でも成功すれば失敗カウンタは 0 に戻る(たまに失敗する pump では止まらない)", () => {
+    const raf = installFakeRaf();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      let calls = 0;
+      const stop = defaultTickScheduler(() => {
+        calls++;
+        // 2 回に 1 回だけ投げる = 連続失敗は常に 1。
+        if (calls % 2 === 1) throw new Error("たまに壊れる pump");
+      });
+      for (let i = 0; i < 40; i++) raf.frame();
+
+      expect(calls).toBe(40);
+      expect(raf.pendingCount()).toBe(1);
+      // 停止行は 1 度も出ていない(= 上限に達していない)。
+      expect(errors.mock.calls.every((call) => !String(call[0]).includes("駆動を止める"))).toBe(
+        true,
+      );
+      stop();
+      expect(raf.pendingCount()).toBe(0);
+    } finally {
+      errors.mockRestore();
+      raf.restore();
+    }
+  });
+
+  it("投げない pump では従来どおり毎フレーム呼ばれ、stop() で止まる", () => {
+    const raf = installFakeRaf();
+    try {
+      let calls = 0;
+      const stop = defaultTickScheduler(() => {
+        calls++;
+      });
+      raf.frame();
+      raf.frame();
+      expect(calls).toBe(2);
+      stop();
+      raf.frame();
+      expect(calls).toBe(2);
+      expect(raf.pendingCount()).toBe(0);
+    } finally {
+      raf.restore();
+    }
+  });
+
+  it("rAF が無い環境では 1 秒間隔へ落ちる(そちらも例外で止まらない)", () => {
+    // 既定の Node 実行環境には requestAnimationFrame が無い(= この分岐)。
+    vi.useFakeTimers();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      let calls = 0;
+      const stop = defaultTickScheduler(() => {
+        calls++;
+        throw new Error("pump が壊れている");
+      });
+      vi.advanceTimersByTime(3000);
+      expect(calls).toBe(3);
+      stop();
+      vi.advanceTimersByTime(3000);
+      expect(calls).toBe(3);
+    } finally {
+      errors.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

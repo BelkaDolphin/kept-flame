@@ -148,6 +148,8 @@ M8 が作ったのは**ストア基盤だけ**である。以下は M8 の成果
 
 `dispatch` は `DispatchResult`(`stateChanged` / `changedPlacementCells` / `advanceContextRebuilt` / `advanceContextRestored` / **`command`**)を返す。前 4 つは UI の描画に使わず**診断・計測・テスト用**だが、**`command` だけは画面が読んでよい** — コマンドが拒否されたことを利用者へ伝える手段が他に無いためである(黙って何も起きない、を作らない)。
 
+**[2026-08-02 / AIプレイテスト R1-A01/A02 修正] 世界の入れ替えは外へ 1 本通知する**: `createGameStore({…, onWorldLoaded})` を渡すと、`worldLoaded` を適用し終えた直後(`batch` の外)に `(state, source)` で 1 回だけ呼ばれる。ストアの外にある 2 つの前提 —— tick 駆動のアンカー(`platform/clock.ts` §6)と IndexedDB のセーブ —— を composition root(`src/main.tsx` の `handleWorldLoaded`)が直すための唯一の口である。**画面側でアンカー引き直しや保存を書かないこと**(インポート/最初からやり直すの各経路で呼び忘れが起きたのが R1 の fatal 2 件)。入れ替えを Worker catch-up へ回さないのは、catch-up が「実時間が経ったのに未計算の tick」を埋める仕組みであり、世界の入れ替えには埋めるべき経過が無いため(過去セーブのインポートを catch-up で進めるとインポートの意味が消える)。
+
 **dispatch は 1 回 = 再描画 1 回**(内部で `batch`)。途中経過は effect に見えない。
 
 ### 4-1. コマンド(M49)

@@ -54,6 +54,27 @@
 //   Worker 経路の領域(> 600 tick)なら**例外にする**。ここで黙って走らせると
 //   ADR-019/ADR-029 の予算設計が無言で破れるため。呼び出し側は Worker へ回して
 //   `catchUpApplied` を投げる。
+//
+// ===========================================================================
+// 5. 世界の入れ替えは外へ 1 本だけ通知する(`onWorldLoaded`)
+// ===========================================================================
+//   `worldLoaded` は state を丸ごと差し替えるので、**ストアの外にある「今の
+//   tick はこれだ」という前提が全部無効になる**: tick 駆動のアンカー
+//   (platform/clock.ts §6)と、IndexedDB に載っているセーブの内容である。
+//   AIプレイテスト Round 1 の fatal 2 件(インポート後・最初からやり直した後に
+//   ゲーム内時刻が永久凍結し、リロードで入れ替え前に戻る)は、この 2 つを
+//   画面側が個別に呼ぶ設計になっておらず**どこからも呼ばれていなかった**
+//   ことが原因だった。
+//
+//   対策として、通知を**唯一の書き込み口である dispatch の中**へ置いた。
+//   世界の入れ替え経路が今後増えても(どの画面から `worldLoaded` を出しても)
+//   結線は自動的に効く = 呼び忘れが構造的に起きない。ストアが知っているのは
+//   「コールバックを 1 個呼ぶ」ことだけで、アンカーもセーブも知らない
+//   (実際の再アンカー/保存は composition root `src/main.tsx` の担当。
+//   architecture.md §1 の「platform → ui は無い」を保つ)。
+//
+//   通知は `batch` の**外**(全 signal が落ち着いた後)で呼ぶ。コールバックから
+//   `dispatch` を呼び返すことは想定していない(再入は禁止)。
 // ---------------------------------------------------------------------------
 
 import { advance, createAdvanceContext } from "../engine/advance";
@@ -248,6 +269,16 @@ export interface CreateGameStoreInput {
    * `createAdvanceContext` を 1 回だけ走らせる。
    */
   readonly advanceContext?: TransferableAdvanceContext;
+  /**
+   * 世界が入れ替わった(`worldLoaded` を適用し終えた)直後に 1 回だけ呼ばれる
+   * 通知(§5)。渡さなければ何も起きない(テスト・部品単体での利用)。
+   *
+   * 受け取るのは**据えたあとの** state と、その由来(`import`/`newGame`/`save`)。
+   * `src/main.tsx` はこれで tick 駆動のアンカー引き直し(`TickDriver.syncTo`)と
+   * 即時保存(`SaveScheduler`)を行う。**このコールバックから `dispatch` を
+   * 呼び返さないこと**(再入は想定していない)。
+   */
+  readonly onWorldLoaded?: (state: GameState, source: WorldLoadSource) => void;
 }
 
 /**
@@ -493,7 +524,13 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
     dispatch(event: StoreEvent): DispatchResult {
       dispatchCount++;
       // 1 dispatch = 1 回の再描画。途中経過を effect に見せない。
-      return batch(() => applyEvent(event));
+      const result = batch(() => applyEvent(event));
+      if (event.type === "worldLoaded") {
+        // 世界の入れ替えを外へ 1 本だけ通知する(§5)。batch の外なので、
+        // 受け手が見る signal は全て新しい世界のものに揃っている。
+        input.onWorldLoaded?.(sources.state.peek(), event.source);
+      }
+      return result;
     },
 
     peekState: () => sources.state.peek(),

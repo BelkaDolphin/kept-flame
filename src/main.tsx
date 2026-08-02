@@ -174,7 +174,16 @@ async function boot(): Promise<void> {
   // ⑫帰還ダイジェストの「不在中」の起点(ui-spec §4)。catch-up の**前**に取る。
   const bootTick = booted.state.tick;
 
-  const store: GameStore = createGameStore({ state: booted.state, content });
+  const store: GameStore = createGameStore({
+    state: booted.state,
+    content,
+    // 世界の入れ替え(インポート / 最初からやり直す)の唯一の結線点。実体は
+    // 下の `handleWorldLoaded`(関数宣言なので巻き上げ済み。呼ばれるのは
+    // プレイヤー操作の時点 = driver / scheduler が揃った後)。
+    onWorldLoaded: (state) => {
+      handleWorldLoaded(state);
+    },
+  });
 
   const router = createHashRouter<ScreenId>(createBrowserRouterHost(), {
     routes: SCREEN_IDS,
@@ -201,6 +210,13 @@ async function boot(): Promise<void> {
   const testplaySpeed = createTestplaySpeedController(scaledClock);
 
   let catchUpInFlight = false;
+  /**
+   * 世界の版番号。`worldLoaded`(インポート/最初からやり直す)のたびに 1 進む。
+   * 飛行中の Worker catch-up は**入れ替え前の世界**を進めているので、完了時に
+   * 版が変わっていたらその結果は捨てる(据えると入れ替えが黙って巻き戻るか、
+   * 古い tick のスナップショットとして `catchUpApplied` が例外になる)。
+   */
+  let worldGeneration = 0;
 
   const driver = createTickDriver({
     startTick: store.peekState().tick,
@@ -222,12 +238,15 @@ async function boot(): Promise<void> {
 
   /** 長い不在の catch-up。Worker が使えなければメインで刻む(分割不変・advance.ts §3)。 */
   async function runCatchUp(toTick: number): Promise<void> {
+    const generation = worldGeneration;
     const current = store.peekState();
     if (toTick <= current.tick) return;
     try {
       const worker = await startCatchUpWorker(content);
       try {
         const result = await worker.catchUp(current, toTick);
+        // 待っている間に世界が入れ替わっていたら、この結果はもう別世界のもの。
+        if (generation !== worldGeneration) return;
         store.dispatch({
           type: "catchUpApplied",
           snapshot: result.snapshot,
@@ -247,6 +266,7 @@ async function boot(): Promise<void> {
         const step = Math.min(toTick - state.tick, LIVE_ADVANCE_MAX_TICK_DELTA);
         state = advance(state, ctx, state.tick + step);
       }
+      if (generation !== worldGeneration) return;
       store.dispatch({
         type: "catchUpApplied",
         snapshot: state,
@@ -256,6 +276,37 @@ async function boot(): Promise<void> {
         },
       });
     }
+  }
+
+  // --- 世界の入れ替え(インポート / 最初からやり直す)の後始末 ----------------
+  //
+  //   `store.dispatch({type:"worldLoaded"})` は state を丸ごと差し替えるが、
+  //   **ストアの外にある 2 つの前提**までは直せない:
+  //     (1) tick 駆動のアンカー(clock.ts §6)。引き直さないと、driver は旧世界
+  //         基準の targetTick を出し続け、ストアが「tick 差が前景経路の上限を
+  //         超える」で例外を投げ、ゲーム内時刻が二度と進まなくなる(R1-A01/A02)。
+  //     (2) IndexedDB のセーブ。書かないとリロードで入れ替え前の世界に戻る
+  //         (インポートによる救済が「成功しました」と言いながら消える)。
+  //   ストア側は `worldLoaded` を適用し終えた直後にここを 1 回だけ呼ぶ
+  //   (`src/ui/store.ts` §5)ので、画面がこの後始末を呼び忘れる余地は無い。
+  //
+  //   **ここを Worker catch-up 経路へ回さない理由**(ADR-026(3)の判断基準):
+  //   catch-up は「実時間が経ったのにまだシミュレーションしていない tick」を
+  //   埋める仕組みである。世界の入れ替えには埋めるべき経過が無い —— 新しい
+  //   state の tick は**今この瞬間の値そのもの**であり、engine を 1 tick も
+  //   回す必要がない。11 ゲーム時間前のセーブをインポートしたときに 660 tick を
+  //   catch-up で進めてしまえば、「昔の状態へ戻す」というインポートの意味自体が
+  //   消える。よってここは同期の `syncTo`(アンカーの引き直しだけ)が正しく、
+  //   Worker 経路は起動時/復帰時の tick 差(= 実時間の経過)に対して従来どおり
+  //   `onCatchUpRequired` が担う。
+  function handleWorldLoaded(state: GameState): void {
+    worldGeneration++;
+    driver.syncTo(state.tick);
+    if (scheduler === null) return;
+    // 既存のセーブ導線をそのまま使う(新しい保存形式も経路も作らない)。
+    // `recordCommands` で最新 state を積み、明示フラッシュで即座に 1 回書く。
+    scheduler.recordCommands(state);
+    void scheduler.flush("manual");
   }
 
   // 起動直後の 1 回(可視復帰と同じ扱い・ADR-026(4))。

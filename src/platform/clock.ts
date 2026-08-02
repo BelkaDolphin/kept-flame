@@ -51,6 +51,36 @@
 //   engine 側(`elapsedMsToTickDelta`)が 0 に落とすので**進行方向へは絶対に
 //   影響しない**。本ファイルはそれを `rewound: true` として観測可能にし、
 //   アンカーを現在時刻へ引き直して以後の計測が壊れないようにする。
+//
+// ===========================================================================
+// 5. 駆動源は pump の例外で死なない(R1-A01/A02 の再発防止線)
+// ===========================================================================
+//   `defaultTickScheduler` の rAF ループは「pump した後に次フレームを予約する」
+//   形をしていたため、pump が 1 度でも throw すると予約に到達せず**rAF 連鎖が
+//   永久に切れ、ゲーム内時刻が二度と進まなくなる**(AIプレイテスト Round 1 の
+//   fatal 2 件が実際にこれで凍結した)。予約を `finally` へ移し、pump の例外は
+//   駆動源の中で捕まえる。
+//
+//   ただし「毎フレーム同じ例外を握り潰して回り続ける」のも異常なので、
+//   {@link TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES} 回**連続**で失敗したら
+//   駆動を止め、ログは 1 連続につき 2 行までに抑える(コンソールの氾濫でページを
+//   固めない)。1 回でも成功すればカウンタは 0 に戻る。
+//
+//   **これは防衛線であって修正ではない。** pump が throw する原因(= 世界を
+//   入れ替えたのにアンカーを引き直していない・§6)は呼び出し側で直すこと。
+//
+// ===========================================================================
+// 6. 世界を入れ替えたら必ず {@link TickDriver.syncTo}(呼び出し側の義務)
+// ===========================================================================
+//   アンカーは「この実時刻のとき、ゲーム内 tick はこれだった」という対応表で
+//   あり、**state を丸ごと差し替える操作(セーブのインポート・最初からやり直す・
+//   新規ゲーム)はこの対応を無効にする**。引き直さないまま次の pump が走ると、
+//   driver は旧世界基準の targetTick を出し、ストア側は新 state の tick との
+//   巨大な差(> 600)を見て例外にする(`src/ui/store.ts` §4)= §5 の凍結に至る。
+//
+//   結線の実体は composition root(`src/main.tsx`)にあり、ストアの
+//   `onWorldLoaded` 通知から `syncTo` を呼ぶ形で**構造的に**取りこぼしを
+//   防いでいる(世界の入れ替えは `worldLoaded` イベント 1 種類しかない)。
 // ---------------------------------------------------------------------------
 
 import { TICK_MS, computeTargetTick } from "../engine/advance";
@@ -156,26 +186,76 @@ export function planTick(anchor: TickAnchor, nowMs: number): TickPlan {
  */
 export type TickScheduler = (pump: () => void) => () => void;
 
-/** 既定の駆動源。rAF があれば rAF、無ければ 1 秒間隔(ADR-026(2) の「rAF または1秒間隔」)。 */
+/**
+ * 既定の駆動源が「もう回しても無駄」と判断して自ら止まるまでの**連続**失敗回数。
+ * 1 回でも成功したら 0 に戻る(§5)。
+ */
+export const TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES = 5;
+
+/**
+ * 既定の駆動源。rAF があれば rAF、無ければ 1 秒間隔(ADR-026(2) の「rAF または1秒間隔」)。
+ *
+ * **pump が投げても合図を止めない**(§5)。次フレームの予約は `finally` に置いて
+ * あり、例外経路からは到達不能な位置に一切書かない。
+ */
 export const defaultTickScheduler: TickScheduler = (pump) => {
+  let consecutiveFailures = 0;
+  let stopped = false;
+  /** 駆動源そのものの解除(rAF なら cancelAnimationFrame、無ければ clearInterval)。 */
+  let cancelSource: () => void = () => undefined;
+
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    cancelSource();
+  };
+
+  /**
+   * 1 回ぶんの合図。**例外を外へ出さない**(出すと呼び出し元の予約が飛ぶ)。
+   * 同じ例外が毎フレーム出続けてもログは 1 連続につき 2 行までに抑える(§5)。
+   */
+  const pumpOnce = (): void => {
+    if (stopped) return;
+    try {
+      pump();
+      consecutiveFailures = 0;
+    } catch (error: unknown) {
+      consecutiveFailures++;
+      if (consecutiveFailures === 1) {
+        console.error("[clock] tick pump が例外を投げた(駆動は継続する)", error);
+      }
+      if (consecutiveFailures >= TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES) {
+        console.error(
+          `[clock] tick pump が ${String(TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES)} 回連続で失敗したので駆動を止める` +
+            "(以後この駆動源は合図を出さない。原因を直してから再読み込みすること)",
+        );
+        stop();
+      }
+    }
+  };
+
   if (typeof requestAnimationFrame === "function") {
     let handle = 0;
-    let stopped = false;
     const loop = (): void => {
       if (stopped) return;
-      pump();
-      handle = requestAnimationFrame(loop);
+      try {
+        pumpOnce();
+      } finally {
+        // 次フレームの予約は**必ず**通る位置に置く(§5)。
+        if (!stopped) handle = requestAnimationFrame(loop);
+      }
     };
-    handle = requestAnimationFrame(loop);
-    return () => {
-      stopped = true;
+    cancelSource = () => {
       cancelAnimationFrame(handle);
     };
+    handle = requestAnimationFrame(loop);
+    return stop;
   }
-  const timer = setInterval(pump, 1000);
-  return () => {
+  const timer = setInterval(pumpOnce, 1000);
+  cancelSource = () => {
     clearInterval(timer);
   };
+  return stop;
 };
 
 export interface TickDriverOptions {
@@ -202,6 +282,8 @@ export interface TickDriver {
   /**
    * 外部要因(Worker catch-up 完了・セーブ復元・世界の入れ替え)で tick が
    * 動いたときにアンカーを引き直す。**進行方向の判断はしない**。
+   *
+   * 呼び出し側の義務は §6 を参照(世界を入れ替えたら必ずここへ通す)。
    */
   syncTo(tick: number): void;
   /** 現在のアンカー(診断・テスト用)。 */

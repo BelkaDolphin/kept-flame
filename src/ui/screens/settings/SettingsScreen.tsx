@@ -9,6 +9,11 @@
 //       テキストも表示する)。
 //   (b) インポート: {@link importSaveText} をそのまま呼び、成功したら
 //       `worldLoaded`(`source: "import"`)を dispatch する。
+//       **[R1-A01/A02] 入れ替え後の後始末(tick 駆動アンカーの引き直しと即時
+//       保存)はこの画面の仕事ではない**。ストアが `worldLoaded` を適用した
+//       直後に composition root へ 1 本だけ通知し(`src/ui/store.ts` §5)、
+//       `src/main.tsx` の `handleWorldLoaded` が両方を行う。ここで個別に呼ぶと
+//       「最初からやり直す」等の別経路で呼び忘れが再発するので、足さないこと。
 //   (c) 破損セーブの救済: (b) と**同じ導線**である。`src/main.tsx` は
 //       起動時のセーブ読出しに失敗すると「セーブが無い」と同じ扱いで新規
 //       ゲームを始める(申し送り済み・main.tsx のコメント参照)ため、
