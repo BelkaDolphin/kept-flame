@@ -1,0 +1,80 @@
+{
+  "protocol": "docs/design/playtest-protocol.md",
+  "round": 3,
+  "date": "2026-08-02",
+  "commit": "549b5a1 (M62+M57統合後)",
+  "agents": "axisD=Sonnet(13画面+オンボーディング) / axisC/E=Sonnet(13画面+新UI×3VP)。axisA/Bは本ラウンド非実施(部分ラウンド)",
+  "scope": "部分ラウンド: M62検収(軸D/E fail 0)とM57検証に焦点。軸A/BはRound 2値を継承(engine変更なし・M62修正の個別検証はR3-D/CE内で実施)",
+  "verdict": "合格(実施軸で初の全項目クリア)",
+  "verdictReasons": [
+    "軸D 5/5 pass(R2残存の/tick単位語が解消。fail 0達成)",
+    "軸E 6/6 pass(E5 sticky 6組全部0px実測。fail 0達成)",
+    "軸C 1.86→1.90(悪化セル0)",
+    "console error / pageerror 全経路0件",
+    "軸A=1.58(R2値継承・基準1.5以上)・fatal 0(実施経路)"
+  ],
+  "scores": {
+    "A_task": "1.58 (R2値継承・本ラウンド非実施)",
+    "C_heuristics": 1.9,
+    "C_groupAverages": {
+      "home_hud": 2.0,
+      "base": 1.8,
+      "research_codify": 1.9,
+      "expedition": 1.9,
+      "cycle_settings": 1.9
+    },
+    "D_wording": "5/5 pass",
+    "E_layout": "6/6 pass"
+  },
+  "comparison": {
+    "C_heuristics": "1.86 → 1.90(home_hud 1.8→2.0=オンボーディング+ホーム導線の効果)",
+    "D_wording": "4/5 → 5/5(/tick単位語7箇所→/分表記で解消)",
+    "E_layout": "5/6 → 6/6(sticky絶対値方式でmigration@768の69px解消・R2-A03のROI覆いも15/15点サンプリングでpass)",
+    "regressions": "0件(全軸)"
+  },
+  "m62m57_verification": [
+    "sticky確定バー: expedition/migration×3VPの6組全部で初期表示重なり0px(R2手法完全再現)",
+    "2×2プレビュー: 48セルelementFromPoint精度検査でずれ0・未開墾クリック阻害も解消",
+    "成文化セレクタ: 4行状態で1行投入→他行不変+二重投入文言「既にキューにあります」実発火2回",
+    "晴天漂着トースト初実発火: 寝床8棟(上限16>人口6)・第4日00:00「Hekekoが晴天漂着で加入した」+ホーム6/16→7/16更新",
+    "帰還ログ和名維持(実派遣→帰還2回・リグレッションなし)",
+    "M57: 初回起動ガイド表示→スキップ→リロード非表示→設定から再表示→辞典10語到達。ガイド/辞典全文が内部語0ヒット・新UIのE1/E2/E3も合格"
+  ],
+  "findings": [
+    {
+      "id": "R3-C01",
+      "severity": "minor",
+      "summary": "カタログ効果ヒント対称化の副作用で格子カタログが52%縦長化(1509→2298px@390px)",
+      "disposition": "次回UI束候補"
+    },
+    {
+      "id": "R3-C02",
+      "severity": "minor",
+      "summary": "住民一括配置(おまかせ)の欠け(R2-C03再掲。engine assist未実装=M62★2で見送り済み)",
+      "disposition": "v1.1候補(engine assist新設を伴うため)"
+    },
+    {
+      "id": "R3-E01",
+      "severity": "minor",
+      "summary": "768×1024初期スクロール位置で格子3セルが下部ナビの陰に入る(スクロールで解消・sticky問題とは別機構)",
+      "disposition": "次回UI束候補"
+    },
+    {
+      "id": "R3-D07",
+      "severity": "info",
+      "summary": "増築/開墾トーストのみ本ラウンド未実発火(unmeasured・コードレビューでは安全確認)",
+      "disposition": "次回ラウンドで確認"
+    },
+    {
+      "id": "R3-D08",
+      "severity": "minor",
+      "summary": "拠点常駐が研究点施設の就労者を奪うと研究チップが「停止中」表示(仕様どおりの帰結だが気づきにくい)",
+      "disposition": "M39再評価候補"
+    }
+  ],
+  "unmeasured": [
+    "軸A/B台本の再実施(R2値継承)",
+    "増築/開墾トーストの実発火",
+    "想起困難・死亡の実UI観測(継続持ち越し)"
+  ]
+}
