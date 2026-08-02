@@ -1,0 +1,132 @@
+{
+  "groups": [
+    {
+      "evaluated": true,
+      "groupId": "tech/era=e1",
+      "mad": 2,
+      "maxAbsLeaveOneOutZ": 3.173727247710039,
+      "maxAbsModifiedZ": 4.047,
+      "maxRelativeDeviation": 0.3,
+      "mean": 40.125,
+      "median": 40,
+      "metric": "researchCost",
+      "outliers": [],
+      "sampleCount": 8,
+      "skipReason": null,
+      "stdev": 6.2206453500765155
+    },
+    {
+      "evaluated": true,
+      "groupId": "tech/era=e2",
+      "mad": 4,
+      "maxAbsLeaveOneOutZ": 3.6356589039397447,
+      "maxAbsModifiedZ": 3.70975,
+      "maxRelativeDeviation": 0.281437125748503,
+      "mean": 79.28571428571429,
+      "median": 82,
+      "metric": "researchCost",
+      "outliers": [],
+      "sampleCount": 7,
+      "skipReason": null,
+      "stdev": 10.20970593298824
+    },
+    {
+      "evaluated": true,
+      "groupId": "tech/era=e3",
+      "mad": 9,
+      "maxAbsLeaveOneOutZ": 3.007504734733344,
+      "maxAbsModifiedZ": 6.370277777777777,
+      "maxRelativeDeviation": 0.4174757281553398,
+      "mean": 188.11111111111111,
+      "median": 205,
+      "metric": "researchCost",
+      "outliers": [],
+      "sampleCount": 9,
+      "skipReason": null,
+      "stdev": 34.93366730120259
+    },
+    {
+      "evaluated": true,
+      "groupId": "facility/output=research",
+      "mad": 0.25000000000000006,
+      "maxAbsLeaveOneOutZ": 2.4052567454695235,
+      "maxAbsModifiedZ": 11.331599999999998,
+      "maxRelativeDeviation": 9,
+      "mean": 1.7275510204081634,
+      "median": 0.55,
+      "metric": "lvCurve[0]/buildCost.amount",
+      "outliers": [],
+      "sampleCount": 7,
+      "skipReason": null,
+      "stdev": 1.8887395851738076
+    },
+    {
+      "evaluated": true,
+      "groupId": "facility/output=research",
+      "mad": 0,
+      "maxAbsLeaveOneOutZ": 2.3824568472337155,
+      "maxAbsModifiedZ": 0,
+      "maxRelativeDeviation": 1,
+      "mean": 26.428571428571427,
+      "median": 20,
+      "metric": "buildCost.amount",
+      "outliers": [],
+      "sampleCount": 7,
+      "skipReason": null,
+      "stdev": 8.521681032463468
+    },
+    {
+      "evaluated": true,
+      "groupId": "facility/output=resource:resource",
+      "mad": 0.2666666666666666,
+      "maxAbsLeaveOneOutZ": 3.8022121852369803,
+      "maxAbsModifiedZ": 6.070500000000002,
+      "maxRelativeDeviation": 0.7073170731707318,
+      "mean": 4.118367346938776,
+      "median": 3.6,
+      "metric": "lvCurve[0]/buildCost.amount",
+      "outliers": [],
+      "sampleCount": 7,
+      "skipReason": null,
+      "stdev": 0.9829669119036608
+    },
+    {
+      "evaluated": true,
+      "groupId": "facility/output=resource:resource",
+      "mad": 0,
+      "maxAbsLeaveOneOutZ": 3.227486121839514,
+      "maxAbsModifiedZ": 0,
+      "maxRelativeDeviation": 0.4,
+      "mean": 27.857142857142858,
+      "median": 25,
+      "metric": "buildCost.amount",
+      "outliers": [],
+      "sampleCount": 7,
+      "skipReason": null,
+      "stdev": 3.9339789623472163
+    }
+  ],
+  "minGroupSize": 5,
+  "outlierCount": 0,
+  "relativeDeviationThreshold": 1,
+  "skippedGroupCount": 0,
+  "uncoveredCategories": [
+    {
+      "category": "event",
+      "reason": "難度・報酬がノード/分岐ごとの difficultyMod / rewardMod に分散しており、『同カテゴリ同era効率』に相当する 1 個のスカラを content から一意に導けない(距離帯パラメータ側の difficulty/reward は balance.json にあり event content の増加では動かない)。解消条件 = GDD 12.4 に event の効率指標(例: 期待報酬 ÷ 期待難度)の定義を明記する"
+    },
+    {
+      "category": "trait",
+      "reason": "効果が stat 別の mul/add に分かれており共通尺度が無い。解消条件 = trait 効果の正規化指標(例: 生産式へ写した後の実効倍率)の定義"
+    },
+    {
+      "category": "facility（産出種別グループの不均質）",
+      "reason": "`output.kind = research` のグループには就労枠 0 のカタログ枠（寝床/保管庫/見張り台/療養所）と実際の研究施設が混在しており、効率分布が二峰になる。就労枠の有無で分けるのが正しいが、現行 content ではどちらも n<5 になり判定不能になるため分けていない。解消条件 = 施設が増えて staffed/unstaffed のどちらも n>=5 になった時点でグループキーを分割する"
+    },
+    {
+      "category": "adjacency",
+      "reason": "tagMatrix は既存エントリの書換が content-diff-gate で reject されるため(ADR-015)、additive 追加のみが起きる。ペア数が 7×7 の上限を持ち分布が小さいので Z-score より個別レンジ検査(schema)が有効。解消条件 = タグペアが十分に増えた段階での再検討"
+    }
+  ],
+  "zThreshold": 3
+}

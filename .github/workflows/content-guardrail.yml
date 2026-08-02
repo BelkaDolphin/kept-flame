@@ -10,10 +10,11 @@
 # ジョブは needs: で上記の順に直列連結してある(並列化すると「順序」という
 # 検収対象そのものが CI 記述から読み取れなくなるため、意図的に直列)。
 #
-# 4(段階sim1000)と 7(統計クリープ検出)は実体が M38 で差し込まれる予定であり、
-# 現時点では未実装。緑色で誤魔化さず、ジョブ名と出力(機械可読 JSON)の両方で
-# 「未実装で保護効果ゼロ」であることを正直に表明する(docs/design/
-# perf-boundaries.md の `hydrateFidelity: "placeholder"` と同じ流儀)。
+# 4(段階sim1000)と 7(統計クリープ検出)は M46 時点では PLACEHOLDER(未実装で
+# 保護効果ゼロと機械可読で宣言するだけ)だったが、**[M38] で実体を差し込み済み**:
+#   4 -> `sim/stagedSim.ts`(11 bot × 3段 = 1000 runs・不等式4種)
+#   7 -> `sim/creep.ts`(Z-score + MAD 修正Z の外れ値監視・GDD 12.4)
+# どちらも閾値超過で非ゼロ終了する = ジョブが実際に赤くなる。
 #
 # 8(bot作成PRをhuman承認merge)はこの workflow のジョブではなく、ブランチ保護
 # (require_code_owner_reviews)+ CODEOWNERS(ADR-030・本タスクで新設)+
@@ -102,45 +103,57 @@ jobs:
         run: npx vitest run tests/schema
 
   # ---------------------------------------------------------------------
-  # 4. 段階sim1000 [PLACEHOLDER] — 実体は M38(夜間ゲート/クリープ検出)で
-  # 差し込む。ここでは「未実装」を機械可読(JSON artifact)かつ人間可読
-  # ($GITHUB_STEP_SUMMARY)の両方で宣言するのみ。常に exit 0 だが、保護効果は
-  # ゼロであることを明記する。
+  # 4. 段階sim1000 — [M38] 実体を差し込み済み(M46 の PLACEHOLDER を置換)。
+  #
+  # `sim/stagedSim.ts` が 11 bot(5戦略 + 敵対6種)× 3 段(600×2日 / 300×7日 /
+  # 100×20日 = ちょうど 1000 runs)を回し、人口下限・盤面消滅・例外・決定論の
+  # 4 種の**不等式**判定を行う。違反 1 件で終了コード 1 = **このジョブが赤くなる**。
+  #
+  # 数値バランスの収束条件(到達 tick レンジ等)は M39〜M41 の担当なので
+  # ここでは判定しない(sim/nightlyGate.ts §1 の owner 線引き)。夜間ゲート
+  # 全 11 条件は `npm run sim:nightly-gate` を人間が起動して見る。
+  #
+  # LLM/AIサービス連携は含まない(npm スクリプトを走らせるだけ)。
   # ---------------------------------------------------------------------
   sim-1000:
-    name: "4. 段階sim1000 [PLACEHOLDER・未実装 M38]"
+    name: "4. 段階sim1000(11 bot × 3段 = 1000 runs)"
     needs: schema-canonicalize-idregistry
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
-      - name: "未実装であることを機械可読に宣言する"
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: "段階sim1000(違反があれば非ゼロ終了)"
+        run: npm run sim:staged
+      - name: "結果を $GITHUB_STEP_SUMMARY へ"
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p pipeline-stage-status
-          cat > pipeline-stage-status/sim1000.json <<'JSON'
+          if [ ! -f sim/output/staged-sim-report.json ]; then
+            echo "### 4. 段階sim1000 — レポートが生成されなかった(実行失敗)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           {
-            "stage": "段階sim1000",
-            "adrOrderIndex": 4,
-            "adrRef": "ADR-015 正準順序 4/10",
-            "implemented": false,
-            "trackedIn": "M38",
-            "protectionEffect": "none",
-            "note": "多戦略/敵対botによる段階的sim1000回のサニティチェックは未実装。このジョブは検証を一切行わず常にexit 0を返す(緑色に見えるが保護効果はゼロ)。"
-          }
-          JSON
-          cat pipeline-stage-status/sim1000.json
-          {
-            echo "### 4. 段階sim1000 — PLACEHOLDER(未実装・M38予定)"
+            echo "### 4. 段階sim1000(ADR-015 正準順序 4/10)"
             echo ""
             echo '```json'
-            cat pipeline-stage-status/sim1000.json
+            cat sim/output/staged-sim-report.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload placeholder status
+      - name: Upload staged sim report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-stage-status-sim1000
-          path: pipeline-stage-status/sim1000.json
+          name: staged-sim-report
+          path: sim/output/staged-sim-report.json
+          if-no-files-found: warn
           retention-days: 30
 
   # ---------------------------------------------------------------------
@@ -191,43 +204,53 @@ jobs:
         run: npm run conformance:e2e
 
   # ---------------------------------------------------------------------
-  # 7. 統計クリープ検出 [PLACEHOLDER] — 実体は M38 で `sim/creep.ts`
-  # (Z-score・§12.4)として差し込む。4と同じ流儀で正直に未実装宣言する。
+  # 7. 統計クリープ検出 — [M38] 実体を差し込み済み(M46 の PLACEHOLDER を置換)。
+  #
+  # `sim/creep.ts`(ADR リポ構成が指定する置き場)が GDD 12.4 の
+  # 「同カテゴリ同era効率分布の Z-score 外れ値監視」を実装する。標本 Z と
+  # MAD ベースの修正 Z の**両方**が閾値を超えたときだけ外れ値と判定し、
+  # 1 件でもあれば終了コード 1 = **このジョブが赤くなる**。
+  # 標本数が 5 未満のグループは「判定省略」を機械可読に残す(pass にしない)。
   # ---------------------------------------------------------------------
   statistical-creep-detection:
-    name: "7. 統計クリープ検出 [PLACEHOLDER・未実装 M38]"
+    name: "7. 統計クリープ検出(Z-score + 修正Z)"
     needs: conformance-3browsers
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: "未実装であることを機械可読に宣言する"
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node (from .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: "統計クリープ検出(外れ値があれば非ゼロ終了)"
+        run: npm run sim:creep
+      - name: "結果を $GITHUB_STEP_SUMMARY へ"
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p pipeline-stage-status
-          cat > pipeline-stage-status/creep.json <<'JSON'
+          if [ ! -f sim/output/creep-report.json ]; then
+            echo "### 7. 統計クリープ検出 — レポートが生成されなかった(実行失敗)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           {
-            "stage": "統計クリープ検出",
-            "adrOrderIndex": 7,
-            "adrRef": "ADR-015 正準順序 7/10、実体は sim/creep.ts(Z-score・ADR §12.4)",
-            "implemented": false,
-            "trackedIn": "M38",
-            "protectionEffect": "none",
-            "note": "Z-scoreベースの統計クリープ検出(sim/creep.ts)は未実装。このジョブは検証を一切行わず常にexit 0を返す(緑色に見えるが保護効果はゼロ)。"
-          }
-          JSON
-          cat pipeline-stage-status/creep.json
-          {
-            echo "### 7. 統計クリープ検出 — PLACEHOLDER(未実装・M38予定)"
+            echo "### 7. 統計クリープ検出(ADR-015 正準順序 7/10・GDD 12.4)"
             echo ""
             echo '```json'
-            cat pipeline-stage-status/creep.json
+            cat sim/output/creep-report.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload placeholder status
+      - name: Upload creep report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-stage-status-creep
-          path: pipeline-stage-status/creep.json
+          name: creep-report
+          path: sim/output/creep-report.json
+          if-no-files-found: warn
           retention-days: 30
 
   # ---------------------------------------------------------------------
@@ -296,10 +319,10 @@ jobs:
             echo "| 1 | schema検証 | job: schema-canonicalize-idregistry |"
             echo "| 2 | canonicalize | job: schema-canonicalize-idregistry(同一パイプライン) |"
             echo "| 3 | id-registry検証 | job: schema-canonicalize-idregistry(同一パイプライン) |"
-            echo "| 4 | 段階sim1000 | job: sim-1000(PLACEHOLDER・未実装・M38) |"
+            echo "| 4 | 段階sim1000 | job: sim-1000(実体 = sim/stagedSim.ts・[M38]で差し込み済み) |"
             echo "| 5 | content-diff-gate | job: content-diff-gate |"
             echo "| 6 | conformance 3ブラウザ | job: conformance-3browsers |"
-            echo "| 7 | 統計クリープ検出 | job: statistical-creep-detection(PLACEHOLDER・未実装・M38) |"
+            echo "| 7 | 統計クリープ検出 | job: statistical-creep-detection(実体 = sim/creep.ts・[M38]で差し込み済み) |"
             echo "| 8 | bot作成PRをhuman承認merge | このworkflow外: ブランチ保護 + CODEOWNERS + bot-token.mjs/bot-pr.mjs(M45) |"
             echo "| 9 | betaソーク | このworkflow外・未着手: M47(ADR-031)が別workflowで実装予定 |"
             echo "| 10 | 本番 | このworkflow外・未着手: M47(ADR-031)が別workflowで実装予定 |"

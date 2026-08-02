@@ -1,0 +1,291 @@
+{
+  "task": "M38 — bot 最大11本での measuredSecPerRun 再校正",
+  "adrRef": "ADR-014(3)",
+  "obligationSource": "docs/measurements/summary.md §2.1「MVP の 5戦略 + 敵対 6種 = 最大 11 本になった時点で measuredSecPerRun は再校正が必要(ADR-014(3))…再校正の義務は消えない」",
+  "measuredOn": "2026-08-02",
+  "reproduce": {
+    "local": "npm run sim:calibrate",
+    "actions": "gh workflow run calibrate.yml --repo BelkaDolphin/kept-flame --ref <branch>"
+  },
+  "runDefinition": {
+    "baselineAndFallback": "sim/board.ts の縮約20人盤面を sim/bots/ の 2 本(reassignmentBot / dispatchBot)込みで 23,040 tick 進める(先行計測 #3/#4 と同一)",
+    "bots11": "1 bot が src/newGame.ts の実 content で 1 ゲームを 23,040 tick(16 ゲーム日)遊ぶ。5戦略bot + 敵対bot6種 × 2 seed = 22 サンプルの中央値"
+  },
+  "local": {
+    "machine": "開発機(Windows 11 / Ryzen 系)",
+    "baseline": {
+      "measuredSecPerRun": 0.27464969999999994,
+      "weekly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 1510.5733499999997,
+        "runsPerShard": 5500,
+        "shards": 2,
+        "totalRuns": 11000,
+        "withinCap": true
+      }
+    },
+    "fallback": {
+      "measuredSecPerRun": 2.6401913000000006,
+      "weekly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 1710.8439624000005,
+        "runsPerShard": 648,
+        "shards": 17,
+        "totalRuns": 11000,
+        "withinCap": true
+      }
+    },
+    "bots11": {
+      "measuredSecPerRun": 0.12635490000000027,
+      "slowestBotId": "turtleNoExploration",
+      "slowestSecPerRun": 0.16924329999999826,
+      "weekly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 1389.903900000003,
+        "runsPerShard": 11000,
+        "shards": 1,
+        "totalRuns": 11000,
+        "withinCap": true
+      },
+      "weeklyWorstCase": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 930.8381499999905,
+        "runsPerShard": 5500,
+        "shards": 2,
+        "totalRuns": 11000,
+        "withinCap": true
+      },
+      "nightly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 277.9807800000006,
+        "runsPerShard": 2200,
+        "shards": 1,
+        "totalRuns": 2200,
+        "withinCap": true
+      },
+      "samples": [
+        {
+          "botId": "greedy",
+          "elapsedMs": 123.11170000000129,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "researchFirst",
+          "elapsedMs": 102.11139999999796,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "explorationFirst",
+          "elapsedMs": 139.0656999999992,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "placementVariant",
+          "elapsedMs": 117.56290000000081,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "codifyFirst",
+          "elapsedMs": 122.7267000000029,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "soleHolderExpeditionWipe",
+          "elapsedMs": 85.51670000000013,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "codifyNeglect",
+          "elapsedMs": 156.16700000000128,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "rareHolderFastestLoss",
+          "elapsedMs": 154.6926999999996,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "traitConcentration",
+          "elapsedMs": 152.05159999999887,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "turtleNoExploration",
+          "elapsedMs": 169.24329999999827,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "clockForwardExploit",
+          "elapsedMs": 151.56760000000213,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-a"
+        },
+        {
+          "botId": "greedy",
+          "elapsedMs": 83.13619999999719,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "researchFirst",
+          "elapsedMs": 89.33480000000054,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "explorationFirst",
+          "elapsedMs": 111.28419999999824,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "placementVariant",
+          "elapsedMs": 74.90949999999793,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "codifyFirst",
+          "elapsedMs": 89.45509999999922,
+          "kind": "strategy",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "soleHolderExpeditionWipe",
+          "elapsedMs": 41.322400000000926,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "codifyNeglect",
+          "elapsedMs": 142.52349999999933,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "rareHolderFastestLoss",
+          "elapsedMs": 131.5142999999989,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "traitConcentration",
+          "elapsedMs": 130.40380000000005,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "turtleNoExploration",
+          "elapsedMs": 129.59809999999925,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        },
+        {
+          "botId": "clockForwardExploit",
+          "elapsedMs": 129.8127999999997,
+          "kind": "adversarial",
+          "seed": "calibrate-bots11-b"
+        }
+      ]
+    }
+  },
+  "actionsRunner": {
+    "source": "docs/measurements/actions-calibrate-2026-08-02.json",
+    "workflowRunId": 30731006489,
+    "runnerImage": "ubuntu-latest",
+    "codeRevision": "main @ 2e91b9b(**M38 のパッチ適用前**)。したがって runner の実測は baseline / fallback の 2 系列のみで、bots11 は含まれない",
+    "baseline": {
+      "measuredSecPerRun": 0.3208811330000001,
+      "weekly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 1764.8462315000006,
+        "runsPerShard": 5500,
+        "shards": 2,
+        "totalRuns": 11000,
+        "withinCap": true
+      }
+    },
+    "fallback": {
+      "measuredSecPerRun": 3.005040922,
+      "weekly": {
+        "meetsGoal": true,
+        "predictedWallClockSec": 1739.918693838,
+        "runsPerShard": 579,
+        "shards": 19,
+        "totalRuns": 11000,
+        "withinCap": true
+      }
+    }
+  },
+  "runnerLocalRatio": {
+    "baseline": 1.1683287220047944,
+    "fallback": 1.138190600809873,
+    "note": "runner のほうが遅い(> 1.0)。先行計測 2026-07-26 の比(baseline 1.39 / fallback 1.25)より縮んでいる"
+  },
+  "bots11RunnerExtrapolation": {
+    "isMeasured": false,
+    "method": "ローカル bots11 の中央値 × baseline の runner/local 比。**実測ではなく外挿**であり、M38 のパッチが main へ入った後に calibrate.yml を再実行して実測へ差し替えること",
+    "estimatedSecPerRun": 0.1476240588360439,
+    "estimatedWeekly": {
+      "totalRuns": 11000,
+      "shards": 1,
+      "runsPerShard": 11000,
+      "predictedWallClockSec": 1623.864647196483,
+      "meetsGoal": true,
+      "withinCap": true
+    },
+    "estimatedNightly": {
+      "totalRuns": 2200,
+      "shards": 1,
+      "runsPerShard": 2200,
+      "predictedWallClockSec": 324.7729294392966,
+      "meetsGoal": true,
+      "withinCap": true
+    },
+    "worstBotEstimatedSecPerRun": 0.197731808396872,
+    "worstBotEstimatedWeekly": {
+      "totalRuns": 11000,
+      "shards": 2,
+      "runsPerShard": 5500,
+      "predictedWallClockSec": 1087.524946182796,
+      "meetsGoal": true,
+      "withinCap": true
+    }
+  },
+  "verdict": {
+    "weekly11000WithinGoal30min": true,
+    "basis": "runner 実測(baseline 0.3209 s/run)で週次 11000 runs = shards 2 / 29.4 分、bots11 の runner 外挿(0.15 s/run 前後)で shards 1〜2 / 16〜24 分。いずれも目標 30 分・キャップ 360 分の内側",
+    "fallbackTiers": {
+      "① 戦略bot 5→3": "不要",
+      "② 毎晩→週次": "不要",
+      "③ 1000→層化200": "不要",
+      "④ 分tick→10分tick": "不要(既に 10 分 tick。1 分 tick へ戻しても runner 実測 shards 19 / 29.0 分で枠内)"
+    }
+  },
+  "regressionSincePreviousCalibration": {
+    "previous": "docs/measurements/actions-calibrate-2026-07-26.json",
+    "previousBaselineSecPerRun": 0.048705,
+    "currentBaselineSecPerRun": 0.3208811330000001,
+    "factor": 6.588258556616366,
+    "cause": "bot 本数ではなく **content 規模の増加**(施設 3→14 種・tech 24 本・event 10 本・住民系 M11〜M13 の techMemory / 寿命 / mastery)。同一ハーネス・同一 bot 2 本での比較なのでハーネス側の変更ではない",
+    "marginToGoal": {
+      "weeklyPredictedMin": 29.414103858333345,
+      "goalMin": 30,
+      "note": "shards の離散化により 29.4 分はノコギリ波の頂点(sec/run がわずかに増えると shards が 2→3 になり 19.6 分へ落ちる)。よって 30 分目標を割るのは shards が 20 上限に張り付いた後であり、現在の余裕は『shards 上限までの倍率』= 約 10 倍と読むのが正しい"
+    }
+  },
+  "followUp": [
+    "M38 のパッチが main へ入った後に `gh workflow run calibrate.yml --ref main` を実行し、bots11 の**実 runner 値**でこのファイルの bots11RunnerExtrapolation を置き換える",
+    "content 規模が今後さらに増えるので、M39〜M41 の各段階完了時に本計測を再実行する(baseline が 6.6 倍になった前例がある)"
+  ]
+}

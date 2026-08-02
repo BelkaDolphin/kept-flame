@@ -162,17 +162,21 @@ function runsFor(): readonly { readonly roster: Roster; readonly stance: Dispatc
   return runs;
 }
 
-function boardState(): GameState {
+function boardStateWithSeed(worldSeed: string): GameState {
   return createGameState(
     {
       saveSchemaVersion: 1,
       contentVersion: 1,
       algoVersion: 1,
-      worldSeed: "eventReachability",
+      worldSeed,
       tick: 0,
     },
     RESIDENTS,
   );
+}
+
+function boardState(): GameState {
+  return boardStateWithSeed("eventReachability");
 }
 
 // --- 3. 到達集計 --------------------------------------------------------------
@@ -327,6 +331,114 @@ export function runEventReachability(): ReachabilityReport {
     allCovered: allGaps.length === 0,
     gaps: allGaps,
     events: eventReports,
+  };
+}
+
+// --- 4b. [M38] 到達**頻度**(GDD 11.4-10「1000回中最低N回」) ------------------
+//
+// §4 の `runEventReachability` は「1 回でも踏めるか」(M23 の検収条件)を見る。
+// GDD 11.4-10 が要求するのは**頻度**「各ノード/分岐が 1000 回中最低 N 回(例
+// N=20)到達」であり、稀にしか踏まれない過剰報酬枝のすり抜けを防ぐのが目的なので
+// 別関数として実装する。
+//
+// 試行の振り方: (roster, stance) の組(§2 の 6 通り)を巡回しつつ、worldSeed と
+// dispatchTick を試行番号から決定論的に変える。cond が読む `teamPower`/
+// `difficulty` は roll を含まないが `injuryCount` は判定失敗回数に依存するため、
+// seed/tick を振ると分岐選択が実際に散る(§2 の注記)。**Math.random は使わない**。
+
+/** {@link measureEventCoverageFrequency} の結果。 */
+export interface EventCoverageFrequencyReport {
+  readonly samples: number;
+  readonly eventCount: number;
+  readonly totalNodes: number;
+  readonly totalBranches: number;
+  /** 全 (event, ノード) と全 (event, ノード, 分岐) を通した最小到達回数。 */
+  readonly minHits: number;
+  /** 最小到達だった対象のラベル(`eventId#node[i]` または `eventId#node[i]/branch[j]`)。 */
+  readonly minHitsLabel: string;
+  /** 到達回数が閾値を下回った対象の一覧(ラベル → 回数・昇順)。 */
+  readonly hitsByLabel: Readonly<Record<string, number>>;
+}
+
+export function measureEventCoverageFrequency(samples: number): EventCoverageFrequencyReport {
+  if (!Number.isSafeInteger(samples) || samples < 1) {
+    throw new EventReachabilityError(
+      `measureEventCoverageFrequency: 試行数 ${String(samples)} が不正`,
+    );
+  }
+  const content = loadContent();
+  const eventDefs = content.eventDefs;
+  if (eventDefs === undefined || eventDefs.size === 0) {
+    throw new EventReachabilityError("content.eventDefs が空(content/event.json が読めていない)");
+  }
+
+  const runs = runsFor();
+  const hits = new Map<string, number>();
+  const defs = [...eventDefs.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  // 全対象を 0 で初期化する(1 度も踏まれない対象を「キーが無い」で見落とさない)。
+  let totalNodes = 0;
+  let totalBranches = 0;
+  for (const def of defs) {
+    for (let i = 0; i < def.nodes.length; i++) {
+      hits.set(`${def.id}#node[${String(i)}]`, 0);
+      totalNodes++;
+      const node = def.nodes[i];
+      if (node === undefined) continue;
+      for (let b = 0; b < node.branches.length; b++) {
+        hits.set(`${def.id}#node[${String(i)}]/branch[${String(b)}]`, 0);
+        totalBranches++;
+      }
+    }
+  }
+
+  for (let sample = 0; sample < samples; sample++) {
+    const run = runs[sample % runs.length];
+    if (run === undefined) continue;
+    const state = boardStateWithSeed(`eventCoverage-${String(sample)}`);
+    const worldSeedU32 = worldSeedToUint32(state.worldSeed);
+    for (const def of defs) {
+      const snapshot = buildDispatchSnapshot(state, content, worldSeedU32, {
+        dispatchId: entityIdFromString(`dispatchCoverage${String(sample)}`),
+        destinationId: def.id,
+        band: bandOf(def),
+        stance: run.stance,
+        memberIds: run.roster.memberIds,
+        dispatchTick: sample * 10,
+      });
+      for (let i = 0; i < snapshot.nodes.length; i++) {
+        const node = snapshot.nodes[i];
+        if (node === undefined) continue;
+        const nodeKey = `${def.id}#node[${String(i)}]`;
+        hits.set(nodeKey, (hits.get(nodeKey) ?? 0) + 1);
+        if (node.branchIndex !== undefined) {
+          const branchKey = `${nodeKey}/branch[${String(node.branchIndex)}]`;
+          hits.set(branchKey, (hits.get(branchKey) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  let minHits = Number.POSITIVE_INFINITY;
+  let minHitsLabel = "(対象なし)";
+  const hitsByLabel: Record<string, number> = {};
+  for (const key of [...hits.keys()].sort()) {
+    const value = hits.get(key) ?? 0;
+    hitsByLabel[key] = value;
+    if (value < minHits) {
+      minHits = value;
+      minHitsLabel = key;
+    }
+  }
+
+  return {
+    samples,
+    eventCount: eventDefs.size,
+    totalNodes,
+    totalBranches,
+    minHits: Number.isFinite(minHits) ? minHits : 0,
+    minHitsLabel,
+    hitsByLabel,
   };
 }
 

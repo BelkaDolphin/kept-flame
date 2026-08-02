@@ -112,7 +112,13 @@ import {
   teamCombatPowerFix,
 } from "../../src/engine/rules/stats";
 import { toRaw } from "../../src/engine/fp";
-import { entityIdFromString, type EntityId, type GameState } from "../../src/engine/state/state";
+import {
+  entityIdFromString,
+  livingResidents,
+  type EntityId,
+  type GameState,
+  type ResidentState,
+} from "../../src/engine/state/state";
 import { GAME_DAY_TICKS, worldSeedToUint32 } from "../../src/engine/stochastic";
 import { createNewGameState } from "../../src/newGame";
 
@@ -120,7 +126,6 @@ import {
   buildAssignmentCommands,
   buildFacilityCommand,
   firstEventIdForBand,
-  livingIdleResidents,
   pickResearchTarget,
   researchCommand,
   type AssignmentPolicy,
@@ -145,6 +150,25 @@ const DEFAULT_BUILD_POLICY: BuildPolicy = {
   placement: "assist",
 };
 const DEFAULT_ASSIGNMENT_POLICY: AssignmentPolicy = { defPriority: DEFAULT_ECONOMY_DEF_PRIORITY };
+
+/**
+ * [M38] 強制系 bot(a)(c)(d) の対象プール。
+ *
+ * M37 実装は `livingIdleResidents`(= **無配属**の生存住民)を対象にしていたが、
+ * 施設14種化(M58)+ [M38] の均等配属で「無配属の住民」は実 run ではほぼ常に
+ * 0 人になり、敵対bot が新規ゲート run で 1 度も強制を行わなくなった
+ * (実測: 夜間ゲートの adversarialLog が 6 本とも 0 件)。GDD 11.6 の趣旨は
+ * 「低頻度エッジを**決定論的に強制発生**させる」ことなので、配属済みの住民も
+ * 引き剥がす(engine の `explorationTeamCandidates` と同じ「非派遣の生存住民」)。
+ */
+function forcibleResidents(state: GameState): readonly ResidentState[] {
+  const result: ResidentState[] = [];
+  for (const resident of livingResidents(state)) {
+    if (resident.dispatched) continue;
+    result.push(resident);
+  }
+  return result;
+}
 
 /** 経済(研究・建設)だけを進める共通部品。6種のうち、経済に手心を加えない bot が使う。 */
 function economyCommands(state: GameState, content: EngineContent): Command[] {
@@ -267,7 +291,7 @@ function soleHolderWipeDecide(
   const adversarialLog: AdversarialLogEntry[] = [];
   const forcedResidentIds = new Set<EntityId>();
 
-  for (const resident of livingIdleResidents(state)) {
+  for (const resident of forcibleResidents(state)) {
     const techIds = soleUncodifiedHeldTechIds(state, resident.id);
     if (techIds.length === 0) continue;
     const dispatchCmd = buildForcedDispatch(
@@ -345,7 +369,7 @@ function rareHolderFastestLossDecide(
   const adversarialLog: AdversarialLogEntry[] = [];
   const forcedResidentIds = new Set<EntityId>();
 
-  for (const resident of livingIdleResidents(state)) {
+  for (const resident of forcibleResidents(state)) {
     const techIds = soleUncodifiedRareHeldTechIds(state, content, resident.id);
     if (techIds.length === 0) continue;
     const dispatchCmd = buildForcedDispatch(
@@ -456,7 +480,7 @@ function traitConcentrationDecide(
   const adversarialLog: AdversarialLogEntry[] = [];
   const forcedResidentIds = new Set<EntityId>();
 
-  const maxed = livingIdleResidents(state).filter(
+  const maxed = forcibleResidents(state).filter(
     (resident) => resident.traitIds.length === MAX_TRAITS_PER_RESIDENT_HELD,
   );
   if (maxed.length > 0) {

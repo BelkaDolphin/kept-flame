@@ -1,5 +1,10 @@
 # 継ぐ火 -Kept Flame- 先行計測 #3/#4 校正ハーネス — 実 Actions runner 専用実行
 #
+# [M38] bot 最大11本(5戦略 + 敵対6種)での `measuredSecPerRun` 再校正
+# (ADR-014(3) / docs/measurements/summary.md §2.1「再校正の義務は消えない」)を
+# 同じジョブで測る。`npm run sim:calibrate` が baseline / fallback に加えて
+# `bots11` を出すようになったので、ワークフロー側は summary の行を増やすだけ。
+#
 # ADR-014 / 先行計測計画_ドラフト.md §5.2 #3・#4(measuredSecPerRun -> shards
 # 導出 -> 目標<30分 / 360分キャップ)をローカルRyzen実測ではなく実際の Actions
 # runner の wall-clock で計測する(計画書 §2.1 P3 行)。npm スクリプトを実行
@@ -59,7 +64,7 @@ jobs:
                 `${w.meetsGoal ? "OK" : "NG"} | ${w.withinCap ? "OK" : "NG"} |`;
             };
             const lines = [
-              "# Calibration summary (先行計測計画 §5.2 #3/#4)",
+              "# Calibration summary (先行計測計画 §5.2 #3/#4 + [M38] bot11本 再校正)",
               "",
               "| label | coarseTickMinutes | measuredSecPerRun(s) | weekly shards | " +
                 "weekly wall-clock(min) | <30min目標 | <360minキャップ |",
@@ -67,6 +72,18 @@ jobs:
               row("baseline"),
               row("fallback"),
             ];
+            if (report.bots11 !== undefined) {
+              lines.push(row("bots11"));
+              lines.push("");
+              lines.push(
+                "[M38] bots11 = 5戦略bot + 敵対bot6種 の 11 本。1 run = 1 bot が " +
+                  report.bots11.totalTicksPerRun + " tick 遊ぶ。最遅 bot = " +
+                  report.bots11.slowestBotId + " (" +
+                  report.bots11.slowestSecPerRun.toFixed(4) + " s/run)、" +
+                  "最遅bot悲観の weekly = " +
+                  (report.bots11.weeklyWorstCase.predictedWallClockSec / 60).toFixed(1) + " min",
+              );
+            }
             fs.appendFileSync(summaryPath, lines.join("\n") + "\n");
           })();
           EOF

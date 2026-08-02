@@ -1,0 +1,38 @@
+{
+  "botCount": 11,
+  "elapsedMs": 27638.4775,
+  "stages": [
+    {
+      "days": 2,
+      "determinismMismatches": 0,
+      "determinismSpotChecks": 2,
+      "exceptionCount": 0,
+      "id": "stage-short",
+      "minFinalFacilityCount": 3,
+      "minPopulationFloorMargin": 3,
+      "runs": 600
+    },
+    {
+      "days": 7,
+      "determinismMismatches": 0,
+      "determinismSpotChecks": 2,
+      "exceptionCount": 0,
+      "id": "stage-medium",
+      "minFinalFacilityCount": 8,
+      "minPopulationFloorMargin": 1,
+      "runs": 300
+    },
+    {
+      "days": 20,
+      "determinismMismatches": 0,
+      "determinismSpotChecks": 2,
+      "exceptionCount": 0,
+      "id": "stage-long",
+      "minFinalFacilityCount": 12,
+      "minPopulationFloorMargin": 1,
+      "runs": 100
+    }
+  ],
+  "totalRuns": 1000,
+  "violations": []
+}

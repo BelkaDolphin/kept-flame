@@ -24,6 +24,7 @@ import {
   type BeginResearchCommand,
   type DispatchExpeditionCommand,
   type PlaceFacilityCommand,
+  type ReclaimCellCommand,
 } from "../../src/engine/commands";
 import { compareUtf16 } from "../../src/engine/canonicalize";
 import { toRaw, FIX_ONE, type Fix } from "../../src/engine/fp";
@@ -47,6 +48,7 @@ import {
   type TeamRequest,
 } from "../../src/engine/assist/exploration";
 import { currentCodification } from "../../src/engine/rules/codify";
+import { nextReclaimCostFix } from "../../src/engine/rules/reclaim";
 import { currentResearch } from "../../src/engine/rules/research";
 import { isTechUnlocked, researchEntityOfTech } from "../../src/engine/rules/techMemory";
 import { isCriticalPathTech } from "../../src/engine/rules/techTree";
@@ -95,16 +97,23 @@ interface OpenFacility {
   readonly defId: EntityId;
   readonly harsh: boolean;
   readonly openSlots: number;
+  /** `policy.defPriority` の添字([M38] 均等配属の tie-break)。 */
+  readonly priorityIndex: number;
 }
 
-/** `defPriority` の順に、空きスロットがある施設インスタンスを列挙する。 */
+/**
+ * `defPriority` の順に、空きスロットがある施設インスタンスを列挙する
+ * (返り値は定義優先順 → 同一定義内は entity ID の正準順)。
+ */
 function openFacilitiesByDefPriority(
   state: GameState,
   content: EngineContent,
   defPriority: readonly EntityId[],
 ): readonly OpenFacility[] {
   const result: OpenFacility[] = [];
-  for (const defId of defPriority) {
+  for (let i = 0; i < defPriority.length; i++) {
+    const defId = defPriority[i];
+    if (defId === undefined) continue;
     const def = content.facilityDefs.get(defId);
     if (def === undefined) continue;
     for (const facility of entitiesOfKind(state, "facility")) {
@@ -113,10 +122,19 @@ function openFacilitiesByDefPriority(
       const openSlots =
         slots === undefined ? Number.POSITIVE_INFINITY : slots - facility.workerIds.length;
       if (openSlots <= 0) continue;
-      result.push({ facility, defId, harsh: def.harshWork, openSlots });
+      result.push({ facility, defId, harsh: def.harshWork, openSlots, priorityIndex: i });
     }
   }
   return result;
+}
+
+/** 現在その定義の施設で働いている住民の総数(定義 ID 別)。 */
+function workerCountByDefId(state: GameState): Map<EntityId, number> {
+  const counts = new Map<EntityId, number>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    counts.set(facility.defId, (counts.get(facility.defId) ?? 0) + facility.workerIds.length);
+  }
+  return counts;
 }
 
 /** 住民配属の方針。`defPriority` は「まず埋めたい施設定義 ID」の優先順。 */
@@ -130,11 +148,22 @@ export interface AssignmentResult {
 }
 
 /**
- * 無配属の住民を、方針の優先順に空きスロットへ割り当てる(GDD 11.5 のガード付き)。
+ * 無配属の住民を空きスロットへ割り当てる(GDD 11.5 のガード付き)。
+ *
+ * **[M38] 選び方 = 「その定義でいま働いている人数が最小の施設、同数なら
+ * `defPriority` の先頭側、さらに同じなら entity ID の正準順」**。
+ *
+ * M36 実装は「`defPriority` の順に最初に空いている枠」だった。施設14種化
+ * (M58)+ 開墾でインスタンス数が人口を大きく超える盤面になると、この規則は
+ * **先頭の定義だけを埋め続け、後ろの定義へ 1 人も回らない**。しかも
+ * 本関数は無配属の住民しか動かさない(配属替えをしない)ので、一度偏ると
+ * 回復しない。実測(修正前・貪欲・30 ゲーム日): 住民 6 名が hearth×2 と
+ * 資源系に張り付き、研究点産出施設が全て無人 = 研究レートが恒久的に 0 で
+ * era 1 止まり。均等配属にすると 24 本完了・era 3 到達へ戻る。
  *
  * 過酷業務(`def.harshWork`)への割当は {@link recallGuardBlocks} を通す。ブロック
- * されたら**その施設定義**を諦め(1 住民 1 回だけログ)、優先順の次の施設定義を
- * 試す。同一 tick 内の枠の奪い合いはローカルな予約カウンタで解消する。
+ * されたら**その施設定義**を諦め(1 住民 1 回だけログ)、次の候補を試す。
+ * 同一 tick 内の枠の奪い合いはローカルな予約カウンタで解消する。
  */
 export function buildAssignmentCommands(
   state: GameState,
@@ -147,6 +176,7 @@ export function buildAssignmentCommands(
   if (idle.length === 0) return { commands: [], recallGuardLog: [] };
 
   const openFacilities = openFacilitiesByDefPriority(state, content, policy.defPriority);
+  const workersByDefId = workerCountByDefId(state);
   const reserved = new Map<EntityId, number>();
   const commands: AssignResidentCommand[] = [];
   const recallGuardLog: RecallGuardLogEntry[] = [];
@@ -154,7 +184,14 @@ export function buildAssignmentCommands(
   for (const resident of idle) {
     const blockedHarshDefIds = new Set<EntityId>();
     let loggedForResident = false;
-    for (const open of openFacilities) {
+    // 均等配属の全順序(定義の現就労者数 → 優先順 → 列挙順)。同一キーは無い。
+    const ordered = [...openFacilities].sort(
+      (l, r) =>
+        (workersByDefId.get(l.defId) ?? 0) - (workersByDefId.get(r.defId) ?? 0) ||
+        l.priorityIndex - r.priorityIndex,
+    );
+
+    for (const open of ordered) {
       if (blockedHarshDefIds.has(open.defId)) continue;
       const already = reserved.get(open.facility.id) ?? 0;
       if (already >= open.openSlots) continue;
@@ -172,6 +209,7 @@ export function buildAssignmentCommands(
       }
 
       reserved.set(open.facility.id, already + 1);
+      workersByDefId.set(open.defId, (workersByDefId.get(open.defId) ?? 0) + 1);
       commands.push({
         kind: "assignResident",
         residentId: resident.id,
@@ -228,13 +266,35 @@ function naivePlacementCell(
 
 /** 建設の方針。`placement` が bot ごとの差(GDD 11.4-1 の「配置戦略違い」)。 */
 export interface BuildPolicy {
+  /**
+   * 建設候補の定義 ID(優先順)。**[M38] 施設14種すべてを載せること**を前提に
+   * した順序である(M36 実装時は `hearth`/`workbench`/`forge` の 3 種しか
+   * 載っておらず、M58 で追加された 11 種を bot が一度も建てられなかった —
+   * 台帳v11 追-8 の申し送り)。
+   */
   readonly defPriority: readonly EntityId[];
   readonly placement: "assist" | "naive";
 }
 
+/** 現在建っている施設を定義 ID 別に数える([M38] 建設候補の多様化に使う)。 */
+export function facilityCountByDefId(state: GameState): ReadonlyMap<EntityId, number> {
+  const counts = new Map<EntityId, number>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    counts.set(facility.defId, (counts.get(facility.defId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
- * 新規施設を 1 基だけ提案する(この tick で建てすぎない)。`defPriority` の
- * 順に「定義がある」→「払える」→「置ける」を試し、最初に成立したものを返す。
+ * 新規施設を 1 基だけ提案する(この tick で建てすぎない)。
+ *
+ * **[M38] 選び方 = 「建設可能な候補のうち現基数が最小のもの、同数なら
+ * `defPriority` の先頭側」**。M36 実装は `defPriority` の先頭から最初に成立した
+ * ものを返していたため、先頭の定義(貪欲なら `hearth`)が資源的に常に建てられる
+ * 限り**その 1 種だけを建て続け**、M58 で追加された施設が実 run に一度も現れ
+ * なかった(実測: 30 ゲーム日 run で hearth×11 + workbench×1)。現基数の最小を
+ * 選ぶ規則にすると、`defPriority` の順序は「同数のときどれを先に建てるか」
+ * = 序盤の建設順という bot の戦略差として残りつつ、盤面は 14 種へ広がる。
  *
  * `placement: "assist"` は M26 推奨配置(`suggestPlacementsAvoidingRubble`)を
  * **qualityRatioFix = 1.0**(素の貪欲・M26 §3 の退化条件)で呼ぶ ——
@@ -250,29 +310,87 @@ export function buildFacilityCommand(
   content: EngineContent,
   policy: BuildPolicy,
 ): PlaceFacilityCommand | undefined {
-  for (const defId of policy.defPriority) {
+  const counts = facilityCountByDefId(state);
+
+  interface Candidate {
+    readonly defId: EntityId;
+    readonly footprint: { readonly width: number; readonly height: number };
+    readonly count: number;
+    readonly priorityIndex: number;
+  }
+  const candidates: Candidate[] = [];
+  for (let i = 0; i < policy.defPriority.length; i++) {
+    const defId = policy.defPriority[i];
+    if (defId === undefined) continue;
     const def = content.facilityDefs.get(defId);
     if (def === undefined) continue;
     if (!canAffordBuild(state, def, facilityBuildCostFix(def))) continue;
-
-    const facilityId = nextFacilityEntityId(state, defId);
     const footprint = def.footprint ?? UNIT_FOOTPRINT;
     if (!isValidFootprintDims(footprint)) continue;
+    candidates.push({ defId, footprint, count: counts.get(defId) ?? 0, priorityIndex: i });
+  }
+  // (現基数 昇順, 優先順 昇順)の全順序。同一キーは存在しない(priorityIndex が一意)。
+  candidates.sort((l, r) => l.count - r.count || l.priorityIndex - r.priorityIndex);
 
+  for (const candidate of candidates) {
+    const facilityId = nextFacilityEntityId(state, candidate.defId);
     if (policy.placement === "assist") {
-      const plan = suggestPlacementsAvoidingRubble(state, content, [{ facilityId, defId }], {
-        qualityRatioFix: FIX_ONE,
-      });
+      const plan = suggestPlacementsAvoidingRubble(
+        state,
+        content,
+        [{ facilityId, defId: candidate.defId }],
+        { qualityRatioFix: FIX_ONE },
+      );
       const command = placementPlanToCommands(plan)[0];
       if (command === undefined) continue;
       return command;
     }
-
-    const cellIndex = naivePlacementCell(state, footprint);
+    const cellIndex = naivePlacementCell(state, candidate.footprint);
     if (cellIndex === null) continue;
-    return { kind: "placeFacility", facilityId, defId, cellIndex };
+    return { kind: "placeFacility", facilityId, defId: candidate.defId, cellIndex };
   }
   return undefined;
+}
+
+// --- 3b. 開墾(GDD 9.1・[M38]) -----------------------------------------------
+
+/**
+ * 1×1 が置ける空きセルの数(瓦礫でも占有済みでもないセル)。
+ * `naivePlacementCell` と同じ engine 検査(footprint/occupancy/rubble)を使う。
+ */
+export function freeUnitCellCount(state: GameState): number {
+  let count = 0;
+  for (let cell = 0; cell < GRID_CELL_COUNT; cell++) {
+    const cells = occupiedCells(cell, UNIT_FOOTPRINT);
+    if (firstRubbleCellIn(state, cells) !== null) continue;
+    if (findOccupancyConflict(state, cells) !== null) continue;
+    count++;
+  }
+  return count;
+}
+
+/**
+ * 空きセルが `minFreeCells` を下回っていて、かつ開墾コストを払えるなら
+ * **セル番号が最小の瓦礫 1 枚**を開墾する提案を返す([M38])。
+ *
+ * M36 の bot は開墾を一度も行わなかったため、`content/balance.json` の
+ * `initialRubbleCells`(セル 12〜47 が瓦礫)により盤面が**12 セット固定**で、
+ * 施設 14 種を建て分ける余地が構造的に無かった。開墾を入れて初めて
+ * 「14 種を建てた盤面」が実 run に出る。
+ */
+export function buildReclaimCommand(
+  state: GameState,
+  content: EngineContent,
+  minFreeCells: number,
+): ReclaimCellCommand | undefined {
+  if (minFreeCells <= 0) return undefined;
+  if (content.reclaim === undefined) return undefined;
+  if (freeUnitCellCount(state) >= minFreeCells) return undefined;
+  const cell = state.terrain.rubbleCells[0];
+  if (cell === undefined) return undefined;
+  const costFix = nextReclaimCostFix(state, content);
+  if (resourceStockRaw(state, content.reclaim.costResourceId) < toRaw(costFix)) return undefined;
+  return { kind: "reclaimCell", cellIndex: cell };
 }
 
 // --- 4. 研究(GDD 5) ---------------------------------------------------------

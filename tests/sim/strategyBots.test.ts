@@ -111,16 +111,24 @@ describe("5戦略bot の戦略差(GDD 11.4-1)が実測できる", () => {
     });
   }
 
-  it("研究優先 は貪欲より研究完了数で劣後しない(クリティカルパス優先の効果)", () => {
+  it("研究優先 は貪欲より研究完了数で劣後せず、エラ壁へより速く到達する", () => {
     const greedy = run(greedyBot);
     const researchFirst = run(researchFirstBot);
     expect(researchFirst.metrics.finalCompletedResearchCount).toBeGreaterThanOrEqual(
       greedy.metrics.finalCompletedResearchCount,
     );
-    // 代表 seed では実際に上回ることを固定(実測値はタスク報告に記載)。
-    expect(researchFirst.metrics.finalCompletedResearchCount).toBeGreaterThan(
-      greedy.metrics.finalCompletedResearchCount,
-    );
+    // [M38] 施設14種化(M58)と均等配属の後、代表 seed では**完了本数が同数**
+    // (どちらも 20 本)になった。M36 時点の「本数で厳密に上回る」は seed 依存の
+    // 観測であって bot の存在理由そのものではない ——「クリティカルパス優先」の
+    // 効果は**壁テック到達 tick の速さ**に現れるので、そちらを固定する
+    // (実測: E2 = 5,760 vs 11,520 tick / E3 = 10,080 vs 21,600 tick)。
+    for (const order of [2, 3] as const) {
+      const fast = researchFirst.metrics.firstTickByEraOrder[order];
+      const slow = greedy.metrics.firstTickByEraOrder[order];
+      expect(fast, `era order=${String(order)} を研究優先が到達していない`).toBeDefined();
+      expect(slow, `era order=${String(order)} を貪欲が到達していない`).toBeDefined();
+      expect(fast ?? Infinity).toBeLessThan(slow ?? Infinity);
+    }
   });
 
   it("探索優先 は貪欲より派遣本数が多い", () => {

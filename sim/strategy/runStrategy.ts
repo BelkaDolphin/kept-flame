@@ -49,19 +49,32 @@ import { createNewGameState, type NewGameOptions } from "../../src/newGame";
 import { type DifficultySeedId } from "../../src/difficulty";
 
 import { advanceWithReport, createAdvanceContext } from "../../src/engine/advance";
+import { compareUtf16 } from "../../src/engine/canonicalize";
 import { apply } from "../../src/engine/commands";
 import { toRaw } from "../../src/engine/fp";
 import { completedRecords } from "../../src/engine/rules/codify";
 import {
+  earnedInheritPoints,
   recommendExodusPlan,
   reachedEraOrder,
   resolveExodusPlan,
 } from "../../src/engine/rules/exodus";
-import type { EngineContent } from "../../src/engine/rules/types";
-import { entitiesOfKind, livingResidents, type GameState } from "../../src/engine/state/state";
+import { rareAssetCountOf } from "../../src/engine/rules/exploration";
+import { populationViewOf } from "../../src/engine/rules/population";
+import { computeProductionRates } from "../../src/engine/rules/production";
+import { colonyOverflowLossRate } from "../../src/engine/rules/storage";
+import type { AdvanceContext, EngineContent } from "../../src/engine/rules/types";
+import {
+  entitiesOfKind,
+  livingResidents,
+  type EntityId,
+  type GameState,
+} from "../../src/engine/state/state";
+import { GAME_DAY_TICKS } from "../../src/engine/stochastic";
 
 import { resolveSimContent, type ContentPatch } from "../board";
 import { boardOutputScore } from "./commonActions";
+import { soleUncodifiedHeldTechIds } from "./recallGuard";
 import type { RecallGuardLogEntry, StrategyBot } from "./types";
 
 // --- 1. content(event を追加した実 content) --------------------------------
@@ -110,6 +123,29 @@ export interface StrategyRunOptions {
   readonly exodusIntervalTicks?: number;
 }
 
+/**
+ * [M38] bot 呼び出し境界(既定 = 1 ゲーム日)ごとの観測サンプル。夜間ゲート
+ * (`sim/nightlyGate.ts`)の「全 tick 維持」系 assert は、この標本の**最小値**を
+ * 実測値として使う(粗粒度の標本であることは報告側で明示する)。
+ */
+export interface StrategyRunSample {
+  readonly tick: number;
+  readonly livingPopulation: number;
+  /** `populationFloorOf`(GDD 7.6 の `min(寝床上限×0.5, 6)`)。 */
+  readonly populationFloor: number;
+  readonly bedCapacity: number;
+  readonly reachedEraOrder: number;
+  /** 1 tick あたり研究点産出(raw)。 */
+  readonly researchRateRaw: number;
+  /** 資源 ID → 1 tick あたり産出(raw)。 */
+  readonly resourceRateRawById: Readonly<Record<string, number>>;
+  /** 盤面全体のオーバーフロー損失率(raw・GDD 11.4-7)。 */
+  readonly overflowLossRateRaw: number;
+  readonly facilityCount: number;
+  /** 建っている施設の**種類数**([M38] 施設14種化の観測値)。 */
+  readonly distinctFacilityDefCount: number;
+}
+
 /** 5戦略bot の観測指標(タスク報告の実測値の元データ)。 */
 export interface StrategyRunMetrics {
   readonly finalTick: number;
@@ -121,12 +157,16 @@ export interface StrategyRunMetrics {
   readonly codifyBeginCount: number;
   /** 成立した `placeFacility` の本数。 */
   readonly placeFacilityCount: number;
+  /** [M38] 成立した `reclaimCell` の本数(GDD 9.1)。 */
+  readonly reclaimCount: number;
   /** 成立した `beginResearch` の回数(選び直しも含む)。 */
   readonly researchSelectCount: number;
   /** bot が提案したが reject された(または executeExodus の下ごしらえで見送った)件数。 */
   readonly rejectedCommandCount: number;
   /** `reachedEraOrder` が最初に 1 以上になった tick(未到達なら null)。 */
   readonly firstEraOrderOneTick: number | null;
+  /** [M38] エラ order(1/2/3…)→ 最初にそこへ到達した tick(GDD 11.4-3)。 */
+  readonly firstTickByEraOrder: Readonly<Record<number, number>>;
   readonly finalReachedEraOrder: number;
   readonly finalCompletedResearchCount: number;
   readonly finalCodifiedRecordCount: number;
@@ -134,6 +174,24 @@ export interface StrategyRunMetrics {
   readonly finalBoardOutputScoreRaw: number;
   readonly finalFacilityCount: number;
   readonly finalLivingPopulation: number;
+  /** [M38] 建てた施設の種類(定義 ID・昇順)。GDD 6.1 の 14 種のうち何種に届いたか。 */
+  readonly builtFacilityDefIds: readonly string[];
+  /** [M38] 標本上の最小生存人口(GDD 11.4-9)。 */
+  readonly minLivingPopulation: number;
+  /** [M38] 派遣した延べ人数(GDD 11.4-11 の分母)。 */
+  readonly dispatchedMemberCount: number;
+  /** [M38] 派遣した人のうち「未成文の唯一保持者」だった延べ人数(GDD 11.4-11 の分子)。 */
+  readonly dispatchedSoleHolderCount: number;
+  /** [M38] 派遣チームが抱えた (B) レア資産の延べ件数(`rareAssetCountOf`・GDD 8.6)。 */
+  readonly dispatchedRareAssetCount: number;
+  /** [M38] この state を今畳んだときに得る継承点(GDD 10.3・11.4-6)。 */
+  readonly earnedInheritPoints: number;
+  /** [M38] 大移動が成立するたびに記録した「その周回の継承点」(GDD 11.4-6)。 */
+  readonly inheritPointsPerCycle: readonly number[];
+  /** [M38] run 中に実際に発生した想起困難の件数(GDD 11.2/11.4-8 の実 run 観測)。 */
+  readonly recallOccurrenceCount: number;
+  /** [M38] 想起困難の判定対象になった延べ「住民 × ゲーム週」(11.4-8 の分母)。 */
+  readonly residentWeeksObserved: number;
 }
 
 export interface StrategyRunResult {
@@ -142,6 +200,8 @@ export interface StrategyRunResult {
   readonly metrics: StrategyRunMetrics;
   /** GDD 11.5 のガードが実際にブロックした全件(検収条件のログ証跡)。 */
   readonly recallGuardLog: readonly RecallGuardLogEntry[];
+  /** [M38] bot 呼び出し境界ごとの観測標本(夜間ゲートの入力)。 */
+  readonly samples: readonly StrategyRunSample[];
   /** 実行時間(ms)。`performance.now()` の差分。計測メタとしてのみ使う。 */
   readonly elapsedMs: number;
 }
@@ -169,6 +229,58 @@ function countCompletedResearch(state: GameState): number {
     if (research.completedTick !== null) count++;
   }
   return count;
+}
+
+// --- 3b. [M38] 観測(夜間ゲートの入力) ---------------------------------------
+
+/** bot 呼び出し境界 1 点ぶんの観測(`StrategyRunSample`)。 */
+function sampleOf(
+  state: GameState,
+  ctx: AdvanceContext,
+  content: EngineContent,
+  reachedEraOrderValue: number,
+): StrategyRunSample {
+  const rates = computeProductionRates(state, ctx);
+  const resourceRateRawById: Record<string, number> = {};
+  for (const [resourceId, rateFix] of rates.resourceRateByResourceId) {
+    resourceRateRawById[String(resourceId)] = toRaw(rateFix);
+  }
+  const view = populationViewOf(state, content);
+  const defIds = new Set<EntityId>();
+  let facilityCount = 0;
+  for (const facility of entitiesOfKind(state, "facility")) {
+    defIds.add(facility.defId);
+    facilityCount++;
+  }
+  return {
+    tick: state.tick,
+    livingPopulation: view.living,
+    populationFloor: view.floor,
+    bedCapacity: view.bedCapacity,
+    reachedEraOrder: reachedEraOrderValue,
+    researchRateRaw: toRaw(rates.researchRateFix),
+    resourceRateRawById,
+    overflowLossRateRaw: toRaw(colonyOverflowLossRate(state)),
+    facilityCount,
+    distinctFacilityDefCount: defIds.size,
+  };
+}
+
+/** 派遣 1 本ぶんの「唯一保持者 / (B)レア資産」観測(GDD 11.4-11)。 */
+function observeDispatchHolders(
+  state: GameState,
+  content: EngineContent,
+  memberIds: readonly EntityId[],
+): { memberCount: number; soleHolderCount: number; rareAssetCount: number } {
+  let soleHolderCount = 0;
+  for (const memberId of memberIds) {
+    if (soleUncodifiedHeldTechIds(state, memberId).length > 0) soleHolderCount++;
+  }
+  return {
+    memberCount: memberIds.length,
+    soleHolderCount,
+    rareAssetCount: rareAssetCountOf(state, content, memberIds),
+  };
 }
 
 // --- 4. 大移動の下ごしらえ(§2) ----------------------------------------------
@@ -219,13 +331,22 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     exodusIntervalTicks === undefined ? Number.POSITIVE_INFINITY : state.tick + exodusIntervalTicks;
 
   const recallGuardLog: RecallGuardLogEntry[] = [];
+  const samples: StrategyRunSample[] = [];
+  const firstTickByEraOrder: Record<number, number> = {};
+  const inheritPointsPerCycle: number[] = [];
   let exodusCount = 0;
   let dispatchCount = 0;
   let codifyBeginCount = 0;
   let placeFacilityCount = 0;
+  let reclaimCount = 0;
   let researchSelectCount = 0;
   let rejectedCommandCount = 0;
   let firstEraOrderOneTick: number | null = null;
+  let dispatchedMemberCount = 0;
+  let dispatchedSoleHolderCount = 0;
+  let dispatchedRareAssetCount = 0;
+  let recallOccurrenceCount = 0;
+  let residentWeekTicks = 0;
 
   const bot = options.bot;
   const start = performance.now();
@@ -233,13 +354,20 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
 
   while (cursor < targetTick) {
     const boundary = Math.min(cursor + bot.intervalTicks, targetTick);
+    const populationBefore = livingResidents(state).length;
+    const tickBefore = state.tick;
     const report = advanceWithReport(state, ctx, boundary);
     state = report.state;
+    recallOccurrenceCount += report.recallOccurrenceCount;
+    residentWeekTicks += populationBefore * (state.tick - tickBefore);
     cursor = state.tick;
 
-    if (firstEraOrderOneTick === null && reachedEraOrder(state, content) >= 1) {
-      firstEraOrderOneTick = cursor;
+    const eraOrder = reachedEraOrder(state, content);
+    if (firstEraOrderOneTick === null && eraOrder >= 1) firstEraOrderOneTick = cursor;
+    for (let order = 1; order <= eraOrder; order++) {
+      if (firstTickByEraOrder[order] === undefined) firstTickByEraOrder[order] = cursor;
     }
+    samples.push(sampleOf(state, ctx, content, eraOrder));
 
     if (cursor >= targetTick) break;
 
@@ -249,10 +377,13 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     // 定常状態のせいで大移動の機会が実質的に来なくなる(bot.decide() の後で
     // 判定すると、今日 apply した新しい派遣が即座に「派遣中」として映ってしまう)。
     if (exodusIntervalTicks !== undefined && cursor >= nextExodusCheckTick) {
+      // 畳む直前の state で「その周回の継承点」を記録する(GDD 10.3・11.4-6)。
+      const pointsBeforeExodus = earnedInheritPoints(state, content);
       const outcome = tryExodus(state, content);
       state = outcome.state;
       if (outcome.applied) {
         exodusCount++;
+        inheritPointsPerCycle.push(pointsBeforeExodus);
         ctx = createAdvanceContext(state, content);
         nextExodusCheckTick = cursor + exodusIntervalTicks;
       } else {
@@ -267,6 +398,12 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
 
     let placementChanged = false;
     for (const command of decision.commands) {
+      // 派遣は「適用前の state」で唯一保持/(B)レアを数える(GDD 11.4-11 の観測)。
+      const dispatchObservation =
+        command.kind === "dispatchExpedition"
+          ? observeDispatchHolders(state, content, command.teamResidentIds)
+          : null;
+
       const result = apply(state, content, command);
       if (!result.ok) {
         rejectedCommandCount++;
@@ -278,8 +415,16 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
         placementChanged = true;
       } else if (command.kind === "demolishFacility" || command.kind === "upgradeFacility") {
         placementChanged = true;
+      } else if (command.kind === "reclaimCell") {
+        reclaimCount++;
+        placementChanged = true;
       } else if (command.kind === "dispatchExpedition") {
         dispatchCount++;
+        if (dispatchObservation !== null) {
+          dispatchedMemberCount += dispatchObservation.memberCount;
+          dispatchedSoleHolderCount += dispatchObservation.soleHolderCount;
+          dispatchedRareAssetCount += dispatchObservation.rareAssetCount;
+        }
       } else if (command.kind === "beginCodification") {
         codifyBeginCount++;
       } else if (command.kind === "beginResearch") {
@@ -291,22 +436,41 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
   }
 
   const elapsedMs = performance.now() - start;
+  const builtDefIds = new Set<string>();
+  for (const facility of entitiesOfKind(state, "facility")) builtDefIds.add(String(facility.defId));
+  let minLivingPopulation = livingResidents(state).length;
+  for (const sample of samples) {
+    if (sample.livingPopulation < minLivingPopulation)
+      minLivingPopulation = sample.livingPopulation;
+  }
+
   const metrics: StrategyRunMetrics = {
     finalTick: state.tick,
     exodusCount,
     dispatchCount,
     codifyBeginCount,
     placeFacilityCount,
+    reclaimCount,
     researchSelectCount,
     rejectedCommandCount,
     firstEraOrderOneTick,
+    firstTickByEraOrder,
     finalReachedEraOrder: reachedEraOrder(state, content),
     finalCompletedResearchCount: countCompletedResearch(state),
     finalCodifiedRecordCount: completedRecords(state).length,
     finalBoardOutputScoreRaw: toRaw(boardOutputScore(state, content)),
     finalFacilityCount: entitiesOfKind(state, "facility").length,
     finalLivingPopulation: livingResidents(state).length,
+    builtFacilityDefIds: [...builtDefIds].sort(compareUtf16),
+    minLivingPopulation,
+    dispatchedMemberCount,
+    dispatchedSoleHolderCount,
+    dispatchedRareAssetCount,
+    earnedInheritPoints: earnedInheritPoints(state, content),
+    inheritPointsPerCycle,
+    recallOccurrenceCount,
+    residentWeeksObserved: residentWeekTicks / (GAME_DAY_TICKS * 7),
   };
 
-  return { state, content, metrics, recallGuardLog, elapsedMs };
+  return { state, content, metrics, recallGuardLog, samples, elapsedMs };
 }

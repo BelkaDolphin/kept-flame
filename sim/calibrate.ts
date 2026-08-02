@@ -28,6 +28,9 @@ import { dispatchBot } from "./bots/dispatchBot";
 import { reassignmentBot } from "./bots/reassignmentBot";
 import { isMainModule, writeJsonReport } from "./cliUtil";
 import { runNightSim, type SimBot } from "./runner";
+import { ADVERSARIAL_BOTS, runAdversarialBotAsNewGame } from "./strategy/adversarialBots";
+import { STRATEGY_BOTS } from "./strategy/bots";
+import { runStrategyBot } from "./strategy/runStrategy";
 
 /** ADR-014: 1 run = 2,304 粗粒度ステップ(10分粒度)。 */
 const RUN_COARSE_STEPS = 2304;
@@ -169,6 +172,112 @@ export function runCalibration(params: RunCalibrationParams): CalibrationReport 
   };
 }
 
+// --- [M38] bot 最大11本での再校正(ADR-014(3) / summary.md §2.1) --------------
+//
+// 先行計測 #3/#4(上の baseline/fallback)は **bot 2 本**(sim/bots/ の
+// reassignmentBot / dispatchBot)で測った値であり、`docs/measurements/summary.md`
+// §2.1 が「MVP の 5戦略 + 敵対 6種 = 最大 11 本になった時点で
+// `measuredSecPerRun` は再校正が必要(ADR-014(3))。現在の余裕(29.8%)は bot 数の
+// 増加を吸収できる幅として十分だが、**再校正の義務は消えない**」と明記している。
+// その義務をここで果たす。
+//
+// 「1 run」の定義: **1 bot が 1 ゲームを `RUN_TOTAL_TICKS` ぶん遊ぶ**。
+// baseline/fallback の 1 run(縮約20人盤面を bot 2 本込みで進める)とは盤面も
+// 中身も違うので、同じ tick 幅(23,040 tick = 16 ゲーム日)を使って**比較可能**に
+// してある。夜間 2200 runs / 週次 11000 runs の「run」はこの単位で数える。
+
+/** [M38] bot 1 本ぶんの校正サンプル。 */
+export interface BotSuiteSample {
+  readonly botId: string;
+  readonly kind: "strategy" | "adversarial";
+  readonly seed: string;
+  readonly elapsedMs: number;
+}
+
+export interface BotSuiteCalibrationReport {
+  readonly label: string;
+  readonly botCount: number;
+  readonly totalTicksPerRun: number;
+  readonly coarseTickMinutes: number;
+  readonly samples: readonly BotSuiteSample[];
+  /** 全サンプルの中央値(秒)。 */
+  readonly measuredSecPerRun: number;
+  /** 最も遅かった bot(最悪ケースの目安)。 */
+  readonly slowestBotId: string;
+  readonly slowestSecPerRun: number;
+  readonly weekly: ShardPlan;
+  readonly nightly: ShardPlan;
+  /** 最悪 bot だけで週次を回した場合の悲観見積り。 */
+  readonly weeklyWorstCase: ShardPlan;
+}
+
+export interface BotSuiteCalibrationParams {
+  readonly seeds?: readonly string[];
+  readonly totalTicks?: number;
+}
+
+/** [M38] 5戦略bot + 敵対bot6種(= 最大11本)での `measuredSecPerRun` 再校正。 */
+export function runBotSuiteCalibration(
+  params: BotSuiteCalibrationParams = {},
+): BotSuiteCalibrationReport {
+  const seeds = params.seeds ?? ["calibrate-bots11-a", "calibrate-bots11-b"];
+  const totalTicks = params.totalTicks ?? RUN_TOTAL_TICKS;
+
+  // ウォームアップ(V8 の JIT・content ロードのコストを測定値へ混ぜない)。
+  const warmupBot = STRATEGY_BOTS[0];
+  if (warmupBot !== undefined) {
+    runStrategyBot({ bot: warmupBot, totalTicks, worldSeed: "calibrate-bots11-warmup" });
+  }
+  const warmupAdversarial = ADVERSARIAL_BOTS[0];
+  if (warmupAdversarial !== undefined) {
+    runAdversarialBotAsNewGame(warmupAdversarial, totalTicks, "calibrate-bots11-warmup");
+  }
+
+  const samples: BotSuiteSample[] = [];
+  for (const seed of seeds) {
+    for (const bot of STRATEGY_BOTS) {
+      const result = runStrategyBot({ bot, totalTicks, worldSeed: seed });
+      samples.push({ botId: bot.id, kind: "strategy", seed, elapsedMs: result.elapsedMs });
+    }
+    for (const bot of ADVERSARIAL_BOTS) {
+      const start = performance.now();
+      runAdversarialBotAsNewGame(bot, totalTicks, seed);
+      samples.push({
+        botId: bot.id,
+        kind: "adversarial",
+        seed,
+        elapsedMs: performance.now() - start,
+      });
+    }
+  }
+
+  const measuredSecPerRun = median(samples.map((s) => s.elapsedMs)) / 1000;
+
+  let slowestBotId = "(なし)";
+  let slowestMs = 0;
+  for (const sample of samples) {
+    if (sample.elapsedMs > slowestMs) {
+      slowestMs = sample.elapsedMs;
+      slowestBotId = sample.botId;
+    }
+  }
+  const slowestSecPerRun = slowestMs / 1000;
+
+  return {
+    label: "bots11-strategy5-plus-adversarial6",
+    botCount: STRATEGY_BOTS.length + ADVERSARIAL_BOTS.length,
+    totalTicksPerRun: totalTicks,
+    coarseTickMinutes: BASELINE_COARSE_TICK_MINUTES,
+    samples,
+    measuredSecPerRun,
+    slowestBotId,
+    slowestSecPerRun,
+    weekly: deriveShardPlan(WEEKLY_TOTAL_RUNS, measuredSecPerRun),
+    nightly: deriveShardPlan(NIGHTLY_TOTAL_RUNS, measuredSecPerRun),
+    weeklyWorstCase: deriveShardPlan(WEEKLY_TOTAL_RUNS, slowestSecPerRun),
+  };
+}
+
 // --- CLI ---------------------------------------------------------------------
 
 function printReport(report: CalibrationReport): void {
@@ -194,19 +303,54 @@ function printReport(report: CalibrationReport): void {
   }
 }
 
+function printBotSuiteReport(report: BotSuiteCalibrationReport): void {
+  console.log(`
+=== ${report.label}(bot ${String(report.botCount)} 本・[M38] 再校正) ===`);
+  console.log(
+    `1 run = ${String(report.totalTicksPerRun)} tick` +
+      `(${String(report.totalTicksPerRun / report.coarseTickMinutes)} 粗粒度ステップ)`,
+  );
+  console.table(
+    report.samples.map((s) => ({
+      bot: s.botId,
+      kind: s.kind,
+      seed: s.seed,
+      elapsedMs: s.elapsedMs.toFixed(2),
+    })),
+  );
+  console.log(
+    `measuredSecPerRun(全 ${String(report.samples.length)} サンプルの中央値) = ` +
+      `${report.measuredSecPerRun.toFixed(4)} s / 最遅 ${report.slowestBotId} = ` +
+      `${report.slowestSecPerRun.toFixed(4)} s`,
+  );
+  for (const [name, plan] of [
+    ["weekly(11000 runs・中央値)", report.weekly],
+    ["weekly(11000 runs・最遅bot悲観)", report.weeklyWorstCase],
+    ["nightly(2200 runs・中央値)", report.nightly],
+  ] as const) {
+    console.log(
+      `  ${name}: shards=${String(plan.shards)} runsPerShard=${String(plan.runsPerShard)} ` +
+        `predictedWallClock=${(plan.predictedWallClockSec / 60).toFixed(1)}min ` +
+        `目標<30min:${plan.meetsGoal ? "OK" : "NG"} 360minキャップ:${plan.withinCap ? "OK" : "NG"}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const baseline = runCalibration({ label: "baseline-10min", coarseTickMinutes: 10 });
   const fallback = runCalibration({ label: "fallback-1min", coarseTickMinutes: 1 });
+  const bots11 = runBotSuiteCalibration();
 
   printReport(baseline);
   printReport(fallback);
+  printBotSuiteReport(bots11);
 
   console.log(
     "\n注意: ローカル実測(このマシン)は GitHub Actions runner より速く出る可能性が高い" +
       "(上振れ)。本判定は Actions 実機での再計測が必要(ADR-014・先行計測計画 §5.1 と同種の注意)。",
   );
 
-  await writeJsonReport("sim/output/calibrate-report.json", { baseline, fallback });
+  await writeJsonReport("sim/output/calibrate-report.json", { baseline, fallback, bots11 });
 }
 
 if (isMainModule(import.meta.url)) {

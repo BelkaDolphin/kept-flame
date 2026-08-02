@@ -1,0 +1,68 @@
+{
+  "baseline": {
+    "coarseTickMinutes": 10,
+    "label": "baseline-10min",
+    "measured": [
+      { "elapsedMs": 364.23498599999994, "seed": "calibrate-baseline-10min-2" },
+      { "elapsedMs": 292.49244299999987, "seed": "calibrate-baseline-10min-3" },
+      { "elapsedMs": 320.8811330000001, "seed": "calibrate-baseline-10min-4" },
+      { "elapsedMs": 296.7148239999997, "seed": "calibrate-baseline-10min-5" },
+      { "elapsedMs": 346.1145650000003, "seed": "calibrate-baseline-10min-6" }
+    ],
+    "measuredSecPerRun": 0.3208811330000001,
+    "nightly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 705.9384926000002,
+      "runsPerShard": 2200,
+      "shards": 1,
+      "totalRuns": 2200,
+      "withinCap": true
+    },
+    "totalTicksPerRun": 23040,
+    "warmup": [
+      { "elapsedMs": 460.8014639999999, "seed": "calibrate-baseline-10min-0" },
+      { "elapsedMs": 304.588966, "seed": "calibrate-baseline-10min-1" }
+    ],
+    "weekly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1764.8462315000006,
+      "runsPerShard": 5500,
+      "shards": 2,
+      "totalRuns": 11000,
+      "withinCap": true
+    }
+  },
+  "fallback": {
+    "coarseTickMinutes": 1,
+    "label": "fallback-1min",
+    "measured": [
+      { "elapsedMs": 2898.5764099999997, "seed": "calibrate-fallback-1min-2" },
+      { "elapsedMs": 3151.4989559999995, "seed": "calibrate-fallback-1min-3" },
+      { "elapsedMs": 3053.8472690000017, "seed": "calibrate-fallback-1min-4" },
+      { "elapsedMs": 3005.040922, "seed": "calibrate-fallback-1min-5" },
+      { "elapsedMs": 2944.5658129999974, "seed": "calibrate-fallback-1min-6" }
+    ],
+    "measuredSecPerRun": 3.005040922,
+    "nightly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1652.7725071,
+      "runsPerShard": 550,
+      "shards": 4,
+      "totalRuns": 2200,
+      "withinCap": true
+    },
+    "totalTicksPerRun": 23040,
+    "warmup": [
+      { "elapsedMs": 3070.1319300000005, "seed": "calibrate-fallback-1min-0" },
+      { "elapsedMs": 3039.130629, "seed": "calibrate-fallback-1min-1" }
+    ],
+    "weekly": {
+      "meetsGoal": true,
+      "predictedWallClockSec": 1739.918693838,
+      "runsPerShard": 579,
+      "shards": 19,
+      "totalRuns": 11000,
+      "withinCap": true
+    }
+  }
+}
