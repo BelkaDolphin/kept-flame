@@ -379,7 +379,8 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
     const delta = event.toTick - current.tick;
     if (delta < 0) {
       throw new StoreError(
-        `toTick ${String(event.toTick)} が現在 tick ${String(current.tick)} より過去(巻き戻しの検知は platform/clock.ts の担当・GDD 11.9)`,
+        // 巻き戻しの検知は platform/clock.ts の担当(GDD 11.9)
+        `toTick ${String(event.toTick)} が現在 tick ${String(current.tick)} より過去`,
       );
     }
     if (delta === 0) {

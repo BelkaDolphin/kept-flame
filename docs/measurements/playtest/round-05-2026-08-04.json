@@ -1,0 +1,94 @@
+{
+  "protocol": "docs/design/playtest-protocol.md",
+  "round": 5,
+  "date": "2026-08-04",
+  "commit": "925173e (M63束G f27039f + M40 merge bfd8032 統合後)",
+  "agents": "axisA/B=Opus(port 4621・390x844・×720で20ゲーム日=周回1第14日→大移動→周回2第20日) / axisC/E=Sonnet(port 4612・3VP・13画面+オンボーディング/辞典) / axisD=Sonnet(port 4613・390x844・実発火確認込み)",
+  "scope": "全軸フル(M40=content/バランス変更後のためプロトコル§8の原則どおり)。束G(M63)+M40の検収ラウンド。台本T2/T7/T9は2026-08-03改訂版(台帳v16 必-3)を適用",
+  "verdict": "不合格(fatal 1件=R5-A01 探索報酬の固定上限200による黙殺破棄+満額虚偽表示)。ただし束G検収は実質達成: T2/T7回復(1→2)・軸E 6/6 fail 0・軸D はD5回復+新規D1(GDD番号露出・同日修正済み)。軸A 1.58→1.83・R4-A10(継承点)も解消",
+  "verdictReasons": [
+    "fatal: R5-A01 balance.json の exploration.rewardOverflow={policy:'discard',capacity:200} が400スケール再校正(M39/M40)の取り残し=外部収入の4系統目。薪在庫200以上で探索報酬が黙って破棄され、冒険記は受入前の粗報酬「薪175」を満額表示(IndexedDB実測: 受領11.3/破棄163.7)。中盤以降の探索が実質無価値",
+    "悪化: T5 2→1(R5-A01起因=帰還ダイジェストの報酬表示が実受領額と乖離し「UIの情報だけで結果を正しく理解できる」を満たさない)",
+    "改善: T2 1→2・T7 1→2・T9 1→2・T12 1→2(束G/M40の実効)。軸E 5/6→6/6(R4-E01解消)。R4-A10(継承点35<50)解消=76点で購入到達",
+    "新規リグレッション: R5-A03 保管庫文言に「GDD 6.7」露出(M63のR4-A01修正が作り込み・major判定)→同日修正済み(スイープ機械検証をGDD+数字/.ts走査へ拡張し既存露出2件も検出・修正)",
+    "進行健全性は堅牢: ×720で20ゲーム日+大移動+周回2、console error/pageerror 0(3体全経路)・時計凍結0・0待ちリロード/ブラウザ強制終了とも巻き戻りなし(R4-A09解消)"
+  ],
+  "scores": {
+    "A_task": 1.83,
+    "A_task_detail": { "T1": 2, "T2": 2, "T3": 2, "T4": 2, "T5": 1, "T6": 2, "T7": 2, "T8": 2, "T9": 2, "T10": 2, "T11": 1, "T12": 2 },
+    "C_heuristics": 1.94,
+    "C_groupAverages": { "home_hud": 1.9, "base": 1.8, "research_codify": 2.0, "expedition": 2.0, "cycle_settings": 2.0 },
+    "D_wording": "4/5 pass(D5回復・新規D1のみfail=GDD番号露出→同日修正済み。D2/D3/D4/D5全pass)",
+    "E_layout": "6/6 fail 0(R4-E01の格子27-28px重なりが3VPとも0pxに解消・R3水準に復帰)"
+  },
+  "B_health": {
+    "fatal": 1,
+    "consoleErrors": 0,
+    "notes": [
+      "進行不能・時計凍結・ソフトロック・表示破綻は全経路0件(20ゲーム日+大移動+周回2)",
+      "セーブ健全性: 操作直後0待ちリロード・export→import→reload・ブラウザ強制終了のいずれも完全復元(R4-A09の flush('command') 修正の実効確認)",
+      "fatal R5-A01 は進行不能ではなく「虚偽表示+資源の無説明消失」類型"
+    ]
+  },
+  "acceptance_bundleG_M40": {
+    "T2_T7_recovery": "回復。可変小数桁が全施設で機能(かまど0.035/分・増築で0.035→0.040/分のLv差判別可)。注記: 就労者0のとき次Lv予測も0/分でLv曲線が読めない(軽微)",
+    "R4_A01_storage_wording": "解消(加算方式文言+逆情報警告撤去)。ただしGDD番号露出を新規に作り込み=R5-A03(同日修正済み)",
+    "R4_A02_zero_per_min": "解消(資材7種全て非ゼロ可読)",
+    "R4_A04_cap_warning": "解消・実発火確認(HUD warnチップ▲+title+ホームアラートの3重符号化・周回1/2とも発火。廃材スポンジ0→237の実UI観測)",
+    "R4_A09_save_on_command": "解消(0待ちリロード+強制終了でも巻き戻りなし)",
+    "R4_A12_A13_decimals": "指摘5箇所すべて解消(3件live・2件ソース確認)",
+    "R4_A14_waste_breakdown": "解消・実発火確認(「かまどを建てた(薪24+廃材6)」=20%代替と一致)。副作用=R5-A04(±1切り捨て)",
+    "R4_B03_filename": "解消(kept-flame-save-day1-*.json)",
+    "R4_E01_grid_overlap": "解消(3VP実測0px)",
+    "M40_research_pacing": "1tick跳躍解消(30〜50tickで段階進行・R4-B02前半解消。後半の100%静止は再現せず=粗ポーリングのため不在証明ではない)",
+    "M40_outpost_supply": "目標どおり(農園供給0.0080/分=菜園の2.0倍。R4は約1.5万倍)",
+    "M40_early_action_interval": "部分改善(安価な中間手が増加。かまど30薪据え置きで次の1棟まで7.5〜18ゲーム時間待ちは残存=M40構造発見(ii)の消費先接続待ち)",
+    "R4_A10_inheritance": "解消(継承点76>最安50・キャラバン容量段階1を実購入)",
+    "R4_A11_new_cycle_clay": "未修正(再掲・M68予定)。周回2開始資源は薪61のみ",
+    "R4_A15_initial_bed": "未修正(再掲・M68予定)。開始時6/0"
+  },
+  "findings": [
+    { "id": "R5-A01", "severity": "fatal", "axis": "A/B/D", "screen": "expedition/chronicle", "summary": "探索報酬が exploration.rewardOverflow(policy:discard, capacity:200)の固定上限で黙って破棄され、冒険記は受入前の粗報酬を満額表示(薪175)。GDD 6.7加算式保管とは別系統の旧スケール取り残し。IndexedDB実測2回(受領11.3/破棄163.7・受領127.4/破棄47.6)。派遣前ROIも「期待報酬109.81薪」と約束", "disposition": "台帳v17裁定(保管系への統合=M64案1系に束ねるか・暫定content処置か+冒険記ログを実受領額へ=engine判定)" },
+    { "id": "R5-A02", "severity": "major", "axis": "A/B", "screen": "residents/facility/research", "summary": "(住民,tech)別の想起困難がUI非表示で、就労1/1のまま産出0/分・研究0/41が約1000tick静止=原因不明の停止に見える。セーブ実値 techMemoryByKey[...].impairedUntilTick=25389 で解除後41tickで即完了。derived.ts:326に「既知・意図的な妥協」と明記の既存ギャップが実プレイで顕在化", "disposition": "台帳v17裁定(UI束H候補=住民行バッジ+施設詳細の産出0理由表示)" },
+    { "id": "R5-A03", "severity": "major", "axis": "D", "screen": "grid/facility", "summary": "保管庫の効果文言に内部文書番号「GDD 6.7:」露出(M63が作り込んだ新規リグレッション・D1違反)。スイープ検証が丸数字限定+.tsx限定だったのが見逃しの穴", "disposition": "同日修正済み(文言からGDD番号除去+gddNumberSweepをGDD+数字パターン/.ts走査へ拡張→既存露出2件(sources.ts/store.tsの例外文言)も検出・修正)" },
+    { "id": "R5-A04", "severity": "minor", "axis": "A/D", "screen": "toast", "summary": "建設トーストの消費量が実コストより1少なく出ることがある(Toast.tsxのspentAmountTextがtoApproxNumber差をfloor=在庫の小数部次第で±1)。例: コスト14薪→「薪13」", "disposition": "束H候補(固定小数点のまま差を取る)" },
+    { "id": "R5-A05", "severity": "minor", "axis": "A/D", "screen": "grid(開墾)", "summary": "開墾コストの逓増式の途中から小数露出(「開墾コスト: 79.4薪」・1枚目60/2枚目69は整数)", "disposition": "束H候補" },
+    { "id": "R5-A06", "severity": "minor", "axis": "A", "screen": "expedition/residents", "summary": "派遣住民の就労が解除され帰還後も自動復帰しない(帰還後21ゲーム時間、薪産出0を実測)。ホームアラート「手の空いている住民」では気づける", "disposition": "v1.1候補 or 束H(帰還ダイジェストでの明示)" },
+    { "id": "R5-A07", "severity": "minor", "axis": "A", "screen": "residents", "summary": "衛星拠点に常駐中の住民が住民一覧で「無配属」表示(常駐状態が分からない)", "disposition": "束H候補(状態バッジ)" },
+    { "id": "R5-A08", "severity": "minor", "axis": "A", "screen": "codify", "summary": "おまかせ成文化が入手不能な媒体(紙0・写字室なし)を提案し適用で停止。停止表示「0/1件を適用しました」が古いまま残り続ける", "disposition": "束H候補(在庫を見た提案)" },
+    { "id": "R5-A09", "severity": "minor", "axis": "A", "screen": "settings", "summary": "インポート欄がonChange(blur)発火のためモバイルで2タップ必要(R2既知のUX論点の再掲・実測で確定)", "disposition": "束H候補(onInput化)" },
+    { "id": "R5-A10", "severity": "minor", "axis": "A", "screen": "migration", "summary": "「獲得予定の継承点」(積み込み非依存・76=エラ10+成文化0.5+生存16の式どおり)が積み込みプレビュー内側にあり選択で変わるように見える", "disposition": "束H候補(セクション分け)" },
+    { "id": "R5-A11", "severity": "minor", "axis": "A", "screen": "residents", "summary": "就労枠0の施設(寝床等)が就労先セレクト候補に出る(選ぶとreject・文言は良好)", "disposition": "束H候補(候補から除外)" },
+    { "id": "R5-A12", "severity": "minor", "axis": "A/D", "screen": "codify/expedition", "summary": "小数の二重基準の残存: 成文化「進行度 18.0/720.0」(CodifyScreen.tsx:135-136のtoFixed(1)・研究側は整数化済みの非対称)・派遣ROI「期待報酬109.81薪」「逸失生産73.44」(単位なし)・MigrationScreen.tsx:115の個別記録toFixed(2)(低確信度・live未確認)", "disposition": "束H候補(磨き)" }
+  ],
+  "comparison": {
+    "A_task": "1.58→1.83(改善4: T2/T7/T9/T12 各1→2 / 悪化1: T5 2→1=R5-A01起因 / 不変7)",
+    "C_heuristics": "1.94→1.94(悪化0。baseの天井2項目=おまかせ配置なし(v1.1)+モバイルカタログ長)",
+    "D_wording": "4/5→4/5(中身が入替: D5回復・D1新規fail→同日修正済み)",
+    "E_layout": "5/6→6/6(fail 0達成)",
+    "fatal": "1→1(内容は別件: R4-A01解消・R5-A01新規)",
+    "consoleErrors": "0→0",
+    "resolved": ["R4-A01", "R4-A02", "R4-A04", "R4-A09", "R4-A10", "R4-A12/A13", "R4-A14", "R4-B03", "R4-B02前半(1tick跳躍)", "R4-E01"],
+    "recurred": ["R4-A11(新周回粘土0・M68予定)", "R4-A15(初期寝床0・M68予定)", "R5-A09=R2既知のインポート2タップ"]
+  },
+  "structuralFindings": [
+    "外部収入の旧スケール取り残しは3系統でなく4系統だった: 拠点供給・探索報酬(額)・研究点はM40で再校正済みだが、exploration.rewardOverflow(受入上限200)が未再校正=R5-A01。上限会計の非対称(本拠生産=加算式上限あり/拠点供給=上限無視/探索報酬=独自固定上限200)が3系統3方式に分裂しており、M64(engine判定・台帳v17)での統一が必要",
+    "序盤テンポの残存課題はM40構造発見(ii)のとおり=かまど30薪・実測0.027〜0.066/分で次の1棟まで7.5〜18ゲーム時間。本格改善は消費先接続(buildCost複数資源化)待ち",
+    "(住民,tech)別想起困難のUI非表示(R5-A02)は「知識は人の記憶に宿る」という中核フックの可視性の穴=見えない失敗はプレイヤーに設計として伝わらない"
+  ],
+  "unmeasured": [
+    "死亡・全滅・救出・負傷の画面表示(20ゲーム日で死亡0件)",
+    "住民単位のrecallImpairedUntilTickバッジの実発生",
+    "遠隔/深部帯・強行方針・派遣枠2本同時",
+    "保管庫建設後の上限800実観測(周回2は2×2設置枠が作れず)・保管庫/寝床Lv2以降",
+    "E2/E3テック到達・(B)一回性喪失テックの成文化/喪失表示",
+    "周回3以降・継承ボーナスの次周回効果",
+    "E4ズーム跨ぎ機械検証(Playwright自動化不能・R4と同じ)",
+    "成文化予告/キャラバン重みの非ゼロ値live確認",
+    "軸A/B/Dの768/1280ビューポート"
+  ],
+  "sameDayFixes": [
+    "R5-A03: facilityEffect.tsの文言からGDD番号除去+テスト追従+gddNumberSweep.test.tsを拡張(GDD+数字パターン新設・走査対象を.tsx→.ts/.tsx両方へ)。拡張スイープが既存露出2件(sources.ts:271・store.ts:382の例外診断文言)を新規検出→文書番号をコメント側へ退避"
+  ],
+  "tokenUsage": "評価3体 ≈ 729k(A/B 285k + C/E 226k + D 218k)"
+}

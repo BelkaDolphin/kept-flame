@@ -137,7 +137,7 @@ describe("[M61/FC6・2026-08-02差し戻し] storageCapacityAt / storageCapacity
   it("[M63/R4-A01 fatal] resourceIds が null(全資源)なら加算方式の式+このLvの寄与を明記する", () => {
     expect(storageTargetResourceIds(warehouseAllResources)).toBeNull();
     expect(storageCapacityEffectText(warehouseAllResources, 1)).toBe(
-      "全資源の保管上限に加算(GDD 6.7: 基礎400 + 建っている保管庫のLv合計×400)。" +
+      "全資源の保管上限に加算(基礎400 + 建っている保管庫のLv合計×400)。" +
         "このLv1の寄与は +400。" +
         "上限を超えた産出は原則失われます(薪など一部の低次資源は超過分の一定比率が廃材になります)。",
     );

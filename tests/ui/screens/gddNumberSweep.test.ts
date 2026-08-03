@@ -20,14 +20,21 @@ import { describe, expect, it } from "vitest";
 
 const UI_ROOT = "src/ui";
 const CIRCLED_NUMBER_PATTERN = /[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬]/;
+// [R5-A03/D1] 「GDD 6.7」等の内部文書番号がプレイヤー文言へ露出した実例
+// (M63 の R4-A01 修正が作り込んだリグレッション・Round 5 実測)。丸数字と同じく
+// コメント外の実文字列に「GDD+数字」が現れることは正当な理由が無いので機械固定する。
+const GDD_DOC_NUMBER_PATTERN = /GDD\s?\d/;
 
-function collectTsxFiles(dir: string): string[] {
+function collectUiSourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      out.push(...collectTsxFiles(full));
-    } else if (entry.isFile() && full.endsWith(".tsx")) {
+      out.push(...collectUiSourceFiles(full));
+    } else if (entry.isFile() && (full.endsWith(".tsx") || full.endsWith(".ts"))) {
+      // [R5-A03] .tsx 限定だと facilityEffect.ts(文言ヘルパの .ts)が走査から
+      // 漏れる——GDD 6.7 露出を見逃した実際の穴。文言は .ts ヘルパにも置かれる
+      // ため両拡張子を対象にする。
       out.push(full);
     }
   }
@@ -40,10 +47,10 @@ function stripComments(source: string): string {
   return withoutBlock.replace(/\/\/[^\n]*/g, "");
 }
 
-describe("GDD画面番号(①〜⑬)のUI露出掃討", () => {
-  it("src/ui/**/*.tsx のコメント外に丸数字が1つも残っていない", () => {
+describe("GDD画面番号(①〜⑬)・内部文書番号のUI露出掃討", () => {
+  it("src/ui/**/*.{ts,tsx} のコメント外に丸数字が1つも残っていない", () => {
     const offenders: { readonly file: string; readonly snippet: string }[] = [];
-    for (const file of collectTsxFiles(UI_ROOT)) {
+    for (const file of collectUiSourceFiles(UI_ROOT)) {
       const stripped = stripComments(readFileSync(file, "utf8"));
       const match = CIRCLED_NUMBER_PATTERN.exec(stripped);
       if (match !== null) {
@@ -56,7 +63,22 @@ describe("GDD画面番号(①〜⑬)のUI露出掃討", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("[R5-A03/D1] src/ui/**/*.{ts,tsx} のコメント外に「GDD+数字」が1つも残っていない", () => {
+    const offenders: { readonly file: string; readonly snippet: string }[] = [];
+    for (const file of collectUiSourceFiles(UI_ROOT)) {
+      const stripped = stripComments(readFileSync(file, "utf8"));
+      const match = GDD_DOC_NUMBER_PATTERN.exec(stripped);
+      if (match !== null) {
+        offenders.push({
+          file,
+          snippet: stripped.slice(Math.max(0, match.index - 20), match.index + 20),
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("走査対象が空でないこと(誤ってUI_ROOTが空/存在しないディレクトリになっていないかの自己点検)", () => {
-    expect(collectTsxFiles(UI_ROOT).length).toBeGreaterThan(20);
+    expect(collectUiSourceFiles(UI_ROOT).length).toBeGreaterThan(20);
   });
 });

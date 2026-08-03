@@ -136,7 +136,7 @@ export function storageCapacityEffectText(def: FacilityDef, level = 1): string |
   if (value === null) return null;
   const scope = storageTargetResourceIds(def) === null ? "全資源" : "対象資源";
   return (
-    `${scope}の保管上限に加算(GDD 6.7: 基礎400 + 建っている保管庫のLv合計×400)。` +
+    `${scope}の保管上限に加算(基礎400 + 建っている保管庫のLv合計×400)。` +
     `このLv${String(level)}の寄与は +${formatResourceAmount(value)}。` +
     `上限を超えた産出は原則失われます(薪など一部の低次資源は超過分の一定比率が廃材になります)。`
   );

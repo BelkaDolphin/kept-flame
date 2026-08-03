@@ -268,7 +268,8 @@ export function syncSourcesFromState(
       }
       if (facilityByCell[cellIndex] !== null) {
         throw new StoreSourceError(
-          `セル ${String(cellIndex)} に複数の施設が建っている(1 セル = 1 施設・GDD 6.1)`,
+          // 1 セル = 1 施設の不変条件(GDD 6.1)
+          `セル ${String(cellIndex)} に複数の施設が建っている(1 セル = 1 施設)`,
         );
       }
       facilityByCell[cellIndex] = facility;
