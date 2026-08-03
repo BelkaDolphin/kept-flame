@@ -70,7 +70,7 @@
       "lv4": 2,
       "lv5": 3
     },
-    "lvCurve": [80, 92, 105.8, 121.67, 139.9205],
+    "lvCurve": [1, 1.15, 1.322499, 1.520874, 1.749006],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
@@ -89,9 +89,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 20
+      "amount": 14
     },
-    "upgradeCostCurve": [24, 29, 35, 41, 50]
+    "upgradeCostCurve": [17, 20, 24, 29, 35]
   },
   {
     "id": "waterTank",
@@ -123,9 +123,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 25
+      "amount": 18
     },
-    "upgradeCostCurve": [27, 32, 39, 47, 56]
+    "upgradeCostCurve": [22, 26, 31, 37, 45]
   },
   {
     "id": "kitchenGarden",
@@ -157,9 +157,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 25
+      "amount": 6
     },
-    "upgradeCostCurve": [32, 38, 46, 55, 66]
+    "upgradeCostCurve": [7, 9, 10, 12, 15]
   },
   {
     "id": "charcoalKiln",
@@ -191,9 +191,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 35
+      "amount": 30
     },
-    "upgradeCostCurve": [34, 41, 49, 59, 71]
+    "upgradeCostCurve": [36, 43, 52, 62, 75]
   },
   {
     "id": "foundry",
@@ -225,9 +225,9 @@
     },
     "buildCost": {
       "resourceId": "iron",
-      "amount": 30
+      "amount": 6
     },
-    "upgradeCostCurve": [35, 42, 50, 60, 73]
+    "upgradeCostCurve": [7, 9, 10, 12, 15]
   },
   {
     "id": "researchDesk",
@@ -239,7 +239,7 @@
       "lv4": 2,
       "lv5": 3
     },
-    "lvCurve": [95, 109.25, 125.6375, 144.483125, 166.155593],
+    "lvCurve": [1.1875, 1.365624, 1.570468, 1.806039, 2.076944],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
@@ -258,9 +258,9 @@
     },
     "buildCost": {
       "resourceId": "clay",
-      "amount": 20
+      "amount": 14
     },
-    "upgradeCostCurve": [25, 30, 36, 43, 52]
+    "upgradeCostCurve": [17, 20, 24, 29, 35]
   },
   {
     "id": "scriptorium",
@@ -292,9 +292,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 25
+      "amount": 14
     },
-    "upgradeCostCurve": [22, 26, 32, 38, 46]
+    "upgradeCostCurve": [17, 20, 24, 29, 35]
   },
   {
     "id": "explorationHq",
@@ -306,7 +306,7 @@
       "lv4": 2,
       "lv5": 2
     },
-    "lvCurve": [70, 80.5, 92.575, 106.46125, 122.430437],
+    "lvCurve": [0.875, 1.006249, 1.157187, 1.330765, 1.53038],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
@@ -325,9 +325,9 @@
     },
     "buildCost": {
       "resourceId": "firewood",
-      "amount": 40
+      "amount": 28
     },
-    "upgradeCostCurve": [21, 25, 30, 36, 44]
+    "upgradeCostCurve": [34, 40, 48, 58, 70]
   },
   {
     "id": "bed",
@@ -339,7 +339,7 @@
       "lv4": 0,
       "lv5": 0
     },
-    "lvCurve": [8, 9.2, 10.58, 12.167, 13.99205],
+    "lvCurve": [1.43, 1.644499, 1.891174, 2.174851, 2.501078],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
@@ -366,7 +366,7 @@
       "lv4": 0,
       "lv5": 0
     },
-    "lvCurve": [12, 13.8, 15.87, 18.2505, 20.988075],
+    "lvCurve": [2.5, 2.875, 3.30625, 3.802187, 4.372515],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 2,
@@ -393,7 +393,7 @@
       "lv4": 0,
       "lv5": 0
     },
-    "lvCurve": [9, 10.35, 11.9025, 13.687875, 15.741056],
+    "lvCurve": [2.14, 2.461, 2.830149, 3.254672, 3.742873],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
@@ -419,7 +419,7 @@
       "lv4": 0,
       "lv5": 0
     },
-    "lvCurve": [11, 12.65, 14.5475, 16.729625, 19.239068],
+    "lvCurve": [1.43, 1.644499, 1.891174, 2.174851, 2.501078],
     "overflowCapPolicy": "discardExcess",
     "footprint": {
       "width": 1,
