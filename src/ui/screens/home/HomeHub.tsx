@@ -80,6 +80,11 @@ export const HOME_ALERT_TEXT: { readonly [K in HomeAlertId]: HomeAlertText } = {
     hint: "研究キューが空。次に何を解禁するか決める",
     unit: "件",
   },
+  storageAtCapacity: {
+    label: "保管上限に達している資源がある",
+    hint: "産出が頭打ちになっている(一部は廃材化)。保管庫を建てると上限が増える",
+    unit: "種",
+  },
   expeditionActive: {
     label: "探索に出ている隊がいる",
     hint: "帰還すると結果がまとめて届く",

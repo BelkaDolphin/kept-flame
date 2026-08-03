@@ -90,3 +90,53 @@ export function resourceDeltaPhrase(
   if (before === after) return "";
   return `${resourceLabel(resourceId)} ${before}→${after}`;
 }
+
+/** {@link resourceSpendBreakdownPhrase} が読む「前後の在庫」1 組。 */
+export interface ResourceSpendSnapshot {
+  readonly resourceId: EntityId | null;
+  readonly beforeStockApprox: number | null;
+  readonly afterStockApprox: number | null;
+}
+
+function spentAmountText(snapshot: ResourceSpendSnapshot): string | null {
+  if (
+    snapshot.resourceId === null ||
+    snapshot.beforeStockApprox === null ||
+    snapshot.afterStockApprox === null
+  ) {
+    return null;
+  }
+  const spent = snapshot.beforeStockApprox - snapshot.afterStockApprox;
+  const text = formatResourceStock(spent);
+  // 整数切り捨て後に 0 なら「消費した」と言えるほどの変化が無い。
+  if (text === "0" || text === "-0") return null;
+  return text;
+}
+
+/**
+ * [M63/R4-A14] 廃材代替(GDD 6.7 の3出口(1)(2)・建設/増築は最大20%・成文化の
+ * 粘土は低比率)が実際に起きたときの消費内訳句(「薪28+廃材7」)。
+ *
+ * 建設/増築/成文化投入は、廃材在庫があれば**黙って**コストの一部を廃材で
+ * 肩代わりする(`substituteCostWithWaste`・engine 側は正しく動いている)。
+ * ところが成功トーストは主資源の増減しか見せておらず、「表示は薪35のみ・
+ * 実消費は薪28+廃材7」という無説明な内訳の欠落があった(R4-A14)。
+ *
+ * このヘルパは判定を一切しない(廃材代替が起きたかどうかも「前後の在庫差分」
+ * という**観測**からしか判断しない・§B4 の規律どおり)。主資源の消費が無い
+ * (在庫不足で reject された/コストが 0 等)なら空文字列、廃材の消費が無い
+ * (代替が起きなかった/廃材資源が渡されていない)なら主資源だけの句
+ * (「薪28」)を返す。
+ */
+export function resourceSpendBreakdownPhrase(
+  primary: ResourceSpendSnapshot,
+  waste: ResourceSpendSnapshot,
+): string {
+  const primaryText = spentAmountText(primary);
+  if (primaryText === null || primary.resourceId === null) return "";
+  const wasteText = spentAmountText(waste);
+  if (wasteText === null || waste.resourceId === null) {
+    return `${resourceLabel(primary.resourceId)}${primaryText}`;
+  }
+  return `${resourceLabel(primary.resourceId)}${primaryText}+${resourceLabel(waste.resourceId)}${wasteText}`;
+}

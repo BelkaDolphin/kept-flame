@@ -223,6 +223,20 @@
   color: var(--kf-urgency-warn-ink);
 }
 
+/* --- [M63/R4-A04] 保管上限到達の資源チップ警告色(GDD 6.7) -----------------
+   ホームアラート(kf-badge--warn)と同じ黄トークンを共有し、意匠の一貫性を
+   保つ。記号(▲・ResourceHud 側で付与)+ title 属性と併用し、色だけに頼らない。 */
+
+.kf-hud__chip--warn {
+  border-color: var(--kf-urgency-warn-line);
+  background: var(--kf-urgency-warn-fill);
+}
+
+.kf-hud__chip--warn .kf-hud__chip-label,
+.kf-hud__chip--warn .kf-hud__chip-value {
+  color: var(--kf-urgency-warn-ink);
+}
+
 /* --- 画面本体 -------------------------------------------------------------- */
 
 .kf-app__screen {

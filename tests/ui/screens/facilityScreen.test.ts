@@ -162,32 +162,13 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
       detail: detailView(),
       onUpgrade: () => undefined,
       effectKind: "storageCapacity",
-      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+      storageEffectText:
+        "全資源の保管上限に加算(GDD 6.7: 基礎400 + 建っている保管庫のLv合計×400)。このLv1の寄与は +400。上限を超えた産出は原則失われます(薪など一部の低次資源は超過分の一定比率が廃材になります)。",
     });
     const text = flattenText(vnode);
-    expect(text).toContain("保管上限を設定");
+    expect(text).toContain("保管上限に加算");
     expect(text).not.toContain("効果は未実装");
     expect(text).not.toContain("就労");
-  });
-
-  it("[M61/FC6・2026-08-02差し戻し] storageCapacityWarningVisible=true で在庫超過の警告を追加表示する", () => {
-    const withWarning = FacilityDetailPanel({
-      detail: detailView(),
-      onUpgrade: () => undefined,
-      effectKind: "storageCapacity",
-      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
-      storageCapacityWarningVisible: true,
-    });
-    expect(flattenText(withWarning)).toContain("頭打ち");
-
-    const withoutWarning = FacilityDetailPanel({
-      detail: detailView(),
-      onUpgrade: () => undefined,
-      effectKind: "storageCapacity",
-      storageEffectText: "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
-      storageCapacityWarningVisible: false,
-    });
-    expect(flattenText(withoutWarning)).not.toContain("頭打ち");
   });
 
   it("研究点産出(resourceId=null)は「研究点」と表示する", () => {

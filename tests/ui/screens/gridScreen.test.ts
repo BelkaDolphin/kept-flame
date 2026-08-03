@@ -252,6 +252,23 @@ describe("ReclaimPanel(瓦礫の開墾・GDD 9.1 / M52申し送り)", () => {
     expect(onReclaim).toHaveBeenCalledOnce();
   });
 
+  it("[M63/R4-A12/A13] 端数のある在庫は整数切り捨て(HUD と揃える)・コストは実額で整形ヘルパを通す", () => {
+    const info: ReclaimInfo = {
+      available: true,
+      nextCostApprox: 30.712345,
+      costResourceId: id("firewood"),
+      availableStockApprox: 417.29,
+      reclaimedCount: 3,
+    };
+    const vnode = ReclaimPanel({ cell: rubbleCell, info, onReclaim: () => undefined });
+    const text = flattenText(vnode);
+    // 生の float(417.29 や 30.712345)がそのまま出ない(旧「開墾パネル在庫417.29」の解消)。
+    expect(text).not.toContain("417.29");
+    expect(text).not.toContain("30.712345");
+    expect(text).toContain("417"); // 在庫は整数切り捨て(formatResourceStock)。
+    expect(text).toContain("30.7"); // コストは実額(formatResourceAmount・小数第1位)。
+  });
+
   it("ボタンは常に有効(在庫不足の判定はしない・engine の insufficientResource reject に委ねる)", () => {
     const info: ReclaimInfo = {
       available: true,

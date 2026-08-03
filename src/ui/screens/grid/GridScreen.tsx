@@ -36,14 +36,19 @@ import {
   bedCapacityEffectText,
   DORMANT_FACILITY_EFFECT_TEXT,
   facilityEffectKind,
-  STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
   storageCapacityEffectText,
-  storageCapacityWouldCapExistingStock,
   workerEffectHintText,
 } from "../facilityEffect";
+import { formatResourceAmount, formatResourceStock } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
-import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
+import {
+  resourceDeltaPhrase,
+  resourceSpendBreakdownPhrase,
+  resourceStockApprox,
+  useToastStack,
+  ToastStackView,
+} from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import { CellBreakdownView } from "./CellBreakdownView";
 import { GridBoard, type PendingPlacement, type PlacementSuccessInfo } from "./GridBoard";
@@ -192,8 +197,12 @@ export function ReclaimPanel({ cell, info, onReclaim }: ReclaimPanelProps) {
         <p class="kf-reclaim__inactive">この盤面では開墾システムが無効です。</p>
       ) : (
         <>
+          {/* [M63/R4-A12/A13] 生の数値をそのまま埋め込んでいた(整形ヘルパを
+              通していないため float 起因の端数がそのまま出うる=「開墾パネル
+              在庫417.29」)。コストは formatResourceAmount(実額)、在庫は
+              HUD と揃えて formatResourceStock(整数切り捨て)へ統一する。 */}
           <p class="kf-reclaim__cost">
-            開墾コスト: {info.nextCostApprox}
+            開墾コスト: {formatResourceAmount(info.nextCostApprox ?? 0)}
             {info.costResourceId !== null ? resourceLabel(info.costResourceId) : ""}
             (通算 {info.reclaimedCount} 枚目)
           </p>
@@ -205,7 +214,7 @@ export function ReclaimPanel({ cell, info, onReclaim }: ReclaimPanelProps) {
             }
           >
             {insufficient ? "▲ " : ""}
-            在庫: {info.availableStockApprox ?? 0}
+            在庫: {formatResourceStock(info.availableStockApprox ?? 0)}
             {info.costResourceId !== null ? resourceLabel(info.costResourceId) : ""}
           </p>
           <button type="button" class="kf-reclaim__button" onClick={onReclaim}>
@@ -247,12 +256,12 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
         if (text !== null) hints.set(defId, text);
       } else if (kind === "storageCapacity") {
         // [M61/FC6・2026-08-02差し戻し] 保管庫: 「効果は未実装」ではなく実効果
-        // (facilityEffect.ts §2「保管庫」)。現在庫が既に上限超なら一言足す。
+        // (facilityEffect.ts §2「保管庫」)。[M63/R4-A01] 「現在庫が上限超なら
+        // 建てると不利益」という警告は加算方式の下では逆情報だったため撤去
+        // (facilityEffect.ts §2 追記参照。継続的な上限到達の警告は
+        // HUD/ホームアラートの担当)。
         const text = storageCapacityEffectText(def, 1);
-        if (text !== null) {
-          const exceeded = storageCapacityWouldCapExistingStock(def, 1, resources);
-          hints.set(defId, exceeded ? `${text} ${STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT}` : text);
-        }
+        if (text !== null) hints.set(defId, text);
       } else if (kind === "none") {
         hints.set(defId, DORMANT_FACILITY_EFFECT_TEXT);
       } else {
@@ -264,7 +273,7 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
       }
     }
     return hints;
-  }, [content, resources]);
+  }, [content]);
 
   // 採番は「選んだ瞬間の state」から 1 度だけ行い、配置が済む/キャンセルされる
   // までは同じ候補 ID を保つ(pendingDefId が変わらない限り再計算しない)。
@@ -296,11 +305,21 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
 
   // [束B/B-4] 成功トースト。GridBoard 側で捕まえた投入前/投入後の在庫を
   // 文言へ組み立てるだけで、判定は一切しない。
+  // [M63/R4-A14] 廃材代替の内訳(「薪28+廃材7」)を表示するため、消費量ベースの
+  // `resourceSpendBreakdownPhrase` へ切り替える(旧「薪 60→30」の前後在庫表記
+  // だと廃材代替で減った分が見えなかった)。
   function handlePlacementSuccess(info: PlacementSuccessInfo): void {
-    const diff = resourceDeltaPhrase(
-      info.resourceId,
-      info.beforeStockApprox,
-      info.afterStockApprox,
+    const diff = resourceSpendBreakdownPhrase(
+      {
+        resourceId: info.resourceId,
+        beforeStockApprox: info.beforeStockApprox,
+        afterStockApprox: info.afterStockApprox,
+      },
+      {
+        resourceId: info.wasteResourceId,
+        beforeStockApprox: info.wasteBeforeStockApprox,
+        afterStockApprox: info.wasteAfterStockApprox,
+      },
     );
     toastStack.push(`${facilityLabel(info.defId)}を建てた${diff.length > 0 ? `(${diff})` : ""}`);
   }

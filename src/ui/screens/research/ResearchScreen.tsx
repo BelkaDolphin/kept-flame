@@ -27,6 +27,7 @@ import type { CommandRejection } from "../../../engine/commands";
 import { entityIdFromString, type EntityId } from "../../../engine/state/state";
 import type { ResearchTreeEntry, ResearchTreeStatus } from "../../derived";
 import { eraLabel, techLabel } from "../contentLabels";
+import { formatResourceAmount } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -45,7 +46,9 @@ function statusText(entry: ResearchTreeEntry): string {
     case "researching": {
       const progress = entry.progressApprox ?? 0;
       const queueNote = entry.isCurrentResearchTarget ? "" : "(キュー待ち)";
-      return `研究中: 進行度 ${progress.toFixed(1)}/${entry.researchCostApprox.toFixed(1)}${queueNote}`;
+      // [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ統一(研究コスト30.0 の
+      // ような不揃いな表記を、末尾行の「研究コスト:」表示(下記)と揃える)。
+      return `研究中: 進行度 ${formatResourceAmount(progress)}/${formatResourceAmount(entry.researchCostApprox)}${queueNote}`;
     }
     case "completed":
       return "解禁済み";
@@ -129,7 +132,11 @@ export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps
       )}
       <p class="kf-research-row__prereqs">
         {prereqText(entry)}
-        <span class="kf-research-row__cost">研究コスト: {entry.researchCostApprox.toFixed(1)}</span>
+        {/* [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ(「研究コスト30.0」の
+            不揃い解消。formatResourceAmount は整数値の末尾 ".0" を出さない)。 */}
+        <span class="kf-research-row__cost">
+          研究コスト: {formatResourceAmount(entry.researchCostApprox)}
+        </span>
       </p>
     </li>
   );

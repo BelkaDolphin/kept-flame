@@ -388,12 +388,26 @@
 }
 
 /* [束A/F-4] 凡例は既定で畳む(常時 495px を無条件に消費していた)。
-   details/summary なので JS 状態を増やさない。 */
+   details/summary なので JS 状態を増やさない。
+   [M63/R4-E01] `scroll-margin-bottom` で sticky 下部ナビ(`.kf-nav`・
+   `--kf-nav-height`)の分だけ余白を確保する——この画面だけ末尾の要素が
+   `<details>`(開くと最大 500px 超に伸びる)であり、展開後に
+   `scrollIntoView`(ブラウザの自動スクロール自体・Playwright のクリック前
+   自動スクロールも同じ)で末尾へ寄せると、position:sticky のナビは
+   スクロール位置に関わらずビューポート下端に居座るため、展開後の凡例の
+   下端 27〜28px がナビの下に隠れる(3ビューポート共通で実測・E5)。
+   他 12 画面は末尾が `<details>` ではない/展開で高さが伸びないため再現しない。
+   `scroll-margin-bottom` は `scrollIntoView` 系のブラウザ標準機構が尊重する
+   ため、JS 測定(`useStickyActionsClearance`)を持ち込まずに解決できる
+   ——あちらは「sticky 要素が“途中の帯”として内容と重なる」問題、こちらは
+   「sticky 要素の分だけ自動スクロールの着地点をずらす」問題で、根本原因が
+   別なので解法も別になる。 */
 .kf-legend-fold {
   border: 1px solid #c9c3b8;
   border-radius: 4px;
   background: #ffffff;
   padding: 0 0.6rem;
+  scroll-margin-bottom: calc(var(--kf-nav-height) + 8px);
 }
 
 .kf-legend-fold__summary {

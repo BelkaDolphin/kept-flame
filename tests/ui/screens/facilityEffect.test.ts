@@ -16,13 +16,11 @@ import type { FacilityDef } from "../../../src/engine/rules/types";
 import { entityIdFromString } from "../../../src/engine/state/state";
 import {
   DORMANT_FACILITY_EFFECT_TEXT,
-  STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
   bedCapacityAt,
   bedCapacityEffectText,
   facilityEffectKind,
   storageCapacityAt,
   storageCapacityEffectText,
-  storageCapacityWouldCapExistingStock,
   storageTargetResourceIds,
   workerBaseOutputAt,
   workerEffectHintText,
@@ -136,10 +134,12 @@ describe("[M61/FC6・2026-08-02差し戻し] storageCapacityAt / storageCapacity
     expect(storageCapacityEffectText(baseDef())).toBeNull();
   });
 
-  it("resourceIds が null(content に storedResourceIds が無い)なら「全資源」と明記する", () => {
+  it("[M63/R4-A01 fatal] resourceIds が null(全資源)なら加算方式の式+このLvの寄与を明記する", () => {
     expect(storageTargetResourceIds(warehouseAllResources)).toBeNull();
     expect(storageCapacityEffectText(warehouseAllResources, 1)).toBe(
-      "全資源の保管上限を設定(Lv1: 400)。上限を超えた分の産出は失われます。",
+      "全資源の保管上限に加算(GDD 6.7: 基礎400 + 建っている保管庫のLv合計×400)。" +
+        "このLv1の寄与は +400。" +
+        "上限を超えた産出は原則失われます(薪など一部の低次資源は超過分の一定比率が廃材になります)。",
     );
   });
 
@@ -152,57 +152,18 @@ describe("[M61/FC6・2026-08-02差し戻し] storageCapacityAt / storageCapacity
     expect(storageCapacityEffectText(warehouseAllResources, 1)).not.toContain("効果は未実装");
   });
 
+  it("[M63/R4-A01 fatal] 旧「上限を設定(Lv1: 400)」の虚偽表現を含まない(この倉庫単体が絶対上限であるかのような誤読を防ぐ)", () => {
+    expect(storageCapacityEffectText(warehouseAllResources, 1)).not.toContain("上限を設定");
+  });
+
+  it("[M63/R4-A01 fatal] Lv が上がるほど「このLvの寄与」の数値も増える(加算対象がこの倉庫の寄与ぶんだけ増えることを表す)", () => {
+    expect(storageCapacityEffectText(warehouseAllResources, 5)).toContain("このLv5の寄与は +700");
+  });
+
   it("Lv省略時はLv1として扱う", () => {
     expect(storageCapacityEffectText(warehouseAllResources)).toBe(
       storageCapacityEffectText(warehouseAllResources, 1),
     );
-  });
-});
-
-describe("[M61/FC6・2026-08-02差し戻し] storageCapacityWouldCapExistingStock", () => {
-  const warehouseAllResources = baseDef({
-    workerSlotsByLevel: [0, 0, 0, 0, 0],
-    storage: { capacityByLevel: [400].map(fixFromInt), resourceIds: null },
-  });
-  const warehouseScoped = baseDef({
-    workerSlotsByLevel: [0, 0, 0, 0, 0],
-    storage: { capacityByLevel: [400].map(fixFromInt), resourceIds: [id("firewood")] },
-  });
-
-  it("いずれかの資源の在庫が上限を超えていれば true", () => {
-    const resources = [
-      { resourceId: id("firewood"), stockApprox: 500 },
-      { resourceId: id("iron"), stockApprox: 10 },
-    ];
-    expect(storageCapacityWouldCapExistingStock(warehouseAllResources, 1, resources)).toBe(true);
-  });
-
-  it("全資源が上限未満なら false", () => {
-    const resources = [
-      { resourceId: id("firewood"), stockApprox: 100 },
-      { resourceId: id("iron"), stockApprox: 10 },
-    ];
-    expect(storageCapacityWouldCapExistingStock(warehouseAllResources, 1, resources)).toBe(false);
-  });
-
-  it("resourceIds で絞られている場合、対象外の資源が超えていても false", () => {
-    const resources = [{ resourceId: id("iron"), stockApprox: 999 }];
-    expect(storageCapacityWouldCapExistingStock(warehouseScoped, 1, resources)).toBe(false);
-  });
-
-  it("storage を持たない施設は常に false", () => {
-    expect(
-      storageCapacityWouldCapExistingStock(baseDef(), 1, [
-        { resourceId: id("firewood"), stockApprox: 999_999 },
-      ]),
-    ).toBe(false);
-  });
-});
-
-describe("[M61/FC6・2026-08-02差し戻し] STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT", () => {
-  it("在庫が上限超であることと産出への影響を伝える文言を持つ", () => {
-    expect(STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT).toContain("上限");
-    expect(STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT).toContain("頭打ち");
   });
 });
 

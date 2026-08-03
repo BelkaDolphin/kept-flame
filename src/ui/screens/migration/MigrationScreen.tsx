@@ -162,8 +162,11 @@ export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
   return (
     <section class="kf-exodus__preview" aria-label="大移動プレビュー">
       <p class="kf-exodus__preview-capacity">
-        キャラバン: {toApproxNumber(resolution.usedCaravanWeightFix).toFixed(2)} /{" "}
-        {toApproxNumber(resolution.caravanCapacityFix).toFixed(2)} 枠・乗員:{" "}
+        {/* [M63/R4-A12/A13] 素の toFixed(2) を整形ヘルパへ(「キャラバン1.00」の
+            不揃い解消。戦力/士気と同じ「資源以外の近似値」枠なので
+            formatApproxDecimal1 を使う)。 */}
+        キャラバン: {formatApproxDecimal1(toApproxNumber(resolution.usedCaravanWeightFix))} /{" "}
+        {formatApproxDecimal1(toApproxNumber(resolution.caravanCapacityFix))} 枠・乗員:{" "}
         {resolution.carriedCrewIds.length} / {resolution.crewCapacity} 名
       </p>
       {resolution.droppedRecordIds.length > 0 && (

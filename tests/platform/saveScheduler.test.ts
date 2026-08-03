@@ -536,10 +536,45 @@ describe("recordCommandOutcome(engine コマンド層との結線・M49)", () =>
     const result = apply(BOARD, CONTENT, PLACE);
 
     expect(scheduler.recordCommandOutcome(result)).toBe(true);
-    expect(scheduler.pendingCommandCount).toBe(1);
+    // [M63/R4-A09] 受理は即時フラッシュ(§0 の 5 番目のトリガ)も起こすので、
+    // 呼び出し直後には積み残しが無い(2 秒のデバウンスを待たずに書込が
+    // 始まっている)。デバウンスのみに頼っていた旧挙動なら 1 が残っていた。
+    expect(scheduler.pendingCommandCount).toBe(0);
     await clock.advance(SAVE_DEBOUNCE_MS);
     expect(writes).toHaveLength(1);
     if (result.ok) expect(writes[0]).toBe(result.state);
+    scheduler.dispose();
+  });
+
+  it("[M63/R4-A09 一次特定] 受理されたコマンドはデバウンスを待たず即座に書込まれる", async () => {
+    // 根拠: 建設直後に即リロードすると保存が反映されない実測(Playwright での
+    // 実ブラウザ再現)。原因は「ライフサイクルフラッシュ(pagehide 等)は
+    // 発火はするが、その中の非同期 IDB 書込がドキュメント破棄と競走して
+    // 負けることがある」ため(saveScheduler.ts §0 追記)。対策として
+    // `recordCommandOutcome` は受理直後に `flush("command")` する。
+    const { scheduler, writes, flushes } = harness();
+    const result = apply(BOARD, CONTENT, PLACE);
+
+    expect(scheduler.recordCommandOutcome(result)).toBe(true);
+    // clock を一切進めない(= デバウンスの 2 秒を待っていない)のに書込まれる。
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+    expect(flushes[0]?.reason).toBe("command");
+    if (result.ok) expect(writes[0]).toBe(result.state);
+    scheduler.dispose();
+  });
+
+  it("[M63] catch-up 中は recordCommandOutcome も即時フラッシュしない(末尾1回の契約を保つ)", async () => {
+    const { scheduler, writes } = harness();
+    scheduler.beginCatchUp();
+    const result = apply(BOARD, CONTENT, PLACE);
+
+    expect(scheduler.recordCommandOutcome(result)).toBe(true);
+    await flushMicrotasks();
+    expect(writes).toHaveLength(0);
+
+    await scheduler.endCatchUp();
+    expect(writes).toHaveLength(1);
     scheduler.dispose();
   });
 
@@ -557,15 +592,20 @@ describe("recordCommandOutcome(engine コマンド層との結線・M49)", () =>
     scheduler.dispose();
   });
 
-  it("列コマンドは要素数ぶん数える(25 件の絶対フラッシュの単位を取り違えない)", () => {
-    const { scheduler } = harness();
+  it("列コマンドは要素数ぶん数える(FlushInfo.commandCount に列の要素数が乗る)", async () => {
+    // [M63] recordCommandOutcome が即時フラッシュするようになったため、
+    // 呼び出し直後の pendingCommandCount は(単発コマンドと同様)常に 0 に
+    // 戻る。列の要素数を取り違えていないことは FlushInfo.commandCount で確認する
+    // (25 件絶対フラッシュ自体は recordCommands 直叩き経路の §2 のテストが担保)。
+    const { scheduler, flushes } = harness();
     const result = apply(BOARD, CONTENT, [
       PLACE,
       { kind: "assignResident", residentId: id("aRui"), facilityId: id("fNew") },
     ]);
 
     expect(scheduler.recordCommandOutcome(result)).toBe(true);
-    expect(scheduler.pendingCommandCount).toBe(2);
+    await flushMicrotasks();
+    expect(flushes[0]?.commandCount).toBe(2);
     scheduler.dispose();
   });
 });

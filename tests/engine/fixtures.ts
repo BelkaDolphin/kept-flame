@@ -177,6 +177,11 @@ export function content(overrides: Partial<EngineContent> = {}): EngineContent {
     adjacency: overrides.adjacency ?? base.adjacency,
     recallRisk: overrides.recallRisk ?? base.recallRisk,
     coarseTickMinutes: overrides.coarseTickMinutes ?? base.coarseTickMinutes,
+    // [M63] `storage`(GDD 6.7・保管上限/廃材)は base に既定値を持たない
+    // (省略時は undefined=上限なし、という既存挙動を保つ)。呼び出し側が
+    // 明示的に渡したときだけ素通しする(既存呼び出し元は誰も渡していない
+    // ので挙動は変わらない・追加のみ)。
+    ...(overrides.storage !== undefined ? { storage: overrides.storage } : {}),
   };
 }
 

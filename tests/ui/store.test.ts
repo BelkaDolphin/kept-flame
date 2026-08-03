@@ -398,10 +398,18 @@ describe("[M62/FC2] onCommandApplied 通知(セーブの操作トリガ結線・
     ).not.toThrow();
   });
 
-  it("main.tsx と同じ配線(scheduler.recordCommandOutcome)でコマンド成功が実際にセーブを dirty にする", () => {
+  it("main.tsx と同じ配線(scheduler.recordCommandOutcome)でコマンド成功が実際にセーブを書き込む", async () => {
     // `src/main.tsx` の `onCommandApplied: (result) => scheduler?.recordCommandOutcome(result)`
     // を実物の SaveScheduler で再現する(composition root 自体はブラウザでしか
     // 動かないため、ここが「トリガ発火」を固定する実質的なテストになる)。
+    //
+    // [M63/R4-A09 一次特定] `recordCommandOutcome` は受理直後に即時フラッシュ
+    // する(§0 の 5 番目のトリガ「操作」・saveScheduler.ts 参照)。理由は
+    // 「操作直後に即リロード/閉じる」と 2 秒デバウンス+ライフサイクル
+    // フラッシュ(pagehide 等)の非同期書込がドキュメント破棄と競走して負ける
+    // ことがある実測(Playwright 再現)への対応。よって `isDirty`/
+    // `pendingCommandCount` は dispatch 直後には既に 0 に戻っている
+    // (旧: デバウンス待ちで dirty のままだった)。
     const state = boardState();
     const content = boardContent();
     let writeCount = 0;
@@ -421,13 +429,19 @@ describe("[M62/FC2] onCommandApplied 通知(セーブの操作トリガ結線・
 
     expect(scheduler.isDirty).toBe(false);
     store.dispatch({ type: "commandApplied", command: placeHearth("fSouth", CELL_SOUTHEAST) });
-    expect(scheduler.isDirty).toBe(true);
-    expect(scheduler.pendingCommandCount).toBe(1);
-    expect(writeCount).toBe(0); // デバウンス前(まだ書いていない)。
+    // 即時フラッシュがデバウンスタイマーをその場で消費するので、呼び出し直後
+    // には積み残しが無い(2 秒待たずに書込が始まっている)。
+    expect(scheduler.isDirty).toBe(false);
+    expect(scheduler.pendingCommandCount).toBe(0);
+    // 実際の書込は非同期(マイクロタスク)なので、待てば反映される。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeCount).toBe(1);
 
-    // 拒否は数えない(§ recordCommandOutcome の契約どおり・pendingCommands 不変)。
+    // 拒否は数えない(§ recordCommandOutcome の契約どおり・書込を起こさない)。
     store.dispatch({ type: "commandApplied", command: placeHearth("fBlocked", CELL_CENTER) });
-    expect(scheduler.pendingCommandCount).toBe(1);
+    expect(scheduler.pendingCommandCount).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writeCount).toBe(1); // 拒否では増えない。
 
     scheduler.dispose();
   });

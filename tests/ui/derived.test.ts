@@ -71,7 +71,7 @@ import {
   M32_REWARD_RESOURCE,
   outpostOf,
 } from "./m32Fixtures";
-import { FORGE, META, research, stateOf } from "../engine/fixtures";
+import { FORGE, META, content, research, stateOf } from "../engine/fixtures";
 import { BUNKS_ID, townContent } from "../engine/lifespanFixtures";
 import {
   CELL_CENTER,
@@ -389,6 +389,61 @@ describe("値の派生(資源・研究・住民・ホームハブ)", () => {
     expect(store.derived.selectedCell.value?.facilityId).toBe(id("fHearth"));
     store.dispatch({ type: "cellSelected", cellIndex: null });
     expect(store.derived.selectedCell.value).toBeNull();
+  });
+});
+
+// --- [M63/R4-A04] resources: capacityApprox / atCapacity(GDD 6.7 の保管上限) ---
+
+describe("[M63/R4-A04] resources: capacityApprox / atCapacity(GDD 6.7・保管上限到達の実態表示)", () => {
+  it("content に storage ブロックが無ければ上限という概念が無い(capacityApprox=null・atCapacity=false)", () => {
+    const { store } = createTestStore();
+    const wood = at(store.derived.resources.value, 0);
+    expect(wood.capacityApprox).toBeNull();
+    expect(wood.atCapacity).toBe(false);
+  });
+
+  it("engine の resolveCapacityByResourceId と同じ上限値(基礎400+倉庫Lv合計×400)を返す", () => {
+    const engineContent = content({
+      storage: {
+        wasteResourceId: null,
+        baseCapacityByResourceId: new Map([[WOOD, fixFromInt(400)]]),
+        wasteConversionRatioByResourceId: new Map(),
+        wasteToResearchRatioFix: fixFromInt(0),
+        buildCostWasteSubstitutionMaxFix: fixFromInt(0),
+        codifyWasteSubstitutionMaxFix: fixFromInt(0),
+      },
+    });
+    const store = createGameStore({ state: boardState(), content: engineContent });
+    const wood = at(store.derived.resources.value, 0);
+    expect(wood.capacityApprox).toBe(400);
+    expect(wood.atCapacity).toBe(false); // boardState の wStock 既定 0 < 400
+
+    const next = updateEntity(boardState(), id("wStock"), "resource", (r) =>
+      setField(r, "stock", fixFromInt(400)),
+    );
+    store.dispatch({ type: "worldLoaded", state: next, content: engineContent, source: "save" });
+    expect(at(store.derived.resources.value, 0).atCapacity).toBe(true);
+  });
+
+  it("[構造発見・拠点供給の非対称] 上限を大幅に超えた在庫でも数値としては壊れず atCapacity=true になる", () => {
+    const engineContent = content({
+      storage: {
+        wasteResourceId: null,
+        baseCapacityByResourceId: new Map([[WOOD, fixFromInt(400)]]),
+        wasteConversionRatioByResourceId: new Map(),
+        wasteToResearchRatioFix: fixFromInt(0),
+        buildCostWasteSubstitutionMaxFix: fixFromInt(0),
+        codifyWasteSubstitutionMaxFix: fixFromInt(0),
+      },
+    });
+    const overflowed = updateEntity(boardState(), id("wStock"), "resource", (r) =>
+      setField(r, "stock", fixFromInt(76_980)),
+    );
+    const store = createGameStore({ state: overflowed, content: engineContent });
+    const wood = at(store.derived.resources.value, 0);
+    expect(wood.capacityApprox).toBe(400);
+    expect(wood.stockApprox).toBe(76_980);
+    expect(wood.atCapacity).toBe(true);
   });
 });
 

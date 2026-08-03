@@ -112,22 +112,58 @@ export function formatApproxDecimal1(approx: number): string {
 }
 
 /**
+ * [M63/R4-A02] 1 未満のレートに要る小数桁数(有効数字方式)。
+ *
+ * 資材施設 7 種の産出は 1/3000 再校正後 0.004〜0.035/分のように 1 未満に
+ * 収まり、`formatResourceAmount` の小数第 1 位丸め(0.0)へ全て埋もれて
+ * 「0/分」の虚偽表示になっていた(R4-A02)。「<0.1/分」の固定文言も検討したが、
+ * hearth 等は Lv1〜5 の全レートが 0.1 未満に収まる曲線(GDD の 1.15^n カーブ)
+ * があり、それだと増築の全 Lv が同じ文言になって「増築画面で Lv 間のレート差が
+ * 判別できる」という検収条件(playtest-protocol.md 台本T7)を満たせない。
+ * そこで値が小さいほど小数桁を増やす有効数字方式を採る(理由の詳細は
+ * `formatRatePerMinute` の doc)。
+ *
+ * 最低 2 桁の有効数字を確保する(0.035→3桁/0.004→4桁、のように先頭の 0 の
+ * 個数ぶん桁を足す)。上限は 6(1e6 固定小数点の精度上限=小数第6位より細かい
+ * 桁を出しても意味が無いため)。
+ */
+function decimalPlacesForSmallRate(absApprox: number): number {
+  if (absApprox <= 0) return 1;
+  // 1e6 固定小数点より小さい値は表現上存在しないはずだが、防御的に丸める。
+  const leadingZeros = Math.max(0, -Math.floor(Math.log10(absApprox)) - 1);
+  return Math.min(6, leadingZeros + 2);
+}
+
+/**
  * [M62/FC4] tick 単位のレート表記(産出/供給/維持費等)を「/分」へ変換する
  * 表示ヘルパ。1 tick = 1 分(GDD 11.1)なので数値の再計算は不要——単位表記の
  * 日本語化だけを行う。
  *
- * 桁の整形は `formatResourceAmount` へ委譲する(独自の `toFixed(2)` を持たない)
- * ——プレイテスト R2-FC9 が指摘した「薪だけ小数第1位が付いて他のレート表示と
- * 体裁が揃わない」不統一は、レート表示(旧: 素の `toFixed(2)`)と資源在庫表示
- * (HUD 等・`formatResourceAmount`)とで整形ヘルパが分かれていたことが原因
- * だった。ここで一本化することで、桁区切り・小数の出し分けルールが資源在庫と
- * 常に一致する(FacilityScreen.tsx/OutpostsScreen.tsx の /tick 表記 7 箇所を
- * 本ヘルパ経由へ置換)。
+ * 絶対値が 1 以上(または 0)は `formatResourceAmount` へ委譲する(独自の
+ * `toFixed(2)` を持たない)——プレイテスト R2-FC9 が指摘した「薪だけ小数第1位が
+ * 付いて他のレート表示と体裁が揃わない」不統一は、レート表示(旧: 素の
+ * `toFixed(2)`)と資源在庫表示(HUD 等・`formatResourceAmount`)とで整形ヘルパが
+ * 分かれていたことが原因だった。ここで一本化することで、桁区切り・小数の
+ * 出し分けルールが資源在庫と常に一致する(FacilityScreen.tsx/OutpostsScreen.tsx
+ * の /tick 表記 7 箇所を本ヘルパ経由へ置換)。
  *
- * @throws {RangeError} 有限数でない場合(`formatResourceAmount` が投げる)
+ * **[M63/R4-A02] 絶対値が 1 未満は小数桁を可変にする**(`decimalPlacesForSmallRate`)。
+ * `formatResourceAmount` の固定 1 桁のままだと 0.004〜0.035/分 が軒並み
+ * 「0.0」→「0/分」に丸まり、稼働中でも「何も生産していない」ように見える
+ * 虚偽表示になっていた(R4-A02)。3 桁区切りは付けない(1 未満の値に桁区切りは
+ * 意味を持たないため)。
+ *
+ * @throws {RangeError} 有限数でない場合
  */
 export function formatRatePerMinute(approx: number): string {
-  return `${formatResourceAmount(approx)}/分`;
+  if (!Number.isFinite(approx)) {
+    throw new RangeError(`資源量 ${String(approx)} が有限数でない`);
+  }
+  const abs = Math.abs(approx);
+  if (abs === 0 || abs >= 1) {
+    return `${formatResourceAmount(approx)}/分`;
+  }
+  return `${approx.toFixed(decimalPlacesForSmallRate(abs))}/分`;
 }
 
 /**

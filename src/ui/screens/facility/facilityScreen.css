@@ -56,14 +56,6 @@
   margin: 0 0 0.3rem;
 }
 
-/* [M61/FC6・2026-08-02差し戻し] 保管庫: 現在庫が上限を超えている警告。 */
-.kf-facility-detail__storage-capacity-warning {
-  font-size: var(--kf-fs-sub);
-  color: #a11334;
-  font-weight: 600;
-  margin: 0 0 0.4rem;
-}
-
 .kf-facility-detail__dormant {
   font-size: var(--kf-fs-body);
   color: #7a5a00;

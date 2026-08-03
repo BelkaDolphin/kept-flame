@@ -270,7 +270,10 @@ describe("CodifyTechRow: 保持者・唯一保持・記録済み・作業中", (
     const text = flattenText(vnode);
     expect(text).toContain("必要資源");
     expect(text).toContain("粘土");
-    expect(text).toContain("12.0");
+    // [M63/R4-A12/A13] formatResourceAmount 経由に統一(整数値は末尾 ".0" を
+    // 出さない——旧「成文化予告20.0」の不揃いの解消)。
+    expect(text).toContain("12");
+    expect(text).not.toContain("12.0");
   });
 
   it("costPreview 省略時は「必要資源」欄を出さない(後方互換)", () => {

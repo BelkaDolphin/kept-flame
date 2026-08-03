@@ -344,6 +344,44 @@ function downloadTextFile(filename: string, text: string): void {
   URL.revokeObjectURL(url);
 }
 
+function pad2(value: number): string {
+  return value < 10 ? `0${String(value)}` : String(value);
+}
+
+/**
+ * [M63/R4-B03] エクスポートファイル名(内部語 tick の露出を解消)。
+ *
+ * 旧実装は `kept-flame-save-tick17019.json` のように engine の内部単位
+ * (tick)をそのままファイル名へ焼き込んでいた。プレイヤーには意味を持たない
+ * 内部語であり、`idLabelize.ts`/`cellCoordinate.ts` 等これまでの内部語掃討
+ * (M61/FC5)と同じ問題。ここは `format.ts` の 1 tick=1 分換算(GDD 11.1)を
+ * 再利用して「第N日」のゲーム内日数へ言い換える。
+ *
+ * **実時刻の使用について**: `format.ts` は「スクリーンショット由来の不具合
+ * 報告が環境で変わって読めなくなる」ことを理由に `Date` を一切使わない方針
+ * だが、ここは表示ではなく**ファイル名の一意化**のためだけに実時刻を使う
+ * (タスク指示どおり「ファイル名生成は UI/platform 層なので実時刻使用も可」)。
+ * 同じゲーム内日数で複数回エクスポートしても上書き衝突しないようにする
+ * のが目的であり、`format.ts` の「決定論的表示」の方針とは別の関心事なので
+ * `format.ts` 側には足さず、ここに閉じる。engine の決定論(tick 計算そのもの)
+ * には一切触れていない——`gameDay` は tick からの純粋な整数演算。
+ *
+ * @throws {RangeError} tick が 0 以上の整数でない場合
+ */
+export function saveExportFilename(tick: number, exportedAt: Date): string {
+  if (!Number.isSafeInteger(tick) || tick < 0) {
+    throw new RangeError(`tick ${String(tick)} が 0 以上の整数でない`);
+  }
+  const gameDay = Math.floor(tick / 1440) + 1; // format.ts の TICKS_PER_GAME_DAY と同じ換算。
+  const y = String(exportedAt.getFullYear());
+  const mo = pad2(exportedAt.getMonth() + 1);
+  const d = pad2(exportedAt.getDate());
+  const h = pad2(exportedAt.getHours());
+  const mi = pad2(exportedAt.getMinutes());
+  const s = pad2(exportedAt.getSeconds());
+  return `kept-flame-save-day${String(gameDay)}-${y}${mo}${d}-${h}${mi}${s}.json`;
+}
+
 export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps) {
   // 現在地の宣言はシェル(shellSession)の仕事なので activate は false(M18★5)。
   useScreenMount(store, "settings", { activate: false });
@@ -377,7 +415,7 @@ export function SettingsScreen({ store, onNavigate, testplaySpeed }: ScreenProps
   function handleExport(): void {
     const text = exportSaveText(store.peekState());
     setExportedText(text);
-    downloadTextFile(`kept-flame-save-tick${String(store.peekState().tick)}.json`, text);
+    downloadTextFile(saveExportFilename(store.peekState().tick, new Date()), text);
     // [M54] 定期バックアップ推奨バナーのデータ条件(backupReminder.ts §3)を
     // リセットする。実際にエクスポートした事実だけを記録し、判定は書かない。
     recordBackupExported(resolveLocalStorage());

@@ -78,6 +78,7 @@ import { populationViewOf, type PopulationView } from "../engine/rules/populatio
 import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
 import { recallRiskPerDay } from "../engine/rules/recall";
+import { resolveCapacityByResourceId } from "../engine/rules/storage";
 import { currentResearch } from "../engine/rules/research";
 import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
 import { erasInOrder, techsOfEra } from "../engine/rules/techTree";
@@ -248,6 +249,28 @@ export interface ResourceView {
   readonly resourceId: EntityId;
   readonly stockFix: Fix;
   readonly stockApprox: number;
+  /**
+   * [M63/R4-A04・GDD 6.7] この資源の現在の保管上限(基礎400+建っている保管庫
+   * のLv合計×400・engine 唯一の正本実装 `resolveCapacityByResourceId` をその
+   * まま呼ぶ)。上限を持たない資源(倉庫が無い盤面・content に storage ブロック
+   * が無い等)は null——**null は「上限に達していない」ではなく「上限という
+   * 概念が無い」を表す**(呼び出し側は null を false 扱いしないこと)。
+   */
+  readonly capacityApprox: number | null;
+  /**
+   * [M63/R4-A04] 在庫が現在の保管上限に達している(以上)か。上限が無ければ
+   * 常に false。
+   *
+   * **既知の非対称(拠点供給は上限を無視する・R4-A04/構造発見)**: 施設産出は
+   * 上限で頭打ちになるが、衛星拠点からの供給は上限判定を通らないため、在庫が
+   * 上限を大幅に超えたまま増え続ける資源がありうる(例: 穀物が上限を無視して
+   * 76,980 まで増加)。その場合でも `stockApprox >= capacityApprox` は
+   * 数値としては真であり、この値は「上限相当に達しているという実態」を偽らず
+   * そのまま表す(超過の原因が施設産出か拠点供給かは区別しない)。engine 側の
+   * 判定(拠点供給にも上限を効かせるか)は M40(台帳v16 必-2)の担当であり、
+   * この表示はどちらの結論でも壊れない。
+   */
+  readonly atCapacity: boolean;
 }
 
 export interface ResearchView {
@@ -431,6 +454,9 @@ export const HOME_ALERT_IDS = [
   "recallImpaired",
   "codifyPending",
   "researchIdle",
+  // [M63/R4-A04・GDD 6.7] 保管上限に達している資源がある(産出が頭打ち/廃材化
+  // している)ことの黄警告。既存4件と同じ「点灯しているものだけ並ぶ」規律。
+  "storageAtCapacity",
   "expeditionActive",
   "idleResidents",
 ] as const;
@@ -505,6 +531,31 @@ function pendingCodifyTechCount(state: GameState, content: EngineContent): numbe
     if (isCodified(state, research.techId)) continue;
     if (techHoldersOf(state, research.techId).length === 0) continue;
     count++;
+  }
+  return count;
+}
+
+/**
+ * [M63/R4-A04・GDD 6.7] 在庫が現在の保管上限に達している(以上)資源の件数。
+ *
+ * `resources` computed と同じ `resolveCapacityByResourceId`(engine 唯一の
+ * 正本実装)を呼ぶだけで、上限式そのものは書き写さない。**上限が無い資源
+ * (倉庫が無い/content に storage ブロックが無い)は対象外**——「上限という
+ * 概念自体が無い」ことと「上限に達していない」ことを混同しない。
+ *
+ * 拠点供給が上限を無視して増え続ける既知の非対称(構造発見・R4-A04)がある
+ * 資源も、数値としては `stock >= capacity` を満たせばここに数える——原因の
+ * 切り分け(施設産出の頭打ちか拠点供給の非対称か)はしない「実態表示」に
+ * 徹する方針(facilityEffect.ts §2 末尾の追記と同じ立場)。
+ */
+function storageAtCapacityResourceCount(state: GameState, content: EngineContent): number {
+  const capacities = resolveCapacityByResourceId(state, content);
+  if (capacities.size === 0) return 0;
+  let count = 0;
+  for (const resource of entitiesOfKind(state, "resource")) {
+    const capacityFix = capacities.get(resource.resourceId);
+    if (capacityFix === undefined) continue;
+    if (toRaw(resource.stock) >= toRaw(capacityFix)) count++;
   }
   return count;
 }
@@ -1080,12 +1131,22 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
   const resources = computed<readonly ResourceView[]>(
     () => {
       const state: GameState = sources.state.value;
-      return entitiesOfKind(state, "resource").map((resource) => ({
-        entityId: resource.id,
-        resourceId: resource.resourceId,
-        stockFix: resource.stock,
-        stockApprox: toApproxNumber(resource.stock),
-      }));
+      const content: EngineContent = sources.content.value;
+      // [M63/R4-A04] 上限は engine 側の唯一の正本実装をそのまま呼ぶ(基礎400+
+      // 建っている保管庫のLv合計×400・GDD 6.7)。UI 側で加算式を書き写さない。
+      const capacities = resolveCapacityByResourceId(state, content);
+      return entitiesOfKind(state, "resource").map((resource) => {
+        const capacityFix = capacities.get(resource.resourceId) ?? null;
+        const capacityApprox = capacityFix === null ? null : toApproxNumber(capacityFix);
+        return {
+          entityId: resource.id,
+          resourceId: resource.resourceId,
+          stockFix: resource.stock,
+          stockApprox: toApproxNumber(resource.stock),
+          capacityApprox,
+          atCapacity: capacityFix !== null && toRaw(resource.stock) >= toRaw(capacityFix),
+        };
+      });
     },
     { name: "resources" },
   );
@@ -1237,6 +1298,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: badges.impairedResidentCount,
         codifyPending: pendingCodifyTechCount(state, content),
         researchIdle: badges.activeResearchCount === 0 ? 1 : 0,
+        storageAtCapacity: storageAtCapacityResourceCount(state, content),
         expeditionActive: state.dispatchSnapshots.length,
         idleResidents: badges.idleResidentCount,
       };
@@ -1245,6 +1307,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: "warn",
         codifyPending: "warn",
         researchIdle: "warn",
+        storageAtCapacity: "warn",
         expeditionActive: "info",
         idleResidents: "info",
       };
@@ -1253,6 +1316,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: "residents",
         codifyPending: "codify",
         researchIdle: "research",
+        storageAtCapacity: "grid",
         expeditionActive: "expedition",
         idleResidents: "residents",
       };

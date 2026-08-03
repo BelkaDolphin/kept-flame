@@ -25,16 +25,31 @@
 //   `schema/engineContent.ts` の `toFacilityStorage` → `FacilityDef.storage` →
 //   engine の `rules/storage.ts` の `resolveCapacityByResourceId`(125〜135行)
 //   まで実際に結線されており、`storedResourceIds` が content に無い(= null)
-//   ため **全資源**が対象になる(warehouse を 1 基建てるだけで全資源に Lv別の
-//   保管上限が設定される。当初 Lv1=400 → 2026-08-02 実プレイ報告「資材が 400 で
-//   カンスト」を受け暫定 ×100(Lv1=40,000)へ引き上げ済み)。上限は産出反映時に効き
-//   (`rules/production.ts` 425行)、超過分は overflow 会計(廃材化/破棄)へ回る
-//   ——既存在庫の没収ではないが、現行バランス(資源が数十万〜百万規模まで
-//   伸びる)では実質「全資源の産出を上限で頭打ちにする」強い・プレイヤーに
-//   とってほぼ確実に不利益な効果になる。**したがって「効果は未実装」は虚偽**
-//   であり、実効果(保管上限の設定 + 超過分喪失の警告)を正直に見せる。
-//   数値(暫定 40,000 の適正値・`storedResourceIds` を絞るべきか)はバランス調整であり
-//   M39 の担当(本タスクでは content/engine に一切触れない)。
+//   ため **全資源**が対象になる。上限は産出反映時に効き(`rules/production.ts`
+//   425行)、超過分は overflow 会計(廃材化/破棄)へ回る——既存在庫の没収では
+//   ないが、プレイヤーにとってほぼ確実に不利益な効果になる。
+//   **したがって「効果は未実装」は虚偽**であり、実効果(保管上限の設定 +
+//   超過分喪失の警告)を正直に見せる。
+//
+//   **[2026-08-03/M63・R4-A01 fatal] 加算方式への追従**: GDD 6.7
+//   [2026-08-02裁定] により保管上限は「基礎400(倉庫なし)+建っている倉庫の
+//   Lv合計×400」の**加算**方式に確定した(`balance.storage.baseCapacity` 全
+//   8資源400 + warehouse curve [400,800,1200,1600,2000])。旧文言
+//   「上限を設定(Lv1: 400)」はこの倉庫**単体**の値がそのまま絶対上限になる
+//   かのように読め、実際には基礎400にこの倉庫の寄与が**加算**される(倉庫が
+//   複数あれば合算)ため虚偽表示だった(Round 4 実測で確認・fatal)。本ファイルは
+//   `def`+`level` だけを引数に取る設計(state を持たない・カタログ/詳細どちらの
+//   呼び出し元からも呼べる)なので、「現在の合計上限」までは計算せず、GDD の
+//   加算式そのものを文言に明記したうえで「このLvの寄与」だけを数値で示す
+//   (捏造しない・唯一の正本実装は `engine/rules/storage.ts` の
+//   `resolveCapacityByResourceId` で、現在の合計値が要る画面はそちらを呼ぶこと)。
+//   **在庫超過警告(`storageCapacityWouldCapExistingStock`)は撤去**した——
+//   旧実装は「このLvの寄与(倉庫単体)」だけを上限とみなして現在庫と比べており、
+//   加算方式のもとでは倉庫は上限を単調に押し上げるだけ(建てて上限が下がる
+//   ことは無い)なので、この警告は「建てると不利益になる」という逆方向の
+//   誤情報になっていた(Round 4 実測)。現在庫が実際に上限へ達しているか
+//   どうかの継続的な警告は HUD/ホームアラート(`derived.ts` の `homeAlerts`・
+//   M63 で追加)が state を見て正しく担う。
 //
 //   **見張り台/療養所**: `content/facility.json` にこの種の追加フィールドが
 //   一切無く、engine 側の参照も確認できなかった(統率者側でも再確認済み)。
@@ -104,40 +119,28 @@ export function storageTargetResourceIds(def: FacilityDef): readonly EntityId[] 
 
 /**
  * 保管庫のカタログ/詳細向け効果文言(§2「保管庫」)。「効果は未実装」ではなく
- * 実効果を正直に見せる——上限設定そのものと、超過分が失われる(オーバー
- * フロー会計・GDD 6.7)ことの両方を明記する。
+ * 実効果を正直に見せる。
+ *
+ * **[M63/R4-A01 fatal] 加算方式(GDD 6.7 [2026-08-02裁定])に合わせた文言**:
+ * 「上限を設定(Lv1: 400)」(この倉庫単体の値がそのまま絶対上限であるかの
+ * ような書き方)は虚偽——実際は基礎400にこの倉庫の寄与が**加算**される
+ * (倉庫を複数建てれば合算)。本関数は `def`+`level` しか持たない(state 非依存)
+ * ため「現在の合計上限」は計算せず、加算式そのものと「このLvの寄与」だけを
+ * 明記する。超過分の扱いも「原則失われる。ただし薪など一部の低次資源は
+ * 一定比率が廃材になる」と GDD 6.7 の記述どおりに正直化する(旧文言の
+ * 「上限を超えた分の産出は失われます」という全資源一律の断定は、実際には
+ * firewood にしか廃材化(比0.5)が設定されておらず不正確だった)。
  */
 export function storageCapacityEffectText(def: FacilityDef, level = 1): string | null {
   const value = storageCapacityAt(def, level);
   if (value === null) return null;
   const scope = storageTargetResourceIds(def) === null ? "全資源" : "対象資源";
-  return `${scope}の保管上限を設定(Lv${String(level)}: ${formatResourceAmount(value)})。上限を超えた分の産出は失われます。`;
+  return (
+    `${scope}の保管上限に加算(GDD 6.7: 基礎400 + 建っている保管庫のLv合計×400)。` +
+    `このLv${String(level)}の寄与は +${formatResourceAmount(value)}。` +
+    `上限を超えた産出は原則失われます(薪など一部の低次資源は超過分の一定比率が廃材になります)。`
+  );
 }
-
-/**
- * 現在の在庫が保管上限を上回っている資源が1つでもあるか(建設/増築で新たに
- * 産出が頭打ちになる資源が出る、という不利益にプレイヤーが気づけるように
- * するための警告条件)。`resources` は `resourceId`/`stockApprox` を持つ
- * 軽量な形(`derived.ts` の `ResourceView` と構造的に互換)だけを要求する。
- */
-export function storageCapacityWouldCapExistingStock(
-  def: FacilityDef,
-  level: number,
-  resources: readonly { readonly resourceId: EntityId; readonly stockApprox: number }[],
-): boolean {
-  const cap = storageCapacityAt(def, level);
-  if (cap === null) return false;
-  const targets = storageTargetResourceIds(def);
-  for (const resource of resources) {
-    if (targets !== null && !targets.includes(resource.resourceId)) continue;
-    if (resource.stockApprox > cap) return true;
-  }
-  return false;
-}
-
-/** 上の警告条件が真のときに添える一言。 */
-export const STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT =
-  "現在の所持量が上限を大きく超えているため、建てると一部資源の産出が頭打ちになります。";
 
 /** 効果未実装の施設に添える固定文言(見張り台/療養所のみ・§2)。 */
 export const DORMANT_FACILITY_EFFECT_TEXT = "効果は未実装(建設しても資源を消費するのみ)";

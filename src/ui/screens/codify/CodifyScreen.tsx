@@ -45,11 +45,16 @@ import type { RecordMedium } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import type { CodifySuggestionView, CodifyTechEntry } from "../../derived";
 import { mediumLabel, resourceLabel, techLabel } from "../contentLabels";
-import { formatTickSpan } from "../format";
+import { formatResourceAmount, formatTickSpan } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
-import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
+import {
+  resourceSpendBreakdownPhrase,
+  resourceStockApprox,
+  useToastStack,
+  ToastStackView,
+} from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./codifyScreen.css";
 
@@ -156,7 +161,10 @@ export function CodifyTechRow({
       </label>
       {costPreview !== null && (
         <p class="kf-codify-row__cost-preview">
-          必要資源: {resourceLabel(costPreview.resourceId)} {costPreview.amountApprox.toFixed(1)}
+          {/* [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ(「成文化予告20.0」の
+              不揃い解消)。 */}
+          必要資源: {resourceLabel(costPreview.resourceId)}{" "}
+          {formatResourceAmount(costPreview.amountApprox)}
         </p>
       )}
       <button
@@ -376,12 +384,18 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
     const beforeState = store.peekState();
     // [束B/B-4] 成功トースト用の差分を取るため、投入前にコスト資源の在庫を
     // 控えておく(content に recordMedia が無ければ算出しない)。
+    // [M63/R4-A14] 石板の粘土コストは廃材で低比率代替されうる(GDD 6.7・3出口
+    // (2)・`codifyWasteSubstitution` は medium=stoneTablet のみ非0)ので、
+    // 廃材資源の在庫も併せて控える(paper 等では単に動かないだけ)。
     const plan =
       content.recordMedia === undefined
         ? null
         : planCodification(content, techId, medium, isPrintingUnlocked(beforeState, content));
     const beforeStockApprox =
       plan === null ? null : resourceStockApprox(beforeState, plan.costResourceId);
+    const wasteResourceId = content.storage?.wasteResourceId ?? null;
+    const wasteBeforeStockApprox =
+      wasteResourceId === null ? null : resourceStockApprox(beforeState, wasteResourceId);
 
     const result = store.dispatch({
       type: "commandApplied",
@@ -399,10 +413,15 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
     setLastRejection(null);
     const afterStockApprox =
       plan === null ? null : resourceStockApprox(store.peekState(), plan.costResourceId);
-    const diff = resourceDeltaPhrase(
-      plan?.costResourceId ?? null,
-      beforeStockApprox,
-      afterStockApprox,
+    const wasteAfterStockApprox =
+      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+    const diff = resourceSpendBreakdownPhrase(
+      { resourceId: plan?.costResourceId ?? null, beforeStockApprox, afterStockApprox },
+      {
+        resourceId: wasteResourceId,
+        beforeStockApprox: wasteBeforeStockApprox,
+        afterStockApprox: wasteAfterStockApprox,
+      },
     );
     toastStack.push(
       `「${techLabel(techId)}」を成文化キューに入れた${diff.length > 0 ? `(${diff})` : ""}`,

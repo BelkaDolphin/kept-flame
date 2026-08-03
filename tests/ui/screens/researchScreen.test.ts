@@ -140,7 +140,10 @@ describe("ResearchTechRow: 状態文言(未着手/研究中/解禁済み/停滞�
     const text = flattenText(vnode);
     expect(text).toContain("研究中");
     expect(text).toContain("12.3");
-    expect(text).toContain("30.0");
+    // [M63/R4-A12/A13] formatResourceAmount 経由に統一(整数値は末尾 ".0" を
+    // 出さない——旧「研究コスト30.0」の不揃いの解消)。
+    expect(text).toContain("30");
+    expect(text).not.toContain("30.0");
   });
 
   it("researching かつキュー先頭でない場合は「キュー待ち」を添える", () => {

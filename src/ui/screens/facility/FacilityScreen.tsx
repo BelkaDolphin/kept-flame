@@ -49,19 +49,22 @@ import {
   bedCapacityEffectText,
   DORMANT_FACILITY_EFFECT_TEXT,
   facilityEffectKind,
-  STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT,
   storageCapacityEffectText,
-  storageCapacityWouldCapExistingStock,
   type FacilityEffectKind,
 } from "../facilityEffect";
-import { formatApproxDecimal1, formatResourceAmount } from "../format";
+import { formatApproxDecimal1, formatRatePerMinute, formatResourceAmount } from "../format";
 import { CellBreakdownView } from "../grid/CellBreakdownView";
 import "../grid/gridBoard.css";
 import { TagChip } from "../grid/TagChip";
 import { TagIconDefs } from "../grid/TagIcons";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
-import { resourceDeltaPhrase, resourceStockApprox, useToastStack, ToastStackView } from "../Toast";
+import {
+  resourceSpendBreakdownPhrase,
+  resourceStockApprox,
+  useToastStack,
+  ToastStackView,
+} from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./facilityScreen.css";
 
@@ -108,9 +111,6 @@ export interface FacilityDetailPanelProps {
    * + 超過分喪失)を正直に見せる(facilityEffect.ts §2「保管庫」参照)。
    */
   readonly storageEffectText?: string | null;
-  /** [同上] 現在の在庫が既に保管上限を上回っている資源がある(=建てると
-   * すぐ頭打ちになる)ときに追加で出す警告の表示可否。 */
-  readonly storageCapacityWarningVisible?: boolean;
   /**
    * [M61/FC11・R1-A14] 増築後の産出見込み(実行前プレビュー)。`null` = 出さない
    * (上限Lv・寝床/非稼働・content にLv曲線が無い等)。値は「増築ボタンを押す前に
@@ -129,7 +129,6 @@ export function FacilityDetailPanel({
   effectKind = "worker",
   bedEffectText = null,
   storageEffectText = null,
-  storageCapacityWarningVisible = false,
   nextLevelOutputApprox = null,
 }: FacilityDetailPanelProps) {
   const isDormant = effectKind === "none";
@@ -164,26 +163,21 @@ export function FacilityDetailPanel({
           {bedEffectText}
         </p>
       ) : isStorageCapacity ? (
-        <>
-          <p class="kf-facility-detail__storage-capacity" data-effect-kind="storageCapacity">
-            {storageEffectText}
-          </p>
-          {storageCapacityWarningVisible && (
-            <p class="kf-facility-detail__storage-capacity-warning">
-              {STORAGE_CAPACITY_EXCEEDED_WARNING_TEXT}
-            </p>
-          )}
-        </>
+        <p class="kf-facility-detail__storage-capacity" data-effect-kind="storageCapacity">
+          {storageEffectText}
+        </p>
       ) : (
         <>
           <p class="kf-facility-detail__output">
             {/* [M62/FC4・R2-D01] 内部語「/tick」を「/分」へ(tick=1分・GDD 11.1)。
-                数値整形も formatResourceAmount へ統一する(R2-FC9: 薪だけ小数第1位が
-                付く不統一の解消)。 */}
-            産出: {formatResourceAmount(detail.outputPerTickApprox)}
+                [M63/R4-A02] 数値整形は formatRatePerMinute(可変小数桁)へ——
+                固定 1 桁の formatResourceAmount だと資材施設 7 種の産出が
+                0.0(→「0/分」)に埋もれ、増築の Lv 間でレート差が判別できなく
+                なる(台本T7)。formatRatePerMinute が「/分」まで含めて返すので
+                以後のリテラル「/分・」は付けない。 */}
+            産出: {formatRatePerMinute(detail.outputPerTickApprox)}
             {/* [M61/FC11・R1-A14] 増築前に効果(産出の伸び)を見せる。 */}
-            {nextLevelOutputApprox !== null && ` → ${formatResourceAmount(nextLevelOutputApprox)}`}
-            /分・
+            {nextLevelOutputApprox !== null && ` → ${formatRatePerMinute(nextLevelOutputApprox)}`}・
             {detail.outputKind === "resource" && detail.outputResourceId !== null
               ? resourceLabel(detail.outputResourceId)
               : "研究点"}
@@ -210,7 +204,9 @@ export function FacilityDetailPanel({
             ? detail.level >= detail.maxLevel
               ? "既に上限Lvです。"
               : "増築コストはかかりません。"
-            : `増築コスト: ${resourceLabel(detail.upgradeCostResourceId)} ${detail.upgradeCostApprox}`}
+            : // [M63/R4-A12 系] 生の数値を直接埋め込んでいた(整形ヘルパを通していない
+              // ため float 起因の端数がそのまま出うる)。formatResourceAmount へ統一。
+              `増築コスト: ${resourceLabel(detail.upgradeCostResourceId)} ${formatResourceAmount(detail.upgradeCostApprox)}`}
         </p>
         {isDormant && detail.level < detail.maxLevel && (
           <p class="kf-facility-detail__dormant-upgrade-warning">
@@ -290,16 +286,6 @@ function storageEffectTextOf(
   return def === undefined ? null : storageCapacityEffectText(def, level);
 }
 
-function storageCapacityWarningOf(
-  content: EngineContent,
-  defId: EntityId,
-  level: number,
-  resources: readonly { readonly resourceId: EntityId; readonly stockApprox: number }[],
-): boolean {
-  const def = content.facilityDefs.get(defId);
-  return def === undefined ? false : storageCapacityWouldCapExistingStock(def, level, resources);
-}
-
 /**
  * [M61/FC11・R1-A14] 増築後の産出見込み(`FacilityDetailPanel` の doc 参照)。
  * `outputPerTickApprox × (次Lv基礎産出 / 現Lv基礎産出)`。基礎産出が 0(非稼働
@@ -329,9 +315,6 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
   const detail = useSignalValue(store.derived.selectedFacilityDetail);
   const breakdown = useSignalValue(store.derived.selectedCellBreakdown);
   const facilityRoster = useSignalValue(store.derived.facilityRoster);
-  // [M61/FC6・2026-08-02差し戻し] 保管庫の「現在の在庫が上限を超えている」
-  // 警告に使う(§2「保管庫」)。
-  const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
   // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり・
@@ -343,6 +326,11 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
       current.upgradeCostResourceId === null
         ? null
         : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
+    // [M63/R4-A14] 増築コストも建設と同じ廃材代替(GDD 6.7・最大20%)を受ける
+    // ので、廃材資源の在庫も併せて控える。
+    const wasteResourceId = content.storage?.wasteResourceId ?? null;
+    const wasteBeforeStockApprox =
+      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
     const result = store.dispatch({
       type: "commandApplied",
       command: { kind: "upgradeFacility", facilityId: current.facilityId },
@@ -356,10 +344,19 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
       current.upgradeCostResourceId === null
         ? null
         : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
-    const diff = resourceDeltaPhrase(
-      current.upgradeCostResourceId,
-      beforeStockApprox,
-      afterStockApprox,
+    const wasteAfterStockApprox =
+      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+    const diff = resourceSpendBreakdownPhrase(
+      {
+        resourceId: current.upgradeCostResourceId,
+        beforeStockApprox,
+        afterStockApprox,
+      },
+      {
+        resourceId: wasteResourceId,
+        beforeStockApprox: wasteBeforeStockApprox,
+        afterStockApprox: wasteAfterStockApprox,
+      },
     );
     toastStack.push(
       `${facilityLabel(current.defId)}をLv${String(current.level + 1)}へ増築した${diff.length > 0 ? `(${diff})` : ""}`,
@@ -391,12 +388,6 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
             effectKind={facilityEffectKindOf(content, detail.defId)}
             bedEffectText={bedEffectTextOf(content, detail.defId, detail.level)}
             storageEffectText={storageEffectTextOf(content, detail.defId, detail.level)}
-            storageCapacityWarningVisible={storageCapacityWarningOf(
-              content,
-              detail.defId,
-              detail.level,
-              resources,
-            )}
             nextLevelOutputApprox={nextLevelOutputApproxOf(content, detail)}
           />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />

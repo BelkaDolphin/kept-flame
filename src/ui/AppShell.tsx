@@ -122,6 +122,12 @@ export interface ResourceHudProps {
  * を使う(UI 側で固定小数点の割り算を発明しない)。桁の整形だけ
  * `formatResourceStock`(screens/format.ts)が持つ —— 在庫は整数切り捨て表示
  * (2026-08-02 実プレイ報告「整数のはずの資材数に小数点が出る」への対応)。
+ *
+ * **[M63/R4-A04] 保管上限に達している資源は警告色+記号で示す**(GDD 6.7)。
+ * 判定は `derived.ts` の `resources` computed(`atCapacity`)にあり、ここは
+ * 表示だけ(色 + 「▲」記号 + title の3重で示す・色だけに頼らない=
+ * ReclaimPanel/LossClassBadge と同じ方針)。上限が無い資源(倉庫が無い盤面等)
+ * は `atCapacity=false` のままなので警告は出ない。
  */
 export function ResourceHud({ store }: ResourceHudProps) {
   const resources = useSignalValue(store.derived.resources);
@@ -129,8 +135,19 @@ export function ResourceHud({ store }: ResourceHudProps) {
   return (
     <ul class="kf-app__hud-list" aria-label="資源在庫">
       {orderHudResources(resources).map((resource) => (
-        <li key={resource.entityId} class="kf-hud__chip" data-resource-id={resource.resourceId}>
-          <span class="kf-hud__chip-label">{resourceLabel(resource.resourceId)}</span>
+        <li
+          key={resource.entityId}
+          class={resource.atCapacity ? "kf-hud__chip kf-hud__chip--warn" : "kf-hud__chip"}
+          data-resource-id={resource.resourceId}
+          data-at-capacity={resource.atCapacity}
+          title={
+            resource.atCapacity ? "保管上限に達しています(産出が頭打ちになっています)" : undefined
+          }
+        >
+          <span class="kf-hud__chip-label">
+            {resource.atCapacity ? "▲ " : ""}
+            {resourceLabel(resource.resourceId)}
+          </span>
           <span class="kf-hud__chip-value">{formatResourceStock(resource.stockApprox)}</span>
         </li>
       ))}

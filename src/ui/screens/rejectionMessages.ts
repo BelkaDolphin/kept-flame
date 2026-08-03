@@ -51,14 +51,29 @@ import { fixFromRaw, toApproxNumber } from "../../engine/fp";
 import type { RecordMedium } from "../../engine/rules/types";
 import { entityIdFromString, type EntityId } from "../../engine/state/state";
 import { mediumLabel, residentDisplayName, resourceLabel, techLabel } from "./contentLabels";
-import { formatResourceAmount } from "./format";
+import { formatResourceAmount, formatResourceStock } from "./format";
 
 // --- 1. 数値・ID の小さな変換ヘルパ(§2) ------------------------------------
 
-/** `requiredRaw`/`availableRaw`(Fix raw・null 可)を表示用の量へ。 */
+/** `requiredRaw`(必要量)を表示用の量へ。コストなので端数も正直に出す。 */
 function amountText(raw: number | null): string {
   if (raw === null) return "0";
   return formatResourceAmount(toApproxNumber(fixFromRaw(raw)));
+}
+
+/**
+ * [M63/R4-A12 系] `availableRaw`(所持量)を表示用の量へ。
+ *
+ * HUD の資源チップ(`formatResourceStock`・整数切り捨て+3桁区切り)と表記が
+ * 揃っていなかった——同じ在庫がホームでは整数、reject 文言では小数
+ * (「所持20.1」)という二重基準になっていた(R4-A12/A13/D03)。在庫は
+ * `formatResourceStock` へ統一する(コスト表示=`amountText` とは意図的に
+ * 異なるヘルパにする。format.ts の「在庫は floor・コスト/レートは実額」の
+ * 使い分けをここでも保つ)。
+ */
+function stockText(raw: number | null): string {
+  if (raw === null) return "0";
+  return formatResourceStock(toApproxNumber(fixFromRaw(raw)));
 }
 
 function resourceName(resourceId: EntityId | null): string {
@@ -183,7 +198,7 @@ const MESSAGE_BUILDERS: { readonly [K in CommandRejectionCode]: MessageBuilder }
     return `${techNameOrFallback(found.techId)}の記録(${mediumLabel(found.medium)})は既にあります。`;
   },
   insufficientResource: (r) =>
-    `${resourceName(r.resourceId)}が足りません(必要 ${amountText(r.requiredRaw)} / 所持 ${amountText(r.availableRaw)})。`,
+    `${resourceName(r.resourceId)}が足りません(必要 ${amountText(r.requiredRaw)} / 所持 ${stockText(r.availableRaw)})。`,
   noResearchTarget: () => "研究中の技術がありません。廃材はここでは使えません。",
   exodusCapacityExceeded: () =>
     "持ち出せる量を超えています。プレビューで何が積みきれないか確認してください。",

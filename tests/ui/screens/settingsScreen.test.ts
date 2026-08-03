@@ -22,6 +22,7 @@ import {
   ImportPanel,
   OnboardingHelpSection,
   ResetGameSection,
+  saveExportFilename,
   TestplaySpeedSection,
   type ImportOutcomeView,
 } from "../../../src/ui/screens/settings/SettingsScreen";
@@ -50,6 +51,42 @@ function hasTextareaChild(vnode: { readonly props: { readonly children?: unknown
       (child as { readonly type?: unknown }).type === "textarea",
   );
 }
+
+describe("[M63/R4-B03] saveExportFilename(エクスポートファイル名の内部語掃討)", () => {
+  it("内部語 tick を含まない(旧: kept-flame-save-tick17019.json)", () => {
+    const filename = saveExportFilename(17_019, new Date(2026, 7, 3, 15, 30, 45));
+    expect(filename).not.toContain("tick");
+  });
+
+  it("ゲーム内日数(第N日相当)へ言い換える(1440tick=1日・GDD 11.1)", () => {
+    expect(saveExportFilename(0, new Date(2026, 7, 3, 0, 0, 0))).toContain("day1");
+    expect(saveExportFilename(1439, new Date(2026, 7, 3, 0, 0, 0))).toContain("day1");
+    expect(saveExportFilename(1440, new Date(2026, 7, 3, 0, 0, 0))).toContain("day2");
+    expect(saveExportFilename(17_019, new Date(2026, 7, 3, 0, 0, 0))).toContain("day12"); // floor(17019/1440)+1=12
+  });
+
+  it("実時刻を一意化のためだけに使う(コロン等ファイル名に使えない文字を含まない)", () => {
+    const filename = saveExportFilename(0, new Date(2026, 7, 3, 15, 30, 45));
+    expect(filename).not.toContain(":");
+    expect(filename).toContain("20260803");
+    expect(filename).toContain("153045");
+  });
+
+  it(".json で終わる", () => {
+    expect(saveExportFilename(0, new Date(2026, 7, 3))).toMatch(/\.json$/);
+  });
+
+  it("同じゲーム内日数でも実時刻が違えば別ファイル名になる(上書き衝突を避ける)", () => {
+    const a = saveExportFilename(100, new Date(2026, 7, 3, 10, 0, 0));
+    const b = saveExportFilename(100, new Date(2026, 7, 3, 10, 0, 1));
+    expect(a).not.toBe(b);
+  });
+
+  it("有限な非負整数でない tick は例外", () => {
+    expect(() => saveExportFilename(-1, new Date())).toThrow(RangeError);
+    expect(() => saveExportFilename(1.5, new Date())).toThrow(RangeError);
+  });
+});
 
 describe("ExportPanel", () => {
   it("エクスポート前はテキストエリアを出さない(存在しない情報を捏造しない)", () => {

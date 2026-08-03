@@ -41,8 +41,8 @@ const BACKUP_ID = id("rBackup");
 const RARE_TECH: TechDef = { ...TECH_BRONZE, lossClass: "rareIrreversible" };
 const RECOVERABLE_TECH: TechDef = { ...TECH_BRONZE, lossClass: "criticalRecoverable" };
 
-function contentWith(tech: TechDef): EngineContent {
-  return content({ techDefs: new Map([[tech.id, tech]]) });
+function contentWith(tech: TechDef, overrides: Partial<EngineContent> = {}): EngineContent {
+  return content({ techDefs: new Map([[tech.id, tech]]), ...overrides });
 }
 
 function completedResearch(): ResearchState {
@@ -228,6 +228,43 @@ describe("homeAlerts: 黄/灰と並び順", () => {
     store.dispatch({ type: "ticked", toTick: store.peekState().tick + 5 });
     // equals で止まるので参照が変わらない = バッジ行は再描画されない(ADR-027(4))。
     expect(store.derived.homeAlerts.value).toBe(before);
+  });
+});
+
+// --- [M63/R4-A04] 保管上限到達の黄警告(GDD 6.7) ----------------------------
+
+describe("homeAlerts: storageAtCapacity(保管上限に達している資源の黄警告)", () => {
+  const storageContent = (): EngineContent =>
+    contentWith(RECOVERABLE_TECH, {
+      storage: {
+        wasteResourceId: null,
+        baseCapacityByResourceId: new Map([[WOOD, fixFromInt(400)]]),
+        wasteConversionRatioByResourceId: new Map(),
+        wasteToResearchRatioFix: fixFromInt(0),
+        buildCostWasteSubstitutionMaxFix: fixFromInt(0),
+        codifyWasteSubstitutionMaxFix: fixFromInt(0),
+      },
+    });
+
+  it("上限を持つ content で在庫が上限以上なら黄で点く(グリッド画面へ遷移)", () => {
+    const state = board({ dispatched: false, extraEntities: [resource("wStock2", WOOD, 400)] });
+    const store = storeWith(state, storageContent());
+    const alert = alertOf(store, "storageAtCapacity");
+    expect(alert?.level).toBe("warn");
+    expect(alert?.screen).toBe("grid");
+    expect(alert?.count).toBeGreaterThan(0);
+  });
+
+  it("在庫が上限未満なら点かない", () => {
+    // board() 既定の wStock(WOOD)は 0 なので上限(400)未満。
+    const store = storeWith(board({ dispatched: false }), storageContent());
+    expect(alertOf(store, "storageAtCapacity")).toBeUndefined();
+  });
+
+  it("content に storage ブロックが無い(上限という概念自体が無い)盤面では点かない", () => {
+    const state = board({ dispatched: false, extraEntities: [resource("wStock2", WOOD, 999_999)] });
+    const store = storeWith(state, contentWith(RECOVERABLE_TECH));
+    expect(alertOf(store, "storageAtCapacity")).toBeUndefined();
   });
 });
 

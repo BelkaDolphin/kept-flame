@@ -70,6 +70,21 @@ describe("rejectionMessages: 主要 code のスポットチェック", () => {
     expect(message).toBe("薪が足りません(必要 30 / 所持 0)。");
   });
 
+  it("[M63/R4-A12/A13/D03] 所持量は在庫扱い(整数切り捨て)・必要量はコスト扱い(実額)で二重基準を解消する", () => {
+    // 所持側が 20.1 のような端数を持ちうる(1e6 固定小数点+非整数レート)。
+    // HUD の在庫チップ(formatResourceStock)と表記を揃え、reject 文言だけ
+    // 小数が残る不統一(R4-A12「所持20.1」)を解消する。
+    const message = playerRejectionMessage(
+      rejection({
+        code: "insufficientResource",
+        resourceId: id("firewood"),
+        requiredRaw: 35_500_000, // 35.5(コスト側は実額のまま)
+        availableRaw: 20_100_000, // 20.1(在庫側は floor されて 20 になる)
+      }),
+    );
+    expect(message).toBe("薪が足りません(必要 35.5 / 所持 20)。");
+  });
+
   it("facilitySlotsFull: limit/actual をそのまま人数として表示する", () => {
     const message = playerRejectionMessage(
       rejection({ code: "facilitySlotsFull", subjectId: id("facHearth1"), limit: 1, actual: 1 }),

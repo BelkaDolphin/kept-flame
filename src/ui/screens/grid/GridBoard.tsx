@@ -396,6 +396,11 @@ function surfaceStyle(viewport: Viewport): string {
  * [束B/B-4] 建設成功トースト用の差分情報(GridScreen が文言を組み立てる)。
  * `beforeStockApprox`/`afterStockApprox` は建設コストが無い(`def.cost`
  * 省略)施設では両方 null になる。
+ *
+ * [M63/R4-A14] 廃材代替(GDD 6.7 の3出口(1)・最大20%)の内訳をトーストへ出す
+ * ため、廃材資源(`content.storage.wasteResourceId`)の前後在庫も併せて渡す
+ * (`wasteResourceId` が無い/廃材が動いていなければ `resourceSpendBreakdownPhrase`
+ * が主資源だけの句へ倒す・判定はしない)。
  */
 export interface PlacementSuccessInfo {
   readonly defId: EntityId;
@@ -403,6 +408,9 @@ export interface PlacementSuccessInfo {
   readonly resourceId: EntityId | null;
   readonly beforeStockApprox: number | null;
   readonly afterStockApprox: number | null;
+  readonly wasteResourceId: EntityId | null;
+  readonly wasteBeforeStockApprox: number | null;
+  readonly wasteAfterStockApprox: number | null;
 }
 
 export interface GridBoardProps {
@@ -542,10 +550,14 @@ export function GridBoard({
       case "place": {
         // [束B/B-4] 成功トースト用に、投入前のコスト資源の在庫を控えておく
         // (`def.cost` が無い施設は resourceId=null のまま=差分を出さない)。
+        // [M63/R4-A14] 廃材代替の内訳も出すため、廃材資源の在庫も併せて控える。
         const costResourceId =
           store.peekContent().facilityDefs.get(action.command.defId)?.cost?.resourceId ?? null;
         const beforeStockApprox =
           costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+        const wasteResourceId = store.peekContent().storage?.wasteResourceId ?? null;
+        const wasteBeforeStockApprox =
+          wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
 
         const result = store.dispatch({ type: "commandApplied", command: action.command });
         // commandApplied を dispatch した直後は DispatchResult.command が
@@ -554,12 +566,19 @@ export function GridBoard({
         if (result.command !== null && result.command.ok && onPlacementSuccess !== undefined) {
           const afterStockApprox =
             costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+          const wasteAfterStockApprox =
+            wasteResourceId === null
+              ? null
+              : resourceStockApprox(store.peekState(), wasteResourceId);
           onPlacementSuccess({
             defId: action.command.defId,
             facilityId: action.command.facilityId,
             resourceId: costResourceId,
             beforeStockApprox,
             afterStockApprox,
+            wasteResourceId,
+            wasteBeforeStockApprox,
+            wasteAfterStockApprox,
           });
         }
         return;
