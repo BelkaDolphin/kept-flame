@@ -1,0 +1,472 @@
+{
+  "task": "M40 — E2 段階 + 台帳v16 必-2 スコープ拡張(消費先接続・外部収入源の再校正・ROI 乖離・研究ペーシング)",
+  "gddRef": [
+    "2.3",
+    "4.2",
+    "5.1",
+    "5.2",
+    "6.7",
+    "8.1",
+    "8.6",
+    "9.2",
+    "11.1",
+    "11.3",
+    "11.4",
+    "12.4",
+    "12.5"
+  ],
+  "roadmapRef": "docs/MVP実装ロードマップ.md M40 行(2026-08-03 拡張・(a)〜(e))",
+  "measuredOn": "2026-08-03",
+  "engineChanged": false,
+  "srcChanged": false,
+  "reproduce": {
+    "economyProbe": "node --experimental-strip-types --import ./tools/tsLoaderRegister.mjs sim/economyProbe.ts sim/output/economy-probe.json",
+    "nightlyGate": "npm run sim:nightly-gate",
+    "creep": "npm run sim:creep",
+    "golden": "npm run golden:check",
+    "semanticsGate": "CONTENT_SEMANTICS_GATE_BASE=<base> npm run content:semantics-gate",
+    "tests": "npm test"
+  },
+
+  "designTargets": {
+    "序盤アクション間隔": {
+      "目標": "第1〜3ゲーム日の『資源で律速されるアクション(建設/増築/開墾)が次に打てるようになるまでの待ち時間』= 中央値 90〜180 tick(実1.5〜3時間)・最大 300 tick(実5時間)以内。1 tick = 1 実分(GDD 11.1)。",
+      "根拠": [
+        "GDD 2.3『1回5〜15分、1日1〜3回』。1日3回(≒8時間間隔=480 tick)で 3〜5 件、1日1回(24時間=1440 tick)で 8〜16 件のアクションが溜まる水準。",
+        "下限を実1.5時間に置くのは、これ以上速くすると GDD 6.7 の保管上限 400 に対して産出が過剰になり、オーバーフロー損失率(GDD 11.4-7c < 15%)を割るため(本タスクの実測 structuralFinding_creepVsOverflow を参照)。",
+        "ユーザー実プレイ報告(2026-08-03)『在庫が増えなさすぎて序盤にやることがなくなる』= かまど Lv1 単独運用だと薪30 に 857 tick(実14時間)。この体感基準の定量化。"
+      ],
+      "実測_before": "中央値 170 tick / 最大 210 tick / 3ゲーム日で 27 件",
+      "実測_after": "中央値 160 tick / 最大 220 tick / 3ゲーム日で 31 件(+15%)",
+      "判定": "**部分達成**。中央値は目標帯(90〜180)に入っているが、改善幅は小さい。かまどの『産出/建設費』比が後述の構造制約で上限に張り付いているため、薪そのもののテンポは content 単独ではこれ以上上げられない(structuralFinding_creepVsOverflow)。改善分は専門資源施設・研究施設の建設費低下による『打てる手の本数』増加(27→31)。"
+    },
+    "研究ペーシング": {
+      "目標": "テック 1 本の研究に最低でも粗粒度 step(coarseTickMinutes = 10 tick)の 3 倍 = 30 tick 以上掛かること(進捗バーが 0→100% を 1 tick で跳ばない = R4-B02 の解消)。かつ E1 の壁テック到達が GDD 5.2 の 0〜3 日目安に収まること。",
+      "根拠": "R4-B02『研究進捗が1tickで0→100%跳躍』。旧値は作業台 80/tick で E1 クリティカルパス 3 本(30+36+43=109点)の合計が **1.37 tick**。建設が 857 tick なのに対し研究だけが 2 桁以上速く、ユーザー報告『研究はE1全部が数ゲーム日で完走』の直接原因。",
+      "実測_before": "作業台 80/tick(115,200/ゲーム日)/ E1 クリティカルパス合計 1.37 tick",
+      "実測_after": "作業台 1.0/tick(1,440/ゲーム日)/ E1 クリティカルパス合計 109 tick(実1.8時間)/ 最安テック(30点)単独 30 tick = 粗粒度 3 step",
+      "判定": "**達成(R4-B02 の跳躍は解消)**。ただし人間プレイヤーの E3 到達は依然 GDD 5.2 の 7〜18 日に遠く届かない(後述 structuralFinding_researchPacing)。"
+    }
+  },
+
+  "changeTable": {
+    "content/facility.json": [
+      {
+        "key": "資源産出 7 種の buildCost.amount",
+        "from": {
+          "hearth": 30,
+          "waterTank": 25,
+          "kitchenGarden": 25,
+          "charcoalKiln": 35,
+          "forge": 25,
+          "foundry": 30,
+          "scriptorium": 25
+        },
+        "to": {
+          "hearth": 30,
+          "waterTank": 18,
+          "kitchenGarden": 6,
+          "charcoalKiln": 30,
+          "forge": 25,
+          "foundry": 6,
+          "scriptorium": 14
+        },
+        "reason": "**クリープ検出の既知例外(台帳v15 必-4・期限 M40)の解除**。`facility/output=resource:resource` グループの 2 メトリクス(`lvCurve[0]/buildCost.amount` と `buildCost.amount`)で、かまどが唯一の外れ値だった(looZ 6.806 / relDev 5.481)。**産出(lvCurve)は 1 bit も変えず、専門資源施設の建設費だけを下げて比をそろえた**のが本タスクの解法。産出を上げる方向(M39 が試した案)は保管上限 400 に対する過剰産出になりオーバーフロー損失率が閾値を割るため採らない(structuralFinding_creepVsOverflow)。",
+        "measured": {
+          "looZ": "6.806 → 2.816(閾値 3)",
+          "relDev": "5.481 → 0.885(閾値 1)",
+          "buildCost.amount グループ": "looZ 3.227 → 1.513 / relDev 0.400 → 0.875"
+        },
+        "sideEffect": "専門資源施設が安くなるので序盤に『打てる手』が増える(3ゲーム日で 27 → 31 件)。産出は据え置きなのでオーバーフロー損失率はほぼ不変(0.1106 → 0.1141)。"
+      },
+      {
+        "key": "資源産出 7 種の lvCurve",
+        "value": "**据え置き(HEAD と 1 bit も同一)**",
+        "reason": "上記のとおり、比の是正は建設費側だけで行った。"
+      },
+      {
+        "key": "資源産出 7 種の upgradeCostCurve",
+        "from": "buildCost × 1.2^n(M39 の整数化どおり)",
+        "to": "同じ規則で新 buildCost から再生成(例: waterTank 18 → [22,26,31,37,45])",
+        "reason": "建設費と増築費の関係(`cost(Lv) = base × 1.2^n`・GDD 11.1)を維持するため。engine は増築費も buildCost.resourceId と同じ資源で払う。"
+      },
+      {
+        "key": "研究産出 3 種の lvCurve(workbench / researchDesk / explorationHq)",
+        "from": [80, 95, 70],
+        "to": [1.0, 1.1875, 0.875],
+        "reason": "**(a) の研究点再校正 = ÷80**。M39 が『桁が資源側と揃っていないのは意図的な暫定』と明記して据え置いた箇所。旧値は最安テック(30点)が 0.375 tick で完了する = 進捗バーが 1 tick で 0→100% に跳ぶ(R4-B02)。新値では 30 tick(粗粒度 3 step)掛かり、建設 1 件(150〜220 tick)と同じ時間帯へ入る。比(80:95:70)は据え置き。",
+        "howChosen": "÷80 は**夜間ゲートが許す最大の減速**として実測で決めた。÷100 まで落とすと gdd-11.4-3-era3-upper が 18 → 19 日で fail(bot が研究施設を無人にする日が実損になるため)。÷80 / ÷60 / ÷40 はいずれも pass 19/fail 0 で、最も遅い ÷80 を採った。"
+      },
+      {
+        "key": "研究産出 3 種の buildCost.amount",
+        "from": { "workbench": 20, "researchDesk": 20, "explorationHq": 40 },
+        "to": { "workbench": 14, "researchDesk": 14, "explorationHq": 28 },
+        "reason": "研究点を 1/80 にすると『研究施設を建てる/増やす』の価値が実質化するため、序盤に手が届く価格へ下げた(GDD 2.3 の開始5分体感)。`facility/output=research` グループのクリープ 2 メトリクスは緑のまま(relDev 0.563 / 1.000・いずれも looZ が閾値未満)。"
+      },
+      {
+        "key": "就労枠 0 の 4 種の lvCurve(bed / warehouse / watchtower / infirmary)",
+        "from": [8, 12, 9, 11],
+        "to": [1.43, 2.5, 2.14, 1.43],
+        "reason": "**挙動は 1 bit も変わらない飾り値の追随**。この 4 種は `output.kind = \"research\"` だが `slots.lv1 = 0` で就労者を割り当てられないため産出は常に 0(GDD 11.1 の Σ担当者寄与 = 0)。しかし**クリープ検出は同じ `facility/output=research` グループとして比較する**ので、研究 3 種だけを ÷80 すると同一グループ内の桁が 80 倍ずれて偽陽性の温床になる。比(lvCurve[0]/buildCost)が研究 3 種と同水準(≒0.07)になるよう合わせた。"
+      }
+    ],
+    "content/outpostType.json": [
+      {
+        "key": "baseSupply / capacityCurve / upkeepFormula(3 タイプ全て)",
+        "from": { "outpostMine": 40, "outpostFarm": 60, "outpostForest": 50 },
+        "to": { "outpostMine": 0.013, "outpostFarm": 0.008, "outpostForest": 0.045 },
+        "reason": "**(a) の拠点供給再校正(R4-A05/A06)**。M39 の 1/3000 再校正が施設産出にしか掛からず拠点が旧スケールで残っていた。実測の非対称は 鉱山 8000 倍 / 農園 15000 倍 / 林 1429 倍(同じ資源を産む施設 Lv1 との比)。新値は『同資源の施設 Lv1 の 1.3〜2.6 倍』= 遠隔地に人を常駐させる不利(維持費・hazard・翳り率)に見合う程度の優位。",
+        "roiPreserved": "**upkeep を同率で縮めたので拠点 ROI は 1 bit も動かない**(鉱山 1.60 / 農園 3.16 / 林 2.22 のまま)。GDD 11.4-7a の閾値が未定(unverifiable)なので、判定条件を動かさずに尺度だけ合わせる形にした。",
+        "note": "sim の content バンドル(`conformance/scenarios.ts` の `loadLiveRawContentBundle`)は outpostType を読まないため、夜間ゲートの数値には一切影響しない(11.4-7a は『outpostType 定義数 0』で unverifiable のまま)。実ゲーム(src/main.tsx 経路)だけが読む値であり、R4-A05 の『穀物が 76,980 まで増える』はこの値が原因だった。"
+      }
+    ],
+    "sim/creep.ts": [
+      {
+        "key": "KNOWN_CREEP_SUPPRESSIONS",
+        "from": "1 件(hearth / lvCurve[0]/buildCost.amount / 期限 M40)",
+        "to": "**空**",
+        "reason": "上記の建設費是正で外れ値でなくなったため解除。`sim:creep` は『外れ値 0 件 / suppressed 0 件 / 消し忘れ 0 件』。閾値(Z 3.0 / relDev 1.0)は 1 段も動かしていない。"
+      }
+    ],
+    "tests": [
+      {
+        "files": ["tests/schema/engineContentOutpost.test.ts"],
+        "reason": "実 content の outpost 数値を期待値に焼いていた 1 件の更新。**判定条件は変えず値だけ差し替え**、変更理由(ROI 不変であること)をコメントで残した。"
+      }
+    ],
+    "sim/economyProbe.ts": [
+      {
+        "key": "新規追加(計測ツール)",
+        "reason": "M40 の 6 つの問い(施設の経済性 / 序盤アクション間隔 / 研究ペーシング / 探索 ROI のモデル vs 実結果 / 拠点供給 vs 施設産出 / 資源別会計とオーバーフローのピーク走査)を 1 コマンドで再現するため。Math.random / Date.now / performance.now を使わない決定論ツール。"
+      }
+    ]
+  },
+
+  "gateResults": {
+    "npm test": "**2979 passed / 0 failed(144 ファイル全 pass)**",
+    "npm run typecheck": "pass(`npm run conformance:gen-harness-data` 後)",
+    "npm run lint": "pass",
+    "npm run format": "pass",
+    "npm run golden:check": "**golden vector 77 本、差分なし**",
+    "npm run content:semantics-gate": "OK(additive 意味論違反なし・新規ID 0 件 / 新規tombstone 0 件)",
+    "npm run sim:creep": "**外れ値 0 件 / suppressed(既知) 0 件 / 消し忘れ 0 件**",
+    "npm run sim:nightly-gate": "**pass 19 / fail 0 / unverifiable 6 / structural fail 0**(M39+台帳v15 完了時と同値)"
+  },
+
+  "nightlyGateBeforeAfter": {
+    "before": {
+      "pass": 19,
+      "fail": 0,
+      "unverifiable": 6,
+      "structuralFail": 0,
+      "source": "本 worktree で HEAD(f06e5f0)を実走して再現"
+    },
+    "after": { "pass": 19, "fail": 0, "unverifiable": 6, "structuralFail": 0 },
+    "perAssert": [
+      { "id": "gdd-11.4-1", "before": "15 run", "after": "15 run", "verdict": "pass → pass" },
+      {
+        "id": "gdd-11.4-2a",
+        "before": "4500 raw",
+        "after": "4500 raw",
+        "verdict": "pass → pass(不変)"
+      },
+      {
+        "id": "gdd-11.4-2a-strict",
+        "before": "900‰",
+        "after": "900‰",
+        "verdict": "unverifiable(不変)"
+      },
+      { "id": "gdd-11.4-2b", "before": "0 件", "after": "0 件", "verdict": "pass → pass" },
+      {
+        "id": "gdd-11.4-3-era1",
+        "before": "1 日",
+        "after": "1 日",
+        "verdict": "unverifiable(GDD にレンジ無し)"
+      },
+      {
+        "id": "gdd-11.4-3-era2",
+        "before": "9 日",
+        "after": "9 日",
+        "verdict": "unverifiable(同上)"
+      },
+      {
+        "id": "gdd-11.4-3-era3-lower",
+        "before": 7,
+        "after": 7,
+        "threshold": ">= 7",
+        "verdict": "pass → pass"
+      },
+      {
+        "id": "gdd-11.4-3-era3-upper",
+        "before": 18,
+        "after": 18,
+        "threshold": "<= 18",
+        "verdict": "pass → pass(**上限ちょうど・余裕ゼロ**)"
+      },
+      { "id": "gdd-11.4-4", "before": 152187, "after": 152187, "verdict": "pass → pass" },
+      { "id": "gdd-11.4-5", "before": "5 digest", "after": "5 digest", "verdict": "pass → pass" },
+      { "id": "gdd-11.4-6a", "before": 1, "after": 1, "verdict": "pass → pass" },
+      { "id": "gdd-11.4-6b", "before": "12 段", "after": "12 段", "verdict": "pass → pass" },
+      { "id": "gdd-11.4-6c", "before": "84 点", "after": "84 点", "verdict": "pass → pass" },
+      { "id": "gdd-11.4-6d", "before": "15 周", "after": "15 周", "verdict": "pass → pass" },
+      {
+        "id": "gdd-11.4-7a",
+        "before": "outpostType 定義数 0",
+        "after": "同左",
+        "verdict": "unverifiable(sim が outpostType を読まないため。実ゲームでは再校正済み)"
+      },
+      {
+        "id": "gdd-11.4-7b",
+        "before": "near=0.357 far=0.000 deep=0.209",
+        "after": "同左",
+        "verdict": "unverifiable(閾値未定・数値も不変)"
+      },
+      {
+        "id": "gdd-11.4-7c",
+        "before": 0.110607,
+        "after": 0.114101,
+        "threshold": "< 0.15",
+        "verdict": "pass → pass(+0.0035。専門施設が安くなり bot が建てる本数が増えたぶん)"
+      },
+      {
+        "id": "gdd-11.4-7d",
+        "before": "1000‰",
+        "after": "1000‰",
+        "verdict": "unverifiable(窓 N も閾値も GDD 未定義)"
+      },
+      {
+        "id": "gdd-11.4-8a",
+        "before": 2.50625,
+        "after": 2.50625,
+        "verdict": "pass → pass(縮約盤面は content 非依存の部分なので不変)"
+      },
+      {
+        "id": "gdd-11.4-8b",
+        "before": 2.661389,
+        "after": 2.668627,
+        "range": [1, 3],
+        "verdict": "pass → pass"
+      },
+      { "id": "gdd-11.4-9", "before": "余裕 2 人", "after": "余裕 2 人", "verdict": "pass → pass" },
+      {
+        "id": "gdd-11.4-10",
+        "before": "166 回",
+        "after": "166 回",
+        "verdict": "pass → pass(event.json 無変更なので不変)"
+      },
+      { "id": "gdd-11.4-11a", "before": "42 人", "after": "42 人", "verdict": "pass → pass" },
+      { "id": "gdd-11.4-11b", "before": "2e7 raw", "after": "2e7 raw", "verdict": "pass → pass" },
+      { "id": "gdd-11.6", "before": "6 bot", "after": "6 bot", "verdict": "pass → pass" }
+    ]
+  },
+
+  "beforeAfterMeasurements": {
+    "序盤アクション間隔(貪欲プレイヤー・3ゲーム日)": {
+      "before": {
+        "medianGapTicks": 170,
+        "maxGapTicks": 210,
+        "resourceGatedActions": 27,
+        "firstDayActions": 12
+      },
+      "after": {
+        "medianGapTicks": 160,
+        "maxGapTicks": 220,
+        "resourceGatedActions": 31,
+        "firstDayActions": 12
+      }
+    },
+    "研究": {
+      "before": { "startingRatePerTick": 80, "e1CriticalPathTicks": 1.37 },
+      "after": { "startingRatePerTick": 1.0, "e1CriticalPathTicks": 109 }
+    },
+    "拠点供給 / 同資源の施設産出レート比": {
+      "before": { "outpostMine": 8000, "outpostFarm": 15000, "outpostForest": 1428.6 },
+      "after": { "outpostMine": 2.6, "outpostFarm": 2.0, "outpostForest": 1.3 }
+    },
+    "資源施設の lvCurve[0]/buildCost.amount(クリープ検出のメトリクス)": {
+      "before": {
+        "hearth": 0.00116667,
+        "waterTank": 0.00048,
+        "scriptorium": 0.00032,
+        "forge": 0.0002,
+        "kitchenGarden": 0.00016,
+        "charcoalKiln": 0.00014286,
+        "foundry": 0.00013333
+      },
+      "after": {
+        "hearth": 0.00116667,
+        "waterTank": 0.00066667,
+        "scriptorium": 0.00057143,
+        "kitchenGarden": 0.00066667,
+        "foundry": 0.00066667,
+        "forge": 0.0002,
+        "charcoalKiln": 0.00016667
+      }
+    },
+    "オーバーフロー損失率(40 ゲーム日 run の最終値)": {
+      "before": {
+        "greedy": 0.0533,
+        "researchFirst": 0.0322,
+        "explorationFirst": 0.0653,
+        "placementVariant": 0.0578,
+        "codifyFirst": 0.0109
+      },
+      "after": {
+        "greedy": 0.0567,
+        "researchFirst": 0.0363,
+        "explorationFirst": 0.0699,
+        "placementVariant": 0.0614,
+        "codifyFirst": 0.0108
+      }
+    }
+  },
+
+  "structuralFinding_consumptionSinks": {
+    "headline": "**入口必須タスク『消費先の無い資源の消費先接続』は content の additive 規約では実行不能**(機械判定で reject される)",
+    "evidence": [
+      "engine の建設/増築コストは `facility.buildCost` の**単一資源**のみ(`upgradeCostCurve` も同じ資源で払う・schema/facility.ts §[M50])。content 側で消費先を作る手段は『既存施設の buildCost.resourceId を張り替える』か『新しい施設を additive 追加する』の 2 つしかない。",
+      "**張り替えは reject される**: 実際に forge→charcoal / scriptorium→clay / explorationHq→paper / watchtower→copper / infirmary→grain の 5 件を実装して `npm run content:semantics-gate` に掛けたところ、5 件すべてが『既存 ID が数値以外のフィールドで変化している(paths: $.buildCost.resourceId)』で reject。GDD 12.4/12.5-2 の additive 意味論(数値のみ変更可)に反する。",
+      "**新施設の追加も採れない**: GDD 6.1 は施設を 14 種と明記しており 15 種目は GDD 改訂(ユーザー承認)が要る。加えて表示名テーブルは `src/ui/screens/contentLabels.ts`(= 本タスクの変更禁止領域)にあり、追加しても UI では英字 ID が出る。",
+      "content 内に残る消費先レバーは『数値』だけ = `reclaim.baseCost`/`costCap`(薪)・`recordMedia.baseCost`(粘土/紙)であり、**木炭・銅・穀物には 1 つも作れない**。"
+    ],
+    "measuredImpact": "40 ゲーム日の貪欲 run で木炭 231 / 銅 0 / 穀物 184 が積まれるだけで 1 単位も消費されない(HEAD 実測)。M39 の記述どおり。",
+    "recommendation": {
+      "案A(推奨・最小)": "engine + schema を拡張して **`buildCost` を複数資源の配列にする**(`buildCost: [{resourceId, amount}, …]`)。既存の単一オブジェクト形も読み続ける(後方互換)。これで『高炉は鉄 30 + 木炭 20』のような跨時代需要(GDD 11.3『前時代資源に持続的出口』)を content だけで書けるようになる。engine 3 ファイル(commands.ts の payFacilityCost / rules/types.ts / schema/facility.ts)+ golden 再生成(既存 content が単一資源のままなら golden は動かない見込み)。規模見積り 250k。",
+      "案B": "`upgradeCostCurve` の支払い資源を `buildCost.resourceId` から分離する(`upgradeCostResourceId` を additive 追加)。案A より小さいが、『建設は薪・増築は木炭』しか表現できず GDD 11.3 の複合需要には届かない。規模見積り 120k。",
+      "案C(裁定のみ・実装ゼロ)": "content-semantics-gate に『buildCost.resourceId の張り替えは M39〜M41 のバランス調整段に限り許可する』という名前つき例外を入れる。ゲートを緩める判断なので**推奨しない**(ゲートの存在意義そのものを削る)。"
+    },
+    "creepSuppressionへの影響": "既知例外の解除自体は**消費先接続なしで達成できた**(産出ではなく建設費を動かす解法)。ただし『消費先が無いから産出を上げられない』という M39 の構造制約は残っており、下記 structuralFinding_creepVsOverflow が正本。"
+  },
+
+  "structuralFinding_creepVsOverflow": {
+    "headline": "**かまどの『産出/建設費』比 = 序盤テンポの上限は、クリープ検出 × 保管上限 400 × 消費先不在の 3 者で構造的に固定される**",
+    "derivation": [
+      "クリープ検出は同一グループ内で `x > 2 × (自分を除く中央値)` を relDev > 1 として拾う(実測で確認: relDev = |x − loo中央値| / loo中央値)。2 メトリクスに同時に掛かるので、かまどについて次の 2 式が同時に要る:",
+      "  (1) 建設費: c_h <= 2 × median(他6種の建設費)",
+      "  (2) 比:     v_h / c_h <= 2 × median(他6種の v/c)",
+      "(1)(2) を合成すると **v_h <= 4 × median(他6種の産出レート)**。かまどの産出は『他 6 種の産出中央値の 4 倍』を超えられない。",
+      "一方 GDD 6.7 の保管上限 400 と『木炭・銅・穀物に消費先が無い』ことから、消費先の無い資源は 40 ゲーム日で 400 を超えない水準 = **概ね 0.0087/tick 以下**でなければオーバーフロー損失率(GDD 11.4-7c < 15%)を割る。",
+      "したがって v_h <= 4 × 0.0087 ≒ **0.035/tick** —— **現行値がちょうどこの上限**である。"
+    ],
+    "実験ログ": [
+      "専門 6 種の産出を平均 0.0063 → 0.0075 へ上げ、かまどを 0.024/建設費18 へ落とした構成: クリープ緑・**オーバーフロー損失率 0.198(fail)**。",
+      "同 0.011 前後まで上げた構成: **0.354(fail)**。M39 が『2 倍で 0.310』と記録したのと同じ壁。",
+      "かまどの産出を下げると薪収入が減り、bot が寝床を建てられず人口が 8 → 6 に落ち、研究施設が無人になる日が 1 → 12 日に増えて **E3 到達が 16 → 23 日(fail)**。薪経済はゲート全体の律速。"
+    ],
+    "結論": "**序盤テンポの本格的な改善は content 単独では不可能**。解くには (i) 消費先接続(= 上記 structuralFinding_consumptionSinks の engine 拡張)で専門資源の産出上限を外す、または (ii) クリープ検出のグループ分けを『資源の用途クラス』で分ける(sim/creep.ts・M39 の option (c))のどちらかが要る。**(i) が本筋**(クリープ検出は正しく非対称を検出しているのであって、偽陽性ではなくなる)。"
+  },
+
+  "structuralFinding_researchPacing": {
+    "headline": "**研究ペーシング機構は engine 側に必要**(M40 ロードマップ行『E3 レンジ狭化のための研究ペーシング機構の要否を再訪』への回答 = **要る**)",
+    "measurement": [
+      "研究点を ÷80 まで落としても、**人間プレイヤーの E3 到達は研究点だけで決まり ≒ 971 点 / レート**。作業台 1 棟(1.0/tick)なら 971 tick = 実 16 時間、研究施設 3 棟なら 5〜6 時間。GDD 5.2 の『E3 = 7〜18 日』に 20〜70 倍足りない。",
+      "GDD 5.2 のレンジまで落とす(必要レート ≒ 0.067/tick)と、夜間ゲートの bot は 1 テックに 2〜9 ゲーム日掛かるようになり E3 上限 assert が壊滅する(M39 が 1/1600 で 7〜27 日を実測済み)。",
+      "bot 側の E3 到達日は『研究点』ではなく『bot が踏むテック本数 × 1 日』で決まる(researchFirst 7 本 = 7 日 / greedy 16〜19 本 = 15〜18 日)。この cadence を sim 側で外して研究点律速にすると、戦略間の研究レート差(3.1 倍)と踏破本数差(2.29 倍)が積になり **比 5.6 倍** へ広がる = [7,18](比 2.57)には絶対に収まらない。",
+      "**tech.fieldRequirement の『該当レシピを N 回稼働』は engine 未実装**(rules/types.ts に明記)。GDD 5.2 が想定する第 2 のゲートが効いていないため、研究は純粋に点だけで律速される。"
+    ],
+    "recommendation": {
+      "案A(推奨)": "**`tech.fieldRequirement.recipe/count` を engine で実装する**。研究点が溜まっても『実地要件 N 回稼働』を満たすまで解禁しない = 研究の律速を『点』から『盤面の稼働実績』へ移す。盤面稼働は戦略によらず時間に比例するので戦略間の分散が縮み、E3 レンジ狭化([7,18] → [8,16])の本命になる。engine + schema + golden 再生成 + algoVersion 判定。規模見積り 350k。",
+      "案B": "era ごとに研究点の**流入上限**(1 ゲーム日あたりの受け入れ量)を balance へ additive 追加し、engine が clamp する。実装は小さい(engine 1 ファイル + schema)が、上限に張り付いた瞬間に『研究施設を増やす意味がゼロ』になり配置パズル(GDD 6.x)と衝突する。規模見積り 150k。",
+      "案C": "GDD 5.2 / 11.4-3 の E3 レンジを『人間プレイヤー基準』ではなく『bot の踏破本数基準』であると明記し、人間の到達日は別指標にする(裁定のみ・実装ゼロ)。"
+    },
+    "M40での処置": "研究点は**夜間ゲートが許す最大の減速(÷80)**まで落として R4-B02(1 tick 跳躍)を潰した。E3 レンジ狭化そのものは engine 待ちとして M41 へ送る。"
+  },
+
+  "structuralFinding_explorationRoiDivergence": {
+    "headline": "**R4-A08(派遣前 ROI の 5 倍乖離)の原因は報酬ではなく『ROI モデルと実解決が別々のパラメータを読んでいる』こと**。content 単独では修正しても夜間ゲートを壊す。",
+    "rootCause": [
+      "派遣前 ROI(`rules/exploration.ts` の `explorationRoi`)は **`balance.exploration.bands.*`** の difficulty / rollRange / nodeCount を読む。",
+      "実際の派遣結果(`buildDispatchSnapshot`)は、目的地が event を指していれば **`content/event.json` の各ノードの difficulty / R / statWeights** を読み、ノード数も event の本数になる(band 値は報酬単価 `rewardPerNode` と負傷量にしか使われない)。",
+      "両者の尺度が食い違っている: near 帯は band が difficulty 135〜225(中点180)/ R 90 / ノード 3〜4 なのに対し、event 実体は difficulty 90〜100 / R 30〜35 / ノード 4。far は band 160〜260・R110 vs event 110〜150・R35〜45。deep は band 200〜268・R140 vs event 130〜170・R40〜55。",
+      "実測(新規プローブ `sim/economyProbe.ts`): near・2名編成でモデル期待報酬 34.15 に対し実結果 175.5 = **5.14 倍**。R4-A08 の『期待35.46/実際175』と一致。3〜4 名では 1.17 / 1.11 倍まで縮むので、**乖離は小編成でのみ顕在化する**。"
+    ],
+    "whyNotFixedInM40": [
+      "モデルを event 側へ合わせる(band difficulty を 90〜100 等へ下げる)と、3 名新人の成功確率が 1.0 になり **全滅確率 = wipeBaseP × (1 − P) が 0** になる。GDD 8.6 の核心フック『(B)保持者を派遣すると損失項で ROI が下がる』が数値上ゼロになり、`tests/engine/exploration.test.ts` の該当 assert が**実質的に**落ちる(期待値の更新では直せない設計上の後退)。",
+      "逆に event 側をモデルへ合わせる(node difficulty を near +50 / far +20 / deep +10 する)と GDD 8.1⑤『1〜2名は全帯で成功率0』と GDD 8.6『新人3〜4名で ROI 1.2〜2.0』が**両方**成立する(実測: モデル/実結果比 0.98・ROI 1.66〜1.82(3名)/ 1.25〜1.36(4名))。ただし夜間ゲートの bot は teamSize=2 で派遣するため全派遣が全失敗になり **gdd-11.4-2a が structural fail**。bot を teamSize=3(= GDD 8.1⑤ の校正点『新人3〜4名』)へ直すと fail は消えるが、代わりに **E3 上限が 18 → 20 日**・オーバーフロー損失率が 0.111 → 0.193 へ悪化して 2 件 fail。",
+      "したがって『検収条件: balance fail を悪化させない』を満たしたまま M40 で着地させることができない。**content/event.json と balance.exploration は HEAD のまま据え置いた**。"
+    ],
+    "recommendation": "M41 で **(1) event.json の node difficulty を near +50 / far +20 / deep +10、(2) balance.exploration.bands を near{4,4,120,170,R33,W33} / far{5,5,125,185,R43,W60} / deep{5,6,130,200,R53,W100}、(3) sim の bot 派遣人数 2 → 3(GDD 8.1⑤ の校正点に合わせる)** を**同時に**入れる。E3 上限が 2 日ぶん延びるので、structuralFinding_researchPacing の案A(実地要件の実装)による E3 レンジ再設計とセットで裁定に掛けるのが安全。数値と実測は本 JSON の `explorationRecalibrationCandidate` に保存してある。",
+    "explorationRecalibrationCandidate": {
+      "balance.exploration.bands.near": {
+        "nodeCountMin": 4,
+        "nodeCountMax": 4,
+        "difficultyMin": 120,
+        "difficultyMax": 170,
+        "rollRange": 33,
+        "rewardPerNode": 33
+      },
+      "balance.exploration.bands.far": {
+        "nodeCountMin": 5,
+        "nodeCountMax": 5,
+        "difficultyMin": 125,
+        "difficultyMax": 185,
+        "rollRange": 43,
+        "rewardPerNode": 60
+      },
+      "balance.exploration.bands.deep": {
+        "nodeCountMin": 5,
+        "nodeCountMax": 6,
+        "difficultyMin": 130,
+        "difficultyMax": 200,
+        "rollRange": 53,
+        "rewardPerNode": 100
+      },
+      "content/event.json": "全ノードの difficulty を band 別に near +50 / far +20 / deep +10(50 ノード)",
+      "sim/strategy/bots.ts": "5 bot すべての dispatch.teamSize を 2 → 3",
+      "実測(この構成での夜間ゲート)": "pass 17 / fail 2(gdd-11.4-3-era3-upper = 20 日 / gdd-11.4-7c = 0.193)・structural fail 0"
+    }
+  },
+
+  "engineJudgementItem_outpostStorageCap": {
+    "title": "(b) 衛星拠点の供給が保管上限を無視する非対称(R4-A05)— **engine 判定事項・台帳v17 用**",
+    "現状": "`src/engine/rules/outpost.ts` の `applyOutpostSupply` が『保管上限/オーバーフロー会計(GDD 6.7・rules/storage.ts)は通さない(素直に加算するだけ)』と**意図的な簡略化として doc に明記**したまま scheduler 段80 に結線されている(M25 の判断)。一方 `rules/production.ts` の本拠生産は `resolveCapacityByResourceId` を通す。結果、拠点を建てた資源だけが上限を素通りする(実測: 穀物 76,980)。",
+    "推奨案": {
+      "採用推奨": "**案1: 拠点供給も `applyGainWithCapacity` を通す(本拠生産と同じ会計)**",
+      "案1_詳細": "`applyOutpostSupply` を `applyProduction` と同じ形に書き換える。すなわち (a) `resolveCapacityByResourceId` で上限を引き、(b) `applyGainWithCapacity(resource, gain, capacity, wasteRatio)` を呼び、(c) `writeCapacityOutcome` で `cumulativeProduced` / `cumulativeOverflow` / 廃材を書き戻す。分割不変性は storage.ts §2(a)(b) の規約(正の産出のみクランプ・廃材は累計超過の差分)をそのまま使えば保たれる —— 拠点供給も『区間内でレート一定の閉形式』なので `applyProduction` と同じ前提を満たす。",
+      "案1_engine影響": {
+        "変更ファイル": "`src/engine/rules/outpost.ts` 1 ファイル(+ scheduler.ts の呼び出し引数に content を渡す 1 行)",
+        "algoVersion": "**bump 必要**。観測可能挙動(在庫の推移)が変わる。ADR-016(3) の『golden 変化 ⟺ algoVersion bump』の必要十分条件に該当する。",
+        "golden波及": "**現行 golden 77 本のうち拠点を持つシナリオだけが動く**。`conformance/content-snapshot/` には outpostType が無く、拠点 entity を置くのは patch 付きシナリオ(sc38-out-supply 系)のみ。それ以外の 70 本超は `rates.resourceRateByResourceId.size === 0` の早期 return で 1 bit も動かない見込み(要実測)。",
+        "ADR-016(3)整合": "content-snapshot 凍結方式は『content 変更が golden を動かさない』ための機構であり、**engine 変更による golden 変化はこれとは別系統**で、従来どおり再生成 + bump が必要。スナップショットの更新は不要。",
+        "ADR-025影響": "algoVersion bump は sunset 機構(旧セーブを凍結ビルドへ退役)を起動する。M40 時点でプレイテスト用セーブしか存在しないなら実害は無いが、ユーザー裁定事項。"
+      },
+      "案2": "拠点供給を『会計は通さないが上限クランプだけ掛ける』= `applyOverflowPolicy`(GDD 12.1 の一括入荷用・会計を触らない純関数)を使う。探索報酬(GDD 8.1 裁定⑥)と同じ扱いになり、オーバーフロー損失率(11.4-7c)の分母を膨らませない。**algoVersion bump は同じく必要**だが、11.4-7c の意味が変わらないぶん再校正の波及が小さい。",
+      "案3(実装ゼロ)": "『拠点供給は上限を無視する』を GDD 9.2 の仕様として明文化する。拠点網が『倉庫を建てなくても無限に貯まる裏口』になるため**推奨しない**(GDD 6.7 のオーバーフロー設計と正面から衝突する)。"
+    },
+    "統率者への論点": "案1(会計込み)と案2(クランプのみ)の差は『拠点供給ぶんをオーバーフロー損失率の分母に入れるか』。GDD 11.4-7c は『オーバーフロー損失率 < 15%』を経済健全性の指標としているので、**拠点を建てるほど分母が増えて損失率が下がる案1 のほうが指標として素直**。ただし拠点が sim に載っていない現状(11.4-7a が unverifiable)では、どちらでも夜間ゲートの数値は動かない。"
+  },
+
+  "taskAssignmentRulings": {
+    "⑨新周回の粘土0": {
+      "層": "**engine(src/newGame.ts → src/engine/rules/worldGen.ts への移設)**",
+      "根拠": "石板 1 枚ぶんの粘土付与は `src/newGame.ts` の末尾ブロック(`recordMedia.baseCost × stoneTablet.costMul` を `ensureResourceFloor`)にしかない。大移動後の新周回が通る `worldGen.placeStartingFacilities` は `ensureProducibleResourceEntities` / `ensureWasteResourceEntity` / `placeHearthAndWorkbench` / `ensureReclaimFloor` の 4 つだけで、粘土の下限保証を持たない(本タスクで実コードを確認)。content 側では `exodus.startingStockResourceId` が単一資源しか取れないので埋められない。",
+      "規模と推奨担当": "engine 1 ファイル + テスト 1〜2 件。**Sonnet で十分**。90k。修正形は『newGame.ts の粘土ブロックを worldGen.placeStartingFacilities へ移す』(初回起動と新周回が同じ生成器を通すという M53 の設計意図どおり)。golden 波及は『conformance シナリオが recordMedia を持つか』次第で、持たない縮約 content では不活性 = 波及ゼロの見込み。"
+    },
+    "⑪想起ガードが実 run で不発": {
+      "層": "**engine + content(balance への additive 追加を engine が読む)**",
+      "根拠": "ガード条件は『士気 < 40 の唯一保持者』。士気の初期値 60 は `src/newGame.ts` のリテラル、漂着者は engine 定数、下げる経路は `rules/bond.ts` の伴侶喪失ペナルティのみ。**content には士気を動かす係数が 1 つも無い**(balance.json 全走査で確認)。したがって content 単独では永久に発火しない。",
+      "規模と推奨担当": "**Opus**。200k。GDD 7 の士気モデル(過酷業務・派遣・想起困難発生そのものによる士気ペナルティと回復)を実装する仕事であり、想起困難頻度(11.4-8a/8b)と ROI((B)喪失)に同時に効く。設計判断が多いので Opus。第 1 段として『balance.townParams へ moraleInitial / moraleDecayPerHarshWorkDay / moraleRecoveryPerRestDay を additive 追加 + engine が読む』だけなら Sonnet + 120k でも可。"
+    },
+    "⑦見張り台・療養所の効果実装": {
+      "層": "**schema + engine(新システム 2 本)**",
+      "根拠": "寝床(bedCapacityByLevel)と保管庫(storage)は結線済みだが、見張り台の襲撃防御と療養所の負傷回復は engine 側にシステムが無く、facility スキーマに該当フィールドも無い。**さらに本タスクで判明した優先度の根拠**: 木炭・銅・穀物の消費先を作るとき、素直な受け皿になるのは見張り台(銅)と療養所(穀物/薬草)だが、どちらも『建てても効果ゼロの枠』なので**偽の需要にしかならない**。消費先接続(structuralFinding_consumptionSinks)を本気でやるなら ⑦ が前提になる。",
+      "規模と推奨担当": "**Opus**。300k。襲撃(GDD 11.1 の戦闘式)と負傷回復(GDD 11.2 の療養所で休養1日)の 2 システム + schema 拡張 + golden 再生成 + algoVersion bump。暫定処置として『効果未実装であることを UI で開示する』は修正束 G(Sonnet・30k)で先に出せる。"
+    }
+  },
+
+  "answers": {
+    "(a) 外部収入源3系統の再校正": "**拠点供給と研究点は実施**(上記 changeTable)。**探索報酬は再校正不要と判明** —— M39 が rewardPerNode を 1500/3000/5500 → 45/90/165 へ、forgoneOutputPerWorkerTick を 1 → 0.03 へ既に 400 スケールへ合わせており、ROI(= 報酬/逸失生産)は新人3〜4名で 1.61〜2.29 と GDD 8.6 のレンジ内。R4-A06 の『探索報酬が旧スケールのまま』は誤認で、実体は (c) の ROI 表示乖離。",
+    "(b) 保管上限×拠点供給の非対称": "**実装せず。engine 判定事項として推奨案を上記 engineJudgementItem_outpostStorageCap に記載**(案1 = 本拠生産と同じ会計を通す・algoVersion bump 必要・golden は拠点シナリオのみ波及)。",
+    "(c) 派遣前ROI表示の5倍乖離": "**原因を特定したが M40 では着地させなかった**(上記 structuralFinding_explorationRoiDivergence)。報酬再校正では直らない(原因は band パラメータと event テーブルの尺度違い)。修正案・実測つきで M41 へ送る。",
+    "(d) 初期寝床0で晴天漂着経路が閉じる(R4-A15)": "**engine(src)変更が必要 = 実装せず推奨案**。開始施設の設置は `src/engine/rules/worldGen.ts` の `placeHearthAndWorkbench` にハードコードされた 2 定数(`HEARTH_DEF_ID` / `WORKBENCH_DEF_ID`)で決まり、**content には初期配置を書く先が 1 つも無い**(facility.json にも balance.json にもフラグが無いことを確認)。推奨案: worldGen に `BED_DEF_ID` を足して 3 棟目として置く(寝床は slots 0 なので就労割り当ては不要・置くセルは上2行の残りセル)。これで開始時 6/3 表示になり漂着経路も開く。engine 1 ファイル + golden 再生成(縮約 content は bed 定義を持たないので不活性 = 波及ゼロの見込み)。規模 90k。⑨と**同じファイル・同じ関数**なので 1 タスクに束ねるのが効率的。",
+    "(e) 研究進捗の1tick跳躍(R4-B02)": "**研究点再校正で解消する — ただし『自然解消』ではなく、夜間ゲートが許す上限まで落として初めて解消する**。÷80 で最安テック(30点)が 30 tick = 粗粒度 3 step になり進捗が段階表示される。なお R4-B02 の後半『100%到達後も数ゲーム分 40.0/40.0 のまま解禁されず静止して見える』は**別原因**(完了判定の tick と表示の同期)であり、再校正では直らない。修正束 G の表示側課題として送る。"
+  },
+
+  "carryOver": [
+    "**E3 上限 assert(gdd-11.4-3-era3-upper)は 18 日ちょうどで余裕ゼロ**。以後どんな減速も即 fail する。M41 で研究ペーシング機構を入れる際は、レンジそのものの再設計(GDD 11.4-3)を同時に裁定に掛けること。",
+    "`facility/output=research` グループには**産出 0 の飾り値**(寝床/保管庫/見張り台/療養所)が 4 件混ざっており、クリープ検出の統計を汚している。⑦(効果実装)で本物の値が入るまでは、比を手で揃え続ける必要がある。恒久策は sim/creep.ts のグループ分けを『就労枠 > 0』で絞ること(sim 変更・30k)。",
+    "`gdd-11.4-7c`(オーバーフロー損失率)のピークは explorationFirst/nightly-c の 0.114。閾値 0.15 まで 0.036 しか余裕が無い。専門資源施設を安くするとこの値が上がる(今回 +0.0035)ので、消費先接続が入るまでは建設費をこれ以上下げられない。",
+    "拠点(outpostType)は sim の content バンドルに載っていないため、拠点まわりの再校正は**夜間ゲートで一切検証できない**(11.4-7a が恒久 unverifiable)。`conformance/scenarios.ts` の `loadLiveRawContentBundle` に outpostType を足し、bot に拠点建設を実装するのが解消条件(sim 変更・150k)。",
+    "`npm run typecheck` は `npm run conformance:gen-harness-data` を先に走らせないと `conformance/harnessData.json` 不在で落ちる(生成物が git 管理外)。CI では conformance:build が先行するので実害は無いが、ローカル検収の手順として明記しておく。"
+  ]
+}

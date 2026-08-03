@@ -15,9 +15,28 @@
   ],
   "scores": {
     "A_task": 1.58,
-    "A_task_detail": { "T1": 2, "T2": 1, "T3": 2, "T4": 2, "T5": 2, "T6": 2, "T7": 1, "T8": 2, "T9": 1, "T10": 2, "T11": 1, "T12": 1 },
+    "A_task_detail": {
+      "T1": 2,
+      "T2": 1,
+      "T3": 2,
+      "T4": 2,
+      "T5": 2,
+      "T6": 2,
+      "T7": 1,
+      "T8": 2,
+      "T9": 1,
+      "T10": 2,
+      "T11": 1,
+      "T12": 1
+    },
     "C_heuristics": 1.94,
-    "C_groupAverages": { "home_hud": 1.9, "base": 1.8, "research_codify": 2.0, "expedition": 2.0, "cycle_settings": 2.0 },
+    "C_groupAverages": {
+      "home_hud": 1.9,
+      "base": 1.8,
+      "research_codify": 2.0,
+      "expedition": 2.0,
+      "cycle_settings": 2.0
+    },
     "D_wording": "4/5 pass(D5のみfail=0/分表示+上限警告不在)",
     "E_layout": "E1/E2/E3/E6 pass・E5=12/13画面0px(grid画面のみ27-28px重なり=R4-E01)・E4は単一ズーム段の目視のみ(unmeasured)"
   },
@@ -36,8 +55,16 @@
     "C_heuristics": "1.90→1.94(悪化セル0だがmajor 2件が内訳に混入)",
     "D_wording": "5/5→4/5(悪化・同根)。R3-D07(増築/開墾トースト)は実発火確認で解消",
     "E_layout": "6/6→実質同水準(R4-E01は検出範囲拡大による新発見)",
-    "resolved": ["R2-FC5(成文化セレクタ)", "R2-FC10(2×2プレビュー)", "R3-D07(増築/開墾トースト実発火)"],
-    "recurred": ["R4-A09=R2-FC2(操作トリガセーブ不発・要一次特定)", "R4-A10=R2-FC8(継承点35<最安50・2ラウンド連続到達不能)", "R4-A11=R2-FC7(新周回粘土0・M40⑨で対応予定)"]
+    "resolved": [
+      "R2-FC5(成文化セレクタ)",
+      "R2-FC10(2×2プレビュー)",
+      "R3-D07(増築/開墾トースト実発火)"
+    ],
+    "recurred": [
+      "R4-A09=R2-FC2(操作トリガセーブ不発・要一次特定)",
+      "R4-A10=R2-FC8(継承点35<最安50・2ラウンド連続到達不能)",
+      "R4-A11=R2-FC7(新周回粘土0・M40⑨で対応予定)"
+    ]
   },
   "structuralFindings_400scale": [
     "M39の再校正が施設産出のみに掛かり、外部収入源が旧スケールのまま残る三重非対称: (a)拠点供給60/分 vs 菜園0.004/分(1.5万倍) (b)探索報酬1回175薪 vs かまど1日約50薪 (c)研究点80〜95/分でE1全8техが数ゲーム分・建物1棟に約430ゲーム分",
@@ -45,23 +72,142 @@
     "廃材の建設/増築/成文化コスト代替消費(最大20%)が無説明(表示35薪→実消費 薪28+廃材7・トーストは薪のみ)"
   ],
   "findings": [
-    { "id": "R4-A01", "severity": "fatal", "axis": "A/B", "screen": "grid/facility", "summary": "保管庫の効果文言が加算方式に未追従の虚偽表示(「設定」表記+逆情報の在庫超過警告)。実測=基礎400+Lv1加算で800・超過分は廃材化。修正はfacilityEffect.tsの文言のみ", "disposition": "修正束G" },
-    { "id": "R4-A02/C02/D01", "severity": "major", "axis": "A/C/D", "screen": "grid/facility", "summary": "資材施設7種が恒常「0/分」表示(実レート0.004〜0.035/分が小数1桁丸めに飲まれる)。研究点系3種は正常。稼働中でも「何も生産していない」ように見える虚偽的表示", "disposition": "修正束G(表示解像度の可変化 or <0.1/分表記)" },
-    { "id": "R4-A04/C01/D02", "severity": "major", "axis": "A/C/D", "screen": "HUD/home", "summary": "保管上限到達の黄警告・HUD分母・ホームアラートが一切存在しない(GDD 6.7要求・コード全面監査で確認)。産出が黙って停止/廃材化する", "disposition": "修正束G(HUD警告色+HOME_ALERT追加)" },
-    { "id": "R4-A05", "severity": "major", "axis": "A/B", "screen": "outposts", "summary": "衛星拠点の供給が保管上限を完全無視(施設産出には効く非対称)", "disposition": "M40(engine判定)" },
-    { "id": "R4-A06", "severity": "major", "axis": "A", "screen": "outposts/expedition", "summary": "拠点供給・探索報酬が1/3000再校正の対象外で旧スケールのまま(菜園の1.5万倍等)", "disposition": "M40(再校正対象に追加)" },
-    { "id": "R4-A07", "severity": "major", "axis": "A", "screen": "research", "summary": "研究点も再校正対象外で研究軸と生産軸の時間尺度が2桁以上乖離(E1全8техが数ゲーム分)", "disposition": "M40(E3レンジ狭化の研究ペーシング再訪と統合)" },
-    { "id": "R4-A08", "severity": "major", "axis": "A", "screen": "expedition", "summary": "派遣前ROI見込みが実結果と約5倍乖離し最良手を「損」と表示(期待35.46薪/実際175薪)", "disposition": "M40(ROI式の再校正)" },
-    { "id": "R4-A09", "severity": "major", "axis": "B", "screen": "全画面", "summary": "操作トリガセーブの不発を再観測(建設直後リロードで巻き戻り・拠点設置消失)=R2-FC2/M62 FC2実装との矛盾。要一次特定", "disposition": "修正束G(最優先で原因特定)" },
-    { "id": "R4-A10", "severity": "major", "axis": "A", "screen": "inheritance", "summary": "継承点35<最安ティア50で2ラウンド連続購入到達不能(R2-FC8再掲)", "disposition": "M40(exodus係数再評価・既登録)" },
-    { "id": "R4-A11", "severity": "major", "axis": "A", "screen": "codify", "summary": "新周回の粘土0で石板成文化が構造的不可能(R2-FC7再掲・engine必要と特定済み)", "disposition": "M40⑨(既登録)" },
-    { "id": "R4-A12/A13/D03", "severity": "minor", "axis": "A/D", "screen": "複数", "summary": "小数表示の残存5箇所+(開墾パネル在庫417.29/研究コスト30.0/成文化予告20.0/reject所持値20.1/キャラバン1.00等)=HUDだけ整数の二重基準", "disposition": "修正束G(整形ヘルパ置換)" },
-    { "id": "R4-A14", "severity": "minor", "axis": "A/D", "screen": "toast", "summary": "廃材のコスト代替消費(最大20%)が無説明で廃材が黙って減る(表示35薪→実際薪28+廃材7)", "disposition": "修正束G(トーストに廃材内訳)" },
-    { "id": "R4-A15", "severity": "minor", "axis": "A", "screen": "home", "summary": "開始状態「生存人口/寝床上限 6/0」=人口が上限超の壊れた見た目・寝床なしでは漂着経路が閉じたまま", "disposition": "M40(初期配置に寝床を含めるか=M53数値再評価と統合)" },
-    { "id": "R4-A16", "severity": "minor", "axis": "台本", "screen": "—", "summary": "T台本の陳腐化3件(T9非稼働4種→実効果表示済みは2種のみ/T2・T7は0/分問題解消後も表示解像度前提の見直しが必要)", "disposition": "統率者がプロトコル§5改訂(台帳v16裁定)" },
-    { "id": "R4-B02", "severity": "minor", "axis": "B", "screen": "research", "summary": "研究進捗が1tickで0→100%跳躍・100%到達後も数ゲーム分「40.0/40.0」のまま解禁されず静止して見える", "disposition": "M40(研究点再校正で自然解消見込み・要確認)" },
-    { "id": "R4-B03", "severity": "minor", "axis": "D", "screen": "settings", "summary": "エクスポートファイル名に内部語tick露出(kept-flame-save-tick17019.json)", "disposition": "修正束G" },
-    { "id": "R4-E01", "severity": "minor", "axis": "E", "screen": "grid", "summary": "格子ビューのみ下部ナビと凡例foldが27-28px重なり(3VP共通・他12画面は0px)", "disposition": "修正束G" }
+    {
+      "id": "R4-A01",
+      "severity": "fatal",
+      "axis": "A/B",
+      "screen": "grid/facility",
+      "summary": "保管庫の効果文言が加算方式に未追従の虚偽表示(「設定」表記+逆情報の在庫超過警告)。実測=基礎400+Lv1加算で800・超過分は廃材化。修正はfacilityEffect.tsの文言のみ",
+      "disposition": "修正束G"
+    },
+    {
+      "id": "R4-A02/C02/D01",
+      "severity": "major",
+      "axis": "A/C/D",
+      "screen": "grid/facility",
+      "summary": "資材施設7種が恒常「0/分」表示(実レート0.004〜0.035/分が小数1桁丸めに飲まれる)。研究点系3種は正常。稼働中でも「何も生産していない」ように見える虚偽的表示",
+      "disposition": "修正束G(表示解像度の可変化 or <0.1/分表記)"
+    },
+    {
+      "id": "R4-A04/C01/D02",
+      "severity": "major",
+      "axis": "A/C/D",
+      "screen": "HUD/home",
+      "summary": "保管上限到達の黄警告・HUD分母・ホームアラートが一切存在しない(GDD 6.7要求・コード全面監査で確認)。産出が黙って停止/廃材化する",
+      "disposition": "修正束G(HUD警告色+HOME_ALERT追加)"
+    },
+    {
+      "id": "R4-A05",
+      "severity": "major",
+      "axis": "A/B",
+      "screen": "outposts",
+      "summary": "衛星拠点の供給が保管上限を完全無視(施設産出には効く非対称)",
+      "disposition": "M40(engine判定)"
+    },
+    {
+      "id": "R4-A06",
+      "severity": "major",
+      "axis": "A",
+      "screen": "outposts/expedition",
+      "summary": "拠点供給・探索報酬が1/3000再校正の対象外で旧スケールのまま(菜園の1.5万倍等)",
+      "disposition": "M40(再校正対象に追加)"
+    },
+    {
+      "id": "R4-A07",
+      "severity": "major",
+      "axis": "A",
+      "screen": "research",
+      "summary": "研究点も再校正対象外で研究軸と生産軸の時間尺度が2桁以上乖離(E1全8техが数ゲーム分)",
+      "disposition": "M40(E3レンジ狭化の研究ペーシング再訪と統合)"
+    },
+    {
+      "id": "R4-A08",
+      "severity": "major",
+      "axis": "A",
+      "screen": "expedition",
+      "summary": "派遣前ROI見込みが実結果と約5倍乖離し最良手を「損」と表示(期待35.46薪/実際175薪)",
+      "disposition": "M40(ROI式の再校正)"
+    },
+    {
+      "id": "R4-A09",
+      "severity": "major",
+      "axis": "B",
+      "screen": "全画面",
+      "summary": "操作トリガセーブの不発を再観測(建設直後リロードで巻き戻り・拠点設置消失)=R2-FC2/M62 FC2実装との矛盾。要一次特定",
+      "disposition": "修正束G(最優先で原因特定)"
+    },
+    {
+      "id": "R4-A10",
+      "severity": "major",
+      "axis": "A",
+      "screen": "inheritance",
+      "summary": "継承点35<最安ティア50で2ラウンド連続購入到達不能(R2-FC8再掲)",
+      "disposition": "M40(exodus係数再評価・既登録)"
+    },
+    {
+      "id": "R4-A11",
+      "severity": "major",
+      "axis": "A",
+      "screen": "codify",
+      "summary": "新周回の粘土0で石板成文化が構造的不可能(R2-FC7再掲・engine必要と特定済み)",
+      "disposition": "M40⑨(既登録)"
+    },
+    {
+      "id": "R4-A12/A13/D03",
+      "severity": "minor",
+      "axis": "A/D",
+      "screen": "複数",
+      "summary": "小数表示の残存5箇所+(開墾パネル在庫417.29/研究コスト30.0/成文化予告20.0/reject所持値20.1/キャラバン1.00等)=HUDだけ整数の二重基準",
+      "disposition": "修正束G(整形ヘルパ置換)"
+    },
+    {
+      "id": "R4-A14",
+      "severity": "minor",
+      "axis": "A/D",
+      "screen": "toast",
+      "summary": "廃材のコスト代替消費(最大20%)が無説明で廃材が黙って減る(表示35薪→実際薪28+廃材7)",
+      "disposition": "修正束G(トーストに廃材内訳)"
+    },
+    {
+      "id": "R4-A15",
+      "severity": "minor",
+      "axis": "A",
+      "screen": "home",
+      "summary": "開始状態「生存人口/寝床上限 6/0」=人口が上限超の壊れた見た目・寝床なしでは漂着経路が閉じたまま",
+      "disposition": "M40(初期配置に寝床を含めるか=M53数値再評価と統合)"
+    },
+    {
+      "id": "R4-A16",
+      "severity": "minor",
+      "axis": "台本",
+      "screen": "—",
+      "summary": "T台本の陳腐化3件(T9非稼働4種→実効果表示済みは2種のみ/T2・T7は0/分問題解消後も表示解像度前提の見直しが必要)",
+      "disposition": "統率者がプロトコル§5改訂(台帳v16裁定)"
+    },
+    {
+      "id": "R4-B02",
+      "severity": "minor",
+      "axis": "B",
+      "screen": "research",
+      "summary": "研究進捗が1tickで0→100%跳躍・100%到達後も数ゲーム分「40.0/40.0」のまま解禁されず静止して見える",
+      "disposition": "M40(研究点再校正で自然解消見込み・要確認)"
+    },
+    {
+      "id": "R4-B03",
+      "severity": "minor",
+      "axis": "D",
+      "screen": "settings",
+      "summary": "エクスポートファイル名に内部語tick露出(kept-flame-save-tick17019.json)",
+      "disposition": "修正束G"
+    },
+    {
+      "id": "R4-E01",
+      "severity": "minor",
+      "axis": "E",
+      "screen": "grid",
+      "summary": "格子ビューのみ下部ナビと凡例foldが27-28px重なり(3VP共通・他12画面は0px)",
+      "disposition": "修正束G"
+    }
   ],
   "unmeasured": [
     "想起困難・死亡・晴天漂着の実UI観測(12ゲーム日で0件・漂着は寝床上限0で構造的に不発=R4-A15)",
