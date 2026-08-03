@@ -67,11 +67,17 @@ describe("outpostType が engine 内部表現へ写る", () => {
     const content = load(rawBundle());
     const mine = requireOutpostTypeDef(content, id("outpostMine"));
     expect(mine.resourceId).toBe("iron");
+    // [M40] 拠点供給の 400 スケール再校正(M39 が施設産出だけを再校正して拠点を
+    // 取り残していた三重非対称の是正・R4-A06)。旧値 40/tick は同じ資源を産む
+    // 製錬炉(forge = 0.005/tick)の 8000 倍で、常駐 1 名の拠点が本拠 1 棟の
+    // 8000 倍を運んでくる状態だった。新値は「同資源の施設 Lv1 の 1.3 倍」。
+    // **upkeep も同率で縮めてあるので ROI(= supply/upkeep)は 1.6 倍のまま不変**
+    // (判定条件は変えず、尺度だけを合わせた)。
     expect(mine.supplyPerResidentTickByLevel.map((f) => toRaw(f))).toEqual([
-      40_000_000, 46_000_000, 52_900_000, 60_835_000, 69_960_250,
+      13_000, 14_950, 17_192, 19_771, 22_737,
     ]);
-    expect(toRaw(mine.upkeep.baseFoodFix)).toBe(20_000_000);
-    expect(toRaw(mine.upkeep.baseMoraleCareFix)).toBe(5_000_000);
+    expect(toRaw(mine.upkeep.baseFoodFix)).toBe(6_500);
+    expect(toRaw(mine.upkeep.baseMoraleCareFix)).toBe(1_625);
     expect(toRaw(mine.hazard.intensityFix)).toBe(50_000);
     expect(toRaw(mine.hazard.growthPerDayFix)).toBe(10_000);
     expect(toRaw(mine.hazard.minFix)).toBe(50_000);

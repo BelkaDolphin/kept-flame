@@ -1,0 +1,1119 @@
+{
+  "accounting": [
+    {
+      "botId": "greedy",
+      "colonyLossRate": 0.0567,
+      "placeFacilityCount": 20,
+      "reclaimCount": 12,
+      "rows": [
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 231.09,
+          "finalStock": 231.09,
+          "lossRate": 0,
+          "resourceId": "charcoal"
+        },
+        {
+          "cumulativeOverflow": 203.64,
+          "cumulativeProduced": 656.64,
+          "finalStock": 400,
+          "lossRate": 0.3101,
+          "resourceId": "clay"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "copper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 1957.62,
+          "finalStock": 190.95,
+          "lossRate": 0,
+          "resourceId": "firewood"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 183.72,
+          "finalStock": 183.72,
+          "lossRate": 0,
+          "resourceId": "grain"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 267.42,
+          "finalStock": 261.42,
+          "lossRate": 0,
+          "resourceId": "iron"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 297.58,
+          "finalStock": 297.58,
+          "lossRate": 0,
+          "resourceId": "paper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "waste"
+        }
+      ]
+    },
+    {
+      "botId": "researchFirst",
+      "colonyLossRate": 0.0363,
+      "placeFacilityCount": 21,
+      "reclaimCount": 12,
+      "rows": [
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 146.1,
+          "finalStock": 146.1,
+          "lossRate": 0,
+          "resourceId": "charcoal"
+        },
+        {
+          "cumulativeOverflow": 107.77,
+          "cumulativeProduced": 580.77,
+          "finalStock": 400,
+          "lossRate": 0.1856,
+          "resourceId": "clay"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "copper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 1957.62,
+          "finalStock": 188.95,
+          "lossRate": 0,
+          "resourceId": "firewood"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 210.67,
+          "finalStock": 210.67,
+          "lossRate": 0,
+          "resourceId": "grain"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "iron"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 74.83,
+          "finalStock": 74.83,
+          "lossRate": 0,
+          "resourceId": "paper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "waste"
+        }
+      ]
+    },
+    {
+      "botId": "explorationFirst",
+      "colonyLossRate": 0.0699,
+      "placeFacilityCount": 29,
+      "reclaimCount": 19,
+      "rows": [
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 14.4,
+          "finalStock": 14.4,
+          "lossRate": 0,
+          "resourceId": "charcoal"
+        },
+        {
+          "cumulativeOverflow": 274.13,
+          "cumulativeProduced": 736.13,
+          "finalStock": 400,
+          "lossRate": 0.3724,
+          "resourceId": "clay"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "copper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 2691.92,
+          "finalStock": 337.26,
+          "lossRate": 0,
+          "resourceId": "firewood"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 201.6,
+          "finalStock": 201.6,
+          "lossRate": 0,
+          "resourceId": "grain"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "iron"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 279.94,
+          "finalStock": 279.94,
+          "lossRate": 0,
+          "resourceId": "paper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "waste"
+        }
+      ]
+    },
+    {
+      "botId": "placementVariant",
+      "colonyLossRate": 0.0614,
+      "placeFacilityCount": 20,
+      "reclaimCount": 12,
+      "rows": [
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 231.09,
+          "finalStock": 231.09,
+          "lossRate": 0,
+          "resourceId": "charcoal"
+        },
+        {
+          "cumulativeOverflow": 203.64,
+          "cumulativeProduced": 656.64,
+          "finalStock": 400,
+          "lossRate": 0.3101,
+          "resourceId": "clay"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "copper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 1790.44,
+          "finalStock": 105.09,
+          "lossRate": 0,
+          "resourceId": "firewood"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 202.63,
+          "finalStock": 202.63,
+          "lossRate": 0,
+          "resourceId": "grain"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 195.47,
+          "finalStock": 189.47,
+          "lossRate": 0,
+          "resourceId": "iron"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 239.23,
+          "finalStock": 239.23,
+          "lossRate": 0,
+          "resourceId": "paper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "waste"
+        }
+      ]
+    },
+    {
+      "botId": "codifyFirst",
+      "colonyLossRate": 0.0108,
+      "placeFacilityCount": 22,
+      "reclaimCount": 13,
+      "rows": [
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 253.37,
+          "finalStock": 253.37,
+          "lossRate": 0,
+          "resourceId": "charcoal"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 615.87,
+          "finalStock": 62.87,
+          "lossRate": 0,
+          "resourceId": "clay"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "copper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 1957.62,
+          "finalStock": 109.44,
+          "lossRate": 0,
+          "resourceId": "firewood"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 194.89,
+          "finalStock": 194.89,
+          "lossRate": 0,
+          "resourceId": "grain"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 32.64,
+          "finalStock": 32.64,
+          "lossRate": 0,
+          "resourceId": "iron"
+        },
+        {
+          "cumulativeOverflow": 37.76,
+          "cumulativeProduced": 437.76,
+          "finalStock": 400,
+          "lossRate": 0.0863,
+          "resourceId": "paper"
+        },
+        {
+          "cumulativeOverflow": 0,
+          "cumulativeProduced": 0,
+          "finalStock": 0,
+          "lossRate": null,
+          "resourceId": "waste"
+        }
+      ]
+    }
+  ],
+  "earlyGame": {
+    "actions": [
+      { "gapTicks": 10, "kind": "placeFacility", "subject": "hearth", "tick": 10 },
+      { "gapTicks": 0, "kind": "assignResident", "subject": "", "tick": 10 },
+      { "gapTicks": 0, "kind": "placeFacility", "subject": "hearth", "tick": 10 },
+      { "gapTicks": 0, "kind": "assignResident", "subject": "", "tick": 10 },
+      { "gapTicks": 0, "kind": "placeFacility", "subject": "researchDesk", "tick": 10 },
+      { "gapTicks": 0, "kind": "assignResident", "subject": "", "tick": 10 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techPottery", "tick": 30 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techStorage", "tick": 50 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techCharcoalKiln", "tick": 80 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techCeramics", "tick": 110 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techSmelting", "tick": 150 },
+      { "gapTicks": 150, "kind": "upgradeFacility", "subject": "facWorkbench1", "tick": 160 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBlastFurnace", "tick": 190 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBlacksmithing", "tick": 250 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techMachineParts", "tick": 320 },
+      { "gapTicks": 180, "kind": "placeFacility", "subject": "bed", "tick": 340 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techSteamEngine", "tick": 400 },
+      { "gapTicks": 140, "kind": "upgradeFacility", "subject": "facBed1", "tick": 480 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techAgriculture", "tick": 490 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBasicMedicine", "tick": 530 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBasketWeaving", "tick": 570 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBedding", "tick": 590 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techBoneHideWorking", "tick": 620 },
+      { "gapTicks": 160, "kind": "upgradeFacility", "subject": "facBed1", "tick": 640 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techGatheringHut", "tick": 660 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techGlass", "tick": 680 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techIrrigation", "tick": 770 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techLens", "tick": 810 },
+      { "gapTicks": 170, "kind": "placeFacility", "subject": "bed", "tick": 810 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techMetalCasting", "tick": 910 },
+      { "gapTicks": 140, "kind": "upgradeFacility", "subject": "facBed2", "tick": 950 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techPrinting", "tick": 1000 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techStoneTools", "tick": 1100 },
+      { "gapTicks": 160, "kind": "upgradeFacility", "subject": "facBed2", "tick": 1110 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techWaterDrawing", "tick": 1120 },
+      { "gapTicks": 0, "kind": "beginResearch", "subject": "techWaterWheel", "tick": 1140 },
+      { "gapTicks": 180, "kind": "placeFacility", "subject": "bed", "tick": 1290 },
+      { "gapTicks": 130, "kind": "upgradeFacility", "subject": "facBed3", "tick": 1420 },
+      { "gapTicks": 160, "kind": "upgradeFacility", "subject": "facBed3", "tick": 1580 },
+      { "gapTicks": 180, "kind": "placeFacility", "subject": "bed", "tick": 1760 },
+      { "gapTicks": 140, "kind": "upgradeFacility", "subject": "facBed4", "tick": 1900 },
+      { "gapTicks": 160, "kind": "upgradeFacility", "subject": "facBed4", "tick": 2060 },
+      { "gapTicks": 190, "kind": "placeFacility", "subject": "bed", "tick": 2250 },
+      { "gapTicks": 140, "kind": "upgradeFacility", "subject": "facBed5", "tick": 2390 },
+      { "gapTicks": 170, "kind": "upgradeFacility", "subject": "facBed5", "tick": 2560 },
+      { "gapTicks": 200, "kind": "placeFacility", "subject": "bed", "tick": 2760 },
+      { "gapTicks": 130, "kind": "placeFacility", "subject": "kitchenGarden", "tick": 2890 },
+      { "gapTicks": 0, "kind": "assignResident", "subject": "", "tick": 2890 },
+      { "gapTicks": 0, "kind": "upgradeFacility", "subject": "facKitchenGarden1", "tick": 2890 },
+      { "gapTicks": 80, "kind": "upgradeFacility", "subject": "facKitchenGarden1", "tick": 2970 },
+      { "gapTicks": 90, "kind": "upgradeFacility", "subject": "facKitchenGarden1", "tick": 3060 },
+      { "gapTicks": 120, "kind": "upgradeFacility", "subject": "facKitchenGarden1", "tick": 3180 },
+      { "gapTicks": 140, "kind": "upgradeFacility", "subject": "facBed6", "tick": 3320 },
+      { "gapTicks": 170, "kind": "upgradeFacility", "subject": "facBed6", "tick": 3490 },
+      { "gapTicks": 190, "kind": "upgradeFacility", "subject": "facWorkbench1", "tick": 3680 },
+      { "gapTicks": 220, "kind": "upgradeFacility", "subject": "facBed1", "tick": 3900 },
+      { "gapTicks": 210, "kind": "upgradeFacility", "subject": "facBed2", "tick": 4110 },
+      { "gapTicks": 210, "kind": "upgradeFacility", "subject": "facBed3", "tick": 4320 }
+    ],
+    "finalStockByResourceId": {
+      "charcoal": 0,
+      "clay": 6,
+      "copper": 0,
+      "firewood": 0.89,
+      "grain": 9.55,
+      "iron": 0,
+      "paper": 0,
+      "waste": 0
+    },
+    "firstDayActionCount": 12,
+    "horizonTicks": 4320,
+    "maxGapTicks": 220,
+    "medianGapTicks": 160,
+    "resourceGatedGapTicks": [
+      10, 0, 0, 150, 180, 140, 160, 170, 140, 160, 180, 130, 160, 180, 140, 160, 190, 140, 170, 200,
+      130, 0, 80, 90, 120, 140, 170, 190, 220, 210, 210
+    ]
+  },
+  "exploration": [
+    {
+      "actualGrossReward": 0,
+      "actualNodeCount": 4,
+      "actualOverModel": null,
+      "actualSuccessCount": 0,
+      "band": "near",
+      "modelExpectedReward": 0,
+      "modelForgoneOutput": 24.48,
+      "modelRoi": 0,
+      "modelSuccessProbability": 0,
+      "teamSize": 1
+    },
+    {
+      "actualGrossReward": 175.5,
+      "actualNodeCount": 4,
+      "actualOverModel": 5.14,
+      "actualSuccessCount": 4,
+      "band": "near",
+      "modelExpectedReward": 34.147,
+      "modelForgoneOutput": 48.96,
+      "modelRoi": 0.6974,
+      "modelSuccessProbability": 0.2168,
+      "teamSize": 2
+    },
+    {
+      "actualGrossReward": 175.5,
+      "actualNodeCount": 4,
+      "actualOverModel": 1.169,
+      "actualSuccessCount": 4,
+      "band": "near",
+      "modelExpectedReward": 150.172,
+      "modelForgoneOutput": 73.44,
+      "modelRoi": 2.0448,
+      "modelSuccessProbability": 0.9535,
+      "teamSize": 3
+    },
+    {
+      "actualGrossReward": 175.5,
+      "actualNodeCount": 4,
+      "actualOverModel": 1.114,
+      "actualSuccessCount": 4,
+      "band": "near",
+      "modelExpectedReward": 157.5,
+      "modelForgoneOutput": 97.92,
+      "modelRoi": 1.6085,
+      "modelSuccessProbability": 1,
+      "teamSize": 4
+    },
+    {
+      "actualGrossReward": 0,
+      "actualNodeCount": 3,
+      "actualOverModel": null,
+      "actualSuccessCount": 0,
+      "band": "far",
+      "modelExpectedReward": 0,
+      "modelForgoneOutput": 55.08,
+      "modelRoi": 0,
+      "modelSuccessProbability": 0,
+      "teamSize": 1
+    },
+    {
+      "actualGrossReward": 0,
+      "actualNodeCount": 3,
+      "actualOverModel": 0,
+      "actualSuccessCount": 0,
+      "band": "far",
+      "modelExpectedReward": 38.915,
+      "modelForgoneOutput": 110.16,
+      "modelRoi": 0.3533,
+      "modelSuccessProbability": 0.0865,
+      "teamSize": 2
+    },
+    {
+      "actualGrossReward": 441,
+      "actualNodeCount": 5,
+      "actualOverModel": 1.422,
+      "actualSuccessCount": 5,
+      "band": "far",
+      "modelExpectedReward": 310.142,
+      "modelForgoneOutput": 165.24,
+      "modelRoi": 1.8769,
+      "modelSuccessProbability": 0.6892,
+      "teamSize": 3
+    },
+    {
+      "actualGrossReward": 441,
+      "actualNodeCount": 5,
+      "actualOverModel": 0.98,
+      "actualSuccessCount": 5,
+      "band": "far",
+      "modelExpectedReward": 450,
+      "modelForgoneOutput": 220.32,
+      "modelRoi": 2.0425,
+      "modelSuccessProbability": 1,
+      "teamSize": 4
+    },
+    {
+      "actualGrossReward": 0,
+      "actualNodeCount": 2,
+      "actualOverModel": null,
+      "actualSuccessCount": 0,
+      "band": "deep",
+      "modelExpectedReward": 0,
+      "modelForgoneOutput": 110.16,
+      "modelRoi": 0,
+      "modelSuccessProbability": 0,
+      "teamSize": 1
+    },
+    {
+      "actualGrossReward": 0,
+      "actualNodeCount": 2,
+      "actualOverModel": 0,
+      "actualSuccessCount": 0,
+      "band": "deep",
+      "modelExpectedReward": 118.836,
+      "modelForgoneOutput": 220.32,
+      "modelRoi": 0.5394,
+      "modelSuccessProbability": 0.1108,
+      "teamSize": 2
+    },
+    {
+      "actualGrossReward": 627,
+      "actualNodeCount": 5,
+      "actualOverModel": 1,
+      "actualSuccessCount": 4,
+      "band": "deep",
+      "modelExpectedReward": 626.742,
+      "modelForgoneOutput": 330.48,
+      "modelRoi": 1.8965,
+      "modelSuccessProbability": 0.5844,
+      "teamSize": 3
+    },
+    {
+      "actualGrossReward": 792,
+      "actualNodeCount": 5,
+      "actualOverModel": 0.784,
+      "actualSuccessCount": 5,
+      "band": "deep",
+      "modelExpectedReward": 1009.777,
+      "modelForgoneOutput": 440.64,
+      "modelRoi": 2.2916,
+      "modelSuccessProbability": 0.9415,
+      "teamSize": 4
+    }
+  ],
+  "facilityEconomics": [
+    {
+      "buildCost": 20,
+      "buildCostResourceId": "firewood",
+      "facilityId": "bed",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.0715,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 2059.2,
+      "ratePerTickLv1": 1.43,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 15
+    },
+    {
+      "buildCost": 30,
+      "buildCostResourceId": "firewood",
+      "facilityId": "charcoalKiln",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00016667,
+      "outputResourceId": "charcoal",
+      "ratePerGameDayLv1": 7.2,
+      "ratePerTickLv1": 0.005,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 36
+    },
+    {
+      "buildCost": 28,
+      "buildCostResourceId": "firewood",
+      "facilityId": "explorationHq",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.03125,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 1260,
+      "ratePerTickLv1": 0.875,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 34
+    },
+    {
+      "buildCost": 25,
+      "buildCostResourceId": "clay",
+      "facilityId": "forge",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.0002,
+      "outputResourceId": "iron",
+      "ratePerGameDayLv1": 7.2,
+      "ratePerTickLv1": 0.005,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 30
+    },
+    {
+      "buildCost": 6,
+      "buildCostResourceId": "iron",
+      "facilityId": "foundry",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00066667,
+      "outputResourceId": "copper",
+      "ratePerGameDayLv1": 5.76,
+      "ratePerTickLv1": 0.004,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 7
+    },
+    {
+      "buildCost": 30,
+      "buildCostResourceId": "firewood",
+      "facilityId": "hearth",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00116667,
+      "outputResourceId": "firewood",
+      "ratePerGameDayLv1": 50.4,
+      "ratePerTickLv1": 0.035,
+      "selfBuildTicks": 857,
+      "upgradeLv1To2Cost": 36
+    },
+    {
+      "buildCost": 20,
+      "buildCostResourceId": "clay",
+      "facilityId": "infirmary",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.0715,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 2059.2,
+      "ratePerTickLv1": 1.43,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 16
+    },
+    {
+      "buildCost": 6,
+      "buildCostResourceId": "firewood",
+      "facilityId": "kitchenGarden",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00066667,
+      "outputResourceId": "grain",
+      "ratePerGameDayLv1": 5.76,
+      "ratePerTickLv1": 0.004,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 7
+    },
+    {
+      "buildCost": 14,
+      "buildCostResourceId": "clay",
+      "facilityId": "researchDesk",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.08482143,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 1710,
+      "ratePerTickLv1": 1.1875,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 17
+    },
+    {
+      "buildCost": 14,
+      "buildCostResourceId": "firewood",
+      "facilityId": "scriptorium",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00057143,
+      "outputResourceId": "paper",
+      "ratePerGameDayLv1": 11.52,
+      "ratePerTickLv1": 0.008,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 17
+    },
+    {
+      "buildCost": 35,
+      "buildCostResourceId": "firewood",
+      "facilityId": "warehouse",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.07142857,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 3600,
+      "ratePerTickLv1": 2.5,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 20
+    },
+    {
+      "buildCost": 30,
+      "buildCostResourceId": "firewood",
+      "facilityId": "watchtower",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.07133333,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 3081.6,
+      "ratePerTickLv1": 2.14,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 18
+    },
+    {
+      "buildCost": 18,
+      "buildCostResourceId": "firewood",
+      "facilityId": "waterTank",
+      "outputKind": "resource",
+      "outputPerBuildCost": 0.00066667,
+      "outputResourceId": "clay",
+      "ratePerGameDayLv1": 17.28,
+      "ratePerTickLv1": 0.012,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 22
+    },
+    {
+      "buildCost": 14,
+      "buildCostResourceId": "firewood",
+      "facilityId": "workbench",
+      "outputKind": "research",
+      "outputPerBuildCost": 0.07142857,
+      "outputResourceId": null,
+      "ratePerGameDayLv1": 1440,
+      "ratePerTickLv1": 1,
+      "selfBuildTicks": null,
+      "upgradeLv1To2Cost": 17
+    }
+  ],
+  "gameDayTicks": 1440,
+  "outpost": [
+    {
+      "facilityRatePerTick": 0.005,
+      "outpostTypeId": "outpostMine",
+      "ratio": 2.6,
+      "resourceId": "iron",
+      "supplyPerGameDay": 18.72,
+      "supplyPerTick": 0.013
+    },
+    {
+      "facilityRatePerTick": 0.004,
+      "outpostTypeId": "outpostFarm",
+      "ratio": 2,
+      "resourceId": "grain",
+      "supplyPerGameDay": 11.52,
+      "supplyPerTick": 0.008
+    },
+    {
+      "facilityRatePerTick": 0.035,
+      "outpostTypeId": "outpostForest",
+      "ratio": 1.3,
+      "resourceId": "firewood",
+      "supplyPerGameDay": 64.8,
+      "supplyPerTick": 0.045
+    }
+  ],
+  "overflowScan": [
+    {
+      "botId": "greedy",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 225.1 },
+        "clay": { "overflow": 82.7, "produced": 535.7 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 2016 },
+        "grain": { "overflow": 0, "produced": 194.9 },
+        "iron": { "overflow": 0, "produced": 165.7 },
+        "paper": { "overflow": 0, "produced": 46.8 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 24480 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.026,
+      "researchZeroSamples": 4,
+      "sampleCount": 40,
+      "seed": "nightly-a"
+    },
+    {
+      "botId": "greedy",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 270.5 },
+        "clay": { "overflow": 69.3, "produced": 522.3 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1619.9 },
+        "grain": { "overflow": 0, "produced": 213.1 },
+        "iron": { "overflow": 0, "produced": 278 },
+        "paper": { "overflow": 0, "produced": 145.2 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 7,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 21600 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0227,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-b"
+    },
+    {
+      "botId": "greedy",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 244.8 },
+        "clay": { "overflow": 312.6, "produced": 765.6 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1668.2 },
+        "grain": { "overflow": 0, "produced": 213.1 },
+        "iron": { "overflow": 0, "produced": 253.9 },
+        "paper": { "overflow": 0, "produced": 347.9 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 12960, "3": 25920 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0895,
+      "researchZeroSamples": 4,
+      "sampleCount": 40,
+      "seed": "nightly-c"
+    },
+    {
+      "botId": "researchFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 23 },
+        "clay": { "overflow": 28.1, "produced": 501.1 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 2016 },
+        "grain": { "overflow": 0, "produced": 203.6 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 0, "produced": 36.8 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 23,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 5760, "3": 10080 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0101,
+      "researchZeroSamples": 0,
+      "sampleCount": 40,
+      "seed": "nightly-a"
+    },
+    {
+      "botId": "researchFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 80.6 },
+        "clay": { "overflow": 147.3, "produced": 600.3 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1529.2 },
+        "grain": { "overflow": 0, "produced": 222.8 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 0, "produced": 36.9 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 7,
+      "firstTickByEraOrder": { "1": 1440, "2": 5760, "3": 10080 },
+      "maxAtTick": 56160,
+      "maxLossRate": 0.0614,
+      "researchZeroSamples": 0,
+      "sampleCount": 40,
+      "seed": "nightly-b"
+    },
+    {
+      "botId": "researchFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 196.6 },
+        "clay": { "overflow": 151.8, "produced": 622.1 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1687.7 },
+        "grain": { "overflow": 0, "produced": 201.6 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 0, "produced": 210.5 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 23,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 5760, "3": 10080 },
+      "maxAtTick": 56160,
+      "maxLossRate": 0.0537,
+      "researchZeroSamples": 0,
+      "sampleCount": 40,
+      "seed": "nightly-c"
+    },
+    {
+      "botId": "explorationFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 244.8 },
+        "clay": { "overflow": 195.4, "produced": 639.4 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 62.6, "produced": 2075.6 },
+        "grain": { "overflow": 0, "produced": 0 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 0, "produced": 41.5 },
+        "waste": { "overflow": 0, "produced": 31.3 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 28,
+      "finalPopulation": 12,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 21600 },
+      "maxAtTick": 12960,
+      "maxLossRate": 0.1027,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-a"
+    },
+    {
+      "botId": "explorationFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 228.5 },
+        "clay": { "overflow": 0, "produced": 293.8 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 40.8, "produced": 1058.4 },
+        "grain": { "overflow": 0, "produced": 207.4 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 0, "produced": 346.8 },
+        "waste": { "overflow": 0, "produced": 20.4 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 23,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 21600 },
+      "maxAtTick": 12960,
+      "maxLossRate": 0.0778,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-b"
+    },
+    {
+      "botId": "explorationFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 352.5 },
+        "clay": { "overflow": 559.2, "produced": 1021.2 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 3049.1 },
+        "grain": { "overflow": 0, "produced": 300.1 },
+        "iron": { "overflow": 0, "produced": 0 },
+        "paper": { "overflow": 28.5, "produced": 428.5 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 32,
+      "finalPopulation": 15,
+      "firstTickByEraOrder": { "1": 1440, "2": 12960, "3": 23040 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.1141,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-c"
+    },
+    {
+      "botId": "placementVariant",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 225.1 },
+        "clay": { "overflow": 82.7, "produced": 535.7 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1857.6 },
+        "grain": { "overflow": 0, "produced": 215.3 },
+        "iron": { "overflow": 0, "produced": 121.9 },
+        "paper": { "overflow": 0, "produced": 37.4 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 24480 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0276,
+      "researchZeroSamples": 4,
+      "sampleCount": 40,
+      "seed": "nightly-a"
+    },
+    {
+      "botId": "placementVariant",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 240.8 },
+        "clay": { "overflow": 69.3, "produced": 522.3 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1448.1 },
+        "grain": { "overflow": 0, "produced": 213.1 },
+        "iron": { "overflow": 0, "produced": 203.8 },
+        "paper": { "overflow": 0, "produced": 129 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 7,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 21600 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0251,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-b"
+    },
+    {
+      "botId": "placementVariant",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 215.7 },
+        "clay": { "overflow": 312.6, "produced": 765.6 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1476 },
+        "grain": { "overflow": 0, "produced": 213.1 },
+        "iron": { "overflow": 0, "produced": 187.3 },
+        "paper": { "overflow": 0, "produced": 314.5 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 22,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 12960, "3": 25920 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0986,
+      "researchZeroSamples": 4,
+      "sampleCount": 40,
+      "seed": "nightly-c"
+    },
+    {
+      "botId": "codifyFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 228.6 },
+        "clay": { "overflow": 0, "produced": 639.4 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 2016 },
+        "grain": { "overflow": 0, "produced": 166.9 },
+        "iron": { "overflow": 0, "produced": 1.4 },
+        "paper": { "overflow": 0, "produced": 361.8 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 24,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 24480 },
+      "maxAtTick": 0,
+      "maxLossRate": 0,
+      "researchZeroSamples": 3,
+      "sampleCount": 40,
+      "seed": "nightly-a"
+    },
+    {
+      "botId": "codifyFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 246.1 },
+        "clay": { "overflow": 0, "produced": 639.4 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1529.2 },
+        "grain": { "overflow": 0, "produced": 200.1 },
+        "iron": { "overflow": 0, "produced": 19.6 },
+        "paper": { "overflow": 0, "produced": 364 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 23,
+      "finalPopulation": 7,
+      "firstTickByEraOrder": { "1": 1440, "2": 11520, "3": 21600 },
+      "maxAtTick": 0,
+      "maxLossRate": 0,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-b"
+    },
+    {
+      "botId": "codifyFirst",
+      "breakdownAtPeak": {
+        "charcoal": { "overflow": 0, "produced": 220.8 },
+        "clay": { "overflow": 0, "produced": 639.4 },
+        "copper": { "overflow": 0, "produced": 0 },
+        "firewood": { "overflow": 0, "produced": 1762.1 },
+        "grain": { "overflow": 0, "produced": 207.4 },
+        "iron": { "overflow": 0, "produced": 117.9 },
+        "paper": { "overflow": 100.9, "produced": 524.9 },
+        "waste": { "overflow": 0, "produced": 0 }
+      },
+      "completedResearch": 24,
+      "finalFacilityCount": 23,
+      "finalPopulation": 8,
+      "firstTickByEraOrder": { "1": 1440, "2": 12960, "3": 23040 },
+      "maxAtTick": 57600,
+      "maxLossRate": 0.0291,
+      "researchZeroSamples": 1,
+      "sampleCount": 40,
+      "seed": "nightly-c"
+    }
+  ],
+  "research": {
+    "botResearchRatePerTick": {
+      "codifyFirst": { "max": 2.384625, "median": 1, "min": 1 },
+      "explorationFirst": { "max": 5.01875, "median": 3.13375, "min": 1 },
+      "greedy": { "max": 2.079437, "median": 1, "min": 1 },
+      "placementVariant": { "max": 2.079437, "median": 1, "min": 1 },
+      "researchFirst": { "max": 3.16925, "median": 3.0625, "min": 1 }
+    },
+    "e1CriticalPathTicks": 109,
+    "firstTickByEraOrder": { "1": 1440, "2": 11520 },
+    "maxResearchCost": 220,
+    "startingResearchRatePerGameDay": 1440,
+    "startingResearchRatePerTick": 1,
+    "ticksPerTechAtStartRate": {
+      "techAgriculture": 80,
+      "techBasicMedicine": 90,
+      "techBasketWeaving": 40,
+      "techBedding": 52,
+      "techBlacksmithing": 144,
+      "techBlastFurnace": 120,
+      "techBoneHideWorking": 82,
+      "techCeramics": 72,
+      "techCharcoalKiln": 60,
+      "techFireStarting": 30,
+      "techGatheringHut": 41,
+      "techGlass": 200,
+      "techIrrigation": 85,
+      "techLens": 214,
+      "techMachineParts": 173,
+      "techMetalCasting": 205,
+      "techPottery": 36,
+      "techPrinting": 220,
+      "techSmelting": 86,
+      "techSteamEngine": 207,
+      "techStoneTools": 40,
+      "techStorage": 43,
+      "techWaterDrawing": 39,
+      "techWaterWheel": 210
+    }
+  }
+}

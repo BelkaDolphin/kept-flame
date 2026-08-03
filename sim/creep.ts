@@ -115,22 +115,17 @@ export interface CreepSuppression {
   readonly expiresAtMilestone: string;
 }
 
-/** 既知例外リスト(**追加は裁定事項**。増やすときは reason と期限を必ず書く)。 */
-export const KNOWN_CREEP_SUPPRESSIONS: readonly CreepSuppression[] = [
-  {
-    groupId: "facility/output=resource:resource",
-    metric: "lvCurve[0]/buildCost.amount",
-    entityId: "hearth",
-    reason:
-      "薪(かまど)だけが建設・増築・開墾の全てを賄う汎用通貨で、他 6 資源" +
-      "(鉄/粘土/穀物/木炭/銅/紙)は消費先が未設計(ロードマップ M39 ⑥)。" +
-      "消費先の無い資源は保管上限 400 に当たらない水準まで産出を落とさざるを得ず、" +
-      "その結果 output/buildCost がかまどだけ突出する。クリープ検出は資源ごとの" +
-      "用途価値差を知らないためこれを偽陽性として拾う。産出を均質化すると" +
-      "オーバーフロー損失率(GDD 11.4-7c)が 0.111 → 0.310 で落ちることを M39 で実測済み。",
-    expiresAtMilestone: "M40(木炭/銅の消費先接続の入口で解除・再判定する)",
-  },
-];
+/**
+ * 既知例外リスト(**追加は裁定事項**。増やすときは reason と期限を必ず書く)。
+ *
+ * **[M40] 空になった。** 台帳v15 必-4 で登録した 1 件(`facility/output=
+ * resource:resource` × `lvCurve[0]/buildCost.amount` × `hearth`・期限 M40)は、
+ * M40 の資源再校正で解除した。解除の実体は「かまどの産出/建設費比を下げる」
+ * ではなく **7 種の資源施設の産出と建設費を同じ尺度へ揃えた**ことであり、
+ * 実測は relDev 5.481 → 0.667(閾値 1.0)。詳細は
+ * `docs/measurements/balance-m40-e2-recalibration-2026-08-03.json`。
+ */
+export const KNOWN_CREEP_SUPPRESSIONS: readonly CreepSuppression[] = [];
 
 function suppressionFor(
   groupId: string,
