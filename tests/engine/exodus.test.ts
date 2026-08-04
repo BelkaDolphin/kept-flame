@@ -201,6 +201,26 @@ const CONTENT_WITH_STARTER_FACILITIES: EngineContent = {
   reclaim: RECLAIM,
 };
 
+/** [M68] 寝床(GDD 6.2「寝床」)。content/facility.json の `bed` と同じ形。 */
+const BED: FacilityDef = {
+  id: id("bed"),
+  tags: ["calm"],
+  harshWork: false,
+  outputPerTickByLevel: [fixFromInt(0), fixFromInt(0), fixFromInt(0), fixFromInt(0), fixFromInt(0)],
+  output: { kind: "research" },
+  bedCapacityByLevel: [3, 4, 5, 6, 7],
+};
+
+/** [M68] `CONTENT_WITH_STARTER_FACILITIES` + 寝床定義(R4-A15 の新周回検証用)。 */
+const CONTENT_WITH_STARTER_FACILITIES_AND_BEDS: EngineContent = {
+  ...CONTENT_WITH_STARTER_FACILITIES,
+  facilityDefs: new Map([
+    [HEARTH.id, HEARTH],
+    [WORKBENCH.id, WORKBENCH],
+    [BED.id, BED],
+  ]),
+};
+
 function research(name: string, techId: EntityId, completedTick: number | null): EntityState {
   return {
     kind: "research",
@@ -845,6 +865,72 @@ describe("新周回の開始状態(M53)", () => {
     // ことの直接固定)。
     const after = executeExodus(board(), CONTENT, { recordIds: [], crewIds: [] });
     expect(entitiesOfKind(after, "facility").length).toBe(0);
+  });
+
+  // --- [M68・台帳v17 必-5] 新周回でも粘土+寝床が生成される --------------------
+
+  it("[R4-A11] 新周回でも石板1枚ぶんの粘土が下限保証される(旧実装は newGame.ts 限定)", () => {
+    // CONTENT は recordMedia(RECORD_MEDIA: baseCostFix=20 / stoneTablet.costMulFix=1)
+    // を持つが、大移動前の board() は粘土在庫を一切持たない。修正前は
+    // executeExodus が worldGen.ts の placeStartingFacilities しか通さず、
+    // 粘土の下限保証は newGame.ts 側にしか無かったため次周も粘土 0 のままだった。
+    const after = executeExodus(board(), CONTENT_WITH_STARTER_FACILITIES, {
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    const clay = entitiesOfKind(after, "resource").find((r) => r.resourceId === id("clay"));
+    expect(clay).toBeDefined();
+    expect(toRaw(clay!.stock)).toBe(toRaw(fixFromInt(20)));
+  });
+
+  it("[R4-A11] 大移動の継承資産で粘土が既に floor 以上ならそのまま(重複計上しない)", () => {
+    // startingStock 系統のボーナスで粘土在庫が既に floor(20)を上回っている場合、
+    // ensureClayFloor は max のみで上書きしない(継承資産の重複計上を作らない)。
+    // `carryResource` は大移動「前」に既に存在する resource entity にしか
+    // ボーナスを適用しない(rules/exodus.ts §3)ので、あらかじめ粘土 entity を
+    // 持つ盤面から始める。
+    const withClayStartingStock: EngineContent = {
+      ...CONTENT_WITH_STARTER_FACILITIES,
+      exodus: { ...EXODUS, startingStockResourceId: id("clay") },
+    };
+    const before = stateOf([resident("residentAlpha"), resource("stockClay", id("clay"), 5)], {
+      tick: 1000,
+    });
+    const boosted = setProgression(before, {
+      runCount: 0,
+      cumulativeInheritPoints: 0,
+      inheritTiers: [{ track: "startingStock", tier: 2 }], // 25 × 2 = 50 > floor(20)。
+    });
+    const after = executeExodus(boosted, withClayStartingStock, {
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    const clay = entitiesOfKind(after, "resource").find((r) => r.resourceId === id("clay"));
+    expect(toRaw(clay!.stock)).toBe(toRaw(fixFromInt(50)));
+  });
+
+  it("[R4-A15] bed 定義があれば新周回にも寝床2基が置かれる(晴天漂着の発生条件を開く)", () => {
+    const after = executeExodus(board(), CONTENT_WITH_STARTER_FACILITIES_AND_BEDS, {
+      recordIds: [],
+      crewIds: [id("residentAlpha"), id("residentBravo")],
+    });
+    const facilities = entitiesOfKind(after, "facility");
+    // hearth + workbench + 寝床2基。
+    expect(facilities.length).toBe(4);
+    const beds = facilities.filter((f) => f.defId === BED.id);
+    expect(beds.length).toBe(2);
+    for (const bed of beds) {
+      expect(bed.level).toBe(1);
+      expect(bed.workerIds).toEqual([]);
+    }
+  });
+
+  it("[R4-A15] bed 定義が無い CONTENT_WITH_STARTER_FACILITIES では新周回でも寝床は増えない(既存互換)", () => {
+    const after = executeExodus(board(), CONTENT_WITH_STARTER_FACILITIES, {
+      recordIds: [],
+      crewIds: [id("residentAlpha"), id("residentBravo")],
+    });
+    expect(entitiesOfKind(after, "facility").length).toBe(2);
   });
 });
 

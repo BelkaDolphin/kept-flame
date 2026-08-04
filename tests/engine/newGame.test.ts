@@ -26,7 +26,11 @@ import {
   type RecordMediaParams,
   type StorageParams,
 } from "../../src/engine/rules/types";
-import { placeStartingFacilities } from "../../src/engine/rules/worldGen";
+import {
+  placeStartingFacilities,
+  STARTER_BED_CELL_1,
+  STARTER_BED_CELL_2,
+} from "../../src/engine/rules/worldGen";
 import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
 import {
   entitiesOfKind,
@@ -137,6 +141,16 @@ const WORKBENCH: FacilityDef = {
   output: { kind: "research" },
 };
 
+/** [M68] 寝床(GDD 6.2「寝床」)。content/facility.json の `bed` と同じ形。 */
+const BED: FacilityDef = {
+  id: id("bed"),
+  tags: ["calm"],
+  harshWork: false,
+  outputPerTickByLevel: [fixFromInt(0), fixFromInt(0), fixFromInt(0), fixFromInt(0), fixFromInt(0)],
+  output: { kind: "research" },
+  bedCapacityByLevel: [3, 4, 5, 6, 7],
+};
+
 const RECLAIM: ReclaimParams = {
   baseCostFix: fixFromInt(40),
   costGrowthFix: fixFromRaw(1_150_000),
@@ -210,6 +224,17 @@ function fullContent(overrides: Partial<EngineContent> = {}): EngineContent {
     ...overrides,
   };
 }
+
+/** [M68] `fullContent` に寝床定義(`bed`)も足した content。 */
+function fullContentWithBed(overrides: Partial<EngineContent> = {}): EngineContent {
+  const base = fullContent(overrides);
+  const facilityDefs = new Map(base.facilityDefs);
+  facilityDefs.set(BED.id, BED);
+  return { ...base, facilityDefs };
+}
+
+/** [M68] `RECORD_MEDIA.byMedium.stoneTablet` の costResourceId(粘土)。 */
+const CLAY = id("clay");
 
 describe("rules/worldGen.ts: placeStartingFacilities", () => {
   it("hearth/workbench が揃っていれば、生存住民の先頭2名を割り当てて設置する", () => {
@@ -315,6 +340,70 @@ describe("rules/worldGen.ts: placeStartingFacilities", () => {
     const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
     expect(entitiesOfKind(next, "resource").some((r) => r.resourceId === WASTE)).toBe(false);
   });
+
+  // --- [M68] 初期寝床(§2(d)/R4-A15)-------------------------------------------
+
+  it("bed の定義があれば Lv1 の寝床を2基、hearth/workbenchと別セルに置く", () => {
+    const c = fullContentWithBed();
+    const bare = stateOf([resident("alpha"), resident("beta")]);
+    const next = placeStartingFacilities(bare, c);
+
+    const beds = entitiesOfKind(next, "facility").filter((f) => f.defId === BED.id);
+    expect(beds.length).toBe(2);
+    const cells = beds.map((f) => f.cellIndex).sort((a, b) => a - b);
+    expect(cells).toEqual([STARTER_BED_CELL_1, STARTER_BED_CELL_2]);
+    for (const bed of beds) {
+      expect(bed.level).toBe(1);
+      expect(bed.workerIds).toEqual([]);
+    }
+    // hearth/workbench も別セルに変わらず存在する(衝突していない)。
+    expect(entitiesOfKind(next, "facility").length).toBe(4);
+  });
+
+  it("bed の定義が無ければ寝床は置かない(hearth/workbench とは独立・§3)", () => {
+    const c = fullContent(); // bed を持たない既存 fullContent。
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
+    expect(entitiesOfKind(next, "facility").some((f) => f.defId === BED.id)).toBe(false);
+    // hearth/workbench 2 つだけ(bed が無くても他が壊れない)。
+    expect(entitiesOfKind(next, "facility").length).toBe(2);
+  });
+
+  it("bed 定義があっても hearth/workbench が欠ければそちらは置かれない(§3 は独立に効く)", () => {
+    const c = fullContentWithBed({ facilityDefs: new Map([[BED.id, BED]]) });
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
+    const facilities = entitiesOfKind(next, "facility");
+    expect(facilities.every((f) => f.defId === BED.id)).toBe(true);
+    expect(facilities.length).toBe(2);
+  });
+
+  // --- [M68] 粘土の最低保証(§2(e)/R4-A11)-------------------------------------
+
+  it("recordMedia があれば石板1枚ぶんの粘土(baseCostFix×costMulFix)を下限保証する", () => {
+    const c = fullContent();
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), c);
+    const clay = resourceOf(next, CLAY);
+    expect(clay).toBeDefined();
+    // RECORD_MEDIA: baseCostFix=20 × stoneTablet.costMulFix=1 → floor 20。
+    expect(toRaw(clay!.stock)).toBe(toRaw(fixFromInt(20)));
+  });
+
+  it("既存の粘土在庫が floor 以上なら減らさない(大移動の継承ボーナスを潰さない)", () => {
+    const c = fullContent();
+    const bare = stateOf([
+      resident("alpha"),
+      { kind: "resource", id: id("stockClay"), resourceId: CLAY, stock: fixFromInt(500) },
+    ]);
+    const next = placeStartingFacilities(bare, c);
+    const clay = resourceOf(next, CLAY);
+    expect(toRaw(clay!.stock)).toBe(toRaw(fixFromInt(500)));
+  });
+
+  it("recordMedia を持たない content では粘土 entity を作らない(省略時は不活性)", () => {
+    const { recordMedia, ...withoutRecordMedia } = fullContent();
+    void recordMedia;
+    const next = placeStartingFacilities(stateOf([resident("alpha")]), withoutRecordMedia);
+    expect(resourceOf(next, CLAY)).toBeUndefined();
+  });
 });
 
 // --- 生成器本体(src/newGame.ts)---------------------------------------------
@@ -374,6 +463,30 @@ describe("src/newGame.ts: createNewGameState", () => {
     for (const f of facilities) {
       expect(f.workerIds.length).toBe(1);
     }
+  });
+
+  // --- [M68] 新規ゲームでも寝床+粘土が生成される(placeStartingFacilities 経由)---
+
+  it("石板1枚ぶんの粘土が積まれる(R4-A11・placeStartingFacilities 経由)", () => {
+    const c = fullContent();
+    const state = createNewGameState(c, { algoVersion: 3 });
+    expect(toRaw(resourceOf(state, CLAY)!.stock)).toBe(toRaw(fixFromInt(20)));
+  });
+
+  it("bed 定義があれば新規ゲームにも寝床2基が含まれる(R4-A15)", () => {
+    const c = fullContentWithBed();
+    const state = createNewGameState(c, { algoVersion: 3 });
+    const facilities = entitiesOfKind(state, "facility");
+    // hearth + workbench + 寝床2基。
+    expect(facilities.length).toBe(4);
+    expect(facilities.filter((f) => f.defId === BED.id).length).toBe(2);
+  });
+
+  it("寝床を含む content でも同一入力ならバイト同一(決定論を壊していない・R4-A15)", () => {
+    const c = fullContentWithBed();
+    const a = createNewGameState(c, { algoVersion: 3 });
+    const b = createNewGameState(c, { algoVersion: 3 });
+    expect(JSON.stringify(toSerializable(a))).toBe(JSON.stringify(toSerializable(b)));
   });
 
   it("content に workbench 定義が無い場合は RulesError(起動要件・§0)", () => {

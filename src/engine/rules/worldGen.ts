@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
-// 継ぐ火 -Kept Flame- 開始盤面の共通生成器 — M53
-//   GDD 6.1(初期利用可は上2行) / 9.1(開墾コスト) / 10.2([2026-08-01裁定]
-//   大移動後の新周回開始状態) / [2026-08-01裁定・台帳v7 必-2]
+// 継ぐ火 -Kept Flame- 開始盤面の共通生成器 — M53 / M68
+//   GDD 6.1(初期利用可は上2行) / 7.7(寝床上限・晴天漂着) / 9.1(開墾コスト) /
+//   10.2([2026-08-01裁定] 大移動後の新周回開始状態) / [2026-08-01裁定・台帳v7
+//   必-2] / [2026-08-04裁定・台帳v17 必-5](M68・経緯は§2(d)/(e))
 //
 // ===========================================================================
 // 1. なぜこれが engine 側にあるのか(rules/exodus.ts §3 からの方針転換)
@@ -50,6 +51,20 @@
 //       その `costResourceId` の在庫を「解放数 0 の開墾 1 回ぶん」
 //       (`reclaimCostFix(reclaim, 0)`)未満にしない。**上書きではなく
 //       max**(既存在庫・大移動の継承ボーナスを潰さない)。
+//   (d) **[M68] 初期寝床の設置**(R4-A15): `content.facilityDefs` に `bed` の
+//       定義があるときだけ、Lv1 の寝床を 2 基置く(§3' 参照)。修正前は寝床上限が
+//       常に 0 で、(ア) home 画面の「生存人口/寝床上限」が常に人口超過の壊れた
+//       見た目になる (イ) `rules/population.ts` の晴天漂着が
+//       `bedCapacity < 1` で毎回不活性化し、「寝床上限 > 人口」という発生条件
+//       (GDD 7.7)そのものが**構造的に**成立しえない、の 2 つが起きていた。
+//       2 基という数の根拠は §3' のコメントを参照(★要ユーザー判断・暫定)。
+//   (e) **[M68] 石板 1 枚ぶんの粘土の最低保証**(R4-A11): `content.recordMedia`
+//       があれば、その `byMedium.stoneTablet` の 1 回ぶん
+//       (`baseCostFix × costMulFix`)を costResourceId の在庫が下回らないよう
+//       にする。(c) と同じ **max(上書きしない)**。旧実装はこれを
+//       `src/newGame.ts` にしか持たず、`executeExodus` は本モジュールしか
+//       通らないため新周回では粘土 0 のまま石板成文化が構造的に不可能だった。
+//       ここへ引き上げることで新規ゲーム・新周回のどちらでも満たされる。
 //
 // ===========================================================================
 // 3. content にどちらかの定義しか無い場合(既存 conformance との整合)
@@ -59,10 +74,47 @@
 //   無し)が本関数を経由しても盤面を変えないようにするための意図的な選択であり、
 //   「揃っていない content では新機構が完全に不活性」という本リポジトリ全体の
 //   規約(storage/exploration/outpost 等と同じ「省略時は不活性」)に倣う。
+//
+//   **[M68] 寝床(`bed`)の活性条件は独立**である(hearth/workbench の有無に
+//   連動しない)。既存の「全か無か」は hearth と workbench という**2 つの定義が
+//   組で 1 つの機能**を成すことの反映であり、寝床は単独の定義 1 つで機能が
+//   完結するため、同じ理由がそのまま当てはまらない。conformance 縮約 content が
+//   `bed` を持たないことは変わらないので、既存 golden vector への影響はやはり無い
+//   (conformance/scenarios.ts は本モジュールを一度も呼ばない・conformance
+//   content-snapshot に `bed` があってもここには効かない)。
+//
+// ===========================================================================
+// 3'. 初期寝床の数(★要ユーザー判断・[2026-08-04裁定・台帳v17 必-5] M68)
+// ===========================================================================
+//   **2 基(いずれも Lv1)固定**。根拠:
+//     - 現行 content(`content/facility.json`)の `bed.bedCapacityCurve[0]` = 3。
+//       2 基 = 寝床上限 6 は、現行の初期人口 6(`src/newGame.ts` の
+//       `STARTING_RESIDENT_NAMES`)と**ちょうど一致**する。
+//     - 1 基(上限 3)では「生存人口/寝床上限」が今までどおり人口超過に見えたまま
+//       残り、R4-A15 の見た目の壊れ方(§2(d))が直らない。3 基(上限 9)は
+//       現在の初期人口に対して過剰——というのが「最小限」の判断基準。
+//     - 晴天漂着(GDD 7.7)は「寝床上限 > 生存人口」が発生条件なので、新規ゲーム
+//       開始直後(人口 6 = 上限 6)には即座には動かない。ここで直しているのは
+//       「寝床上限 0 だと死亡が起きても永久に発生しない」という**構造的な閉塞**
+//       であって、開始 tick から実際に漂着させることではない —— 寝床上限が
+//       1 以上になった時点で `rules/population.ts` §1 の不活性条件が外れ、
+//       死亡で人口が下限(3 = 上限6×0.5)まで落ちれば漂着が実際に起こるように
+//       なる。R4-A15 の指摘する「発生条件が閉じたまま」の解消はこれで足りる。
+//     - 新周回(`executeExodus`)の乗員は多くの場合 6 未満(GDD 10.2 の乗員定員
+//       `ceil(生存人数×0.5)+ボーナス`)なので、固定 2 基は新周回でも同じ理屈で
+//       足りる側に振れる。継承ボーナスの蓄積で乗員が 6 を超える極端なセーブでは
+//       再び人口超過の見た目が戻りうるが、**本校正は M41 帯のバランス再評価まで
+//       の暫定**でよい(タスク仕様どおり)。
+//
+//   セルは初期利用可能領域(GDD 9.1 の上2行・§2(b) の hearth/workbench と同じ
+//   `content.reclaim.initialRubbleCells` が空けている領域)のうち、hearth
+//   (セル0)/workbench(セル{@link STARTER_WORKBENCH_CELL})と重ならない 2 行目
+//   先頭 2 マスを使う(§2' 実装)。
 // ---------------------------------------------------------------------------
 
 import { GRID_WIDTH } from "../adjacency";
-import { fixFromInt, maxFix, toRaw } from "../fp";
+import { facilityOccupyingCell } from "../footprint";
+import { fixFromInt, maxFix, mulFix, toRaw, type Fix } from "../fp";
 import {
   entitiesOfKind,
   entityIdFromString,
@@ -89,6 +141,17 @@ const WORKBENCH_ENTITY_ID = entityIdFromString("facWorkbench1");
 export const STARTER_HEARTH_CELL = 0;
 /** 作業台を置くセル(かまどと同じ行・8近傍が重ならない列・GDD 6.1)。 */
 export const STARTER_WORKBENCH_CELL = GRID_WIDTH - 1;
+
+/** [M68] content 側の「寝床」定義 ID(GDD 6.2「寝床」・contentLabels.ts)。 */
+const BED_DEF_ID = entityIdFromString("bed");
+
+/** [M68] 置く entity ID(hearth/workbench と同じ命名規約)。 */
+const BED_ENTITY_ID_1 = entityIdFromString("facBed1");
+const BED_ENTITY_ID_2 = entityIdFromString("facBed2");
+
+/** [M68] 寝床を置くセル(2行目の先頭2マス・§3' の数の根拠を参照)。 */
+export const STARTER_BED_CELL_1 = GRID_WIDTH;
+export const STARTER_BED_CELL_2 = GRID_WIDTH + 1;
 
 /** `stem` + ID 先頭大文字化(`ui/screens/grid/facilityId.ts` の採番規約と同型)。 */
 function capitalize(value: string): string {
@@ -224,7 +287,86 @@ function placeHearthAndWorkbench(state: GameState, content: EngineContent): Game
   return next;
 }
 
-// --- 3. 開墾資源の最低保証(§2(c)) -------------------------------------------
+// --- 2'. 初期寝床の設置(§2(d) / §3') -----------------------------------------
+
+/**
+ * [M68] 初期配置に寝床(Lv1)を 2 基含める(R4-A15 / [2026-08-04裁定・台帳v17
+ * 必-5])。数と根拠は§3' 参照。`content.facilityDefs` に `bed` の定義が無ければ
+ * 何もしない(hearth/workbench の有無とは独立の「省略時は不活性」・§3)。
+ *
+ * hearth/workbench の**後**に呼ぶ前提(`placeStartingFacilities` §4 の順序)。
+ * hearth/workbench 側は「施設ゼロの盤面にだけ行う」を前提にしているため、寝床は
+ * 自分の対象セルだけを衝突検査する(全体がゼロであることは要求しない)。
+ *
+ * @throws {RulesError} 対象セルが瓦礫、または既に施設が置かれている場合
+ */
+function placeStartingBeds(state: GameState, content: EngineContent): GameState {
+  const bedDef = content.facilityDefs.get(BED_DEF_ID);
+  if (bedDef === undefined) return state;
+  const capacityLv1 = bedDef.bedCapacityByLevel?.[0];
+  if (capacityLv1 === undefined || capacityLv1 <= 0) return state;
+
+  for (const cellIndex of [STARTER_BED_CELL_1, STARTER_BED_CELL_2]) {
+    if (isRubbleCell(state, cellIndex)) {
+      throw new RulesError(
+        `placeStartingBeds: 開始寝床のセル(${String(cellIndex)})が瓦礫になっている` +
+          "(content の reclaim.initialRubbleCells が上2行を含んでいないか確認)",
+      );
+    }
+    if (facilityOccupyingCell(state, cellIndex) !== undefined) {
+      throw new RulesError(
+        `placeStartingBeds: 開始寝床のセル(${String(cellIndex)})に既に施設がある` +
+          "(worldGen.ts §2' の前提=そのセルが空の盤面にだけ行う)",
+      );
+    }
+  }
+
+  const bed1: FacilityState = {
+    kind: "facility",
+    id: BED_ENTITY_ID_1,
+    defId: BED_DEF_ID,
+    level: 1,
+    cellIndex: STARTER_BED_CELL_1,
+    workerIds: [],
+  };
+  const bed2: FacilityState = {
+    kind: "facility",
+    id: BED_ENTITY_ID_2,
+    defId: BED_DEF_ID,
+    level: 1,
+    cellIndex: STARTER_BED_CELL_2,
+    workerIds: [],
+  };
+  return putEntity(putEntity(state, bed1), bed2);
+}
+
+// --- 3. 資源の最低保証(§2(c) / §2(e))----------------------------------------
+
+/**
+ * 資源 entity の在庫を「少なくとも floor」にする(既存在庫は max で保つ・
+ * §2(c)/(e) の共通実装)。対象 resourceId の entity が state に無ければ floor
+ * で新規作成する。
+ */
+function ensureResourceStockFloor(
+  state: GameState,
+  resourceId: EntityId,
+  floorFix: Fix,
+): GameState {
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId !== resourceId) continue;
+    if (toRaw(resource.stock) >= toRaw(floorFix)) return state;
+    return updateEntity(state, resource.id, "resource", (r) =>
+      setField(r, "stock", maxFix(r.stock, floorFix)),
+    );
+  }
+  const entity: ResourceState = {
+    kind: "resource",
+    id: stockEntityIdFor(resourceId),
+    resourceId,
+    stock: floorFix,
+  };
+  return putEntity(state, entity);
+}
 
 /**
  * `content.reclaim.costResourceId` の在庫を「解放数 0 の開墾 1 回ぶん」未満に
@@ -234,22 +376,21 @@ function placeHearthAndWorkbench(state: GameState, content: EngineContent): Game
 function ensureReclaimFloor(state: GameState, content: EngineContent): GameState {
   const params = content.reclaim;
   if (params === undefined) return state;
-  const floorFix = reclaimCostFix(params, 0);
+  return ensureResourceStockFloor(state, params.costResourceId, reclaimCostFix(params, 0));
+}
 
-  for (const resource of entitiesOfKind(state, "resource")) {
-    if (resource.resourceId !== params.costResourceId) continue;
-    if (toRaw(resource.stock) >= toRaw(floorFix)) return state;
-    return updateEntity(state, resource.id, "resource", (r) =>
-      setField(r, "stock", maxFix(r.stock, floorFix)),
-    );
-  }
-  const entity: ResourceState = {
-    kind: "resource",
-    id: stockEntityIdFor(params.costResourceId),
-    resourceId: params.costResourceId,
-    stock: floorFix,
-  };
-  return putEntity(state, entity);
+/**
+ * [M68] 石板 1 枚ぶんの粘土(`baseCostFix × byMedium.stoneTablet.costMulFix`)を
+ * 下限保証する(R4-A11 / §2(e))。`content.recordMedia` が無い content(成文化
+ * そのものが不活性)では何もしない。`ensureReclaimFloor` と同じ max 方式なので
+ * 既存在庫(大移動の継承ボーナス等)を減らすことはない。
+ */
+function ensureClayFloor(state: GameState, content: EngineContent): GameState {
+  const recordMedia = content.recordMedia;
+  if (recordMedia === undefined) return state;
+  const stoneTablet = recordMedia.byMedium.stoneTablet;
+  const floorFix = mulFix(recordMedia.baseCostFix, stoneTablet.costMulFix);
+  return ensureResourceStockFloor(state, stoneTablet.costResourceId, floorFix);
 }
 
 // --- 4. 公開口 ---------------------------------------------------------------
@@ -258,13 +399,20 @@ function ensureReclaimFloor(state: GameState, content: EngineContent): GameState
  * 開始盤面の共通生成器(§0)。**新規ゲームと大移動後の新周回の両方が通る**。
  *
  * 呼び出し前提: 施設を 1 つも持たない state(新規ゲームの素の盤面、または
- * `executeExodus` が施設を捨てた直後の次周 state)。既に施設がある state へ
- * 呼ぶと {@link RulesError} で止まる(§2(b))。
+ * `executeExodus` が施設を捨てた直後の次周 state)。既に hearth/workbench や
+ * 寝床セルに施設がある state へ呼ぶと {@link RulesError} で止まる(§2(b)/(d))。
  *
  * 何もしない場合があることに注意(§3): `hearth`/`workbench` の定義が
- * どちらか欠けていれば施設は置かない。`content.reclaim` が無ければ開墾資源の
- * 最低保証も行わず、`content.storage.wasteResourceId` が無ければ廃材の受け皿も
- * 作らない(= それぞれ既存の「省略時は不活性」規約どおり)。
+ * どちらか欠けていれば施設は置かない。`bed` の定義が無ければ寝床も置かない
+ * (§2(d)・hearth/workbench とは独立の判定)。`content.reclaim` が無ければ
+ * 開墾資源の最低保証も行わず、`content.recordMedia` が無ければ粘土の最低保証も
+ * 行わず、`content.storage.wasteResourceId` が無ければ廃材の受け皿も作らない
+ * (= それぞれ既存の「省略時は不活性」規約どおり)。
+ *
+ * 呼び出し順は固定: 産出先/廃材の受け皿確保 → hearth/workbench → 寝床 → 開墾
+ * 資源floor → 粘土floor。寝床が hearth/workbench の**後**なのは、
+ * {@link placeHearthAndWorkbench} が「施設ゼロの盤面」を前提にしているため
+ * (§2' 冒頭)。
  *
  * @throws {RulesError} 既に facility entity がある / 開始セルが瓦礫の場合
  */
@@ -272,6 +420,8 @@ export function placeStartingFacilities(state: GameState, content: EngineContent
   let next = ensureProducibleResourceEntities(state, content);
   next = ensureWasteResourceEntity(next, content);
   next = placeHearthAndWorkbench(next, content);
+  next = placeStartingBeds(next, content);
   next = ensureReclaimFloor(next, content);
+  next = ensureClayFloor(next, content);
   return next;
 }

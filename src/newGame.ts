@@ -30,8 +30,8 @@
 //      salt は常に `residentId` 由来(生成順に依存しない・hash アドレス方式)。
 //   4. 住民 + 初期研究(火起こし)だけの「施設ゼロ」state を組み立てる。
 //   5. `placeStartingFacilities`(engine・`rules/worldGen.ts`)で開始施設
-//      (かまど・作業台)と詰み防止の開墾資源最低保証を適用する。
-//   6. 石板 1 枚ぶんの粘土(§4)を追加する。
+//      (かまど・作業台・[M68] 寝床)と詰み防止の開墾資源・石板1枚ぶんの粘土の
+//      最低保証(§4)を一括で適用する。
 //
 //   同じ (worldSeed, 難度シード, algoVersion, contentVersion) からは常に同じ
 //   byte 列の state になる(Date.now/Math.random を 1 度も読まない・
@@ -59,15 +59,18 @@
 // ===========================================================================
 //   薪(firewood 相当)は `placeStartingFacilities` が開墾コスト
 //   (`content.reclaim.costResourceId` の解放数 0 の 1 回ぶん)を下限保証する
-//   (GDD 9.1)。加えてここで**粘土 1 枚ぶん**(`content.recordMedia` の石板
-//   コスト = `baseCostFix × byMedium.stoneTablet.costMulFix`)を積む —
-//   GDD 2.3「開始5分の体験」の②(小クラフト完成)③(成文化前の喪失)を初手から
-//   遊べるようにするための最小限。`content.recordMedia` が無い content では
-//   粘土を積まない(同じ「省略時は不活性」規約)。
+//   (GDD 9.1)。**粘土 1 枚ぶん**(`content.recordMedia` の石板コスト =
+//   `baseCostFix × byMedium.stoneTablet.costMulFix`)も同じ `placeStartingFacilities`
+//   が積む([M68] 旧版はこのファイルにだけ粘土の下限保証があり、`executeExodus`
+//   側(新周回)には無かったため石板成文化が新周回で構造的に不可能だった=R4-A11。
+//   `rules/worldGen.ts` の共通生成器へ引き上げて新規ゲーム・新周回のどちらでも
+//   満たすようにした)。ねらいは GDD 2.3「開始5分の体験」の②(小クラフト完成)
+//   ③(成文化前の喪失)を初手から遊べるようにする最小限。`content.recordMedia`
+//   が無い content では粘土を積まない(同じ「省略時は不活性」規約)。
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "./engine/canonicalize";
-import { fixFromInt, mulFix, type Fix } from "./engine/fp";
+import { fixFromInt } from "./engine/fp";
 import { DOMAIN_TAGS } from "./engine/rng/domainTags";
 import { createResidentLife } from "./engine/rules/lifespan";
 import { initialTerrain } from "./engine/rules/reclaim";
@@ -82,7 +85,7 @@ import {
   type GameStateMeta,
   type ResidentState,
 } from "./engine/state/state";
-import { createGameState, putEntity } from "./engine/state/update";
+import { createGameState } from "./engine/state/update";
 import {
   hashedDrawUint32,
   saltFromId,
@@ -123,12 +126,6 @@ export interface NewGameOptions {
   readonly difficultySeedId?: DifficultySeedId;
 }
 
-/** `stem` + ID 先頭大文字化(`rules/worldGen.ts` / `ui/screens/grid/facilityId.ts` と同型)。 */
-function capitalize(value: string): string {
-  const head = value.charAt(0);
-  return head.toUpperCase() + value.slice(1);
-}
-
 /**
  * 初期住民 1 人の trait 抽選(§3)。`content.traitDefs` が無い/空なら常に空配列。
  *
@@ -166,25 +163,6 @@ function rollInitialTraits(
     pool.splice(index, 1);
   }
   return [...chosen].sort(compareUtf16);
-}
-
-/**
- * 資源 entity の在庫を「少なくとも floor」にする(既存在庫は max で保つ)。
- * 対象 resourceId の entity が無ければ floor で新規作成する
- * (`rules/worldGen.ts` の `ensureReclaimFloor` と同じ考え方)。
- */
-function ensureResourceFloor(state: GameState, resourceId: EntityId, floorFix: Fix): GameState {
-  for (const entity of state.entityStateById.values()) {
-    if (entity.kind !== "resource" || entity.resourceId !== resourceId) continue;
-    if (entity.stock >= floorFix) return state;
-    return putEntity(state, { ...entity, stock: floorFix });
-  }
-  return putEntity(state, {
-    kind: "resource",
-    id: eid(`stock${capitalize(resourceId)}`),
-    resourceId,
-    stock: floorFix,
-  });
 }
 
 /**
@@ -266,19 +244,8 @@ export function createNewGameState(content: EngineContent, options: NewGameOptio
     [],
     initialTerrain(seededContent),
   );
-  // [M53] 開始施設・詰み防止の開墾資源は、大移動の新周回と共通の生成器を通す
-  // (rules/worldGen.ts §1)。
-  let state = placeStartingFacilities(bare, seededContent);
-
-  // [M53・§4] 石板 1 枚ぶんの粘土。content に recordMedia が無ければ積まない
-  // (成文化そのものが不活性な content なので不要・rules/types.ts の
-  // `RecordMediaParams` doc)。
-  const recordMedia = seededContent.recordMedia;
-  if (recordMedia !== undefined) {
-    const stoneTablet = recordMedia.byMedium.stoneTablet;
-    const clayFloorFix = mulFix(recordMedia.baseCostFix, stoneTablet.costMulFix);
-    state = ensureResourceFloor(state, stoneTablet.costResourceId, clayFloorFix);
-  }
-
-  return state;
+  // [M53・M68] 開始施設(かまど・作業台・寝床)・詰み防止の開墾資源・石板1枚
+  // ぶんの粘土は、大移動の新周回と共通の生成器が一括で保証する(§4 / rules/
+  // worldGen.ts §1・§2(e))。
+  return placeStartingFacilities(bare, seededContent);
 }
