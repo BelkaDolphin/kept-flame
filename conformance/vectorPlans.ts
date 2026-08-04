@@ -419,9 +419,12 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     { splitTicks: [50] },
   ),
 
-  // --- sc37-exp-reward-overflow(GDD 12.1 item overflow・探索報酬の上限クランプ) ------
+  // --- sc37-exp-reward-overflow(GDD 6.7・探索報酬の保管上限クランプ) ---------------
+  // [M64] 上限の出所が `exploration.rewardOverflow` から `storage`(加算式)へ
+  // 一本化されたので、クランプに加えてスポンジ機構(廃材化)も同じ run で踏む。
   plan("sc37-exp-reward-overflow-alpha", "sc37-exp-reward-overflow", SEEDS.alpha, 60, [
     "exp-reward-overflow-clamp",
+    "exp-reward-waste-sponge",
   ]),
 
   // --- sc38-out-supply(GDD 9.2 衛星供給・scheduler段80結線・二重計上なし) -----------
@@ -474,5 +477,21 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     250,
     ["split-at-research-select-expiry-tick"],
     { splitTicks: [100] },
+  ),
+
+  // --- sc41-out-supply-cap(M64: 拠点供給にも加算式保管上限が掛かる) ---------
+  // 供給レートは RNG を引かない(rules/outpost.ts §1)ので worldSeed 非依存
+  // = C7 対象外(sc38 と同じ理由)。
+  plan("sc41-out-supply-cap-alpha", "sc41-out-supply-cap", SEEDS.alpha, 1000, [
+    "out-supply-storage-cap",
+    "out-supply-waste-sponge",
+  ]),
+  plan(
+    "sc41-out-supply-cap-split-alpha",
+    "sc41-out-supply-cap",
+    SEEDS.alpha,
+    1000,
+    ["out-split-at-capped-supply"],
+    { splitTicks: [500] },
   ),
 ];

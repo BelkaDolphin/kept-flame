@@ -908,15 +908,26 @@
     },
     {
       "id": "exp-reward-overflow-clamp",
-      "title": "balance.exploration.rewardOverflowが設定されていれば探索報酬も保管上限でクランプされ超過分は方策どおり処理される",
+      "title": "探索報酬も本拠の施設産出と同じ加算式保管上限(GDD 6.7)でクランプされる",
       "refs": [
-        "GDD 12.1",
         "GDD 6.7",
+        "GDD 8.4",
         "src/engine/rules/exploration.ts applyExpeditionReward",
-        "src/engine/rules/storage.ts applyOverflowPolicy"
+        "src/engine/rules/storage.ts §2b applyCappedIntake"
       ],
       "observedBy": ["digest", "probe"],
-      "note": "[M25] sc37-exp-reward-overflow-alphaが固定。初期在庫200+報酬2000(policy=discard・capacity=1000)がcapacity1000でクランプされprobe.resourceStockSumRaw=1,000,000,000 rawになる(素の加算なら2,200,000,000 raw相当)。反証(2026-07-31実測): contentPatchをnull(rewardOverflowブロック無し)に戻すとprobe.resourceStockSumRawが1,000,000,000→2,200,000,000 raw(クランプなしの素の合計)へ動き、stateDigestも動くことを確認しrevert"
+      "note": "[M64・台帳v17 必-1(案1)] sc37-exp-reward-overflow-alphaが固定。M25〜M63は`balance.exploration.rewardOverflow`(探索報酬専用の固定上限)だったが、400スケール再校正から取り残されたcapacity 200が薪200以上の報酬を黙殺していた(R5-A01・fatal)ため、上限の出所をstorage 1系統へ統一した。初期在庫200+報酬2000がbaseCapacity.firewood=1000でクランプされる(素の加算なら2,200,000,000 raw相当)。反証: contentPatchをnull(baseCapacity空)に戻すと在庫が上限なしの2,200,000,000 rawへ動き、stateDigestも動く"
+    },
+    {
+      "id": "exp-reward-waste-sponge",
+      "title": "探索報酬の超過分も本拠と同じスポンジ機構(wasteConversionRatio)で廃材になる",
+      "refs": [
+        "GDD 6.7",
+        "src/engine/rules/exploration.ts applyExpeditionReward",
+        "src/engine/rules/storage.ts §2b creditWasteGain"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M64] sc37-exp-reward-overflow-alphaが固定。超過1200に凍結contentのwasteConversionRatio.firewood=0.5が掛かり600が廃材resourceWasteへ入るので、probe.resourceStockSumRawは薪1000+廃材600=1,600,000,000 rawになる(クランプのみで廃材化しないなら1,000,000,000 raw)。反証: creditWasteGainの呼び出しを外すと差が出る。廃材の受け皿resourceWasteが盤面に無ければRulesErrorで停止する(黙って捨てない設計)"
     },
     {
       "id": "out-supply-stage80-wired",
@@ -940,6 +951,40 @@
       ],
       "observedBy": ["digest", "probe"],
       "note": "[M25] sc38-out-supply-alphaが固定(検分観点そのもの)。facilityHearthHome(residentHome)産出のfirewoodとoutpostForestActive(residentOutpostA/B)供給のfirewoodが同一resource entityへ加算され、最終在庫probe.resourceStockSumRaw=200,000,000,000 rawが『本拠生産100,000,000,000 raw(out-supply-stage80-wiredの反証で実測)+拠点供給100,000,000,000 rawの単純和』であることを実測固定(tests/engine/outpost.test.tsの段80結線版unit testと同一構造をgolden側でも確認)。residentIds の重複があれば assertNoDoubleStationedResidents がRulesErrorで止まる(unit-testで別途固定済み・本ベクタは正常系の和が正しいことの担当)"
+    },
+    {
+      "id": "out-supply-storage-cap",
+      "title": "衛星拠点の供給も本拠の施設産出と同じ加算式保管上限(GDD 6.7)を通る",
+      "refs": [
+        "GDD 6.7",
+        "GDD 9.2",
+        "src/engine/rules/outpost.ts applyOutpostSupply",
+        "src/engine/rules/storage.ts §2b applyCappedIntake"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M64・台帳v17 必-1(案1)] sc41-out-supply-cap-alphaが固定。M25〜M63のapplyOutpostSupplyは『保管上限を通さない』意図的な簡略化だったため、拠点を建てた資源だけが上限を素通りしていた(R4-A05・穀物76,980まで実測=倉庫を建てずに無限に貯まる裏口)。sc38(上限なし)が1000tickで200,000まで積むのに対し、本ベクタはbaseCapacity.firewood=50,000で頭打ちになる。**同一区間内で生産(段30)→拠点供給(段80)の2段クランプが掛かる**ことを踏む。反証: applyOutpostSupplyをM63の素の加算へ戻すと在庫が上限を超えstateDigestが動く"
+    },
+    {
+      "id": "out-supply-waste-sponge",
+      "title": "拠点供給の超過分も本拠と同じスポンジ機構で廃材になる(廃材会計が経路で分岐しない)",
+      "refs": [
+        "GDD 6.7",
+        "src/engine/rules/outpost.ts applyOutpostSupply",
+        "src/engine/rules/storage.ts §2b creditWasteGain"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M64] sc41-out-supply-cap-alphaが固定。凍結contentのwasteConversionRatio.firewood=0.5により、上限を超えた供給ぶんが廃材resourceWasteへ回る。廃材生成量は累計超過の差分(storage.ts §3のtelescoping)なので、生産ぶんと拠点供給ぶんを別々に会計しても総量が経路非依存になる"
+    },
+    {
+      "id": "out-split-at-capped-supply",
+      "title": "分割不変性: 保管上限が binding な状態(2段クランプ + 廃材telescoping)でも拠点供給の区間分割で最終状態が一致する",
+      "refs": [
+        "src/engine/advance.ts §3",
+        "src/engine/rules/storage.ts §2(a)(b)",
+        "src/engine/rules/outpost.ts applyOutpostSupply"
+      ],
+      "observedBy": ["split-digest"],
+      "note": "[M64] sc41-out-supply-cap-split-alpha(splitTicks=[500])が固定。上限クランプはmin()の非線形演算なので、素朴に実装すると区間分割で結果が変わる。storage.ts §2(a)の『クランプは産出が正のときだけ』と§3の『廃材は累計超過の差分』の2規約により、生産→拠点供給の2段クランプでもmin(min(x+a,cap)+b,cap)=min(x+a+b,cap)(a,b>=0)で一致する。反証: applyOutpostSupplyでクランプを負の入荷にも掛ける/廃材を区間ごとのfloorで出すとsplit側の最終ダイジェストが食い違い、golden:writeがGeneratorErrorで停止する"
     },
     {
       "id": "out-split-at-supply-integration",

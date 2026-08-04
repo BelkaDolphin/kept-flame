@@ -73,18 +73,13 @@ import {
   type GameState,
   type ResidentState,
 } from "../state/state";
-import { setField, updateEntity } from "../state/update";
 import {
   NEUTRAL_RESIDENT_STATS,
   UNIFORM_STAT_WEIGHTS,
   resolveTraitDefs,
   workerContribution,
 } from "./stats";
-import {
-  applyGainWithCapacity,
-  resolveCapacityByResourceId,
-  writeCapacityOutcome,
-} from "./storage";
+import { applyCappedIntake, creditWasteGain, resolveCapacityByResourceId } from "./storage";
 import {
   buildImpairmentIndex,
   computeMasteryGains,
@@ -467,24 +462,17 @@ export function applyProduction(
     consumed++;
     const gain = mulFixInt(rate, deltaTicks);
 
-    const capacity = rates.capacityByResourceId.get(resource.resourceId);
-    if (capacity === undefined) {
-      // 上限なし(既定)= T5 と同一経路。会計フィールドも足さない(§3)。
-      if (toRaw(gain) === 0) continue;
-      next = updateEntity(next, resource.id, "resource", (r) =>
-        setField(r, "stock", addFix(r.stock, gain)),
-      );
-      continue;
-    }
-
-    const outcome = applyGainWithCapacity(
+    // [M64] 上限なし(既定)= T5 と同一経路(会計フィールドも足さない・§3)も
+    // 含めて `applyCappedIntake`(rules/storage.ts §2b)へ一本化した。
+    const intake = applyCappedIntake(
+      next,
+      rates.storage,
+      rates.capacityByResourceId,
       resource,
       gain,
-      capacity,
-      wasteConversionRatio(rates, resource.resourceId),
     );
-    next = writeCapacityOutcome(next, resource.id, outcome);
-    wasteGainTotal = addFix(wasteGainTotal, outcome.wasteGain);
+    next = intake.state;
+    wasteGainTotal = addFix(wasteGainTotal, intake.wasteGainFix);
   }
 
   if (consumed !== rates.resourceRateByResourceId.size) {
@@ -493,49 +481,12 @@ export function applyProduction(
         `(レート ${String(rates.resourceRateByResourceId.size)} 件に対し受け皿 ${String(consumed)} 件)`,
     );
   }
-  if (toRaw(wasteGainTotal) > 0) {
-    next = creditWaste(next, rates, wasteGainTotal);
-  }
-  return next;
-}
-
-/**
- * 資源 1 種の廃材変換率(GDD 6.7 のスポンジ機構)。
- * **廃材そのものは再変換しない**(自己参照ループを作らない)。
- */
-function wasteConversionRatio(rates: ProductionRates, resourceId: EntityId): Fix {
-  const storage = rates.storage;
-  if (storage === undefined || storage.wasteResourceId === resourceId) return FIX_ZERO;
-  return storage.wasteConversionRatioByResourceId.get(resourceId) ?? FIX_ZERO;
-}
-
-/**
- * スポンジで生じた廃材を廃材資源の在庫へ入れる。
- * 廃材自身にも上限があれば適用するが、その超過は破棄する(変換率 0 で渡す)。
- *
- * @throws {RulesError} 廃材の resource entity が state に無い場合
- *   (生成した廃材を黙って捨てないため)
- */
-function creditWaste(state: GameState, rates: ProductionRates, wasteGain: Fix): GameState {
-  const wasteResourceId = rates.storage?.wasteResourceId;
-  if (wasteResourceId === undefined || wasteResourceId === null) return state;
-
-  for (const resource of entitiesOfKind(state, "resource")) {
-    if (resource.resourceId !== wasteResourceId) continue;
-    const capacity = rates.capacityByResourceId.get(wasteResourceId);
-    if (capacity === undefined) {
-      return updateEntity(state, resource.id, "resource", (r) =>
-        setField(r, "stock", addFix(r.stock, wasteGain)),
-      );
-    }
-    return writeCapacityOutcome(
-      state,
-      resource.id,
-      applyGainWithCapacity(resource, wasteGain, capacity, FIX_ZERO),
-    );
-  }
-  throw new RulesError(
-    `applyProduction: 廃材 "${wasteResourceId}" の resource entity が state に無い` +
-      `(スポンジ機構が生んだ ${String(toRaw(wasteGain))} を黙って捨てないため停止)`,
+  // [M64] 廃材の受け皿も rules/storage.ts §2b の単一入口へ寄せた。
+  return creditWasteGain(
+    next,
+    rates.storage,
+    rates.capacityByResourceId,
+    wasteGainTotal,
+    "applyProduction",
   );
 }

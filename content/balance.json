@@ -1,6 +1,6 @@
 {
   "fpScale": 1000000,
-  "algoVersion": 3,
+  "algoVersion": 4,
   "coarseTickMinutes": 10,
   "offlineClampTick": 4320,
   "safetyFactor": 1.5,
@@ -157,12 +157,6 @@
         "rescueChance": 0.03,
         "wipeBaseP": 0.35
       }
-    },
-    "rewardOverflow": {
-      "policy": "discard",
-      "capacity": 200,
-      "convertTo": null,
-      "ratio": 0
     }
   },
   "outpost": {

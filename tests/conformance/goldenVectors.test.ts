@@ -20,7 +20,7 @@ import { buildVector, diffVectors, loadStoredVector } from "../../tools/genGolde
 const registry = coverageJson as CoverageRegistry;
 
 describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
-  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50 拡張のとおり 77 本ある", () => {
+  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50/M64 拡張のとおり 79 本ある", () => {
     // 37 → 40: M10 で sc17-prod-full-alpha / sc18-sto-overflow-alpha /
     // sc18-sto-overflow-split-alpha の 3 本を追加(spec §9・conformance 拡張 #1)。
     // 40 → 56: M15 で住民系(sc19〜sc27・16 本)を追加(conformance 拡張 #2)。
@@ -39,7 +39,14 @@ describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
     //   expected/splitCounters は 1 バイトも動いていない**(実測・M50 報告)ので
     //   algoVersion の bump は伴わない(spec §9.4(1) の表「新ベクタの追加のみ →
     //   bump 不要」・M25 の段80 結線と同じ結論)。
-    expect(VECTOR_PLANS.length).toBe(77);
+    // 77 → 79: M64(上限会計の統一・台帳v17 必-1 案1)で sc41-out-supply-cap ×2 を
+    //   追加。**既存 77 本のうち動いたのは sc37-exp-reward-overflow-alpha 1 本だけ**
+    //   (探索報酬の上限の出所が `exploration.rewardOverflow` から `storage` の
+    //   加算式へ移ったため。シナリオの contentPatch 自体も差し替えた)。ほかの
+    //   76 本は凍結 content の `storage.baseCapacity` が空 = 上限機構に入らない
+    //   ため 1 バイトも動いていない(実測)。engine の観測挙動が変わったので
+    //   ADR-016(1) に従い `content/balance.json` の algoVersion を 3 → 4 へ bump した。
+    expect(VECTOR_PLANS.length).toBe(79);
   });
 
   it("vectorId に重複が無い", () => {

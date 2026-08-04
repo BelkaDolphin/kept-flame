@@ -585,53 +585,15 @@ export interface ExplorationParams {
   readonly rareAssetValueFix: Fix;
   /** 安全曲線の全滅確率の上限(GDD 8.5「理不尽全滅はしない曲線」)。 */
   readonly wipeMaxPFix: Fix;
-  /**
-   * [M22] 探索報酬の受け取りに掛かるオーバーフロー方策(GDD 12.1 の
-   * `item(… overflow{policy, convertTo, ratio})` / GDD 6.7)。
-   *
-   * **省略時は上限なし**(= M21 と 1 bit も違わない)。GDD 8.1 の
-   * [2026-07-30裁定]⑥ が「探索報酬は保管上限/オーバーフロー会計を通さない」
-   * と定めているのは `cumulativeProduced` / `cumulativeOverflow`(生産側の
-   * 損失率会計・GDD 11.4-7)を膨らませないためであり、**上限そのものを
-   * 掛けてはいけないという意味ではない**。本ブロックは会計を通さずに
-   * 上限とあふれ処理だけを行う(rules/storage.ts の `applyOverflowPolicy`)。
-   *
-   * 置き場が balance なのは item カテゴリが MVP に無いためである。item entity が
-   * 入ったら方策の**出所だけ**がそちらへ移り、engine 側の primitive は変わらない。
-   */
-  readonly rewardOverflow?: OverflowPolicy;
-}
-
-/** [M22] {@link OverflowPolicy} の方策(GDD 12.1 `item.overflow.policy`・UTF-16 昇順)。 */
-export const OVERFLOW_POLICIES = ["convert", "discard"] as const;
-
-/** {@link OVERFLOW_POLICIES} のいずれか。 */
-export type OverflowPolicyKind = (typeof OVERFLOW_POLICIES)[number];
-
-/** 未知の文字列がオーバーフロー方策のいずれかか(型ガード)。 */
-export function isOverflowPolicyKind(value: string): value is OverflowPolicyKind {
-  for (const policy of OVERFLOW_POLICIES) {
-    if (policy === value) return true;
-  }
-  return false;
-}
-
-/**
- * [M22] 「入りきらない分をどうするか」の方策(GDD 12.1 の
- * `item.overflow{policy, convertTo, ratio}` / GDD 6.7「原則超過分破棄 +
- * 低次資源は一定比率で廃材へ」)。
- *
- *   discard : 超過分は破棄する(GDD 6.7 の原則)
- *   convert : 超過分 × `ratioFix` を `convertToResourceId` へ入れる
- */
-export interface OverflowPolicy {
-  readonly policy: OverflowPolicyKind;
-  /** 受け取り上限。これを超えた分が「超過」になる。 */
-  readonly capacityFix: Fix;
-  /** `convert` のときの変換先 resource 定義 ID。`discard` では null。 */
-  readonly convertToResourceId: EntityId | null;
-  /** `convert` のときの変換率(0〜1)。`discard` では 0。 */
-  readonly ratioFix: Fix;
+  //
+  // **[M64・2026-08-04裁定・台帳v17 必-1(案1)] `rewardOverflow` は撤廃した。**
+  // M22 が置いた「探索報酬だけに掛かる独自の固定上限」(`{policy:'discard',
+  // capacity:200}`)は、400 スケール再校正(M39/M40)から取り残されて薪 200 以上の
+  // 報酬を黙殺していた(R5-A01・fatal)。上限の出所は
+  // `balance.storage.baseCapacity` + 保管施設の加算式(GDD 6.7 [2026-08-02裁定])
+  // 1 系統に統一され、探索報酬は本拠生産と同じ `rules/storage.ts` §2b を通る。
+  // 旧キーが残った content はスキーマの未知キーとして黙って無視される
+  // (reject しない = 後方互換)。
 }
 
 // --- 3f. event(GDD 8.2〜8.4 / 12.1 / 12.2)— M22 -----------------------------

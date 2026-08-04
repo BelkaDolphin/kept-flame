@@ -144,7 +144,7 @@ import { createResidentLife } from "./lifespan";
 import { appendMemoirEntry, initializeResidentMemoir } from "./memoir";
 import { ARRIVAL_INITIAL_MORALE_FIX } from "./population";
 import { NEUTRAL_RESIDENT_STATS } from "./stats";
-import { applyOverflowPolicy } from "./storage";
+import { applyCappedLumpIntake, creditWasteGain, resolveCapacityByResourceId } from "./storage";
 import { heldTechIdsOf, techHoldersOf } from "./techMemory";
 import {
   RulesError,
@@ -640,6 +640,22 @@ export interface ExpeditionResolution {
   readonly rescuedIds: readonly EntityId[];
   /** 適用したスナップショット(帰還ログの材料)。 */
   readonly snapshot: DispatchSnapshot;
+  /** [M64] 報酬の実受領額と、保管上限であふれた量(帰還ログ/検証用)。 */
+  readonly rewardIntake: RewardIntake;
+}
+
+/**
+ * [M64] 探索報酬の受入結果(GDD 6.7 の保管上限を通した後の実額)。
+ *
+ * `acceptedFix` が**実際に在庫へ入った量**であり、帰還ログ(GDD 8.4)に焼くのは
+ * こちらである。粗報酬(`DispatchSnapshot.rewardFix`)を表示していたのが
+ * R5-A01(fatal)の「受領 11.3 に対しログは 175」の正体だった。
+ */
+export interface RewardIntake {
+  /** 実際に在庫へ入った量。 */
+  readonly acceptedFix: Fix;
+  /** 保管上限に阻まれて在庫へ入らなかった量(廃材化ぶんを含む)。 */
+  readonly excessFix: Fix;
 }
 
 /**
@@ -693,15 +709,20 @@ export function resolveExpedition(
     next = updateEntity(next, memberId, "resident", (r) => setField(r, "dispatched", false));
   }
 
-  // (2) 報酬。**生産側の会計(`cumulativeProduced` / `cumulativeOverflow`)は
-  //     通さない**(GDD 8.1 [2026-07-30裁定]⑥)。連続生産と同じ会計へ入れると
-  //     損失率(GDD 11.4-7)の分母が探索ぶんで膨らみ、生産側の指標の意味が
-  //     変わるためである。
-  //     [M22] 上限とあふれ処理(GDD 12.1 の `item.overflow{policy,convertTo,ratio}`)
-  //     だけは `balance.exploration.rewardOverflow` があるときに掛かる
-  //     (rules/storage.ts §2b)。ブロックが無ければ M21 と同一挙動。
+  // (2) 報酬。**[M64・台帳v17 必-1(案1系)] 本拠の施設産出と同じ加算式保管上限
+  //     とスポンジを通す**(rules/storage.ts §2b)。生産側の会計
+  //     (`cumulativeProduced` / `cumulativeOverflow`)は GDD 8.1
+  //     [2026-07-30裁定]⑥ どおり触らない(理由は storage.ts §2b 冒頭)。
+  let rewardIntake: RewardIntake = { acceptedFix: snapshot.rewardFix, excessFix: FIX_ZERO };
   if (toRaw(snapshot.rewardFix) > 0) {
-    next = applyExpeditionReward(next, ctx.content, snapshot.rewardResourceId, snapshot.rewardFix);
+    const credited = applyExpeditionReward(
+      next,
+      ctx.content,
+      snapshot.rewardResourceId,
+      snapshot.rewardFix,
+    );
+    next = credited.state;
+    rewardIntake = credited.intake;
   }
 
   // (2b) [M22] スナップショットへ焼かれた効果(`destroyRecords` 等)。
@@ -743,27 +764,51 @@ export function resolveExpedition(
     }
   }
 
-  // (4) 帰還ログ(GDD 8.4・レンダリング済み文字列)。
-  next = appendRenderedLog(next, { tick, text: renderReturnLog(snapshot, rescuedIds.length) });
+  // (4) 帰還ログ(GDD 8.4・レンダリング済み文字列)。**[M64] 実受領額を焼く**
+  //     (ログはセーブ確定方式 = 後から直せないので、保存する前に正しい値にする)。
+  next = appendRenderedLog(next, {
+    tick,
+    text: renderReturnLog(snapshot, rescuedIds.length, rewardIntake),
+  });
 
-  return { state: next, casualtyIds: snapshot.casualtyMemberIds, rescuedIds, snapshot };
+  return {
+    state: next,
+    casualtyIds: snapshot.casualtyMemberIds,
+    rescuedIds,
+    snapshot,
+    rewardIntake,
+  };
 }
 
 /**
- * [M22] 探索報酬を在庫へ入れる(GDD 8.4 / 12.1 の item overflow)。
+ * [M64] 探索報酬を在庫へ入れる(GDD 6.7 / 8.4)。
  *
- * `balance.exploration.rewardOverflow` が無ければ**素直に全量を足す**
- * (= M21 と 1 bit も違わない)。あれば上限までを在庫へ入れ、あふれた分は
- * 方策どおり破棄 or 変換する。生産側の会計は一切触らない(§(2) の doc)。
+ * **[2026-08-04裁定・台帳v17 必-1(案1系)]** 上限とあふれ処理は本拠の施設産出と
+ * **まったく同じ実装**(`rules/storage.ts` §2b の `applyCappedLumpIntake`)を通す。
+ * 上限が無い資源なら全量が入る(= M21 と 1 bit も違わない)。上限がある資源では
+ * 加算式保管上限(基礎 400 + 保管施設の Lv 合計 × 400・GDD 6.7 [2026-08-02裁定])
+ * までを在庫へ入れ、あふれた分は本拠と同じ扱い(`wasteConversionRatio` が
+ * 登録されていればその比率で廃材化・無ければ破棄)にする。
  *
- * @throws {RulesError} 報酬資源 / 変換先資源の受け皿 entity が state に無い場合
+ * M22 の `balance.exploration.rewardOverflow`(独自の固定上限)は撤廃した。
+ * 400 スケール再校正(M39/M40)から取り残された `capacity: 200` が薪 200 以上で
+ * 報酬を黙殺していた(R5-A01・fatal)ことが直接の契機であり、根治は
+ * 「上限の出所を保管施設 1 系統に統一する」ことである。
+ *
+ * **`cumulativeProduced` / `cumulativeOverflow` は動かさない**(GDD 8.1
+ * [2026-07-30裁定]⑥ は撤回されていない)。理由と実測は storage.ts §2b 冒頭。
+ *
+ * 受け取った量・あふれた量を返すのは、帰還ログ(GDD 8.4)へ**実受領額**を
+ * 焼くためである(粗報酬を満額表示していたのが R5-A01 のもう半分)。
+ *
+ * @throws {RulesError} 報酬資源 / 廃材の受け皿 entity が state に無い場合
  */
 function applyExpeditionReward(
   state: GameState,
   content: EngineContent,
   rewardResourceId: EntityId,
   rewardFix: Fix,
-): GameState {
+): { readonly state: GameState; readonly intake: RewardIntake } {
   const resourceEntityId = rewardResourceEntityIdOf(state, rewardResourceId);
   if (resourceEntityId === undefined) {
     throw new RulesError(
@@ -771,29 +816,24 @@ function applyExpeditionReward(
         "(派遣確定時に検査済みのはず = 実装バグ)",
     );
   }
-  const policy = content.exploration?.rewardOverflow;
-  if (policy === undefined) {
-    return updateEntity(state, resourceEntityId, "resource", (r) =>
-      setField(r, "stock", addFix(r.stock, rewardFix)),
-    );
-  }
-  const current = requireEntity(state, resourceEntityId, "resource");
-  const outcome = applyOverflowPolicy(current.stock, rewardFix, policy);
-  let next = updateEntity(state, resourceEntityId, "resource", (r) =>
-    setField(r, "stock", addFix(r.stock, outcome.acceptedFix)),
+  const capacityByResourceId = resolveCapacityByResourceId(state, content);
+  const outcome = applyCappedLumpIntake(
+    state,
+    content.storage,
+    capacityByResourceId,
+    requireEntity(state, resourceEntityId, "resource"),
+    rewardFix,
   );
-  if (outcome.convertToResourceId === null || toRaw(outcome.convertedFix) <= 0) return next;
-  const convertEntityId = rewardResourceEntityIdOf(next, outcome.convertToResourceId);
-  if (convertEntityId === undefined) {
-    throw new RulesError(
-      `探索報酬のオーバーフロー変換先 "${outcome.convertToResourceId}" の在庫 entity が state に無い` +
-        "(balance.exploration.rewardOverflow.convertTo の受け皿不在)",
-    );
-  }
-  next = updateEntity(next, convertEntityId, "resource", (r) =>
-    setField(r, "stock", addFix(r.stock, outcome.convertedFix)),
-  );
-  return next;
+  return {
+    state: creditWasteGain(
+      outcome.state,
+      content.storage,
+      capacityByResourceId,
+      outcome.wasteGainFix,
+      "applyExpeditionReward",
+    ),
+    intake: { acceptedFix: outcome.acceptedFix, excessFix: outcome.excessFix },
+  };
 }
 
 /**
@@ -848,8 +888,18 @@ function formatFixInt(value: Fix): string {
  *
  * ノードに `logText` が 1 つも無い(= M21 の手続き生成)場合、出力は M21 と
  * 完全に同一の文字列になる。
+ *
+ * **[M64] 報酬欄は `intake.acceptedFix`(実受領額)である。** 保管上限で
+ * あふれた分があれば、黙殺せず「あふれた量」を 1 句足す(R5-A01 の
+ * 「黙って破棄され、ログは粗報酬を満額表示」の両方に対する回答)。
+ * あふれが 0 のとき(= 上限が無い/届いていない大多数の盤面)は M22 までと
+ * 1 バイトも変わらない文字列になる。
  */
-export function renderReturnLog(snapshot: DispatchSnapshot, rescuedCount: number): string {
+export function renderReturnLog(
+  snapshot: DispatchSnapshot,
+  rescuedCount: number,
+  intake: RewardIntake,
+): string {
   let successCount = 0;
   const nodeTexts: string[] = [];
   for (const node of snapshot.nodes) {
@@ -859,8 +909,11 @@ export function renderReturnLog(snapshot: DispatchSnapshot, rescuedCount: number
   const parts: string[] = [
     `${BAND_LABEL[snapshot.band]}探索「${snapshot.destinationId}」より${String(snapshot.memberIds.length)}名が帰還`,
     `${String(snapshot.nodes.length)}ノード中${String(successCount)}成功`,
-    `報酬 ${snapshot.rewardResourceId} ${formatFixInt(snapshot.rewardFix)}`,
+    `報酬 ${snapshot.rewardResourceId} ${formatFixInt(intake.acceptedFix)}`,
   ];
+  if (toRaw(intake.excessFix) > 0) {
+    parts.push(`保管上限のため ${formatFixInt(intake.excessFix)} は持ち帰れなかった`);
+  }
   if (snapshot.withdrawn) parts.push("撤退により報酬は半分");
   if (rescuedCount > 0) parts.push(`${String(rescuedCount)}名を保護`);
   if (snapshot.casualtyMemberIds.length > 0) {

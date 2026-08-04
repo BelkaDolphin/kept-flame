@@ -7,7 +7,7 @@
 //   3. choices の質的分岐(GDD 8.3)が判定の**前**に効く + choiceKey が salt へ入る
 //   4. branches の cond 評価 → result / logTemplate(GDD 8.4 の完成文字列)
 //   5. 効果プリミティブ `destroyRecords{medium, scope}`(GDD 11.1 追補)
-//   6. item overflow(GDD 12.1 の `item.overflow{policy, convertTo, ratio}`)
+//   6. [M64] 探索報酬の保管上限会計(GDD 6.7 の加算式上限 + スポンジ + 実受領額ログ)
 //   7. ローダーの reject(未知プレースホルダ / 無条件成立でない末尾 branch /
 //      正本語彙でない statWeights / 距離帯不一致)
 // ---------------------------------------------------------------------------
@@ -25,7 +25,6 @@ import { loadEngineContent, loadEngineContentOrThrow } from "../../schema/engine
 import { validateEvent } from "../../schema/event";
 
 import { FIX_ONE, FIX_ZERO, fixFromInt, fixFromRaw, toRaw } from "../../src/engine/fp";
-import { applyOverflowPolicy, type OverflowOutcome } from "../../src/engine/rules/storage";
 import {
   destroyRecords,
   effectiveDifficultyFix,
@@ -41,6 +40,7 @@ import {
   buildDispatchSnapshot,
   renderReturnLog,
   resolveExpedition,
+  type RewardIntake,
 } from "../../src/engine/rules/exploration";
 import { isCodified } from "../../src/engine/rules/codify";
 import { RulesError, type EngineContent, type EventNodeDef } from "../../src/engine/rules/types";
@@ -171,6 +171,11 @@ function snapshotOf(
   });
 }
 
+/** [M64] 保管上限が無い盤面の受入結果(= 粗報酬が満額入る)。 */
+function fullIntake(snapshot: DispatchSnapshot): RewardIntake {
+  return { acceptedFix: snapshot.rewardFix, excessFix: FIX_ZERO };
+}
+
 // --- 2. 縮約互換(検収の根幹) -----------------------------------------------
 
 describe("event ランタイム — content に event が無ければ M21 と同一", () => {
@@ -195,7 +200,7 @@ describe("event ランタイム — content に event が無ければ M21 と同
 
   it("手続き生成の帰還ログは M21 の形のまま(分岐ログを足さない)", () => {
     const plain = snapshotOf(NO_EVENT_CONTENT, id("destUnknown"));
-    const text = renderReturnLog(plain, 0);
+    const text = renderReturnLog(plain, 0, fullIntake(plain));
     expect(text).toMatch(/^近郊探索「destUnknown」より3名が帰還。/);
     expect(text.endsWith("。")).toBe(true);
   });
@@ -372,7 +377,7 @@ describe("event ランタイム — branches と帰還ログ", () => {
 
   it("帰還ログは要約行 + ノード順の分岐ログの連結(完成文字列)", () => {
     const snapshot = snapshotOf(content, EVENT_ID);
-    const text = renderReturnLog(snapshot, 0);
+    const text = renderReturnLog(snapshot, 0, fullIntake(snapshot));
     expect(text).toContain("近郊探索「eventNearProbe」より3名が帰還");
     expect(text).toContain("近郊の1番目を踏破した");
     expect(text).toContain("近郊の3番目を踏破した");
@@ -611,63 +616,39 @@ describe("destroyRecords(GDD 11.1 追補の効果プリミティブ)", () => {
   });
 });
 
-// --- 7. item overflow(GDD 12.1 の `item.overflow`) --------------------------
+// --- 7. 探索報酬の保管上限会計(GDD 6.7・M64 上限会計の統一) ----------------
+//
+// **[2026-08-04裁定・台帳v17 必-1(案1)]** M22 の
+// `balance.exploration.rewardOverflow`(探索報酬だけに掛かる独自の固定上限)は
+// 撤廃され、探索報酬は本拠の施設産出とまったく同じ加算式保管上限
+// (`balance.storage.baseCapacity` + 保管施設の寄与)を通る。ここで固定するのは
+//   (a) 上限がある資源では上限までしか受け取らない(R5-A01 の再発防止)
+//   (b) 超過分は本拠と同じスポンジ機構(`wasteConversionRatio`)で廃材化される
+//   (c) **帰還ログの報酬欄が実受領額**である(粗報酬の満額表示をしない)
+//   (d) 上限が無い資源では M21 と 1 bit も変わらない
 
-describe("item overflow(GDD 12.1 / 6.7)", () => {
-  const discard = {
-    policy: "discard" as const,
-    capacityFix: fixFromInt(100),
-    convertToResourceId: null,
-    ratioFix: FIX_ZERO,
-  };
+describe("探索報酬の保管上限会計(GDD 6.7 / M64)", () => {
+  /** `balance.storage.baseCapacity` を差し替える patch。 */
+  function withCapacity(capacityByResourceId: Record<string, number>) {
+    return (balance: Record<string, unknown>): Record<string, unknown> => {
+      const storage = { ...(balance["storage"] as Record<string, unknown>) };
+      storage["baseCapacity"] = capacityByResourceId;
+      return { ...balance, storage };
+    };
+  }
 
-  it("上限までを受け取り、超過分は破棄される(GDD 6.7 の原則)", () => {
-    const outcome: OverflowOutcome = applyOverflowPolicy(fixFromInt(90), fixFromInt(30), discard);
-    expect(toRaw(outcome.acceptedFix)).toBe(toRaw(fixFromInt(10)));
-    expect(toRaw(outcome.excessFix)).toBe(toRaw(fixFromInt(20)));
-    expect(toRaw(outcome.convertedFix)).toBe(0);
-  });
+  /** 上限機構そのものを不活性にする patch(`storage` ブロックごと落とす)。 */
+  function withoutStorage(balance: Record<string, unknown>): Record<string, unknown> {
+    const next = { ...balance };
+    delete next["storage"];
+    return next;
+  }
 
-  it("既に上限を超えている在庫では 1 も受け取らない", () => {
-    const outcome = applyOverflowPolicy(fixFromInt(120), fixFromInt(30), discard);
-    expect(toRaw(outcome.acceptedFix)).toBe(0);
-    expect(toRaw(outcome.excessFix)).toBe(toRaw(fixFromInt(30)));
-  });
-
-  it("減少(負の入荷)は上限判定を通さない(§2(a) と同じ規約)", () => {
-    const outcome = applyOverflowPolicy(fixFromInt(120), fixFromInt(-5), discard);
-    expect(toRaw(outcome.acceptedFix)).toBe(toRaw(fixFromInt(-5)));
-    expect(toRaw(outcome.excessFix)).toBe(0);
-  });
-
-  it("policy=convert は超過分 × ratio を変換先へ回す", () => {
-    const outcome = applyOverflowPolicy(fixFromInt(90), fixFromInt(30), {
-      policy: "convert",
-      capacityFix: fixFromInt(100),
-      convertToResourceId: id("scrap"),
-      ratioFix: fixFromRaw(500_000),
-    });
-    expect(toRaw(outcome.acceptedFix)).toBe(toRaw(fixFromInt(10)));
-    expect(toRaw(outcome.convertedFix)).toBe(toRaw(fixFromInt(10)));
-    expect(outcome.convertToResourceId).toBe(id("scrap"));
-  });
-
-  it("探索報酬が rewardOverflow で頭打ちになる(帰還 tick)", () => {
-    const capped = loadWith([], (balance) => {
-      const exploration = balance["exploration"] as Record<string, unknown>;
-      return {
-        ...balance,
-        exploration: {
-          ...exploration,
-          // [M39] 実 content の報酬スケール(near 45/ノード)に合わせて 100 へ。
-          rewardOverflow: { policy: "discard", capacity: 100, convertTo: null, ratio: 0 },
-        },
-      };
-    });
-    const state = boardOf();
-    const snapshot = snapshotOf(capped, id("destUnknown"), "cautious", state);
-    expect(toRaw(snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(100)));
-
+  function resolveWith(
+    engineContent: EngineContent,
+    state: GameState,
+  ): ReturnType<typeof resolveExpedition> {
+    const snapshot = snapshotOf(engineContent, id("destUnknown"), "cautious", state);
     const withDispatch = createGameState(
       {
         saveSchemaVersion: 4,
@@ -682,23 +663,59 @@ describe("item overflow(GDD 12.1 / 6.7)", () => {
       [],
       [snapshot],
     );
-    const ctx = createAdvanceContext(withDispatch, capped);
-    const resolved = resolveExpedition(withDispatch, ctx, DISPATCH_ID, snapshot.returnTick);
+    const ctx = createAdvanceContext(withDispatch, engineContent);
+    return resolveExpedition(withDispatch, ctx, DISPATCH_ID, snapshot.returnTick);
+  }
+
+  it("保管上限がある資源では上限までしか受け取らない(R5-A01 の根治)", () => {
+    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const board = boardOf([resource("resWaste", id("waste"))]);
+    const resolved = resolveWith(capped, board);
+    expect(toRaw(resolved.snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(100)));
+
     const stock = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
     expect(toRaw(stock)).toBe(toRaw(fixFromInt(100)));
+    expect(toRaw(resolved.rewardIntake.acceptedFix)).toBe(toRaw(fixFromInt(100)));
+    expect(toRaw(resolved.rewardIntake.excessFix)).toBe(
+      toRaw(resolved.snapshot.rewardFix) - toRaw(fixFromInt(100)),
+    );
   });
 
-  it("rewardOverflow が無ければ全量が入る(M21 と同一)", () => {
-    // [M39] 実 content は rewardOverflow(capacity 200)を持つようになったので、
-    // 「無ければ」の条件をこのテスト自身が patch で作る。
-    const plain = loadWith([], (balance) => {
-      const exploration = { ...(balance["exploration"] as Record<string, unknown>) };
-      delete exploration["rewardOverflow"];
-      return { ...balance, exploration };
-    });
-    const state = boardOf();
-    const snapshot = snapshotOf(plain, id("destUnknown"), "cautious", state);
-    const withDispatch = createGameState(
+  it("超過分は本拠と同じスポンジ機構で廃材になる(GDD 6.7)", () => {
+    // 実 content の wasteConversionRatio.firewood = 0.5。
+    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const resolved = resolveWith(capped, boardOf([resource("resWaste", id("waste"))]));
+    const waste = requireEntity(resolved.state, id("resWaste"), "resource").stock;
+    expect(toRaw(waste)).toBe(Math.floor(toRaw(resolved.rewardIntake.excessFix) / 2));
+  });
+
+  it("**帰還ログの報酬欄は実受領額**であり、あふれた量も黙殺しない(R5-A01)", () => {
+    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const resolved = resolveWith(capped, boardOf([resource("resWaste", id("waste"))]));
+    const logged = resolved.state.renderedLogs.entries[0];
+    expect(logged?.text).toContain("報酬 firewood 100");
+    expect(logged?.text).not.toContain(
+      `報酬 firewood ${String(Math.floor(toRaw(resolved.snapshot.rewardFix) / 1_000_000))}`,
+    );
+    expect(logged?.text).toContain("保管上限のため");
+    // 在庫へ入った量とログの表示額が一致する(= 受領額 = 表示額)。
+    const stock = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
+    expect(logged?.text).toContain(`報酬 firewood ${String(Math.floor(toRaw(stock) / 1_000_000))}`);
+  });
+
+  it("**R5-A01 の再現**: 実 content(薪上限400)で在庫が上限近くでも受領額 = 表示額", () => {
+    // R5-A01(fatal・評価Round 5)の再現手順そのもの:
+    //   薪の在庫が上限近く → 探索から帰還 → 報酬の大半が受け取れない
+    // 旧実装(`exploration.rewardOverflow={policy:'discard',capacity:200}`)では
+    //   (a) 上限が保管施設と無関係な固定 200 だったので薪 200 以上で報酬が全損し
+    //   (b) 帰還ログは受入前の粗報酬を満額表示した(IndexedDB 実測: 受領 11.3 /
+    //       破棄 163.7 に対しログは「薪 175」)
+    // M64 後は (a) 上限が実 content の加算式(基礎 400)になり
+    //          (b) ログの報酬欄が実受領額になる。
+    const real = loadWith([]); // 実 content(patch なし)。
+    const stockBefore = 390;
+    const board = boardOf([resource("resWaste", id("waste"))]);
+    const withStock = createGameState(
       {
         saveSchemaVersion: 4,
         contentVersion: 1,
@@ -706,16 +723,52 @@ describe("item overflow(GDD 12.1 / 6.7)", () => {
         worldSeed: "seedAlpha",
         tick: 0,
       },
-      [...state.entityStateById.values()],
-      [],
-      [],
-      [],
-      [snapshot],
+      [...board.entityStateById.values()].map((entity) =>
+        entity.kind === "resource" && entity.resourceId === id("firewood")
+          ? { ...entity, stock: fixFromInt(stockBefore) }
+          : entity,
+      ),
     );
-    const ctx = createAdvanceContext(withDispatch, plain);
-    const resolved = resolveExpedition(withDispatch, ctx, DISPATCH_ID, snapshot.returnTick);
+    const resolved = resolveWith(real, withStock);
+
+    // 粗報酬は上限の残り(400 − 390 = 10)より十分大きい = R5-A01 と同じ状況。
+    expect(toRaw(resolved.snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(10)));
+    // 受領額は「上限までの残り」ちょうど。
+    expect(toRaw(resolved.rewardIntake.acceptedFix)).toBe(toRaw(fixFromInt(400 - stockBefore)));
+    const stockAfter = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
+    expect(toRaw(stockAfter)).toBe(toRaw(fixFromInt(400)));
+
+    // **検収条件: 受領額 = 表示額。** ログの報酬欄が在庫増分と一致する。
+    const logText = resolved.state.renderedLogs.entries[0]?.text ?? "";
+    const acceptedInt = Math.floor(toRaw(resolved.rewardIntake.acceptedFix) / 1_000_000);
+    const grossInt = Math.floor(toRaw(resolved.snapshot.rewardFix) / 1_000_000);
+    expect(logText).toContain(`報酬 firewood ${String(acceptedInt)}`);
+    expect(acceptedInt).toBeLessThan(grossInt);
+    expect(logText).not.toContain(`報酬 firewood ${String(grossInt)}`);
+    // 破棄も黙殺しない(旧実装は「黙って破棄」だった)。
+    expect(logText).toContain("保管上限のため");
+  });
+
+  it("保管上限が無ければ全量が入り、ログも M21 の形のまま(縮約互換)", () => {
+    const plain = loadWith([], withoutStorage);
+    const resolved = resolveWith(plain, boardOf());
     const stock = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
-    expect(toRaw(stock)).toBe(toRaw(snapshot.rewardFix));
+    expect(toRaw(stock)).toBe(toRaw(resolved.snapshot.rewardFix));
+    expect(toRaw(resolved.rewardIntake.excessFix)).toBe(0);
+    expect(resolved.state.renderedLogs.entries[0]?.text).not.toContain("保管上限のため");
+  });
+
+  it("上限に届かない報酬では在庫もログも上限が無いときと一致する", () => {
+    const roomy = loadWith([], withCapacity({ firewood: 100_000, waste: 400 }));
+    const plain = loadWith([], withoutStorage);
+    const cappedResolved = resolveWith(roomy, boardOf([resource("resWaste", id("waste"))]));
+    const plainResolved = resolveWith(plain, boardOf());
+    expect(toRaw(cappedResolved.rewardIntake.acceptedFix)).toBe(
+      toRaw(plainResolved.rewardIntake.acceptedFix),
+    );
+    expect(cappedResolved.state.renderedLogs.entries[0]?.text).toBe(
+      plainResolved.state.renderedLogs.entries[0]?.text,
+    );
   });
 });
 

@@ -87,8 +87,8 @@ import {
   type GameState,
   type OutpostState,
 } from "../state/state";
-import { setField, updateEntity } from "../state/update";
 import { rareAssetCountOf } from "./exploration";
+import { applyCappedIntake, creditWasteGain, resolveCapacityByResourceId } from "./storage";
 import { GAME_DAY_TICKS } from "../stochastic";
 import {
   RulesError,
@@ -97,6 +97,7 @@ import {
   type EngineContent,
   type OutpostParams,
   type OutpostTypeDef,
+  type StorageParams,
 } from "./types";
 
 // --- 1. hazard(GDD 12.1 hazard{intensity,growth,min,max})-------------------
@@ -226,10 +227,21 @@ export function assertNoDoubleStationedResidents(state: GameState): void {
 
 // --- 6. 供給レートの集約と適用(GDD 9.2「決定論tickで本拠在庫へ自動供給」) ---
 
+/** 供給が 1 件も無い盤面で使い回す空の上限 Map(アロケーションゼロ)。 */
+const EMPTY_CAPACITIES: ReadonlyMap<EntityId, Fix> = new Map();
+
 /** {@link computeOutpostSupplyRates} の結果。`rules/production.ts` の `ProductionRates` と同型。 */
 export interface OutpostSupplyRates {
   /** content の resourceId → 全拠点合算の 1 tick あたり供給量。 */
   readonly resourceRateByResourceId: ReadonlyMap<EntityId, Fix>;
+  /**
+   * [M64] 保管上限(GDD 6.7 の加算式 = 基礎容量 + 建っている保管施設の寄与)。
+   * `ProductionRates.capacityByResourceId` と**同じ関数**
+   * (`rules/storage.ts` の `resolveCapacityByResourceId`)から作る。
+   */
+  readonly capacityByResourceId: ReadonlyMap<EntityId, Fix>;
+  /** [M64] 廃材スポンジのパラメータ(`ProductionRates.storage` と同じ値)。 */
+  readonly storage: StorageParams | undefined;
 }
 
 /**
@@ -258,26 +270,44 @@ export function computeOutpostSupplyRates(
       addFix(resourceRateByResourceId.get(def.resourceId) ?? FIX_ZERO, rateFix),
     );
   }
-  return { resourceRateByResourceId };
+  // [M64] 上限の解決は施設の全走査を伴うので、**供給が 1 件も無い盤面では
+  // 呼ばない**(拠点ゼロの盤面 = 既存 golden の大多数と実プレイの序盤が
+  // ここに入る。`applyOutpostSupply` も size 0 で早期 return する)。
+  // 施設配置は advance 中に変わらないので、区間内で 1 回の解決で足りる
+  // (`ProductionRates.capacityByResourceId` と同じ前提・production.ts §3)。
+  return {
+    resourceRateByResourceId,
+    capacityByResourceId:
+      resourceRateByResourceId.size === 0
+        ? EMPTY_CAPACITIES
+        : resolveCapacityByResourceId(state, content),
+    storage: content.storage,
+  };
 }
 
 /**
  * 拠点供給を本拠の resource 在庫へ一括加算する((A) 区間の閉形式 = レート ×
  * 区間長。`rules/production.ts` の `applyProduction` と同型)。
  *
- * **意図的な簡略化**: 保管上限/オーバーフロー会計(GDD 6.7・rules/storage.ts)は
- * 通さない(素直に加算するだけ)。**[M25]** scheduler.ts の段80 へ結線した後も
- * この簡略化は据え置く——`applyProduction` は本拠生産ぶんの上限判定を既に
- * 単独で担っており、拠点供給ぶんにも同じ上限判定を通す設計(廃材スポンジ・
- * 3出口の会計を拠点供給分だけ経路分岐させる必要が出る)は M25 のスコープ外
- * (段80 結線そのものが目的)。**同じ resource entity(resourceId で解決)へ書く**
- * ことが二重計上しようがない構造の根拠(§2)であり、この省略はそれとは独立
- * (rules/exploration.ts の報酬が同じ理由でオーバーフロー会計を通さないのと
- * 同種の判断)。上限判定を足すタスクでは telescoping の前提(区間分割不変性)を
- * 保ったまま storage.ts と組み合わせて設計すること。
+ * **[M64・2026-08-04裁定・台帳v17 必-1(案1)] 保管上限/オーバーフロー会計
+ * (GDD 6.7・rules/storage.ts §2b)を本拠生産とまったく同じ形で通す。**
+ * M25〜M63 は「素直に加算するだけ」の意図的な簡略化だったが、拠点を建てた
+ * 資源だけが上限を素通りする非対称(R4-A05・穀物 76,980 まで実測)を生み、
+ * 「倉庫を建てなくても無限に貯まる裏口」になっていた。
+ *
+ * 分割不変性(advance.ts §3)は storage.ts §2(a)(b) の規約がそのまま効く:
+ * 拠点供給も「区間内でレート一定の閉形式」なので、区間 [t0,t1) を [t0,tm)+
+ * [tm,t1) に切っても各片の産出は非負であり、`min(min(x+a,cap)+b,cap) =
+ * min(x+a+b,cap)`(a,b>=0)で在庫が一致する。生産(段30)→拠点供給(段80)の
+ * **順に 2 回クランプが掛かる**点も同じ補題で吸収される(cap でのクランプは
+ * 非負の加算に対して結合的)。累計超過も同じ理由で経路非依存になり、廃材の
+ * telescoping(§3)が保たれる。
+ *
+ * **同じ resource entity(resourceId で解決)へ書く**ことが二重計上しようが
+ * ない構造の根拠(§2)であり、上限会計とは独立である。
  *
  * @throws {RulesError} deltaTicks が 1 以上の整数でない / 供給先の resource
- *   entity が state に無い場合
+ *   entity が state に無い / 廃材の受け皿が state に無い場合
  */
 export function applyOutpostSupply(
   state: GameState,
@@ -291,15 +321,20 @@ export function applyOutpostSupply(
 
   let next = state;
   let matched = 0;
+  let wasteGainTotal = FIX_ZERO;
   for (const resource of entitiesOfKind(state, "resource")) {
     const rateFix = rates.resourceRateByResourceId.get(resource.resourceId);
     if (rateFix === undefined) continue;
     matched++;
-    const gainFix = mulFixInt(rateFix, deltaTicks);
-    if (toRaw(gainFix) === 0) continue;
-    next = updateEntity(next, resource.id, "resource", (r) =>
-      setField(r, "stock", addFix(r.stock, gainFix)),
+    const intake = applyCappedIntake(
+      next,
+      rates.storage,
+      rates.capacityByResourceId,
+      resource,
+      mulFixInt(rateFix, deltaTicks),
     );
+    next = intake.state;
+    wasteGainTotal = addFix(wasteGainTotal, intake.wasteGainFix);
   }
   if (matched !== rates.resourceRateByResourceId.size) {
     throw new RulesError(
@@ -307,7 +342,13 @@ export function applyOutpostSupply(
         `(レート ${String(rates.resourceRateByResourceId.size)} 件に対し受け皿 ${String(matched)} 件)`,
     );
   }
-  return next;
+  return creditWasteGain(
+    next,
+    rates.storage,
+    rates.capacityByResourceId,
+    wasteGainTotal,
+    "applyOutpostSupply",
+  );
 }
 
 // --- 7. ROI(GDD 9.2 のネット収益 + GDD 8.6 の (B) 喪失金銭化を援用・§4) ------
