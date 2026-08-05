@@ -21,6 +21,7 @@ import { entityIdFromString } from "../../../src/engine/state/state";
 import {
   ExodusCompletedNotice,
   ExodusCrewRow,
+  ExodusInheritPointsNote,
   ExodusPreviewPanel,
   ExodusRecordRow,
   mediumLabel,
@@ -134,8 +135,35 @@ describe("ExodusPreviewPanel(GDD 10.2・検収条件=何が落ちるかのプレ
       // [束B/B-3] 落ちた住民IDも residentDisplayName を通す。
       expect(text).toContain("BKaya");
     }
-    // [束B/B-2] GDD 節番号の引用は削除した(プレイヤー向け画面から開発メモを除去)。
+    // [M70/R5-A10] 獲得予定の継承点は積み込み(選択)に依存しないので
+    // `ExodusInheritPointsNote` へ分離した(このパネルは積み込みで変わる値だけ)。
+    expect(text).not.toContain("獲得予定の継承点");
+  });
+});
+
+describe("[M70/R5-A10] ExodusInheritPointsNote(獲得予定の継承点・積み込みプレビューとは別セクション)", () => {
+  it("resolution が null なら何も出さない(算出不能を捏造しない)", () => {
+    const vnode = ExodusInheritPointsNote({ resolution: null });
+    expect(vnode).toBeNull();
+  });
+
+  it("engine の resolveExodusPlan.earnedInheritPoints をそのまま表示し、選択非依存であることを注記する", () => {
+    const content = exodusContent();
+    const state = boardState([
+      resident("bKaya"),
+      m33Research("researchA1", M33_TECH_A1, 100),
+      m33Research("researchB1", M33_TECH_B1, 200),
+      m33Record("codifyA1", M33_TECH_A1, "stoneTablet"),
+      m33Record("codifyB1", M33_TECH_B1, "paper"),
+    ]);
+    const resolution = resolveExodusPlan(state, content, {
+      recordIds: [id("codifyA1"), id("codifyB1")],
+      crewIds: [id("aRui"), id("bKaya")],
+    });
+    const vnode = ExodusInheritPointsNote({ resolution });
+    const text = flattenText(vnode);
     expect(text).toContain(`獲得予定の継承点: ${String(resolution.earnedInheritPoints)}`);
+    expect(text).toContain("左右されません");
   });
 });
 

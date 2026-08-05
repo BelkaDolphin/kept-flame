@@ -47,6 +47,7 @@ import {
   previewExplorationRoi,
   type ExpeditionCandidateView,
   type ExpeditionDispatchView,
+  type ResourceView,
 } from "../../derived";
 import {
   distanceBandLabel,
@@ -60,7 +61,13 @@ import type { ScreenProps } from "../screenProps";
 import { useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import { useStickyActionsClearance } from "../useStickyActionsClearance";
-import { formatApproxDecimal1, formatGameClock, formatTickSpan } from "../format";
+import {
+  formatApproxDecimal1,
+  formatApproxDecimal2,
+  formatGameClock,
+  formatResourceAmount,
+  formatTickSpan,
+} from "../format";
 import { nextDispatchId } from "./dispatchId";
 import { proceduralDestinationId } from "./destinationOptions";
 import "./expeditionScreen.css";
@@ -223,33 +230,67 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
       <p class="kf-expedition__roi-inactive">現在のデータでは派遣前の見込みを算出できません。</p>
     );
   }
+  // [M70/R5-A12] 素の toFixed(2)/(1) を整形ヘルパへ統一(「期待報酬109.81薪」
+  // 「逸失生産73.44」(単位なし)のような、画面ごとに桁ルールが違う「小数の
+  // 二重基準」の掃討)。期待報酬/逸失生産/期待損失は資源相当の量なので
+  // formatResourceAmount(他画面のコスト表示と同じ丸め・桁区切り規則)、
+  // 確率%は formatApproxDecimal1(常に小数第1位)、ROI比は 0.25 のような値も
+  // 判別できるよう formatApproxDecimal2 を使う。
   return (
     <section class="kf-expedition__roi" aria-label="派遣前 ROI">
       <p class="kf-expedition__roi-reward">
-        期待報酬: {toApproxNumber(report.expectedRewardFix).toFixed(2)}
+        期待報酬: {formatResourceAmount(toApproxNumber(report.expectedRewardFix))}
         {rewardResourceId !== null ? resourceLabel(rewardResourceId) : ""}
       </p>
       <p class="kf-expedition__roi-forgone">
-        逸失生産(機会費用): {toApproxNumber(report.forgoneOutputFix).toFixed(2)}
+        逸失生産(機会費用): {formatResourceAmount(toApproxNumber(report.forgoneOutputFix))}
       </p>
       <p class="kf-expedition__roi-loss" data-testid="expedition-b-loss">
-        (B)喪失リスク: 期待損失 {toApproxNumber(report.expectedRareLossFix).toFixed(2)}
+        (B)喪失リスク: 期待損失 {formatResourceAmount(toApproxNumber(report.expectedRareLossFix))}
         (対象 (B) 資産 {report.rareAssetCount} 件・全滅確率{" "}
-        {(toApproxNumber(report.wipeProbabilityFix) * 100).toFixed(1)}%)
+        {formatApproxDecimal1(toApproxNumber(report.wipeProbabilityFix) * 100)}%)
       </p>
       <p class="kf-expedition__roi-value">
-        ROI: {report.roiFix === null ? "算出不可(分母0)" : toApproxNumber(report.roiFix).toFixed(2)}
+        ROI:{" "}
+        {report.roiFix === null
+          ? "算出不可(分母0)"
+          : formatApproxDecimal2(toApproxNumber(report.roiFix))}
       </p>
       <p class="kf-expedition__roi-travel">往復所要: {formatTickSpan(report.travelTicks)}</p>
     </section>
   );
 }
 
-export interface DispatchRowProps {
-  readonly dispatch: ExpeditionDispatchView;
+/**
+ * [台帳v18 必-1] 派遣中カードの「持ち帰り予定」が、倉庫満杯で満額受け取れない
+ * 可能性を判定する。**engine の再計算はしない**(タスク指示どおり=決定論の
+ * 二重実装禁止)——現在の在庫/上限(`store.derived.resources`、engine 唯一の
+ * 正本 `resolveCapacityByResourceId` から作られた値をそのまま読むだけ)と
+ * 粗報酬を突き合わせるだけの見込み判定であり、帰還時に engine が実際に適用
+ * する加算式保管上限+スポンジ処理(rules/storage.ts の
+ * `applyCappedLumpIntake`)を UI 側で模倣しない。「正確な受領予測」ではなく
+ * 「満額は怪しい」という注記だけを出す。
+ */
+export function rewardMayOverflow(
+  resources: readonly ResourceView[],
+  rewardResourceId: EntityId,
+  rewardApprox: number,
+): boolean {
+  const resource = resources.find((entry) => entry.resourceId === rewardResourceId);
+  if (resource === undefined || resource.capacityApprox === null) return false;
+  return resource.atCapacity || resource.stockApprox + rewardApprox > resource.capacityApprox;
 }
 
-export function DispatchRow({ dispatch }: DispatchRowProps) {
+export interface DispatchRowProps {
+  readonly dispatch: ExpeditionDispatchView;
+  /**
+   * [台帳v18 必-1] `rewardMayOverflow` の結果。省略時(既存呼び出し互換)は
+   * false 扱い=注記を出さない。
+   */
+  readonly mayOverflow?: boolean;
+}
+
+export function DispatchRow({ dispatch, mayOverflow = false }: DispatchRowProps) {
   return (
     <li class="kf-expedition__dispatch-row">
       <p class="kf-expedition__dispatch-head">
@@ -259,6 +300,19 @@ export function DispatchRow({ dispatch }: DispatchRowProps) {
       <p class="kf-expedition__dispatch-members">
         隊員: {dispatch.memberIds.map((memberId) => residentDisplayName(memberId)).join("・")}
       </p>
+      {/* [台帳v18 必-1] 「持ち帰り予定」は粗報酬(倉庫上限を通す前)の見込み値。
+          M64 で帰還ログ側は実受領額+あふれ量を開示済みだが、派遣中カード側は
+          そもそも金額を出していなかった(この行が無かった)ので新設する。 */}
+      <p class="kf-expedition__dispatch-reward">
+        持ち帰り予定(見込み): {formatResourceAmount(dispatch.rewardApprox)}
+        {resourceLabel(dispatch.rewardResourceId)}
+      </p>
+      {mayOverflow && (
+        <p class="kf-expedition__dispatch-reward-warning">
+          ▲ 倉庫がこの資源の保管上限に近いため、実際に持ち帰れる量はこれより少なくなる場合が
+          あります(帰還時に受領額を確定します)。
+        </p>
+      )}
       <p class="kf-expedition__dispatch-tick">帰還予定: {formatGameClock(dispatch.returnTick)}</p>
       {dispatch.casualtyMemberIds.length > 0 && (
         <p class="kf-expedition__dispatch-casualty">
@@ -279,6 +333,8 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
   const candidates = useSignalValue(store.derived.expeditionCandidates);
   const dispatches = useSignalValue(store.derived.expeditionDispatches);
   const slots = useSignalValue(store.derived.expeditionSlots);
+  // [台帳v18 必-1] 「持ち帰り予定」の満杯注記に使う(rewardMayOverflow の doc 参照)。
+  const resources = useSignalValue(store.derived.resources);
   // content は起動後に差し替わらない(sources.ts の doc)ので非追跡の peek で
   // 読む——architecture.md §6 が禁じるのは `store.sources.*` の**購読**であり、
   // 一時的な読み出し(`store.peekState()` と同じ立場)は他画面にも前例がある
@@ -457,9 +513,12 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
               {/* [M61/FC5・R1-A09] 住民IDの生露出("提案: resrui・resseri")を
                   residentDisplayName で和名化する。 */}
               提案: {proposedSuggestion.memberIds.map((id) => residentDisplayName(id)).join("・")}
-              (戦力 {toApproxNumber(proposedSuggestion.teamPowerFix).toFixed(1)} / 目標{" "}
-              {toApproxNumber(proposedSuggestion.targetTeamPowerFix).toFixed(1)} / 理論最大{" "}
-              {toApproxNumber(proposedSuggestion.bestTeamPowerFix).toFixed(1)})
+              {/* [M70/R5-A12] 同じ「戦力」の値なのに CandidateRow は
+                  formatApproxDecimal1 経由・ここだけ素の toFixed(1) だった
+                  (同一ファイル内の二重基準)ので統一する。 */}
+              (戦力 {formatApproxDecimal1(toApproxNumber(proposedSuggestion.teamPowerFix))} / 目標{" "}
+              {formatApproxDecimal1(toApproxNumber(proposedSuggestion.targetTeamPowerFix))} /
+              理論最大 {formatApproxDecimal1(toApproxNumber(proposedSuggestion.bestTeamPowerFix))})
             </p>
             <button type="button" class="kf-expedition__apply-button" onClick={applySuggestion}>
               この編成を適用する
@@ -499,7 +558,15 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
       ) : (
         <ul class="kf-expedition__dispatch-list">
           {dispatches.map((dispatch) => (
-            <DispatchRow key={dispatch.dispatchId} dispatch={dispatch} />
+            <DispatchRow
+              key={dispatch.dispatchId}
+              dispatch={dispatch}
+              mayOverflow={rewardMayOverflow(
+                resources,
+                dispatch.rewardResourceId,
+                dispatch.rewardApprox,
+              )}
+            />
           ))}
         </ul>
       )}

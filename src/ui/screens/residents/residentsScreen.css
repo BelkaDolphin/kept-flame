@@ -54,6 +54,13 @@
   color: #8c290b;
 }
 
+/* [M70/R5-A02] 想起困難の対象tech明示(derived.ts:326 の既知妥協への回答)。 */
+.kf-resident-row__impairment {
+  font-size: var(--kf-fs-sub);
+  color: #8c290b;
+  margin: 0 0 0.3rem;
+}
+
 .kf-resident-row__stats {
   list-style: none;
   display: flex;

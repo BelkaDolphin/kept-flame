@@ -242,6 +242,47 @@ describe("buildReturnDigest: 帰還ログ(GDD 8.4)", () => {
   });
 });
 
+// --- [M70/R5-A06] 帰還後まだ配属されていない住民 -----------------------------
+
+describe("buildReturnDigest: [M70/R5-A06] 帰還後まだ配属されていない住民", () => {
+  it("不在中に帰還ログが1件でもあれば、現在無配属の住民を明示する", () => {
+    const digest = digestOf(
+      board({
+        // resident() の既定は assignedFacilityId=null・dispatched=false(無配属)。
+        entities: [resident("rIdle")],
+        renderedLogs: { entries: [{ tick: 900, text: "近郊から戻った" }], foldedCount: 0 },
+      }),
+    );
+    const row = digest.rows.find((candidate) => candidate.id === "returnedUnassignedResidents");
+    expect(row?.count).toBe(1);
+    expect(row?.screen).toBe("residents");
+    expect(row?.negative).toBe(true);
+  });
+
+  it("帰還ログが無ければ無配属の住民がいても点灯しない(既存の idleResidents ホームバッジと役割分担)", () => {
+    const digest = digestOf(board({ entities: [resident("rIdle")] }));
+    expect(
+      digest.rows.find((candidate) => candidate.id === "returnedUnassignedResidents"),
+    ).toBeUndefined();
+  });
+
+  it("配属済み・派遣中・死亡の住民は数えない", () => {
+    const digest = digestOf(
+      board({
+        entities: [
+          resident("rAssigned", { assignedFacilityId: id("fHearth") }),
+          resident("rDispatched", { dispatched: true }),
+          deadResident("rDead2", 500),
+        ],
+        renderedLogs: { entries: [{ tick: 900, text: "近郊から戻った" }], foldedCount: 0 },
+      }),
+    );
+    expect(
+      digest.rows.find((candidate) => candidate.id === "returnedUnassignedResidents"),
+    ).toBeUndefined();
+  });
+});
+
 // --- ネタバレ防止 ------------------------------------------------------------
 
 describe("buildReturnDigest: 未帰還の派遣から結果を読まない(ネタバレ防止)", () => {

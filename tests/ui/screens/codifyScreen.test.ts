@@ -255,8 +255,34 @@ describe("CodifyTechRow: 保持者・唯一保持・記録済み・作業中", (
     });
     const text = flattenText(vnode);
     expect(text).toContain("作業中");
-    expect(text).toContain("5.0");
-    expect(text).toContain("20.0");
+    // [M70/R5-A12] formatResourceAmount 経由に統一(研究側の統一表記に合わせ、
+    // 整数値は末尾 ".0" を出さない——旧「進行度 5.0/20.0」の二重基準の解消)。
+    expect(text).toContain("5");
+    expect(text).toContain("20");
+    expect(text).not.toContain("5.0");
+    expect(text).not.toContain("20.0");
+  });
+
+  it("[M70/R5-A12] 進行度が端数を持てば formatResourceAmount どおり小数第1位まで出す", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        pendingRecords: [
+          {
+            entityId: id("cJob1"),
+            medium: "paper",
+            progressApprox: 18.4,
+            requiredWorkApprox: 720,
+          },
+        ],
+      }),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("18.4");
+    expect(text).toContain("720");
+    expect(text).not.toContain("720.0");
   });
 
   it("[M61/FC11・R1-A15] costPreview があればキューに入れる前に必要資源を見せる", () => {

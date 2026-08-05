@@ -167,6 +167,20 @@ export function formatRatePerMinute(approx: number): string {
 }
 
 /**
+ * [M70/R5-A12] 小数第2位までの汎用整形(ROI比・キャラバン重み等、
+ * `formatApproxDecimal1`(小数第1位)では 0.25 のような値が判別できない場合)。
+ * `formatApproxDecimal1` と同じ「常に固定桁を出す」規律を1桁増やしただけ。
+ *
+ * @throws {RangeError} 有限数でない場合
+ */
+export function formatApproxDecimal2(approx: number): string {
+  if (!Number.isFinite(approx)) {
+    throw new RangeError(`数値 ${String(approx)} が有限数でない`);
+  }
+  return approx.toFixed(2);
+}
+
+/**
  * 経過 tick を「○日○時間」形式にする(⑫帰還ダイジェストの不在時間)。
  * 1 時間未満は「○分」。
  *

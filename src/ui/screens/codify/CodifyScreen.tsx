@@ -51,7 +51,7 @@ import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import {
   resourceSpendBreakdownPhrase,
-  resourceStockApprox,
+  resourceStockFix,
   useToastStack,
   ToastStackView,
 } from "../Toast";
@@ -132,8 +132,14 @@ export function CodifyTechRow({
         <ul class="kf-codify-row__pending">
           {entry.pendingRecords.map((record) => (
             <li key={record.entityId}>
-              作業中: {mediumLabel(record.medium)}(進行度 {record.progressApprox.toFixed(1)}/
-              {record.requiredWorkApprox.toFixed(1)})
+              {/* [M70/R5-A12] 素の toFixed(1) を整形ヘルパへ(研究側は
+                  formatResourceAmount で整数値の末尾 ".0" を出さないのに対し、
+                  ここだけ常に小数第1位を出す非対称=「進行度 18.0/720.0」が
+                  残っていた。他箇所(必要資源等)と同じ formatResourceAmount へ
+                  統一する)。 */}
+              作業中: {mediumLabel(record.medium)}(進行度{" "}
+              {formatResourceAmount(record.progressApprox)}/
+              {formatResourceAmount(record.requiredWorkApprox)})
               {onCancel !== undefined && (
                 <button
                   type="button"
@@ -391,11 +397,14 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
       content.recordMedia === undefined
         ? null
         : planCodification(content, techId, medium, isPrintingUnlocked(beforeState, content));
-    const beforeStockApprox =
-      plan === null ? null : resourceStockApprox(beforeState, plan.costResourceId);
+    // [M70/R5-A04] Fix のまま控える(resourceStockFix・Toast.tsx の
+    // spentAmountText doc 参照。近似値どうしの減算は IEEE754 の丸め誤差で
+    // ±1 ずれることがある)。
+    const beforeStockFix =
+      plan === null ? null : resourceStockFix(beforeState, plan.costResourceId);
     const wasteResourceId = content.storage?.wasteResourceId ?? null;
-    const wasteBeforeStockApprox =
-      wasteResourceId === null ? null : resourceStockApprox(beforeState, wasteResourceId);
+    const wasteBeforeStockFix =
+      wasteResourceId === null ? null : resourceStockFix(beforeState, wasteResourceId);
 
     const result = store.dispatch({
       type: "commandApplied",
@@ -411,16 +420,16 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
       return;
     }
     setLastRejection(null);
-    const afterStockApprox =
-      plan === null ? null : resourceStockApprox(store.peekState(), plan.costResourceId);
-    const wasteAfterStockApprox =
-      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+    const afterStockFix =
+      plan === null ? null : resourceStockFix(store.peekState(), plan.costResourceId);
+    const wasteAfterStockFix =
+      wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
     const diff = resourceSpendBreakdownPhrase(
-      { resourceId: plan?.costResourceId ?? null, beforeStockApprox, afterStockApprox },
+      { resourceId: plan?.costResourceId ?? null, beforeStockFix, afterStockFix },
       {
         resourceId: wasteResourceId,
-        beforeStockApprox: wasteBeforeStockApprox,
-        afterStockApprox: wasteAfterStockApprox,
+        beforeStockFix: wasteBeforeStockFix,
+        afterStockFix: wasteAfterStockFix,
       },
     );
     toastStack.push(

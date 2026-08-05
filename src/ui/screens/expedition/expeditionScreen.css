@@ -238,9 +238,17 @@
 }
 
 .kf-expedition__dispatch-members,
-.kf-expedition__dispatch-tick {
+.kf-expedition__dispatch-tick,
+.kf-expedition__dispatch-reward {
   margin: 0 0 0.2rem;
   color: #5b534b;
+}
+
+/* [台帳v18 必-1] 倉庫満杯で「持ち帰り予定」が満額入らない可能性の注記。 */
+.kf-expedition__dispatch-reward-warning {
+  margin: 0 0 0.2rem;
+  color: #a11334;
+  font-weight: 600;
 }
 
 .kf-expedition__dispatch-casualty {

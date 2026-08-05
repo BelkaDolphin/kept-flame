@@ -25,6 +25,29 @@
   color: #5b534b;
 }
 
+/* [M70/R5-A02] 想起困難による研究点停止の明示(derived.ts の
+   ResearchStallNote/buildResearchStallNotes doc 参照)。 */
+.kf-research-screen__stall {
+  font-size: var(--kf-fs-sub);
+  padding: 0.5rem 0.6rem;
+  margin: 0 0 0.6rem;
+  border: 1px solid #a11334;
+  border-radius: 4px;
+  background: #faf8f5;
+}
+
+.kf-research-screen__stall-title {
+  color: #a11334;
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+}
+
+.kf-research-screen__stall-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #5b534b;
+}
+
 /* [束A/M-3] エラごとのアコーディオン。既定で開くのは進行中/次のエラだけ
    (判定は ResearchScreen.tsx の eraOpenFlags)。 */
 .kf-research-era {

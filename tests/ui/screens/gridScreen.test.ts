@@ -269,6 +269,41 @@ describe("ReclaimPanel(瓦礫の開墾・GDD 9.1 / M52申し送り)", () => {
     expect(text).toContain("30.7"); // コストは実額(formatResourceAmount・小数第1位)。
   });
 
+  it("[M70/R5-A05] 小数を含むコストには「約」を前置する(1枚目60/2枚目69の整数表示との不揃いの緩和)", () => {
+    const decimalInfo: ReclaimInfo = {
+      available: true,
+      nextCostApprox: 79.4,
+      costResourceId: id("firewood"),
+      availableStockApprox: 100,
+      reclaimedCount: 5,
+    };
+    const decimalVnode = ReclaimPanel({
+      cell: rubbleCell,
+      info: decimalInfo,
+      onReclaim: () => undefined,
+    });
+    expect(flattenText(decimalVnode)).toContain("約79.4");
+
+    const integerInfo: ReclaimInfo = {
+      available: true,
+      nextCostApprox: 60,
+      costResourceId: id("firewood"),
+      availableStockApprox: 100,
+      reclaimedCount: 0,
+    };
+    const integerVnode = ReclaimPanel({
+      cell: rubbleCell,
+      info: integerInfo,
+      onReclaim: () => undefined,
+    });
+    const integerText = flattenText(integerVnode);
+    // このファイルの flattenText は要素間の区切りに "|" を挟む(ファイル冒頭の
+    // doc 参照)ので、「開墾コスト: 」と近似値は別ノードとして別々に確認する。
+    expect(integerText).toContain("開墾コスト:");
+    expect(integerText).toContain("60");
+    expect(integerText).not.toContain("約");
+  });
+
   it("ボタンは常に有効(在庫不足の判定はしない・engine の insufficientResource reject に委ねる)", () => {
     const info: ReclaimInfo = {
       available: true,

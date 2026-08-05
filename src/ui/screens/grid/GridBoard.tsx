@@ -60,7 +60,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import { GRID_WIDTH, type Tag } from "../../../engine/adjacency";
 import type { CommandResult, PlaceFacilityCommand } from "../../../engine/commands";
-import { toApproxNumber } from "../../../engine/fp";
+import { toApproxNumber, type Fix } from "../../../engine/fp";
 import type { EntityId } from "../../../engine/state/state";
 import {
   computePlacementPreview,
@@ -68,7 +68,7 @@ import {
   type PlacementPreviewCell,
 } from "../../derived";
 import type { GameStore } from "../../store";
-import { resourceStockApprox } from "../Toast";
+import { resourceStockFix } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./gridBoard.css";
 import { CELL_SIZE_PX, DEFAULT_SCALE, MIN_TAP_TARGET_PX } from "./gridConstants";
@@ -394,23 +394,27 @@ function surfaceStyle(viewport: Viewport): string {
 
 /**
  * [束B/B-4] 建設成功トースト用の差分情報(GridScreen が文言を組み立てる)。
- * `beforeStockApprox`/`afterStockApprox` は建設コストが無い(`def.cost`
- * 省略)施設では両方 null になる。
+ * `beforeStockFix`/`afterStockFix` は建設コストが無い(`def.cost` 省略)施設
+ * では両方 null になる。
  *
  * [M63/R4-A14] 廃材代替(GDD 6.7 の3出口(1)・最大20%)の内訳をトーストへ出す
  * ため、廃材資源(`content.storage.wasteResourceId`)の前後在庫も併せて渡す
  * (`wasteResourceId` が無い/廃材が動いていなければ `resourceSpendBreakdownPhrase`
  * が主資源だけの句へ倒す・判定はしない)。
+ *
+ * **[M70/R5-A04] Fix のまま持つ**(近似値 number ではない)。理由は Toast.tsx
+ * の `spentAmountText` doc を参照(近似値どうしの減算は IEEE754 の丸め誤差で
+ * ±1 ずれることがある)。
  */
 export interface PlacementSuccessInfo {
   readonly defId: EntityId;
   readonly facilityId: EntityId;
   readonly resourceId: EntityId | null;
-  readonly beforeStockApprox: number | null;
-  readonly afterStockApprox: number | null;
+  readonly beforeStockFix: Fix | null;
+  readonly afterStockFix: Fix | null;
   readonly wasteResourceId: EntityId | null;
-  readonly wasteBeforeStockApprox: number | null;
-  readonly wasteAfterStockApprox: number | null;
+  readonly wasteBeforeStockFix: Fix | null;
+  readonly wasteAfterStockFix: Fix | null;
 }
 
 export interface GridBoardProps {
@@ -551,34 +555,34 @@ export function GridBoard({
         // [束B/B-4] 成功トースト用に、投入前のコスト資源の在庫を控えておく
         // (`def.cost` が無い施設は resourceId=null のまま=差分を出さない)。
         // [M63/R4-A14] 廃材代替の内訳も出すため、廃材資源の在庫も併せて控える。
+        // [M70/R5-A04] Fix のまま控える(近似値どうしの減算による ±1 ずれの解消
+        // ・Toast.tsx の spentAmountText doc 参照)。
         const costResourceId =
           store.peekContent().facilityDefs.get(action.command.defId)?.cost?.resourceId ?? null;
-        const beforeStockApprox =
-          costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
+        const beforeStockFix =
+          costResourceId === null ? null : resourceStockFix(store.peekState(), costResourceId);
         const wasteResourceId = store.peekContent().storage?.wasteResourceId ?? null;
-        const wasteBeforeStockApprox =
-          wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+        const wasteBeforeStockFix =
+          wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
 
         const result = store.dispatch({ type: "commandApplied", command: action.command });
         // commandApplied を dispatch した直後は DispatchResult.command が
         // 必ず非 null になる(store.ts の applyCommand)。
         if (result.command !== null) onPlacementResult?.(result.command);
         if (result.command !== null && result.command.ok && onPlacementSuccess !== undefined) {
-          const afterStockApprox =
-            costResourceId === null ? null : resourceStockApprox(store.peekState(), costResourceId);
-          const wasteAfterStockApprox =
-            wasteResourceId === null
-              ? null
-              : resourceStockApprox(store.peekState(), wasteResourceId);
+          const afterStockFix =
+            costResourceId === null ? null : resourceStockFix(store.peekState(), costResourceId);
+          const wasteAfterStockFix =
+            wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
           onPlacementSuccess({
             defId: action.command.defId,
             facilityId: action.command.facilityId,
             resourceId: costResourceId,
-            beforeStockApprox,
-            afterStockApprox,
+            beforeStockFix,
+            afterStockFix,
             wasteResourceId,
-            wasteBeforeStockApprox,
-            wasteAfterStockApprox,
+            wasteBeforeStockFix,
+            wasteAfterStockFix,
           });
         }
         return;

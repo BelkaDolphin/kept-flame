@@ -44,7 +44,7 @@ import type { EngineContent } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import type { FacilityDetailView, FacilityRosterEntry, FacilityWorkerView } from "../../derived";
 import { cellCoordinateLabel } from "../cellCoordinate";
-import { facilityLabel, residentDisplayName, resourceLabel } from "../contentLabels";
+import { facilityLabel, residentDisplayName, resourceLabel, techLabel } from "../contentLabels";
 import {
   bedCapacityEffectText,
   DORMANT_FACILITY_EFFECT_TEXT,
@@ -61,7 +61,7 @@ import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import {
   resourceSpendBreakdownPhrase,
-  resourceStockApprox,
+  resourceStockFix,
   useToastStack,
   ToastStackView,
 } from "../Toast";
@@ -76,10 +76,14 @@ export interface FacilityWorkerRowProps {
 
 /** 想起困難/派遣中/死亡tombstoneの状態表示(GDD 7.1/7.5/11.2・④と同じ語彙)。 */
 export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
+  // [M70/R5-A02] `impairedTechIds` は (住民,tech) 別の想起困難(M13 本式)。
+  // `recallImpaired`(住民単位スカラ)とは独立の情報源なので、どちらかが
+  // 立っていれば「想起困難」バッジを出す(derived.ts の doc 参照)。
+  const impairedTechIds = worker.impairedTechIds ?? [];
   const badges: string[] = [];
   if (!worker.alive) badges.push("死亡");
   if (worker.dispatched) badges.push("派遣中");
-  if (worker.recallImpaired) badges.push("想起困難");
+  if (worker.recallImpaired || impairedTechIds.length > 0) badges.push("想起困難");
   return (
     <li class="kf-facility-detail__worker">
       <span class="kf-facility-detail__worker-id">{residentDisplayName(worker.residentId)}</span>
@@ -88,6 +92,14 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
       </span>
       {badges.length > 0 && (
         <span class="kf-facility-detail__worker-badges">{badges.join("・")}</span>
+      )}
+      {/* [M70/R5-A02] 「想起困難」バッジだけでは何のtechか分からない
+          (derived.ts:326 の既知妥協への回答)。この施設の寄与を止めている
+          tech名を明示する。 */}
+      {impairedTechIds.length > 0 && (
+        <span class="kf-facility-detail__worker-impairment">
+          想起困難の対象: {impairedTechIds.map((techId) => techLabel(techId)).join("・")}
+        </span>
       )}
     </li>
   );
@@ -183,6 +195,15 @@ export function FacilityDetailPanel({
               : "研究点"}
             (隣接乗数 ×{detail.multiplierApprox.toFixed(2)})
           </p>
+          {/* [M70/R5-A02] 就労1/1なのに産出0/分が延々続く=「壊れて見える」の
+              解消(derived.ts:326 の既知妥協への回答)。理由を就労者一覧の前に
+              明示する(詳細は各行の想起困難バッジ+対象techに出る)。 */}
+          {detail.workers.some((worker) => (worker.impairedTechIds ?? []).length > 0) && (
+            <p class="kf-facility-detail__impairment-note" role="note">
+              ▲ 想起困難のため一部の就労者の生産が止まっています(下の就労者一覧を参照)。
+              知識は人の記憶に宿るため、時間が経てば思い出して回復します。
+            </p>
+          )}
           <p class="kf-facility-detail__slots">
             就労: {detail.workers.length}
             {detail.slotsMax !== null ? `/${String(detail.slotsMax)}` : "(上限なし)"}
@@ -322,15 +343,18 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
   const content = store.peekContent();
 
   function handleUpgrade(current: FacilityDetailView): void {
-    const beforeStockApprox =
+    // [M70/R5-A04] 消費量表示の差分は Fix のまま取る(resourceStockFix・
+    // Toast.tsx の spentAmountText doc 参照。近似値どうしの減算は IEEE754 の
+    // 丸め誤差で ±1 ずれることがある)。
+    const beforeStockFix =
       current.upgradeCostResourceId === null
         ? null
-        : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
+        : resourceStockFix(store.peekState(), current.upgradeCostResourceId);
     // [M63/R4-A14] 増築コストも建設と同じ廃材代替(GDD 6.7・最大20%)を受ける
     // ので、廃材資源の在庫も併せて控える。
     const wasteResourceId = content.storage?.wasteResourceId ?? null;
-    const wasteBeforeStockApprox =
-      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+    const wasteBeforeStockFix =
+      wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
     const result = store.dispatch({
       type: "commandApplied",
       command: { kind: "upgradeFacility", facilityId: current.facilityId },
@@ -340,22 +364,22 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
       return;
     }
     setLastRejection(null);
-    const afterStockApprox =
+    const afterStockFix =
       current.upgradeCostResourceId === null
         ? null
-        : resourceStockApprox(store.peekState(), current.upgradeCostResourceId);
-    const wasteAfterStockApprox =
-      wasteResourceId === null ? null : resourceStockApprox(store.peekState(), wasteResourceId);
+        : resourceStockFix(store.peekState(), current.upgradeCostResourceId);
+    const wasteAfterStockFix =
+      wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
     const diff = resourceSpendBreakdownPhrase(
       {
         resourceId: current.upgradeCostResourceId,
-        beforeStockApprox,
-        afterStockApprox,
+        beforeStockFix,
+        afterStockFix,
       },
       {
         resourceId: wasteResourceId,
-        beforeStockApprox: wasteBeforeStockApprox,
-        afterStockApprox: wasteAfterStockApprox,
+        beforeStockFix: wasteBeforeStockFix,
+        afterStockFix: wasteAfterStockFix,
       },
     );
     toastStack.push(

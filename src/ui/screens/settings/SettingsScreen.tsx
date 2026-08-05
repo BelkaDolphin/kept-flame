@@ -120,7 +120,13 @@ export function ImportPanel({
   outcome,
   selectedFileName,
 }: ImportPanelProps) {
-  function handleTextareaChange(event: Event): void {
+  // [M70/R5-A09] Preact の `onChange` は DOM の `change` イベント(blur 時にしか
+  // 発火しない)に直結する——React の `onChange`(=`input` イベント相当)とは
+  // 違う既知の差異。textarea へ貼り付けた直後に別欄へ移らないと `importText`
+  // state が更新されず、「インポートを実行」ボタンが disabled のまま
+  // (importText.length===0 判定)に見える=モバイルで2タップ要求(R5-A09)。
+  // `onInput`(DOM の `input` イベント)へ切り替えて即時反映する。
+  function handleTextareaInput(event: Event): void {
     onImportTextChange((event.target as HTMLTextAreaElement).value);
   }
 
@@ -150,7 +156,7 @@ export function ImportPanel({
       <textarea
         class="kf-settings__import-text"
         value={importText}
-        onChange={handleTextareaChange}
+        onInput={handleTextareaInput}
         aria-label="またはエクスポートしたテキストを直接貼り付け"
         placeholder="エクスポートしたテキストをここに貼り付けることもできます"
       />

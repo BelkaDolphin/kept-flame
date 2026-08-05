@@ -100,6 +100,21 @@ describe("FacilityWorkerRow(想起困難/派遣中/死亡tombstoneの状態表�
     expect(text).toContain("派遣中");
     expect(text).toContain("想起困難");
   });
+
+  it("[M70/R5-A02] impairedTechIds があれば recallImpaired=false でも「想起困難」バッジ+対象tech名を出す", () => {
+    const vnode = FacilityWorkerRow({
+      worker: workerView({ recallImpaired: false, impairedTechIds: [id("techFireStarting")] }),
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("想起困難");
+    expect(text).toContain("火起こし");
+    expect(text).toContain("想起困難の対象");
+  });
+
+  it("impairedTechIds 省略時(既存呼び出し互換)は対象tech行を出さない", () => {
+    const vnode = FacilityWorkerRow({ worker: workerView() });
+    expect(flattenText(vnode)).not.toContain("想起困難の対象");
+  });
 });
 
 describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () => {
@@ -185,6 +200,22 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
       onUpgrade: () => undefined,
     });
     expect(flattenText(vnode)).toContain("就労者がいません");
+  });
+
+  it("[M70/R5-A02] 就労者に想起困難があれば産出行の上に注記を出す(「就労1/1なのに産出0」の理由明示)", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({
+        outputPerTickApprox: 0,
+        workers: [workerView({ impairedTechIds: [id("techFireStarting")] })],
+      }),
+      onUpgrade: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("想起困難のため一部の就労者の生産が止まっています");
+  });
+
+  it("想起困難な就労者がいなければ注記を出さない", () => {
+    const vnode = FacilityDetailPanel({ detail: detailView(), onUpgrade: () => undefined });
+    expect(flattenText(vnode)).not.toContain("一部の就労者の生産が止まっています");
   });
 
   it("[束B/B-2] 増築コストが無い(def.cost 省略)場合は「コストはかかりません」と正直に表示する", () => {

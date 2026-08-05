@@ -199,6 +199,55 @@ describe("ResidentRow: ステータス5種/trait/状態表示(GDD 7.1/7.2/7.5/11
     expect(badges).not.toContain("無配属"); // 配属済みなので無配属ではない
   });
 
+  it("[M70/R5-A02] techImpairments があれば recallImpaired=false でも「想起困難」バッジ+対象tech名を出す", () => {
+    const vnode = ResidentRow({
+      resident: residentView({
+        recallImpaired: false,
+        assignedFacilityId: id("facHearth1"),
+        techImpairments: [{ techId: id("techFireStarting"), untilTick: 500 }],
+      }),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(badgeText(vnode)).toContain("想起困難");
+    expect(text).toContain("想起困難の対象");
+    expect(text).toContain("火起こし");
+  });
+
+  it("techImpairments 省略時(既存呼び出し互換)は対象tech行を出さない", () => {
+    const vnode = ResidentRow({
+      resident: residentView(),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    expect(flattenText(vnode)).not.toContain("想起困難の対象");
+  });
+
+  it("[M70/R5-A07] 拠点常駐中は「拠点常駐」を表示し「無配属」は出さない(常駐状態が分かる)", () => {
+    const vnode = ResidentRow({
+      resident: residentView({ stationedOutpostId: id("outpost1") }),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    const badges = badgeText(vnode);
+    expect(badges).toContain("拠点常駐");
+    expect(badges).not.toContain("無配属");
+  });
+
+  it("stationedOutpostId 省略時(既存呼び出し互換)は平常時どおり「無配属」を出す", () => {
+    const vnode = ResidentRow({
+      resident: residentView(),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    expect(badgeText(vnode)).toBe("無配属");
+  });
+
   it("就労先セレクトに施設ロースターの選択肢が並ぶ", () => {
     const vnode = ResidentRow({
       resident: residentView(),
@@ -207,6 +256,33 @@ describe("ResidentRow: ステータス5種/trait/状態表示(GDD 7.1/7.2/7.5/11
       onUnassign: () => undefined,
     });
     expect(flattenText(vnode)).toContain("かまど");
+  });
+
+  it("[M70/R5-A11] 就労枠0の施設は候補から除外する(選んでも必ずrejectされるだけの選択肢を出さない)", () => {
+    const rosterWithZeroSlots: readonly FacilityRosterEntry[] = [
+      ...ROSTER,
+      {
+        facilityId: id("facBed1"),
+        defId: id("bed"),
+        cellIndex: 20,
+        cellId: "c20",
+        level: 1,
+        tags: [],
+        workerIds: [],
+        slotsMax: 0,
+      },
+    ];
+    const vnode = ResidentRow({
+      resident: residentView(),
+      facilityRoster: rosterWithZeroSlots,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("かまど");
+    // セル20(cellCoordinateLabel で「3列4行」)は slotsMax=0 の施設だけが持つ
+    // 座標なので、これが出ないことで候補から除外されたことを確認できる。
+    expect(text).not.toContain("3列4行");
   });
 });
 

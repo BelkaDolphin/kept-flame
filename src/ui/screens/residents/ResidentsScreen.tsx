@@ -29,7 +29,7 @@ import type { CommandRejection } from "../../../engine/commands";
 import { entityIdFromString, type EntityId } from "../../../engine/state/state";
 import type { FacilityRosterEntry, ResidentView } from "../../derived";
 import { cellCoordinateLabel } from "../cellCoordinate";
-import { facilityLabel, residentDisplayName, traitLabel } from "../contentLabels";
+import { facilityLabel, residentDisplayName, techLabel, traitLabel } from "../contentLabels";
 import { formatApproxDecimal1 } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -47,11 +47,23 @@ export interface ResidentRowProps {
 
 /** 想起困難/派遣中/死亡tombstoneの状態表示(GDD 7.1/7.5/11.2)。 */
 function statusBadges(resident: ResidentView): readonly string[] {
+  // [M70/R5-A02] `techImpairments`((住民,tech) 別・M13 本式)は
+  // `recallImpaired`(住民単位スカラ)と独立の情報源。どちらかが立っていれば
+  // 「想起困難」バッジを出す(derived.ts の ResidentView doc 参照)。
+  const techImpairments = resident.techImpairments ?? [];
+  // [M70/R5-A07] 衛星拠点に常駐中かどうか(省略時=既存テスト互換は null 扱い)。
+  const stationedOutpostId = resident.stationedOutpostId ?? null;
   const badges: string[] = [];
   if (!resident.alive) badges.push("死亡");
   if (resident.dispatched) badges.push("派遣中");
-  if (resident.recallImpaired) badges.push("想起困難");
-  if (resident.alive && !resident.dispatched && resident.assignedFacilityId === null) {
+  if (resident.recallImpaired || techImpairments.length > 0) badges.push("想起困難");
+  if (stationedOutpostId !== null) badges.push("拠点常駐");
+  if (
+    resident.alive &&
+    !resident.dispatched &&
+    resident.assignedFacilityId === null &&
+    stationedOutpostId === null
+  ) {
     badges.push("無配属");
   }
   return badges;
@@ -68,6 +80,13 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
   }
 
   const badges = statusBadges(resident);
+  const techImpairments = resident.techImpairments ?? [];
+  // [M70/R5-A11] 就労枠0の施設(寝床/保管庫等)は選んでも必ず reject される
+  // だけなので候補から外す(commands.ts の判定を先読みするのではなく、
+  // 「そもそも就ける枠が無い」という構造的事実を候補列挙の段階で反映するだけ・
+  // §3 の「判定は書かない」規律には抵触しない=枠 0 は engine の apply 結果を
+  // 待たずとも明らかな不変条件)。
+  const assignableFacilities = facilityRoster.filter((facility) => facility.slotsMax !== 0);
 
   return (
     <li class="kf-resident-row">
@@ -75,6 +94,13 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
         <span class="kf-resident-row__id">{residentDisplayName(resident.entityId)}</span>
         {badges.length > 0 && <span class="kf-resident-row__badges">{badges.join("・")}</span>}
       </div>
+      {/* [M70/R5-A02] 「想起困難」バッジだけでは何のtechか分からない
+          (derived.ts:326 の既知妥協への回答)。対象tech名を明示する。 */}
+      {techImpairments.length > 0 && (
+        <p class="kf-resident-row__impairment">
+          想起困難の対象: {techImpairments.map((entry) => techLabel(entry.techId)).join("・")}
+        </p>
+      )}
       <ul class="kf-resident-row__stats">
         <li>体力{formatApproxDecimal1(resident.stats.vigorApprox)}</li>
         <li>器用{formatApproxDecimal1(resident.stats.dexterityApprox)}</li>
@@ -95,7 +121,7 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
           onChange={handleChange}
         >
           <option value="">(無配属)</option>
-          {facilityRoster.map((facility) => (
+          {assignableFacilities.map((facility) => (
             <option key={facility.facilityId} value={facility.facilityId}>
               {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})
             </option>

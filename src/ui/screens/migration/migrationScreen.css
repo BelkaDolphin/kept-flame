@@ -142,6 +142,22 @@
   margin: 0 0 0.3rem;
 }
 
+/* [M70/R5-A10] 獲得予定の継承点は積み込み(記録/住民の選択)に依存しないので、
+   .kf-exodus__preview(選択で変わる値)とは見た目でも別枠にする。 */
+.kf-exodus__inherit-points {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #faf8f5;
+  margin: 0 0 0.6rem;
+}
+
+.kf-exodus__preview-earned-note {
+  display: block;
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+}
+
 .kf-migration-screen__seed-label {
   display: block;
   font-size: var(--kf-fs-sub);

@@ -71,7 +71,7 @@ import {
   M32_REWARD_RESOURCE,
   outpostOf,
 } from "./m32Fixtures";
-import { FORGE, META, content, research, stateOf } from "../engine/fixtures";
+import { FORGE, META, TECH_BRONZE, content, research, stateOf } from "../engine/fixtures";
 import { BUNKS_ID, townContent } from "../engine/lifespanFixtures";
 import {
   CELL_CENTER,
@@ -359,6 +359,27 @@ describe("値の派生(資源・研究・住民・ホームハブ)", () => {
     );
     store.dispatch({ type: "worldLoaded", state: next, content, source: "save" });
     expect(at(store.derived.residents.value, 0).recallImpaired).toBe(true);
+    expect(store.derived.homeBadges.value.impairedResidentCount).toBe(1);
+  });
+
+  it("[M70/R5-A02] (住民,tech) 別の想起困難は住民単位スカラが0でも residents/homeBadges に見える", () => {
+    const { store, state, content } = createTestStore();
+    // M13 の実プレイ抽選が実際に書くのは techMemoryByKey 側であり、住民単位
+    // スカラ(recallImpairedUntilTick)には触れない(rules/recall.ts §3)。
+    // ここではまさにその状態(住民単位スカラ=0のまま tech別だけ想起困難)を
+    // 直接組み立てる——derived.ts:326 の既知妥協が実プレイで見えなかった原因。
+    const next = setTechMemories(state, [
+      [
+        techMemoryKeyOf(WORKER_ID, TECH_BRONZE.id),
+        { masteryFix: fixFromInt(0), impairedUntilTick: 999 },
+      ],
+    ]);
+    store.dispatch({ type: "worldLoaded", state: next, content, source: "save" });
+
+    const view = at(store.derived.residents.value, 0);
+    expect(view.recallImpaired).toBe(false); // 住民単位スカラは平常のまま
+    expect(view.techImpairments).toEqual([{ techId: TECH_BRONZE.id, untilTick: 999 }]);
+    // ホームハブの「想起困難」バッジも tech 別だけで点灯する(旧実装は0のままだった)。
     expect(store.derived.homeBadges.value.impairedResidentCount).toBe(1);
   });
 
@@ -893,6 +914,25 @@ describe("[M30] selectedFacilityDetail(③施設詳細/増築)", () => {
     expect(detail?.outputPerTickApprox).toBe(toApproxNumber(expectedRateFix));
     expect(detail?.multiplierApprox).toBe(cell.multiplierApprox);
   });
+
+  it("[M70/R5-A02] 就労者の想起困難tech(この施設を止めているもの)を workers[].impairedTechIds に出す", () => {
+    const { store, state, content } = createTestStore();
+    // TECH_BRONZE は fieldFacilityId 省略(techMemory.ts §1 のフォールバック=
+    // 実地要件不明の tech は住民単位の全停止)なので、どの施設に居ても止まる。
+    const next = setTechMemories(state, [
+      [
+        techMemoryKeyOf(WORKER_ID, TECH_BRONZE.id),
+        { masteryFix: fixFromInt(0), impairedUntilTick: 999 },
+      ],
+    ]);
+    store.dispatch({ type: "worldLoaded", state: next, content, source: "save" });
+    store.dispatch({ type: "cellSelected", cellIndex: CELL_CENTER });
+    const detail = store.derived.selectedFacilityDetail.value;
+    expect(detail?.workers[0]?.impairedTechIds).toEqual([TECH_BRONZE.id]);
+    // 産出も実際に 0 になっている(activeLaborFix が想起困難を考慮する)ことを
+    // 併せて確認する——「就労1/1なのに産出0/分」の状態そのもの。
+    expect(detail?.outputPerTickApprox).toBe(0);
+  });
 });
 
 describe("[M30] reclaimInfo(②瓦礫開墾の現況・GDD 9.1)", () => {
@@ -1198,6 +1238,40 @@ describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チ�
     expect(store.derived.researchChip.value?.stalled).toBe(true);
   });
 
+  it("[M70/R5-A02] 研究机の就労者が (住民,tech) 別想起困難で稼働していなければ stalled=true + researchStallNotes に出る", () => {
+    const testContent = researchTreeContent();
+    // TECH_GAMMA は fieldFacilityId 省略(実地要件不明=住民単位の全停止に
+    // フォールバック・techMemory.ts §1)なので、STUDY_DESK でも止まる。
+    const state = setTechMemories(
+      stateOf(
+        [
+          resident("aScholar"), // 住民単位スカラは平常(isWorkerActive=true のまま)
+          facility("fDesk", STUDY_DESK.id, 0, [id("aScholar")]),
+          research("rBeta", TECH_BETA.id, 10),
+        ],
+        META,
+      ),
+      [
+        [
+          techMemoryKeyOf(id("aScholar"), TECH_GAMMA.id),
+          { masteryFix: fixFromInt(0), impairedUntilTick: 999 },
+        ],
+      ],
+    );
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchChip.value?.stalled).toBe(true);
+    expect(store.derived.researchStallNotes.value).toEqual([
+      { residentId: id("aScholar"), facilityDefId: STUDY_DESK.id, techIds: [TECH_GAMMA.id] },
+    ]);
+  });
+
+  it("[M70/R5-A02] researchStallNotes は死亡/派遣中/停滞なしなら空(二重に説明しない)", () => {
+    const testContent = researchTreeContent();
+    const state = stateOf([resident("aTest"), research("rBeta", TECH_BETA.id, 10)], META);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.researchStallNotes.value).toEqual([]);
+  });
+
   it("floor であって四捨五入ではない(cost が 100 を割り切らない値で確認)", () => {
     const testContent = researchTreeContent(); // techAlpha: cost 30
     const state = stateOf([resident("aTest"), research("rAlpha", TECH_ALPHA.id, 29)], META);
@@ -1475,6 +1549,11 @@ describe("[M31] codifySuggestions(おまかせ成文化の提案・GDD 2.1)", ()
         progress: fixFromInt(20),
         completedTick: 3,
       } satisfies ResearchState,
+      // [M70/R5-A08] コスト資源が十分にある盤面(在庫フィルタで落ちないことを
+      // 保証する)。congruence を見たいのは「提案順・累積tick」であって
+      // 「在庫を見て落とすか」は別テストの担当。
+      resource("rClay", CODIFY_CLAY, 1000),
+      resource("rPaper", CODIFY_PAPER_RESOURCE, 1000),
     ];
     const state = setTechMemories(stateOf(entities, META), [
       [
@@ -1504,6 +1583,62 @@ describe("[M31] codifySuggestions(おまかせ成文化の提案・GDD 2.1)", ()
       expect(view?.cumulativeTicks).toBe(suggestion?.cumulativeTicks);
       expect(view?.onSchedule).toBe(suggestion?.onSchedule);
     }
+  });
+
+  it("[M70/R5-A08] コスト資源の在庫が足りない提案は出さない(紙0で紙提案→適用で停止、の解消)", () => {
+    const testContent = researchTreeContent();
+    const holder = resident(HOLDER_FOR_SUGGESTION);
+    // TECH_ALPHA は唯一保持なので engine のヒューリスティック
+    // (assistPreferredMedium)は石板(stoneTablet・costResourceId=CODIFY_CLAY)
+    // を選ぶ。その粘土の受け皿 entity をあえて置かない(=在庫0)。
+    const entities: EntityState[] = [
+      holder,
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+    ];
+    const state = setTechMemories(stateOf(entities, META), [
+      [
+        techMemoryKeyOf(HOLDER_FOR_SUGGESTION, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const expected = suggestCodification(state, testContent, state.tick);
+
+    // engine 側(判定ロジックは書き換えていない)は在庫を見ないので提案する。
+    expect(expected.suggestions.length).toBeGreaterThan(0);
+    expect(expected.suggestions[0]?.medium).toBe("stoneTablet");
+    // UI 側(derived.codifySuggestions)は在庫を見て落とす。
+    expect(store.derived.codifySuggestions.value).toEqual([]);
+  });
+
+  it("[M70/R5-A08] 在庫が足りていれば従来どおり提案する(誤って全部落とさない)", () => {
+    const testContent = researchTreeContent();
+    const holder = resident(HOLDER_FOR_SUGGESTION);
+    const entities: EntityState[] = [
+      holder,
+      {
+        kind: "research",
+        id: id("rAlpha"),
+        techId: TECH_ALPHA.id,
+        progress: fixFromInt(30),
+        completedTick: 5,
+      } satisfies ResearchState,
+      resource("rClay", CODIFY_CLAY, 1000),
+    ];
+    const state = setTechMemories(stateOf(entities, META), [
+      [
+        techMemoryKeyOf(HOLDER_FOR_SUGGESTION, TECH_ALPHA.id),
+        { masteryFix: fixFromInt(5), impairedUntilTick: 0 },
+      ],
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    expect(store.derived.codifySuggestions.value.length).toBeGreaterThan(0);
   });
 });
 
@@ -1668,6 +1803,40 @@ describe("[M32] outpostOverview(GDD 9.2 / 11.4-7・outpostNetworkRoi をその�
       roiApprox: null,
     });
     expect(overview.roster).toEqual([]);
+  });
+});
+
+describe("[M70/R5-A07] 衛星拠点常駐者の表示(residents.stationedOutpostId / homeBadges)", () => {
+  it("常駐中の住民は residents.value で stationedOutpostId が立つ(GDD 9.2)", () => {
+    const stationed = candidateResident("aStation");
+    const outpost = outpostOf("outpost1", "near", [stationed.id]);
+    const state = createGameState(META, [stationed], [], [], [], [], undefined, [outpost]);
+    const content = m32Content();
+    const store = createGameStore({ state, content });
+
+    const view = store.derived.residents.value.find((r) => r.entityId === stationed.id);
+    expect(view?.stationedOutpostId).toBe(outpost.id);
+  });
+
+  it("常駐中の住民は homeBadges の idleResidentCount/impairedResidentCount に「無配属で暇」として数えない", () => {
+    const stationed = candidateResident("aStation");
+    const outpost = outpostOf("outpost1", "near", [stationed.id]);
+    const state = createGameState(META, [stationed], [], [], [], [], undefined, [outpost]);
+    const content = m32Content();
+    const store = createGameStore({ state, content });
+
+    // 常駐者は assignedFacilityId=null かつ dispatched=false のまま(施設の
+    // workerIds には載らない・state.ts の不変条件)なので、拠点常駐の除外が
+    // 無ければ idleResidentCount に誤って数えられる。
+    expect(store.derived.homeBadges.value.idleResidentCount).toBe(0);
+  });
+
+  it("常駐していない住民は従来どおり無配属なら idleResidentCount に数える(既存挙動を壊さない)", () => {
+    const idle = candidateResident("aIdle");
+    const state = createGameState(META, [idle]);
+    const content = m32Content();
+    const store = createGameStore({ state, content });
+    expect(store.derived.homeBadges.value.idleResidentCount).toBe(1);
   });
 });
 

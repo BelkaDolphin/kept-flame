@@ -173,6 +173,18 @@ export function FacilityCatalogPanel({
 
 // --- 2. 瓦礫の開墾パネル(GDD 9.1・hooks 不使用) -----------------------------
 
+/**
+ * [M70/R5-A05] 開墾コストの表示テキスト。逓増式(`base×1.15^解放数`)は
+ * cap 到達まで整数で割り切れる保証が無く、通算枚数が進むと突然「79.4」の
+ * ような小数が出て(1枚目60/2枚目69は整数だった)体裁が不揃いに見える
+ * (R5-A05)。値そのものは変えず、`formatResourceAmount` が小数を出す回
+ * だけ「約」を前置して「これは近似表示である」ことを一貫させる。
+ */
+function reclaimCostText(costApprox: number): string {
+  const text = formatResourceAmount(costApprox);
+  return text.includes(".") ? `約${text}` : text;
+}
+
 export interface ReclaimPanelProps {
   readonly cell: CellViewModel;
   readonly info: ReclaimInfo;
@@ -201,8 +213,13 @@ export function ReclaimPanel({ cell, info, onReclaim }: ReclaimPanelProps) {
               通していないため float 起因の端数がそのまま出うる=「開墾パネル
               在庫417.29」)。コストは formatResourceAmount(実額)、在庫は
               HUD と揃えて formatResourceStock(整数切り捨て)へ統一する。 */}
+          {/* [M70/R5-A05] 逓増式(base×1.15^解放数)は途中から小数を持つため
+              (1枚目60/2枚目69は整数でも、後の枚は「79.4」のように急に小数が
+              出て体裁が不揃いに見えた)。小数を含む回だけ「約」を添え、精密な
+              コストではなく近似表示であることを一貫して示す
+              (formatResourceAmount が小数を出さない=整数のときは何も足さない)。 */}
           <p class="kf-reclaim__cost">
-            開墾コスト: {formatResourceAmount(info.nextCostApprox ?? 0)}
+            開墾コスト: {reclaimCostText(info.nextCostApprox ?? 0)}
             {info.costResourceId !== null ? resourceLabel(info.costResourceId) : ""}
             (通算 {info.reclaimedCount} 枚目)
           </p>
@@ -312,13 +329,13 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
     const diff = resourceSpendBreakdownPhrase(
       {
         resourceId: info.resourceId,
-        beforeStockApprox: info.beforeStockApprox,
-        afterStockApprox: info.afterStockApprox,
+        beforeStockFix: info.beforeStockFix,
+        afterStockFix: info.afterStockFix,
       },
       {
         resourceId: info.wasteResourceId,
-        beforeStockApprox: info.wasteBeforeStockApprox,
-        afterStockApprox: info.wasteAfterStockApprox,
+        beforeStockFix: info.wasteBeforeStockFix,
+        afterStockFix: info.wasteAfterStockFix,
       },
     );
     toastStack.push(`${facilityLabel(info.defId)}を建てた${diff.length > 0 ? `(${diff})` : ""}`);

@@ -79,6 +79,7 @@
 
 .kf-facility-detail__worker {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   font-size: var(--kf-fs-sub);
@@ -93,6 +94,19 @@
 
 .kf-facility-detail__worker-badges {
   color: #8c290b;
+}
+
+/* [M70/R5-A02] 想起困難の対象tech明示(derived.ts:326 の既知妥協への回答)。 */
+.kf-facility-detail__worker-impairment {
+  flex-basis: 100%;
+  color: #8c290b;
+}
+
+.kf-facility-detail__impairment-note {
+  font-size: var(--kf-fs-sub);
+  color: #a11334;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
 }
 
 .kf-facility-detail__no-workers {

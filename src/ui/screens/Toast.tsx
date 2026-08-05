@@ -13,7 +13,7 @@
 
 import { useCallback, useRef, useState } from "preact/hooks";
 
-import { toApproxNumber } from "../../engine/fp";
+import { subFix, toApproxNumber, type Fix } from "../../engine/fp";
 import { entitiesOfKind, type EntityId, type GameState } from "../../engine/state/state";
 import { resourceLabel } from "./contentLabels";
 import { formatResourceStock } from "./format";
@@ -74,6 +74,18 @@ export function resourceStockApprox(state: GameState, resourceId: EntityId): num
 }
 
 /**
+ * [M70/R5-A04] state から資源 1 件の在庫を **Fix のまま** 引く(受け皿 entity が
+ * 無ければ null)。`resourceStockApprox` の Fix 版——差分計算(消費量表示)は
+ * こちらを使うこと(§ 直後の `spentAmountText` の doc 参照)。
+ */
+export function resourceStockFix(state: GameState, resourceId: EntityId): Fix | null {
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId === resourceId) return resource.stock;
+  }
+  return null;
+}
+
+/**
  * 「薪 60→30」形式の差分句を作る。対象資源が無い/前後が同じなら空文字列
  * (呼び出し側は空文字列なら丸括弧ごと付けない)。
  */
@@ -91,23 +103,40 @@ export function resourceDeltaPhrase(
   return `${resourceLabel(resourceId)} ${before}→${after}`;
 }
 
-/** {@link resourceSpendBreakdownPhrase} が読む「前後の在庫」1 組。 */
+/**
+ * {@link resourceSpendBreakdownPhrase} が読む「前後の在庫」1 組。
+ *
+ * **[M70/R5-A04] Fix のまま持つ**(近似値 number ではない)。理由は
+ * `spentAmountText` の doc を参照——2 つの独立に丸められた近似値どうしを引くと
+ * IEEE754 の丸め誤差で「コスト14薪→表示13」のような ±1 のずれが出るため
+ * (在庫の小数部次第で発生・R5-A04)。差分は固定小数点(整数)のまま取り、
+ * 最後に 1 回だけ近似値へ変換する。
+ */
 export interface ResourceSpendSnapshot {
   readonly resourceId: EntityId | null;
-  readonly beforeStockApprox: number | null;
-  readonly afterStockApprox: number | null;
+  readonly beforeStockFix: Fix | null;
+  readonly afterStockFix: Fix | null;
 }
 
+/**
+ * [M70/R5-A04] 「消費した量」の表示テキスト。**固定小数点のまま差を取ってから
+ * 1 度だけ近似値へ変換する**——`beforeStockApprox - afterStockApprox`(2 つの
+ * 独立した浮動小数)で引くと、在庫の小数部次第で `formatResourceStock` の
+ * floor が実コストより 1 少ない値へ丸まることがあった(例: コスト 14 薪 →
+ * 「薪13」。原因は toApproxNumber 後の 2 値の減算が IEEE754 の丸め誤差を
+ * 持ち込むため。固定小数点(整数)どうしの減算は誤差を持たないので、
+ * `subFix` で先に厳密な差を取ってから `toApproxNumber` を 1 回だけ通す)。
+ */
 function spentAmountText(snapshot: ResourceSpendSnapshot): string | null {
   if (
     snapshot.resourceId === null ||
-    snapshot.beforeStockApprox === null ||
-    snapshot.afterStockApprox === null
+    snapshot.beforeStockFix === null ||
+    snapshot.afterStockFix === null
   ) {
     return null;
   }
-  const spent = snapshot.beforeStockApprox - snapshot.afterStockApprox;
-  const text = formatResourceStock(spent);
+  const spentFix = subFix(snapshot.beforeStockFix, snapshot.afterStockFix);
+  const text = formatResourceStock(toApproxNumber(spentFix));
   // 整数切り捨て後に 0 なら「消費した」と言えるほどの変化が無い。
   if (text === "0" || text === "-0") return null;
   return text;

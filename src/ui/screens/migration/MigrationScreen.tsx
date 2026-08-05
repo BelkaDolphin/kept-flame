@@ -56,7 +56,7 @@ import {
 } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
 import { mediumLabel, residentDisplayName, techLabel, traitLabel } from "../contentLabels";
-import { formatApproxDecimal1 } from "../format";
+import { formatApproxDecimal1, formatApproxDecimal2 } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -112,7 +112,10 @@ export function ExodusRecordRow({ record, selected, onToggle }: ExodusRecordRowP
         <span class="kf-exodus__record-tech">{techLabel(record.techId)}</span>
         <LossClassBadge lossClass={record.lossClass} />
         <span class="kf-exodus__record-medium">{mediumLabel(record.medium)}</span>
-        <span class="kf-exodus__record-weight">枠 {record.weightApprox.toFixed(2)}</span>
+        {/* [M70/R5-A12] 素の toFixed(2) を整形ヘルパへ(小数第2位まで要る値
+            (紙0.25等)は formatApproxDecimal1 だと丸まって判別できないため
+            formatApproxDecimal2 を使う・小数の二重基準の残存の掃討)。 */}
+        <span class="kf-exodus__record-weight">枠 {formatApproxDecimal2(record.weightApprox)}</span>
       </button>
     </li>
   );
@@ -154,13 +157,17 @@ export interface ExodusPreviewPanelProps {
   readonly resolution: ExodusResolution | null;
 }
 
-/** GDD 10.2 の「何が落ちるか」プレビュー + GDD 10.3 の獲得予定継承点。 */
+/**
+ * GDD 10.2 の「何が落ちるか」プレビュー(積み込み=記録/住民の選択に依存する
+ * 値だけを持つ)。**[M70/R5-A10] 獲得予定の継承点はここに含めない**
+ * (`ExodusInheritPointsNote` へ分離した理由の doc 参照)。
+ */
 export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
   if (resolution === null) {
     return <p class="kf-exodus__preview-inactive">現在のデータでは大移動を算出できません。</p>;
   }
   return (
-    <section class="kf-exodus__preview" aria-label="大移動プレビュー">
+    <section class="kf-exodus__preview" aria-label="積み込みプレビュー">
       <p class="kf-exodus__preview-capacity">
         {/* [M63/R4-A12/A13] 素の toFixed(2) を整形ヘルパへ(「キャラバン1.00」の
             不揃い解消。戦力/士気と同じ「資源以外の近似値」枠なので
@@ -186,7 +193,31 @@ export function ExodusPreviewPanel({ resolution }: ExodusPreviewPanelProps) {
           {resolution.lostRareTechIds.map((techId) => techLabel(techId)).join("・")}
         </p>
       )}
-      <p class="kf-exodus__preview-earned">獲得予定の継承点: {resolution.earnedInheritPoints}</p>
+    </section>
+  );
+}
+
+// --- 4b. [M70/R5-A10] 獲得予定の継承点(積み込みプレビューとは別セクション) --
+//
+// GDD 10.3 の継承点式(エラ+成文化+生存)は積み込み(記録/住民の選択)に
+// **依存しない**。旧実装は `ExodusPreviewPanel`(積み込みで変わる容量/落ちる
+// ものと同じ section)の内側に置いていたため、選択で変わって見えると誤解
+// された(R5-A10「積み込みプレビュー内側にあり選択で変わるように見える」)。
+// 別セクション+注記で独立性を明示する。
+
+export interface ExodusInheritPointsNoteProps {
+  /** `null` = content に exodus/recordMedia ブロックが無く算出不能。 */
+  readonly resolution: ExodusResolution | null;
+}
+
+export function ExodusInheritPointsNote({ resolution }: ExodusInheritPointsNoteProps) {
+  if (resolution === null) return null;
+  return (
+    <section class="kf-exodus__inherit-points" aria-label="獲得予定の継承点">
+      <p class="kf-exodus__preview-earned">
+        獲得予定の継承点: {resolution.earnedInheritPoints}
+        <span class="kf-exodus__preview-earned-note">(下の記録・住民の選択には左右されません)</span>
+      </p>
     </section>
   );
 }
@@ -367,6 +398,11 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
         <p class="kf-migration-screen__inactive">現在のデータでは大移動は実行できません。</p>
       )}
 
+      {/* [M70/R5-A10] 積み込み(記録/住民の選択)に依存しない値なので、選択を
+          始める前(おまかせ選択ボタンの下・石版プールの上)に独立した節として
+          出す。積み込みプレビュー(下部・選択で変わる値)とは別セクション。 */}
+      <ExodusInheritPointsNote resolution={resolution} />
+
       <button
         type="button"
         class="kf-migration-screen__recommend-button"
@@ -425,11 +461,14 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
 
         <label class="kf-migration-screen__seed-label">
           次の周回のシードを指定(任意)
+          {/* [M70/R5-A09と同型] Preact の onChange は blur 発火(change イベント)
+              なので、入力直後に他欄へ移らず「大移動を実行」まで進むと入力が
+              反映されないまま実行されうる。onInput(input イベント)へ統一。 */}
           <input
             type="text"
             class="kf-migration-screen__seed-input"
             value={worldSeedOverride}
-            onChange={(event) => setWorldSeedOverride((event.target as HTMLInputElement).value)}
+            onInput={(event) => setWorldSeedOverride((event.target as HTMLInputElement).value)}
             placeholder="空欄なら自動で決まります"
           />
         </label>

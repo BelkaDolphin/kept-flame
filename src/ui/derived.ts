@@ -70,7 +70,12 @@ import {
   suggestCodification,
 } from "../engine/assist/codify";
 import { explorationTeamCandidates } from "../engine/assist/exploration";
-import { isCodified, recordMediaOfTech } from "../engine/rules/codify";
+import {
+  isCodified,
+  isPrintingUnlocked,
+  planCodification,
+  recordMediaOfTech,
+} from "../engine/rules/codify";
 import { residentCombatPower } from "../engine/rules/combat";
 import { explorationRoi, type ExplorationRoiReport } from "../engine/rules/exploration";
 import { outpostNetworkRoi } from "../engine/rules/outpost";
@@ -82,7 +87,14 @@ import { resolveCapacityByResourceId } from "../engine/rules/storage";
 import { currentResearch } from "../engine/rules/research";
 import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
 import { erasInOrder, techsOfEra } from "../engine/rules/techTree";
-import { isTechUnlocked, techHoldersOf } from "../engine/rules/techMemory";
+import {
+  isTechImpaired,
+  isTechUnlocked,
+  memoryTechIdsOf,
+  techHoldersOf,
+  techImpairmentStopsFacility,
+  techMemoryOf,
+} from "../engine/rules/techMemory";
 import {
   lossClassOfTech,
   prereqsOfTech,
@@ -97,6 +109,7 @@ import {
   allOutposts,
   entitiesOfKind,
   isAliveResident,
+  livingResidents,
   type CodifyState,
   type DispatchSnapshot,
   type DispatchStance,
@@ -341,6 +354,58 @@ function hasActiveResearchProduction(state: GameState, content: EngineContent): 
 }
 
 /**
+ * [M70/R5-A02] ⑤研究画面が「研究点の産出が想起困難で止まっている」ことを
+ * 明示するための 1 件(住民 × 研究点産出施設)。
+ *
+ * `hasActiveResearchProduction` は「止まっているか(bool)」までしか返さない
+ * (§ 直前の doc「ヘッダのチップ 1 個のために索引を作らない」)。5 番目の画面
+ * (研究ツリー)は常時マウントされないぶん重くしてよいので、ここでは
+ * 「誰の・どのtechが」まで踏み込む——中核フック「知識は人の記憶に宿る」の
+ * 失敗が見えない、という R5-A02 の眼目そのものへの回答。
+ *
+ * 死亡/派遣中/住民単位スカラでの全停止は**対象外**(それらは他のバッジで
+ * 既に見えている・②③④の規律と同じ「二重に説明しない」)。ここが拾うのは
+ * 「一見 就労可能に見えるのに (住民,tech) 別想起困難だけで生産が止まっている」
+ * 本式(M13)特有の見えない失敗だけである。
+ */
+export interface ResearchStallNote {
+  readonly residentId: EntityId;
+  readonly facilityDefId: EntityId;
+  /** この施設の寄与を止めている tech(techId昇順)。 */
+  readonly techIds: readonly EntityId[];
+}
+
+function buildResearchStallNotes(
+  state: GameState,
+  content: EngineContent,
+): readonly ResearchStallNote[] {
+  if (state.techMemoryByKey.size === 0) return [];
+  const notes: ResearchStallNote[] = [];
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "research") continue;
+    for (const workerId of facility.workerIds) {
+      const resident = state.entityStateById.get(workerId);
+      if (resident === undefined || resident.kind !== "resident") continue;
+      if (!isAliveResident(resident) || resident.dispatched) continue;
+      if (state.tick < resident.recallImpairedUntilTick) continue;
+      const impairments = residentTechImpairments(state, workerId, state.tick);
+      if (impairments.length === 0) continue;
+      const techIds = impairedTechIdsAtFacility(impairments, content, def.id);
+      if (techIds.length === 0) continue;
+      notes.push({ residentId: workerId, facilityDefId: def.id, techIds });
+    }
+  }
+  // 施設 ID 反復順(entitiesOfKind=ID昇順)× workerIds(ID昇順)で組んでいるが、
+  // 明示ソートで全順序を固定する(§3 の規律どおり反復順に頼らない)。
+  notes.sort(
+    (a, b) =>
+      compareUtf16(a.residentId, b.residentId) || compareUtf16(a.facilityDefId, b.facilityDefId),
+  );
+  return notes;
+}
+
+/**
  * [M30] ステータス 5 種(裁定 B8 / GDD 7.1)の表示値。trait 適用後
  * (`effectiveStats`)を近似値へ落としたもの——生産式が実際に読む値と同じ
  * (rules/production.ts の `residentContribution` と同一の合成経路)。
@@ -369,6 +434,19 @@ export interface ResidentView {
   readonly alive: boolean;
   /** [M30] 死亡した tick(生存中は null)。 */
   readonly diedTick: number | null;
+  /**
+   * [M70/R5-A02] 現在アクティブな (住民,tech) 別想起困難(techId昇順)。
+   * `recallImpaired`(住民単位スカラ)と独立——M13 以降の実プレイの抽選は
+   * こちらにしか書かない(rules/recall.ts §3)ので、④住民一覧はここを見ないと
+   * 「就労1/1なのに産出0/分が延々続く」の理由が一切見えない(R5-A02 の眼目)。
+   * 省略時(既存テストフィクスチャ互換)は空扱い(`?? []`)。
+   */
+  readonly techImpairments?: readonly TechImpairmentView[];
+  /**
+   * [M70/R5-A07] 衛星拠点に常駐中ならその拠点 ID(GDD 9.2)。常駐でなければ
+   * null。省略時(既存テストフィクスチャ互換)は null 扱い(`?? null`)。
+   */
+  readonly stationedOutpostId?: EntityId | null;
 }
 
 /**
@@ -390,6 +468,77 @@ function residentStatsView(resident: ResidentState, content: EngineContent): Res
     fortitudeApprox: toApproxNumber(effective.fortitude),
     willApprox: toApproxNumber(effective.will),
   };
+}
+
+/**
+ * [M70/R5-A02] (住民,tech) 別の想起困難 1 件(techId 昇順)。
+ *
+ * `derived.ts:326`(旧・ヘッダチップの doc)が「既知・意図的な妥協」と明記して
+ * いた精度の限界(索引省略の低頻度経路)をそのまま使う——住民は高々数十人
+ * (GDD 7.7)なので、③④⑤の表示専用にここで毎回全 tech を舐めても O(住民×tech)
+ * で軽い(homeBadges と同じ立場・§3-2 冒頭 doc)。
+ */
+export interface TechImpairmentView {
+  readonly techId: EntityId;
+  /** 回復する tick(GDD 11.2)。「対象techが分かる」表示の材料。 */
+  readonly untilTick: number;
+}
+
+/**
+ * その住民が**現在**想起困難中の (tech別) 一覧(techId昇順)。
+ * `state.techMemoryByKey` が空(既存セーブ・conformance シナリオ)なら
+ * `memoryTechIdsOf` が空配列を返すので O(1) で空になる。
+ */
+function residentTechImpairments(
+  state: GameState,
+  residentId: EntityId,
+  tick: number,
+): readonly TechImpairmentView[] {
+  const result: TechImpairmentView[] = [];
+  for (const techId of memoryTechIdsOf(state, residentId)) {
+    if (!isTechImpaired(state, residentId, techId, tick)) continue;
+    const memory = techMemoryOf(state, residentId, techId);
+    // isTechImpaired が true を返した以上 memory は必ず存在する(techMemory.ts
+    // §1 の doc どおり)。防御的に undefined をスキップするだけで捏造はしない。
+    if (memory === undefined) continue;
+    result.push({ techId, untilTick: memory.impairedUntilTick });
+  }
+  return result;
+}
+
+/**
+ * `residentTechImpairments` の結果のうち、この施設定義での寄与を実際に
+ * 止めている tech だけ(`techImpairmentStopsFacility`・rules/techMemory.ts §1
+ * の本式規則をそのまま呼ぶ・techId 昇順は入力の順序を保つ)。
+ */
+function impairedTechIdsAtFacility(
+  impairments: readonly TechImpairmentView[],
+  content: EngineContent,
+  facilityDefId: EntityId,
+): readonly EntityId[] {
+  const result: EntityId[] = [];
+  for (const impairment of impairments) {
+    const tech = content.techDefs.get(impairment.techId);
+    if (tech === undefined || techImpairmentStopsFacility(tech, facilityDefId)) {
+      result.push(impairment.techId);
+    }
+  }
+  return result;
+}
+
+/**
+ * [M70/R5-A07] 衛星拠点に常駐中の住民 → その拠点 ID(GDD 9.2)。
+ * `allOutposts(state)` を 1 パスするだけで、拠点数・常駐数とも高々数十
+ * (OUTPOST_RESIDENTS_MAX=4・GDD 9.2)なので軽い。
+ */
+function stationedOutpostIdByResident(state: GameState): ReadonlyMap<EntityId, EntityId> {
+  const result = new Map<EntityId, EntityId>();
+  for (const outpost of allOutposts(state)) {
+    for (const residentId of outpost.residentIds) {
+      result.set(residentId, outpost.id);
+    }
+  }
+  return result;
 }
 
 export interface CodifyView {
@@ -703,6 +852,14 @@ export interface FacilityWorkerView {
   readonly alive: boolean;
   readonly dispatched: boolean;
   readonly recallImpaired: boolean;
+  /**
+   * [M70/R5-A02] この施設での寄与を実際に止めている想起困難tech(techId昇順)。
+   * `recallImpaired`(住民単位スカラ)とは独立——空でも `recallImpaired` が
+   * true なことはあるし(住民単位の全停止)、逆に `recallImpaired=false` でも
+   * ここが非空なことがある((住民,tech) 別停止だけが効いている・M13 本式)。
+   * 省略時(既存テストフィクスチャ互換)は空扱い(`?? []`)。
+   */
+  readonly impairedTechIds?: readonly EntityId[];
 }
 
 /** [M30] 選択施設の詳細(③施設詳細/増築)。 */
@@ -772,12 +929,15 @@ function buildFacilityDetail(
   for (const workerId of facilityEntity.workerIds) {
     const residentEntity = state.entityStateById.get(workerId);
     if (residentEntity === undefined || residentEntity.kind !== "resident") continue;
+    // [M70/R5-A02] この施設の寄与を実際に止めている tech だけ(techImpairmentStopsFacility)。
+    const impairments = residentTechImpairments(state, workerId, state.tick);
     workers.push({
       residentId: workerId,
       moraleApprox: toApproxNumber(residentEntity.morale),
       alive: isAliveResident(residentEntity),
       dispatched: residentEntity.dispatched,
       recallImpaired: residentEntity.recallImpairedUntilTick > state.tick,
+      impairedTechIds: impairedTechIdsAtFacility(impairments, content, def.id),
     });
   }
 
@@ -882,6 +1042,11 @@ export interface StoreDerived {
    * 「いま点が流れ込んでいる 1 件」だけを持つ。
    */
   readonly researchChip: ReadonlyComputed<ResearchChipView | null>;
+  /**
+   * [M70/R5-A02] ⑤研究画面が「誰の・どのtechの想起困難で研究点産出が止まって
+   * いるか」を明示するための一覧(`ResearchStallNote` の doc 参照)。
+   */
+  readonly researchStallNotes: ReadonlyComputed<readonly ResearchStallNote[]>;
   readonly residents: ReadonlyComputed<readonly ResidentView[]>;
   readonly codify: ReadonlyComputed<readonly CodifyView[]>;
   readonly homeBadges: ReadonlyComputed<HomeBadges>;
@@ -1194,10 +1359,17 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "researchChip" },
   );
 
+  const researchStallNotes = computed<readonly ResearchStallNote[]>(
+    () => buildResearchStallNotes(sources.state.value, sources.content.value),
+    { name: "researchStallNotes" },
+  );
+
   const residents = computed<readonly ResidentView[]>(
     () => {
       const state: GameState = sources.state.value;
       const content: EngineContent = sources.content.value;
+      // [M70/R5-A07] 拠点常駐者の索引は 1 回だけ作って全住民で使い回す。
+      const stationedByResident = stationedOutpostIdByResident(state);
       return entitiesOfKind(state, "resident").map((resident) => ({
         entityId: resident.id,
         moraleApprox: toApproxNumber(resident.morale),
@@ -1210,6 +1382,10 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         stats: residentStatsView(resident, content),
         alive: isAliveResident(resident),
         diedTick: resident.life?.diedTick ?? null,
+        // [M70/R5-A02]
+        techImpairments: residentTechImpairments(state, resident.id, state.tick),
+        // [M70/R5-A07]
+        stationedOutpostId: stationedByResident.get(resident.id) ?? null,
       }));
     },
     { name: "residents" },
@@ -1234,6 +1410,21 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
   const homeBadges = computed<HomeBadges>(
     () => {
       const state: GameState = sources.state.value;
+      // [M70/R5-A02] 想起困難バッジは住民単位スカラだけでなく (住民,tech) 別
+      // (M13 の実プレイ抽選はこちらにしか書かない・rules/recall.ts §3)も見る。
+      // [M70/R5-A07] 拠点常駐者は「無配属で暇している」に数えない(idle の意味を
+      // 「就いていない」から「安全に配属できるのに就いていない」へ正す)。
+      const stationedByResident = stationedOutpostIdByResident(state);
+      const techImpairedResidentIds =
+        state.techMemoryByKey.size === 0
+          ? null
+          : new Set(
+              livingResidents(state)
+                .filter(
+                  (resident) => residentTechImpairments(state, resident.id, state.tick).length > 0,
+                )
+                .map((resident) => resident.id),
+            );
       let residentCount = 0;
       let impairedResidentCount = 0;
       let idleResidentCount = 0;
@@ -1248,8 +1439,19 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         switch (entity.kind) {
           case "resident":
             residentCount++;
-            if (entity.recallImpairedUntilTick > state.tick) impairedResidentCount++;
-            if (entity.assignedFacilityId === null && !entity.dispatched) idleResidentCount++;
+            if (
+              entity.recallImpairedUntilTick > state.tick ||
+              techImpairedResidentIds?.has(entity.id) === true
+            ) {
+              impairedResidentCount++;
+            }
+            if (
+              entity.assignedFacilityId === null &&
+              !entity.dispatched &&
+              !stationedByResident.has(entity.id)
+            ) {
+              idleResidentCount++;
+            }
             if (entity.dispatched) dispatchedResidentCount++;
             break;
           case "facility":
@@ -1475,6 +1677,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     resources,
     research,
     researchChip,
+    researchStallNotes,
     residents,
     codify,
     homeBadges,
@@ -1645,6 +1848,10 @@ export const DIGEST_ROW_IDS = [
   "residentDeaths",
   "techLosses",
   "returnLogs",
+  // [M70/R5-A06] 帰還した派遣の隊員は配属が自動復帰しない(GDD の仕様どおり=
+  // engine 側は変えない)ので、少なくとも 1 件の帰還があった不在期間だけ、
+  // 現在無配属の住民がいることを明示する(returnLogs の直後=帰還がらみ)。
+  "returnedUnassignedResidents",
   "rescues",
   "arrivals",
   "bondMilestones",
@@ -1768,6 +1975,10 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
   let rescueCount = 0;
   let bondMilestoneCount = 0;
   let partnerLostCount = 0;
+  // [M70/R5-A06] 帰還後に配属が自動復帰しない(engineの仕様どおり)ことの明示。
+  // 拠点常駐者は「無配属」に数えない(R5-A07 と同じ定義・homeBadges と揃える)。
+  let idleResidentCount = 0;
+  const stationedByResident = stationedOutpostIdByResident(state);
 
   for (const entity of state.entityStateById.values()) {
     if (entity.kind === "resident") {
@@ -1780,6 +1991,14 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
           subjectId: entity.id,
           tick: diedTick,
         });
+      }
+      if (
+        isAliveResident(entity) &&
+        !entity.dispatched &&
+        entity.assignedFacilityId === null &&
+        !stationedByResident.has(entity.id)
+      ) {
+        idleResidentCount++;
       }
       arrivalCount += countMemoirSince(entity, sinceTick, ARRIVAL_KINDS);
       rescueCount += countMemoirSince(entity, sinceTick, RESCUE_KINDS);
@@ -1840,10 +2059,16 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
   }
 
   const inFlight: readonly DispatchSnapshot[] = state.dispatchSnapshots;
+  // [M70/R5-A06] 少なくとも 1 件の帰還ログがあった不在期間だけ点灯する
+  // (帰還と無関係に常時「無配属がいる」を言うと既存の idleResidents ホーム
+  // バッジと重複するため・帰還ダイジェストは「帰還が理由でこうなったかも
+  // しれない」という文脈を添える専用の行)。
+  const returnedUnassignedResidents = logEntries.length > 0 ? idleResidentCount : 0;
   const counts: { readonly [K in DigestRowId]: number } = {
     residentDeaths: deathCount,
     techLosses: rareLossCount + recoverableLossCount,
     returnLogs: logEntries.length,
+    returnedUnassignedResidents,
     rescues: rescueCount,
     arrivals: arrivalCount,
     bondMilestones: bondMilestoneCount,
@@ -1854,6 +2079,7 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
     residentDeaths: "residents",
     techLosses: "research",
     returnLogs: "chronicle",
+    returnedUnassignedResidents: "residents",
     rescues: "residents",
     arrivals: "residents",
     bondMilestones: "chronicle",
@@ -1864,6 +2090,7 @@ export function buildReturnDigest(state: GameState, input: ReturnDigestInput): R
     residentDeaths: true,
     techLosses: true,
     returnLogs: false,
+    returnedUnassignedResidents: true,
     rescues: false,
     arrivals: false,
     bondMilestones: false,
@@ -2125,6 +2352,14 @@ export interface CodifySuggestionView {
   readonly onSchedule: boolean;
 }
 
+/** その資源の在庫近似値(受け皿 entity が無ければ 0・`buildReclaimInfo` と同型)。 */
+function resourceStockApproxOrZero(state: GameState, resourceId: EntityId): number {
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId === resourceId) return toApproxNumber(resource.stock);
+  }
+  return 0;
+}
+
 /**
  * おまかせ成文化の提案(GDD 2.1「おまかせ成文化」)。**state を 1 バイトも
  * 動かさない**(`suggestCodification` は読み取り専用・§1 と同じ立場)。
@@ -2133,6 +2368,20 @@ export interface CodifySuggestionView {
  * `suggestCodification` が候補到達時に例外を投げうる(`planCodification` が
  * `recordMedia` を必須にするため)ので、ここで先に空へ倒す
  * (`reclaimInfo`/`buildReclaimInfo` の「機構が無ければ不活性」と同じ作法)。
+ *
+ * **[M70/R5-A08] 入手不能な媒体(コスト資源の在庫が足りない)は提案しない。**
+ * engine のヒューリスティック(`suggestCodification`)は在庫を見ずに並べる
+ * (§2 の定義どおり)ため、紙0・写字室なしの盤面でも紙媒体を提案し、適用すると
+ * `insufficientResource` で即座に停止し「0/1件を適用しました」が古いまま
+ * 残り続けていた(R5-A08)。ここでやるのは CodifyScreen.tsx の
+ * `defaultMediumFor` と同じ「在庫を見て選ぶ」UI アシストの延長であり
+ * (§ 既存の precedent)、`suggestCodification` の並び順/優先度そのものは
+ * 書き換えない(=engine の判定ロジックを UI で二重実装しない)——1 件も選ばず
+ * 落とすだけ。**既知の単純化**: 廃材代替(`codifyWasteSubstitution`)は加味
+ * しない(CodifyScreen.tsx `defaultMediumFor` の doc と同じ簡易判定)。落とした
+ * ぶんだけ `cumulativeTicks`/`onSchedule` は「その手も含めて流したときの値」の
+ * ままになる(安全側に倒れるだけで、engine の実際のキュー結果とは無関係な表示
+ * 専用値なので実害はない)。
  */
 function buildCodifySuggestions(
   state: GameState,
@@ -2140,16 +2389,29 @@ function buildCodifySuggestions(
 ): readonly CodifySuggestionView[] {
   if (content.recordMedia === undefined) return [];
   const plan = suggestCodification(state, content, state.tick);
-  return plan.suggestions.map((suggestion) => ({
-    techId: suggestion.techId,
-    medium: suggestion.medium,
-    codifyId: suggestion.codifyId,
-    residualTick: suggestion.residualTick,
-    hasDeadline: suggestion.residualTick !== CODIFY_NO_DEADLINE_TICKS,
-    durationTicks: suggestion.durationTicks,
-    cumulativeTicks: suggestion.cumulativeTicks,
-    onSchedule: suggestion.onSchedule,
-  }));
+  const printingUnlocked = isPrintingUnlocked(state, content);
+  const result: CodifySuggestionView[] = [];
+  for (const suggestion of plan.suggestions) {
+    const costPlan = planCodification(
+      content,
+      suggestion.techId,
+      suggestion.medium,
+      printingUnlocked,
+    );
+    const stockApprox = resourceStockApproxOrZero(state, costPlan.costResourceId);
+    if (stockApprox < toApproxNumber(costPlan.costFix)) continue;
+    result.push({
+      techId: suggestion.techId,
+      medium: suggestion.medium,
+      codifyId: suggestion.codifyId,
+      residualTick: suggestion.residualTick,
+      hasDeadline: suggestion.residualTick !== CODIFY_NO_DEADLINE_TICKS,
+      durationTicks: suggestion.durationTicks,
+      cumulativeTicks: suggestion.cumulativeTicks,
+      onSchedule: suggestion.onSchedule,
+    });
+  }
+  return result;
 }
 
 // --- 8. 探索本部/冒険記/衛星拠点(⑦⑧⑨・M32)------------------------------------

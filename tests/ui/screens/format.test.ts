@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatApproxDecimal1,
+  formatApproxDecimal2,
   formatRatePerMinute,
   formatResourceAmount,
   formatResourceStock,
@@ -130,5 +131,22 @@ describe("[M61/FC11] formatApproxDecimal1: 戦力・士気等の小数第1位表
 
   it("有限数でなければ例外", () => {
     expect(() => formatApproxDecimal1(Number.NaN)).toThrow(RangeError);
+  });
+});
+
+describe("[M70/R5-A12] formatApproxDecimal2: 小数第2位表示(ROI比・キャラバン重み等)", () => {
+  it("常に小数第2位まで出す(整数でも .00 を出す)", () => {
+    expect(formatApproxDecimal2(1)).toBe("1.00");
+    expect(formatApproxDecimal2(0.25)).toBe("0.25");
+  });
+
+  it("formatApproxDecimal1(小数第1位止まり)では判別できない値も区別できる", () => {
+    // 1.00 と 1.04 はどちらも小数第1位では "1.0" に丸まって区別できない。
+    expect(formatApproxDecimal1(1.0)).toBe(formatApproxDecimal1(1.04));
+    expect(formatApproxDecimal2(1.0)).not.toBe(formatApproxDecimal2(1.04));
+  });
+
+  it("有限数でなければ例外", () => {
+    expect(() => formatApproxDecimal2(Number.NaN)).toThrow(RangeError);
   });
 });

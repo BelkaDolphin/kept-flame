@@ -13,14 +13,20 @@
 
 import { describe, expect, it } from "vitest";
 
+import { FIX_ZERO } from "../../../src/engine/fp";
 import { entityIdFromString } from "../../../src/engine/state/state";
-import type { ExpeditionCandidateView, ExpeditionDispatchView } from "../../../src/ui/derived";
+import type {
+  ExpeditionCandidateView,
+  ExpeditionDispatchView,
+  ResourceView,
+} from "../../../src/ui/derived";
 import {
   BandPicker,
   CandidateRow,
   DestinationPicker,
   DispatchRow,
   RoiPanel,
+  rewardMayOverflow,
   StancePicker,
 } from "../../../src/ui/screens/expedition/ExpeditionScreen";
 import { previewExplorationRoi } from "../../../src/ui/derived";
@@ -181,5 +187,83 @@ describe("DispatchRow(⑦/⑧未帰還派遣1件)", () => {
     };
     const vnode = DispatchRow({ dispatch });
     expect(flattenText(vnode)).toContain("脱落見込み");
+  });
+
+  it("[台帳v18 必-1] 「持ち帰り予定」(粗報酬の見込み)を表示する", () => {
+    const dispatch: ExpeditionDispatchView = {
+      dispatchId: id("dispatchNear1"),
+      destinationId: id("eventNearRubbleSweep"),
+      band: "near",
+      stance: "cautious",
+      memberIds: [id("aRui")],
+      dispatchTick: 0,
+      returnTick: 60,
+      rewardResourceId: id("wood"),
+      rewardApprox: 30,
+      withdrawn: false,
+      casualtyMemberIds: [],
+    };
+    const vnode = DispatchRow({ dispatch });
+    const text = flattenText(vnode);
+    expect(text).toContain("持ち帰り予定");
+    expect(text).toContain("30");
+    expect(text).not.toContain("倉庫がこの資源の保管上限");
+  });
+
+  it("[台帳v18 必-1] mayOverflow=true なら倉庫満杯の注記を添える(満額表示だけにしない)", () => {
+    const dispatch: ExpeditionDispatchView = {
+      dispatchId: id("dispatchNear1"),
+      destinationId: id("eventNearRubbleSweep"),
+      band: "near",
+      stance: "cautious",
+      memberIds: [id("aRui")],
+      dispatchTick: 0,
+      returnTick: 60,
+      rewardResourceId: id("wood"),
+      rewardApprox: 30,
+      withdrawn: false,
+      casualtyMemberIds: [],
+    };
+    const vnode = DispatchRow({ dispatch, mayOverflow: true });
+    expect(flattenText(vnode)).toContain("倉庫がこの資源の保管上限");
+  });
+});
+
+describe("[台帳v18 必-1] rewardMayOverflow(倉庫満杯の見込み判定・engine再計算はしない)", () => {
+  function resourceView(overrides: Partial<ResourceView> = {}): ResourceView {
+    return {
+      entityId: id("rWood"),
+      resourceId: id("wood"),
+      stockFix: FIX_ZERO,
+      stockApprox: 0,
+      capacityApprox: null,
+      atCapacity: false,
+      ...overrides,
+    };
+  }
+
+  it("上限が無い資源(capacityApprox=null)は常に false", () => {
+    expect(rewardMayOverflow([resourceView({ capacityApprox: null })], id("wood"), 100)).toBe(
+      false,
+    );
+  });
+
+  it("在庫+報酬が上限を超えるなら true", () => {
+    const resources = [resourceView({ stockApprox: 780, capacityApprox: 800 })];
+    expect(rewardMayOverflow(resources, id("wood"), 30)).toBe(true);
+  });
+
+  it("在庫+報酬が上限以内なら false", () => {
+    const resources = [resourceView({ stockApprox: 100, capacityApprox: 800 })];
+    expect(rewardMayOverflow(resources, id("wood"), 30)).toBe(false);
+  });
+
+  it("既に上限(atCapacity=true)なら報酬額に関わらず true", () => {
+    const resources = [resourceView({ stockApprox: 800, capacityApprox: 800, atCapacity: true })];
+    expect(rewardMayOverflow(resources, id("wood"), 0)).toBe(true);
+  });
+
+  it("対象資源の ResourceView が無ければ false(捏造しない)", () => {
+    expect(rewardMayOverflow([], id("wood"), 100)).toBe(false);
   });
 });

@@ -93,6 +93,9 @@ export const DIGEST_ROW_TEXT: { readonly [K in DigestRowId]: DigestRowText } = {
   residentDeaths: { mark: "✕", label: "亡くなった住民", unit: "人" },
   techLosses: { mark: "✕", label: "失われた技術", unit: "件" },
   returnLogs: { mark: "▸", label: "探索隊の帰還記録", unit: "件" },
+  // [M70/R5-A06] 帰還した派遣の隊員は配属が自動復帰しない(施設からは自動的に
+  // 外れたまま)。気づかずに放置すると産出が止まったまま気づけない(R5-A06)。
+  returnedUnassignedResidents: { mark: "△", label: "帰還後まだ配属されていない住民", unit: "人" },
   rescues: { mark: "＋", label: "保護して迎え入れた人", unit: "人" },
   arrivals: { mark: "＋", label: "新しく加わった人", unit: "人" },
   bondMilestones: { mark: "▸", label: "絆が深まった記録", unit: "件" },

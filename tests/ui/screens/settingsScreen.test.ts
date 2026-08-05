@@ -196,6 +196,46 @@ describe("ImportPanel", () => {
     });
     expect(flattenText(selected)).toContain("kept-flame-save-tick1000.json");
   });
+
+  it("[M70/R5-A09] 貼り付け欄は onInput で即時反映する(onChange=blur待ちだとモバイルで2タップ要求)", () => {
+    const onImportTextChange = vi.fn();
+    const vnode = ImportPanel({
+      importText: "",
+      onImportTextChange,
+      onFileSelected: () => undefined,
+      onSubmit: () => undefined,
+      outcome: null,
+      selectedFileName: null,
+    });
+    function findTextarea(node: unknown): {
+      readonly props: { readonly onInput?: (e: Event) => void; readonly onChange?: unknown };
+    } | null {
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = findTextarea(child);
+          if (found !== null) return found;
+        }
+        return null;
+      }
+      if (node === null || node === undefined || typeof node !== "object") return null;
+      const candidate = node as {
+        readonly type?: unknown;
+        readonly props?: { readonly children?: unknown };
+      };
+      if (candidate.type === "textarea") {
+        return candidate as {
+          readonly props: { readonly onInput?: (e: Event) => void; readonly onChange?: unknown };
+        };
+      }
+      return findTextarea(candidate.props?.children);
+    }
+    const textarea = findTextarea(vnode);
+    expect(textarea).not.toBeNull();
+    expect(typeof textarea?.props.onInput).toBe("function");
+    expect(textarea?.props.onChange).toBeUndefined();
+    textarea?.props.onInput?.({ target: { value: "pasted" } } as unknown as Event);
+    expect(onImportTextChange).toHaveBeenCalledWith("pasted");
+  });
 });
 
 // [M59] ボタンの走査は ResetGameSection のテストと同じ vnode 再帰ヘルパを使う。

@@ -25,8 +25,8 @@ import { useState } from "preact/hooks";
 
 import type { CommandRejection } from "../../../engine/commands";
 import { entityIdFromString, type EntityId } from "../../../engine/state/state";
-import type { ResearchTreeEntry, ResearchTreeStatus } from "../../derived";
-import { eraLabel, techLabel } from "../contentLabels";
+import type { ResearchStallNote, ResearchTreeEntry, ResearchTreeStatus } from "../../derived";
+import { eraLabel, facilityLabel, residentDisplayName, techLabel } from "../contentLabels";
 import { formatResourceAmount } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
 import { RejectionBanner } from "../RejectionBanner";
@@ -228,6 +228,38 @@ export function ResearchEraSection({
   );
 }
 
+// --- 3b. [M70/R5-A02] 想起困難による研究点停止の明示(hooks 不使用) ----------
+//
+// 「就労1/1なのに研究0/41が延々静止する」の解消(derived.ts の
+// `ResearchStallNote`/`buildResearchStallNotes` doc 参照)。研究点は
+// (今まさに選ばれている tech ではなく)研究点産出施設全般のレートなので、
+// エラ別の行1本には吊るせない——画面冒頭に横断バナーとして出す。
+
+export interface ResearchStallBannerProps {
+  readonly notes: readonly ResearchStallNote[];
+}
+
+export function ResearchStallBanner({ notes }: ResearchStallBannerProps) {
+  if (notes.length === 0) return null;
+  return (
+    <section class="kf-research-screen__stall" role="note" aria-label="想起困難による研究点停止">
+      <p class="kf-research-screen__stall-title">
+        ▲ 想起困難のため研究点の産出が止まっています。知識は人の記憶に宿るため、時間が経てば
+        思い出して回復します。
+      </p>
+      <ul class="kf-research-screen__stall-list">
+        {notes.map((note) => (
+          <li key={`${note.residentId}:${note.facilityDefId}`}>
+            {residentDisplayName(note.residentId)}が{facilityLabel(note.facilityDefId)}で
+            {note.techIds.map((techId) => techLabel(techId)).join("・")}
+            の記憶を今は思い出せません。
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 // --- 4. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 export function ResearchScreen({ store, onNavigate }: ScreenProps) {
@@ -235,6 +267,7 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
   useScreenMount(store, "research", { activate: false });
 
   const tree = useSignalValue(store.derived.researchTree);
+  const stallNotes = useSignalValue(store.derived.researchStallNotes);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
 
@@ -273,6 +306,8 @@ export function ResearchScreen({ store, onNavigate }: ScreenProps) {
       <ToastStackView toasts={toastStack.toasts} />
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
+
+      <ResearchStallBanner notes={stallNotes} />
 
       {tree.length === 0 ? (
         <p class="kf-research-screen__empty">tech 定義がありません。</p>

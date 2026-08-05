@@ -9,9 +9,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
-import type { ResearchTreeEntry } from "../../../src/ui/derived";
+import type { ResearchStallNote, ResearchTreeEntry } from "../../../src/ui/derived";
 import {
   ResearchEraSection,
+  ResearchStallBanner,
   ResearchTechRow,
   groupResearchTreeByEra,
   researchEntityIdFor,
@@ -264,5 +265,27 @@ describe("ResearchEraSection", () => {
     expect(text).toContain("灰の時代");
     expect(text).toContain("火起こし");
     expect(text).toContain("土器");
+  });
+});
+
+describe("[M70/R5-A02] ResearchStallBanner(想起困難による研究点停止の明示)", () => {
+  it("notes が空なら何も出さない(捏造しない)", () => {
+    const vnode = ResearchStallBanner({ notes: [] });
+    expect(vnode).toBeNull();
+  });
+
+  it("notes があれば住民名・施設名・対象techを明示する", () => {
+    const notes: readonly ResearchStallNote[] = [
+      {
+        residentId: id("aRui"),
+        facilityDefId: id("studyDesk"),
+        techIds: [id("techFireStarting")],
+      },
+    ];
+    const vnode = ResearchStallBanner({ notes });
+    const text = flattenText(vnode);
+    expect(text).toContain("ARui");
+    expect(text).toContain("火起こし");
+    expect(text).toContain("止まっています");
   });
 });
