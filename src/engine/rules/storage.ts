@@ -6,6 +6,11 @@
 // ===========================================================================
 //   (1) 上限到達時は原則超過分破棄          → {@link applyGainWithCapacity}
 //   (2) 低次資源は超過分を一定比率で廃材へ  → 同上(スポンジ機構・§3)
+//
+//   **[M64] 上限を掛ける実装はこのファイルの §2 / §2b だけ**である。本拠の施設
+//   産出(rules/production.ts)・衛星拠点の供給(rules/outpost.ts)・探索報酬の
+//   受入(rules/exploration.ts)はいずれも §2b の {@link applyCappedIntake} /
+//   {@link creditWasteGain} を経由する(台帳v17 必-1 案1)。
 //   (3) 副産物の上限判定は独立              → 上限は **resource 定義 ID ごと**に
 //       持ち、資源間で連鎖しない。ある資源が満杯でも他資源の産出は止まらない
 //       (施設単位で止める実装にすると「連鎖停止」が起きる)
@@ -63,12 +68,12 @@
 //   **純関数 + コマンド適用**として置き、離散事象を増やさない。
 // ---------------------------------------------------------------------------
 
-import { FIX_ZERO, addFix, fixFromRaw, floorDivFix, mulFix, subFix, toRaw, type Fix } from "../fp";
+import { FIX_ZERO, addFix, floorDivFix, mulFix, subFix, toRaw, type Fix } from "../fp";
 import { compareUtf16 } from "../canonicalize";
 import { entitiesOfKind, type EntityId, type GameState, type ResourceState } from "../state/state";
 import { setField, updateEntity } from "../state/update";
 import { currentResearch } from "./research";
-import { RulesError, requireFacilityDef, type EngineContent, type OverflowPolicy } from "./types";
+import { RulesError, requireFacilityDef, type EngineContent, type StorageParams } from "./types";
 
 // --- 1. 容量の解決 ---------------------------------------------------------
 
@@ -208,72 +213,203 @@ export function writeCapacityOutcome(
   });
 }
 
-// --- 2b. 方策つきオーバーフロー(GDD 12.1 `item.overflow`)— M22 -------------
+// --- 2b. 一括入荷の単一入口(GDD 6.7・M64「上限会計の統一」)-----------------
 //
-//   §2 の {@link applyGainWithCapacity} は「毎 tick の連続生産」用であり、
-//   `cumulativeProduced` / `cumulativeOverflow`(GDD 11.4-7 の損失率会計)を
-//   必ず動かす。一方 GDD 12.1 の `item(… overflow{policy, convertTo, ratio})` は
-//   **一括入荷(探索報酬・イベント報酬)にだけ掛かる方策**であり、
-//   GDD 8.1 の [2026-07-30裁定]⑥「探索報酬は保管上限/オーバーフロー会計を
-//   通さない(`cumulativeProduced` を膨らませない)」と両立させる必要がある。
+//   **[2026-08-04裁定・台帳v17 必-1(案1)]** 上限会計は 1 方式に統一する。
+//   M64 以前は 3 系統 3 方式に分裂していた:
+//     (a) 本拠の施設産出 = 加算式保管上限 + 廃材スポンジ(§1〜§3)…正
+//     (b) 衛星拠点の供給 = 上限を完全に無視(素の加算)
+//     (c) 探索報酬       = `balance.exploration.rewardOverflow` の独自固定上限
+//   (b)(c) をどちらも (a) と**同じ上限・同じスポンジ**へ寄せたのが本節であり、
+//   `rules/production.ts` の `applyProduction` も同じ関数群の上に建て直して
+//   ある(「上限を掛ける実装」がリポジトリに 1 つしか無い状態を作るため)。
+//   これに伴い M22 の `applyOverflowPolicy` と
+//   `balance.exploration.rewardOverflow`(探索報酬専用の固定上限)は**撤廃**した。
 //
-//   そこで本節は **会計を一切触らない純関数**として上限とあふれ処理だけを行う。
-//   「上限を掛ける」ことと「損失率の分母を増やす」ことを別の関数に分けたのが
-//   ⑥ への回答である(⑥ が禁じているのは後者)。
+//   ----------------------------------------------------------------------
+//   入口が 2 つあるのは「連続流」と「一括入荷」で**会計の扱いだけ**が違うため
+//   ----------------------------------------------------------------------
+//     {@link applyCappedIntake}     : (A) 区間の連続流(本拠生産・拠点供給)。
+//         `cumulativeProduced` / `cumulativeOverflow` を進め、廃材は §3 の
+//         telescoping(累計超過の差分)で出す。**区間を分割しても結果が変わらない
+//         ことが要件**なので、この会計は機能上の必需品である。
+//     {@link applyCappedLumpIntake} : 一括入荷(探索報酬)。上限とスポンジは
+//         上と**まったく同じ式**を使うが、`cumulativeProduced` /
+//         `cumulativeOverflow` は動かさない。
+//
+//   一括入荷が会計を動かさない理由は 2 つある:
+//     (1) GDD 8.1 [2026-07-30裁定]⑥ が「探索報酬は保管上限/オーバーフロー会計を
+//         通さない(`cumulativeProduced` を膨らませない)」と明文で定めている。
+//         台帳v17 必-1(案1)が扱ったのは **(b) 拠点供給の非対称**であり、⑥ を
+//         撤回する裁定は出ていない(R5-A01 が求めたのは『保管系への統合』=
+//         上限の出所を 1 つにすること、と『冒険記ログを実受領額へ』の 2 点)。
+//     (2) 実測: 探索報酬を GDD 11.4-7c(オーバーフロー損失率 < 15%)の分子分母へ
+//         入れると、指標が **0.114 → 0.637** へ跳ね夜間ゲートが fail になる
+//         (M64 実測・bot 別内訳は最終報告)。⑥ が守っていたのは「生産の健全性
+//         指標に外部収入を混ぜない」ことであり、混ぜると閾値 15% の校正が
+//         意味を失う。
+//   一括入荷は**離散事象(帰還 tick)で 1 回だけ起きる**ので区間分割が有り得ず、
+//   telescoping を必要としない —— よって会計を動かさなくても分割不変性は
+//   1 mm も損なわれない。
 
-/** [M22] 方策つきオーバーフローの結果({@link applyOverflowPolicy})。 */
-export interface OverflowOutcome {
-  /** 実際に在庫へ入る量(上限までのぶん)。 */
+/** [M64] 入荷 1 件ぶんの受入結果({@link applyCappedIntake} / {@link applyCappedLumpIntake})。 */
+export interface CappedIntakeOutcome {
+  /** 反映後の state。 */
+  readonly state: GameState;
+  /** 実際に在庫へ入った量(= 反映後在庫 − 反映前在庫)。 */
   readonly acceptedFix: Fix;
-  /** 入りきらなかった量。 */
+  /** 上限に阻まれて在庫へ入らなかった量(`gain − accepted`)。 */
   readonly excessFix: Fix;
-  /** 変換で得られた量(`discard` なら 0)。 */
-  readonly convertedFix: Fix;
-  /** 変換先の resource 定義 ID(変換が起きなければ null)。 */
-  readonly convertToResourceId: EntityId | null;
+  /** この入荷で新たに生じた廃材(呼び出し側が {@link creditWasteGain} で入れる)。 */
+  readonly wasteGainFix: Fix;
 }
 
 /**
- * [M22] 一括入荷に方策つきオーバーフローを適用する(GDD 12.1 / 6.7)。
- *
- * 会計(`cumulativeProduced` / `cumulativeOverflow`)は**動かさない**(§2b)。
- * 減少(gain <= 0)は上限判定を通さない —— §2(a) と同じ理由で、
- * クランプを非負のときだけ掛けることで加算の結合性を壊さないため。
- *
- * 値域: `excess × ratio` は content 由来の上限が緩い経路なので
- * {@link mulFix}(自動 BigInt フォールバック)を使う(fp.ts §4 の線引き)。
+ * 資源 1 種の廃材変換率(GDD 6.7 のスポンジ機構)。
+ * **廃材そのものは再変換しない**(自己参照ループを作らない)。
  */
-export function applyOverflowPolicy(
-  currentStockFix: Fix,
+export function wasteConversionRatioOf(
+  storage: StorageParams | undefined,
+  resourceId: EntityId,
+): Fix {
+  if (storage === undefined || storage.wasteResourceId === resourceId) return FIX_ZERO;
+  return storage.wasteConversionRatioByResourceId.get(resourceId) ?? FIX_ZERO;
+}
+
+/**
+ * [M64] (A) 区間の**連続流**を 1 つの resource entity へ上限つきで反映する
+ * (本拠生産・拠点供給。§2b の入口その 1)。
+ *
+ * 上限が無い資源(`capacityByResourceId` に現れない)は**在庫へ足すだけ**で
+ * 会計フィールドも作らない —— M64 以前の `applyProduction` / `applyOutpostSupply`
+ * の「上限なし」経路と 1 bit も違わない。
+ *
+ * `resource` は `state` に居る現物を渡すこと(呼び出し側が `entitiesOfKind` で
+ * 走査した値をそのまま渡す前提。1 資源につき 1 回だけ呼ぶ)。
+ */
+export function applyCappedIntake(
+  state: GameState,
+  storage: StorageParams | undefined,
+  capacityByResourceId: ReadonlyMap<EntityId, Fix>,
+  resource: ResourceState,
   gainFix: Fix,
-  policy: OverflowPolicy,
-): OverflowOutcome {
-  if (toRaw(gainFix) <= 0) {
+): CappedIntakeOutcome {
+  const capacityFix = capacityByResourceId.get(resource.resourceId);
+  if (capacityFix === undefined) {
+    if (toRaw(gainFix) === 0) {
+      return { state, acceptedFix: FIX_ZERO, excessFix: FIX_ZERO, wasteGainFix: FIX_ZERO };
+    }
     return {
+      state: updateEntity(state, resource.id, "resource", (r) =>
+        setField(r, "stock", addFix(r.stock, gainFix)),
+      ),
       acceptedFix: gainFix,
       excessFix: FIX_ZERO,
-      convertedFix: FIX_ZERO,
-      convertToResourceId: null,
+      wasteGainFix: FIX_ZERO,
     };
   }
-  const roomRaw = toRaw(policy.capacityFix) - toRaw(currentStockFix);
-  const gainRaw = toRaw(gainFix);
-  const acceptedRaw = roomRaw <= 0 ? 0 : roomRaw < gainRaw ? roomRaw : gainRaw;
-  const acceptedFix = fixFromRaw(acceptedRaw);
-  const excessFix = fixFromRaw(gainRaw - acceptedRaw);
-  if (
-    policy.policy !== "convert" ||
-    policy.convertToResourceId === null ||
-    toRaw(excessFix) === 0
-  ) {
-    return { acceptedFix, excessFix, convertedFix: FIX_ZERO, convertToResourceId: null };
-  }
+
+  const outcome = applyGainWithCapacity(
+    resource,
+    gainFix,
+    capacityFix,
+    wasteConversionRatioOf(storage, resource.resourceId),
+  );
+  const acceptedFix = subFix(outcome.stock, resource.stock);
   return {
+    state: writeCapacityOutcome(state, resource.id, outcome),
+    acceptedFix,
+    excessFix: subFix(gainFix, acceptedFix),
+    wasteGainFix: outcome.wasteGain,
+  };
+}
+
+/**
+ * [M64] **一括入荷**を 1 つの resource entity へ上限つきで反映する(探索報酬。
+ * §2b の入口その 2)。
+ *
+ * 上限のクランプ式は {@link applyCappedIntake} と**同じ** {@link
+ * applyGainWithCapacity} を使い、超過分の廃材化も本拠とまったく同じ
+ * {@link wasteConversionRatioOf} を使う —— 「上限とスポンジは 1 実装」という
+ * M64 の要件はここで満たされる。違いは `cumulativeProduced` /
+ * `cumulativeOverflow`(GDD 11.4-7 の生産健全性会計)を**動かさない**ことだけで、
+ * 理由と根拠は §2b 冒頭の (1)(2)。
+ *
+ * 廃材量は累計の差分でなく**この 1 件の超過 × 比率**でよい(離散事象なので
+ * 区間分割が起こらず telescoping が不要・§2b 冒頭)。
+ */
+export function applyCappedLumpIntake(
+  state: GameState,
+  storage: StorageParams | undefined,
+  capacityByResourceId: ReadonlyMap<EntityId, Fix>,
+  resource: ResourceState,
+  gainFix: Fix,
+): CappedIntakeOutcome {
+  const capacityFix = capacityByResourceId.get(resource.resourceId);
+  if (capacityFix === undefined) {
+    if (toRaw(gainFix) === 0) {
+      return { state, acceptedFix: FIX_ZERO, excessFix: FIX_ZERO, wasteGainFix: FIX_ZERO };
+    }
+    return {
+      state: updateEntity(state, resource.id, "resource", (r) =>
+        setField(r, "stock", addFix(r.stock, gainFix)),
+      ),
+      acceptedFix: gainFix,
+      excessFix: FIX_ZERO,
+      wasteGainFix: FIX_ZERO,
+    };
+  }
+
+  // 変換率 0 で呼ぶ = クランプ結果だけを借りる(会計値は読み捨てる)。
+  const clamped = applyGainWithCapacity(resource, gainFix, capacityFix, FIX_ZERO);
+  const acceptedFix = subFix(clamped.stock, resource.stock);
+  const excessFix = subFix(gainFix, acceptedFix);
+  return {
+    state: updateEntity(state, resource.id, "resource", (r) => setField(r, "stock", clamped.stock)),
     acceptedFix,
     excessFix,
-    convertedFix: mulFix(excessFix, policy.ratioFix),
-    convertToResourceId: policy.convertToResourceId,
+    wasteGainFix: mulFix(excessFix, wasteConversionRatioOf(storage, resource.resourceId)),
   };
+}
+
+/**
+ * [M64] スポンジで生じた廃材を廃材資源の在庫へ入れる(§2b の単一入口)。
+ * 廃材自身にも上限があれば適用するが、その超過は破棄する(変換率 0 で渡す)。
+ *
+ * `contextLabel` は例外メッセージの接頭辞(呼び出し元の関数名)。
+ *
+ * @throws {RulesError} 廃材の resource entity が state に無い場合
+ *   (生成した廃材を黙って捨てないため)
+ */
+export function creditWasteGain(
+  state: GameState,
+  storage: StorageParams | undefined,
+  capacityByResourceId: ReadonlyMap<EntityId, Fix>,
+  wasteGainFix: Fix,
+  contextLabel: string,
+): GameState {
+  const wasteResourceId = storage?.wasteResourceId;
+  if (wasteResourceId === undefined || wasteResourceId === null) return state;
+  if (toRaw(wasteGainFix) <= 0) return state;
+
+  for (const resource of entitiesOfKind(state, "resource")) {
+    if (resource.resourceId !== wasteResourceId) continue;
+    const capacity = capacityByResourceId.get(wasteResourceId);
+    if (capacity === undefined) {
+      return updateEntity(state, resource.id, "resource", (r) =>
+        setField(r, "stock", addFix(r.stock, wasteGainFix)),
+      );
+    }
+    return writeCapacityOutcome(
+      state,
+      resource.id,
+      applyGainWithCapacity(resource, wasteGainFix, capacity, FIX_ZERO),
+    );
+  }
+  throw new RulesError(
+    `${contextLabel}: 廃材 "${wasteResourceId}" の resource entity が state に無い` +
+      `(スポンジ機構が生んだ ${String(toRaw(wasteGainFix))} を黙って捨てないため停止)`,
+  );
 }
 
 // --- 3. オーバーフロー損失率(GDD 11.4-7) ---------------------------------

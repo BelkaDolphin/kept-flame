@@ -27,7 +27,7 @@ import {
   apply,
   type Command,
 } from "../../src/engine/commands";
-import { FIX_SCALE, fixFromInt, fixFromRaw, toRaw, type Fix } from "../../src/engine/fp";
+import { FIX_SCALE, FIX_ZERO, fixFromInt, fixFromRaw, toRaw, type Fix } from "../../src/engine/fp";
 import {
   DISPATCH_TEAM_MAX,
   MAX_RENDERED_LOGS,
@@ -517,7 +517,9 @@ describe("帰還解決(段60)", () => {
     expect(afterReturn.renderedLogs.entries).toHaveLength(1);
     const logged = afterReturn.renderedLogs.entries[0];
     expect(logged?.tick).toBe(snapshot.returnTick);
-    expect(logged?.text).toBe(renderReturnLog(snapshot, 0));
+    expect(logged?.text).toBe(
+      renderReturnLog(snapshot, 0, { acceptedFix: snapshot.rewardFix, excessFix: FIX_ZERO }),
+    );
     expect(typeof logged?.text).toBe("string");
   });
 

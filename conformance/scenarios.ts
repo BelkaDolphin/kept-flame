@@ -730,38 +730,6 @@ function patchAddOutpostType(): (raw: RawContentBundle) => RawContentBundle {
   });
 }
 
-/**
- * [M25] 探索報酬のオーバーフロー方策(GDD 12.1 `item.overflow`・M22)を
- * `balance.exploration.rewardOverflow` へ追加する。base content には無い
- * (M22 完了時点で「ブロックが無ければ上限なし」のまま・schema/balance.ts の doc)。
- */
-function patchExplorationRewardOverflow(options: {
-  readonly capacity: number;
-  readonly policy: "discard" | "convert";
-  readonly convertTo?: string;
-  readonly ratio?: number;
-}): (raw: RawContentBundle) => RawContentBundle {
-  return (raw) => {
-    const balance = clone(raw.balance) as Record<string, unknown>;
-    const exploration = clone(balance["exploration"]) as Record<string, unknown>;
-    return {
-      ...raw,
-      balance: {
-        ...balance,
-        exploration: {
-          ...exploration,
-          rewardOverflow: {
-            policy: options.policy,
-            capacity: options.capacity,
-            convertTo: options.convertTo ?? null,
-            ratio: options.ratio ?? 0,
-          },
-        },
-      },
-    };
-  };
-}
-
 // ===========================================================================
 // 5. シナリオごとの盤面(spec §4.3 の表そのもの)
 // ===========================================================================
@@ -1666,12 +1634,20 @@ function sc36BuildState(worldSeed: string): GameState {
   );
 }
 
-// --- sc37-exp-reward-overflow(GDD 12.1 item overflow・探索報酬の上限クランプ) --
+// --- sc37-exp-reward-overflow(GDD 6.7・探索報酬の保管上限クランプ) ------------
 
 /**
- * [M25] `balance.exploration.rewardOverflow`(policy=discard・capacity=1000)を
- * 足し、初期在庫200 + 報酬2000 が上限1000で頭打ちになることを固定する
- * (`applyExpeditionReward` の overflow 分岐・rules/exploration.ts)。
+ * **[M64・2026-08-04裁定・台帳v17 必-1(案1)]** 探索報酬は本拠の施設産出と
+ * まったく同じ加算式保管上限(`balance.storage.baseCapacity` + 保管施設の寄与)
+ * を通る。M25〜M63 の `balance.exploration.rewardOverflow`(探索報酬専用の
+ * 固定上限)は撤廃したので、本シナリオも `patchStorageCapacity` へ移した。
+ *
+ * 初期在庫 200 + 報酬 2000 が上限 1000 で頭打ちになり、超過 1200 のうち
+ * `wasteConversionRatio.firewood = 0.5`(凍結 content が既に持つ)により
+ * 600 が廃材へ回る —— **上限クランプとスポンジ機構が探索報酬にも掛かる**
+ * ことを 1 本のベクタで固定する。廃材の受け皿(`resourceWaste`)を置くのは
+ * sc18 と同じ理由(生んだ廃材を黙って捨てず RulesError で止める設計)。
+ *
  * RNG を引かない(節点は確定値)ので worldSeed 非依存 = C7 対象外。
  */
 function sc37BuildState(worldSeed: string): GameState {
@@ -1689,6 +1665,7 @@ function sc37BuildState(worldSeed: string): GameState {
     [
       mkResident("residentIvy", { dispatched: true }),
       mkResource("resourceFirewood", "firewood", 200),
+      mkResource("resourceWaste", "waste", 0),
     ],
     [],
     [],
@@ -1825,6 +1802,56 @@ function sc40BuildState(worldSeed: string): GameState {
   );
 }
 
+// --- sc41-out-supply-cap(M64: 拠点供給にも加算式保管上限が掛かる) ------------
+
+/**
+ * **[M64・2026-08-04裁定・台帳v17 必-1(案1)]** 衛星拠点の供給(GDD 9.2)も
+ * 本拠の施設産出と同じ保管上限会計(GDD 6.7)を通る。sc38 が「上限が無い盤面での
+ * 拠点供給」を固定しているのに対し、本シナリオは**上限がある盤面**を固定する。
+ *
+ * 盤面は sc38 と同型(本拠 hearth 1 基 + 拠点 1 基が同じ firewood へ供給)で、
+ * 差分は 2 つだけ:
+ *   (1) `patchStorageCapacity({ firewood: 50_000 })` — sc38 の 1000 tick 実行は
+ *       上限なしで 200,000 まで積むので、上限は run の途中(約 tick 250)で
+ *       必ず binding になる。
+ *   (2) 廃材の受け皿 `resourceWaste` — 凍結 content の
+ *       `wasteConversionRatio.firewood = 0.5` によりスポンジが実働するため
+ *       (受け皿が無いと `creditWasteGain` が RulesError で止まる = sc18 と同じ)。
+ *
+ * これで「**生産(段30)でクランプ → 拠点供給(段80)でもクランプ**」という
+ * 同一区間内の 2 段クランプが golden で観測される。split 版(splitTicks=[500])は
+ * その 2 段クランプ + 廃材 telescoping が区間分割で不変であることを固定する
+ * (`min(min(x+a,cap)+b,cap) = min(x+a+b,cap)` が非負の a,b に対して成り立つ、
+ * という storage.ts §2(a) の補題が拠点供給にも効くことの実証)。
+ *
+ * 供給レートは常駐人数/拠点Lvのみに依存し RNG を引かないので worldSeed 非依存
+ * = C7 対象外(sc38 と同じ理由)。
+ */
+function sc41BuildState(worldSeed: string): GameState {
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentHome", { assignedFacilityId: "facilityHearthHome" }),
+      mkResident("residentOutpostA"),
+      mkResident("residentOutpostB"),
+      mkFacility("facilityHearthHome", "hearth", 0, ["residentHome"], 1),
+      mkResource("resourceFirewood", "firewood", 0),
+      mkResource("resourceWaste", "waste", 0),
+    ],
+    [],
+    [],
+    [],
+    [],
+    undefined,
+    [
+      mkOutpost("outpostForestActive", "outpostForest", "near", [
+        "residentOutpostA",
+        "residentOutpostB",
+      ]),
+    ],
+  );
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -1927,7 +1954,7 @@ export const SCENARIOS: readonly Scenario[] = [
   { id: "sc36-exp-all-lost", contentPatch: null, buildState: sc36BuildState },
   {
     id: "sc37-exp-reward-overflow",
-    contentPatch: patchExplorationRewardOverflow({ capacity: 1000, policy: "discard" }),
+    contentPatch: patchStorageCapacity({ firewood: 1000 }),
     buildState: sc37BuildState,
   },
   { id: "sc38-out-supply", contentPatch: patchAddOutpostType(), buildState: sc38BuildState },
@@ -1939,6 +1966,11 @@ export const SCENARIOS: readonly Scenario[] = [
       patchTechResearchCost("techBasketWeaving", 24_000),
     ),
     buildState: sc40BuildState,
+  },
+  {
+    id: "sc41-out-supply-cap",
+    contentPatch: composePatches(patchAddOutpostType(), patchStorageCapacity({ firewood: 50_000 })),
+    buildState: sc41BuildState,
   },
 ];
 

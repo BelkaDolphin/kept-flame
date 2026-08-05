@@ -34,11 +34,11 @@
     },
     {
       "comparator": "<=",
-      "detail": "最悪は explorationFirst/nightly-b:firewood(18/20 標本)",
+      "detail": "最悪は greedy/nightly-a:iron(15/20 標本)",
       "gddRef": "GDD 11.4-2",
       "id": "gdd-11.4-2a-strict",
       "inequality": "max_(run, 資源) レート 0 の標本率(‰) <= 閾値",
-      "measured": 900,
+      "measured": 750,
       "owner": "balance",
       "status": "unverifiable",
       "threshold": 0,
@@ -130,7 +130,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "172 ペアを評価(所要は石板 = 遅い方・GDD 11.1 追補)。最小余裕は codifyFirst/nightly-a:resseri/techBlacksmithing",
+      "detail": "185 ペアを評価(所要は石板 = 遅い方・GDD 11.1 追補)。最小余裕は codifyFirst/nightly-a:resseri/techBlacksmithing",
       "gddRef": "GDD 11.4-4",
       "id": "gdd-11.4-4",
       "inequality": "min_(住民,技術) (残存tick × memoryDecayDelay − 成文化所要tick × 1.5) >= 0",
@@ -194,7 +194,7 @@
     },
     {
       "comparator": ">=",
-      "detail": "代表周回 = GDD 10.3(到達E3 + 成文化率60% + 生存12人)。実 run の最小獲得点は 44(46,44,46,46,44,46,54,46,60,46,44,46,75,71,71)",
+      "detail": "代表周回 = GDD 10.3(到達E3 + 成文化率60% + 生存12人)。実 run の最小獲得点は 44(46,44,46,46,44,46,52,48,60,46,44,46,77,71,73)",
       "gddRef": "GDD 11.4-6",
       "id": "gdd-11.4-6c",
       "inequality": "代表周回の継承点(84) >= 第1段コスト",
@@ -258,13 +258,13 @@
     },
     {
       "comparator": "<",
-      "detail": "全 run の全標本で最大 0.114101。content の storage.baseCapacity に上限が定義されている",
+      "detail": "全 run の全標本で最大 0.494103。content の storage.baseCapacity に上限が定義されている",
       "gddRef": "GDD 11.4-7",
       "id": "gdd-11.4-7c",
       "inequality": "max_(run, 標本) オーバーフロー損失率 < 0.15",
-      "measured": 114101,
+      "measured": 494103,
       "owner": "balance",
-      "status": "pass",
+      "status": "fail",
       "threshold": 150000,
       "thresholdUpper": null,
       "title": "オーバーフロー損失率 < 15%",
@@ -306,11 +306,11 @@
     },
     {
       "comparator": "in-range",
-      "detail": "5戦略bot の実 run(縮約でない content・15 run)で 1621 件 / 607.43 住民週。bot 別: greedy/nightly-a=2.794 greedy/nightly-b=2.728 greedy/nightly-c=2.208 researchFirst/nightly-a=2.089 researchFirst/nightly-b=2.425 researchFirst/nightly-c=1.997 explorationFirst/nightly-a=3.986 explorationFirst/nightly-b=3.897 explorationFirst/nightly-c=2.917 placementVariant/nightly-a=2.794 placementVariant/nightly-b=2.728 placementVariant/nightly-c=2.208 codifyFirst/nightly-a=2.117 codifyFirst/nightly-b=2.480 codifyFirst/nightly-c=2.419",
+      "detail": "5戦略bot の実 run(縮約でない content・15 run)で 1621 件 / 609.43 住民週。bot 別: greedy/nightly-a=2.794 greedy/nightly-b=2.728 greedy/nightly-c=2.208 researchFirst/nightly-a=2.089 researchFirst/nightly-b=2.425 researchFirst/nightly-c=1.997 explorationFirst/nightly-a=3.818 explorationFirst/nightly-b=3.873 explorationFirst/nightly-c=2.917 placementVariant/nightly-a=2.794 placementVariant/nightly-b=2.728 placementVariant/nightly-c=2.208 codifyFirst/nightly-a=2.117 codifyFirst/nightly-b=2.480 codifyFirst/nightly-c=2.419",
       "gddRef": "GDD 11.4-8",
       "id": "gdd-11.4-8b",
       "inequality": "1 <= 回/住民/週 <= 3",
-      "measured": 2.66862652869238,
+      "measured": 2.659868729488983,
       "owner": "balance",
       "status": "pass",
       "threshold": 1,
@@ -401,7 +401,7 @@
       "unverifiableReason": null
     }
   ],
-  "failCount": 0,
+  "failCount": 1,
   "options": {
     "determinismRuns": 1000,
     "determinismTicks": 2880,
@@ -411,7 +411,7 @@
     "runTicks": 57600,
     "strategySeeds": ["nightly-a", "nightly-b", "nightly-c"]
   },
-  "passCount": 19,
+  "passCount": 18,
   "profile": "full",
   "runObservations": [
     {
@@ -432,14 +432,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 20855010,
+      "finalBoardOutputScoreRaw": 22755010,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 99,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-a"
     },
     {
@@ -460,14 +460,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 21085023,
+      "finalBoardOutputScoreRaw": 22985023,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 99,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-b"
     },
     {
@@ -488,14 +488,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 21084133,
+      "finalBoardOutputScoreRaw": 22984133,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 94,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-c"
     },
     {
@@ -515,14 +515,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 21837229,
+      "finalBoardOutputScoreRaw": 23517781,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 74,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-a"
     },
     {
@@ -542,14 +542,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 20778338,
+      "finalBoardOutputScoreRaw": 22678338,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 88,
-      "reclaimCount": 11,
+      "reclaimCount": 13,
       "seed": "nightly-b"
     },
     {
@@ -569,14 +569,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 21744899,
+      "finalBoardOutputScoreRaw": 23482633,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 85,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-c"
     },
     {
@@ -595,14 +595,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 26119448,
+      "finalBoardOutputScoreRaw": 32700000,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 160,
-      "reclaimCount": 16,
+      "recallOccurrenceCount": 156,
+      "reclaimCount": 23,
       "seed": "nightly-a"
     },
     {
@@ -621,14 +621,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 21690551,
+      "finalBoardOutputScoreRaw": 30890551,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
-      "recallOccurrenceCount": 162,
-      "reclaimCount": 11,
+      "recallOccurrenceCount": 166,
+      "reclaimCount": 22,
       "seed": "nightly-b"
     },
     {
@@ -647,14 +647,14 @@
         "workbench"
       ],
       "dispatchCount": 39,
-      "finalBoardOutputScoreRaw": 29981133,
+      "finalBoardOutputScoreRaw": 35500000,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 200,
-      "reclaimCount": 20,
+      "reclaimCount": 27,
       "seed": "nightly-c"
     },
     {
@@ -675,14 +675,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 20338896,
+      "finalBoardOutputScoreRaw": 21955010,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 99,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-a"
     },
     {
@@ -703,14 +703,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 20281102,
+      "finalBoardOutputScoreRaw": 21281102,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 99,
-      "reclaimCount": 12,
+      "reclaimCount": 13,
       "seed": "nightly-b"
     },
     {
@@ -731,14 +731,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 20262266,
+      "finalBoardOutputScoreRaw": 21262266,
       "finalCodifiedRecordCount": 0,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 94,
-      "reclaimCount": 12,
+      "reclaimCount": 13,
       "seed": "nightly-c"
     },
     {
@@ -758,14 +758,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 23137229,
-      "finalCodifiedRecordCount": 14,
+      "finalBoardOutputScoreRaw": 24156677,
+      "finalCodifiedRecordCount": 15,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 75,
-      "reclaimCount": 13,
+      "reclaimCount": 14,
       "seed": "nightly-a"
     },
     {
@@ -785,14 +785,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 22178338,
+      "finalBoardOutputScoreRaw": 23078338,
       "finalCodifiedRecordCount": 13,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 5,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 90,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-b"
     },
     {
@@ -812,14 +812,14 @@
         "workbench"
       ],
       "dispatchCount": 7,
-      "finalBoardOutputScoreRaw": 22163766,
-      "finalCodifiedRecordCount": 12,
+      "finalBoardOutputScoreRaw": 23944899,
+      "finalCodifiedRecordCount": 13,
       "finalCompletedResearchCount": 24,
       "finalReachedEraOrder": 3,
       "minLivingPopulation": 6,
       "recallGuardBlockCount": 0,
       "recallOccurrenceCount": 103,
-      "reclaimCount": 12,
+      "reclaimCount": 14,
       "seed": "nightly-c"
     }
   ],

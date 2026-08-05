@@ -1,5 +1,5 @@
 {
-  "algoVersion": 3,
+  "algoVersion": 4,
   "baseContentVectorIds": [
     "sc01-clamp-exact",
     "sc01-clamp-over",
@@ -154,6 +154,11 @@
     {
       "file": "sc40-research-select-split-alpha.json",
       "vectorId": "sc40-research-select-split-alpha"
+    },
+    { "file": "sc41-out-supply-cap-alpha.json", "vectorId": "sc41-out-supply-cap-alpha" },
+    {
+      "file": "sc41-out-supply-cap-split-alpha.json",
+      "vectorId": "sc41-out-supply-cap-split-alpha"
     }
   ]
 }

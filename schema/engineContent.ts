@@ -131,7 +131,6 @@ import {
   isDestroyRecordsMedium,
   isDestroyRecordsScope,
   isDistanceBand,
-  isOverflowPolicyKind,
 } from "../src/engine/rules/types";
 import type {
   DistanceBand,
@@ -153,7 +152,6 @@ import type {
   OutpostParams,
   OutpostTypeDef,
   OutpostUpkeepParams,
-  OverflowPolicy,
   RecallRiskParams,
   ReclaimParams,
   RecordMediaParams,
@@ -178,7 +176,6 @@ import type {
   ReclaimBalanceContent,
   RecordMediaContent,
   RecordMediumContent,
-  RewardOverflowContent,
   StorageParamsContent,
   TownParamsContent,
 } from "./balance";
@@ -1417,11 +1414,6 @@ function toExplorationParams(
     "(B)資産の価値換算",
   );
   const wipeMaxPFix = toFix(content.wipeMaxP, `${path}.wipeMaxP`, issues, "全滅確率の上限");
-  // [M22] 省略可。null = 上限なし(M21 と同一挙動)。
-  const rewardOverflow =
-    content.rewardOverflow === null
-      ? null
-      : (toOverflowPolicy(content.rewardOverflow, issues) ?? undefined);
 
   const bands: { [K in DistanceBand]?: ExplorationBandParams } = {};
   for (const band of DISTANCE_BANDS) {
@@ -1492,14 +1484,16 @@ function toExplorationParams(
     forgoneOutputPerWorkerTickFix === undefined ||
     rareAssetValueFix === undefined ||
     wipeMaxPFix === undefined ||
-    rewardOverflow === undefined ||
     near === undefined ||
     far === undefined ||
     deep === undefined
   ) {
     return undefined;
   }
-  const base = {
+  // [M64] `rewardOverflow`(M22 の探索報酬専用の固定上限)は撤廃した。上限は
+  // `balance.storage` + 保管施設の加算式 1 系統(GDD 6.7 [2026-08-02裁定])だけが
+  // 出所であり、探索報酬も本拠生産と同じ `rules/storage.ts` §2b を通る。
+  return {
     byBand: { near, far, deep },
     withdrawRewardRatioFix,
     pressInjuryMulFix,
@@ -1509,32 +1503,6 @@ function toExplorationParams(
     forgoneOutputPerWorkerTickFix,
     rareAssetValueFix,
     wipeMaxPFix,
-  };
-  // exactOptionalPropertyTypes ゆえ「値があるときだけキーを足す」形にする。
-  return rewardOverflow === null ? base : { ...base, rewardOverflow };
-}
-
-// --- 6d. rewardOverflow(GDD 12.1 `item.overflow`・M22)-----------------------
-
-/** [M22] 報酬のオーバーフロー方策を engine 内部表現へ写す。 */
-function toOverflowPolicy(
-  content: RewardOverflowContent,
-  issues: IssueCollector,
-): OverflowPolicy | undefined {
-  const path = "balance.exploration.rewardOverflow";
-  const capacityFix = toFix(content.capacity, `${path}.capacity`, issues, "受け取り上限");
-  const ratioFix = toFix(content.ratio, `${path}.ratio`, issues, "変換率");
-  if (capacityFix === undefined || ratioFix === undefined) return undefined;
-  if (!isOverflowPolicyKind(content.policy)) {
-    // schema 側で検査済み(型の穴の保険)。
-    issues.add(`${path}.policy`, `未知のオーバーフロー方策 "${content.policy}"`);
-    return undefined;
-  }
-  return {
-    policy: content.policy,
-    capacityFix,
-    convertToResourceId: content.convertTo === null ? null : entityIdFromString(content.convertTo),
-    ratioFix,
   };
 }
 
