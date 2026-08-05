@@ -8,7 +8,28 @@
 
 import { describe, expect, it } from "vitest";
 
-import { labelizeLogText } from "../../../src/ui/screens/idLabelize";
+import { fixFromRaw, FIX_ZERO } from "../../../src/engine/fp";
+import { entityIdFromString } from "../../../src/engine/state/state";
+import type { StorageParams } from "../../../src/engine/rules/types";
+import { labelizeLogText, returnLogOverflowNote } from "../../../src/ui/screens/idLabelize";
+
+const id = entityIdFromString;
+
+function storageParams(
+  wasteConversionRatioByResourceId: ReadonlyMap<
+    ReturnType<typeof id>,
+    ReturnType<typeof fixFromRaw>
+  >,
+): StorageParams {
+  return {
+    wasteResourceId: id("waste"),
+    baseCapacityByResourceId: new Map(),
+    wasteConversionRatioByResourceId,
+    wasteToResearchRatioFix: FIX_ZERO,
+    buildCostWasteSubstitutionMaxFix: FIX_ZERO,
+    codifyWasteSubstitutionMaxFix: FIX_ZERO,
+  };
+}
 
 describe("labelizeLogText(帰還ログの表示時ID変換)", () => {
   it("R1-A06の実例: event ID と資源 ID を地の文の中で和名化する", () => {
@@ -48,5 +69,30 @@ describe("labelizeLogText(帰還ログの表示時ID変換)", () => {
 
   it("空文字列は空文字列のまま", () => {
     expect(labelizeLogText("")).toBe("");
+  });
+});
+
+describe("[M71/R6-A03] returnLogOverflowNote(あふれた分の廃材転換注記)", () => {
+  const overflowText = "報酬 firewood 63。保管上限のため 112 は持ち帰れなかった。";
+
+  it("あふれた資源の廃材変換率が 0 より大きければ注記を付ける", () => {
+    const storage = storageParams(new Map([[id("firewood"), fixFromRaw(500_000)]])); // 0.5
+    expect(returnLogOverflowNote(overflowText, storage)).toBe(
+      "あふれた分の一部は廃材として回収されます。",
+    );
+  });
+
+  it("あふれた資源の廃材変換率が 0(未登録)なら注記を付けない(付けると逆に嘘になる)", () => {
+    const storage = storageParams(new Map());
+    expect(returnLogOverflowNote(overflowText, storage)).toBe("");
+  });
+
+  it("「持ち帰れなかった」の句が無ければ注記を付けない(あふれが無いログ)", () => {
+    const storage = storageParams(new Map([[id("firewood"), fixFromRaw(500_000)]]));
+    expect(returnLogOverflowNote("報酬 firewood 175。", storage)).toBe("");
+  });
+
+  it("storage 定義自体が無い盤面(廃材機構が不活性)では注記を付けない", () => {
+    expect(returnLogOverflowNote(overflowText, undefined)).toBe("");
   });
 });

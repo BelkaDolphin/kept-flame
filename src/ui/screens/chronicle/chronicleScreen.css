@@ -46,6 +46,12 @@
   margin: 0 0 0.15rem;
 }
 
+/* [M71/R6-A03] あふれた分の廃材転換注記(建設トーストの「薪28+廃材7」と
+   対称にする表示。数値は持たない事実の注記のみ)。 */
+.kf-chronicle__log-overflow-note {
+  color: #5b534b;
+}
+
 .kf-chronicle__folded {
   font-size: var(--kf-fs-sub);
   color: #5b534b;

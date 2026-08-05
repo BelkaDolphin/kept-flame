@@ -159,6 +159,15 @@
   cursor: pointer;
 }
 
+/* [M71/R6-A04] 常設セレクタ化に伴い、選択中の施設が分かるようにする
+   (他画面の aria-pressed ボタンと同じ強調・expeditionScreen.css 等と同型)。 */
+.kf-facility-picker__button[aria-pressed="true"] {
+  border-color: #24201c;
+  border-width: 2px;
+  background: #faf8f5;
+  font-weight: 600;
+}
+
 .kf-facility-screen__nav {
   display: flex;
   gap: 0.5rem;

@@ -343,6 +343,96 @@ describe("CodifyTechRow: 媒体トグル + キュー投入(ロードマップ M3
   });
 });
 
+describe("[M71/R6-C02] CodifyTechRow: 在庫不足の事前マーカー(disabled にはしない)", () => {
+  it("insufficient=true は▲記号+専用クラスを出すが、ボタンは disabled にしない(クリックは通る)", () => {
+    const onEnqueue = vi.fn();
+    const vnode = CodifyTechRow({
+      entry: techEntry({ techId: id("techPottery") }),
+      selectedMedium: "paper",
+      onMediumChange: () => undefined,
+      onEnqueue,
+      costPreview: { resourceId: id("paper"), amountApprox: 20 },
+      insufficient: true,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("▲");
+    const button = findButton(vnode);
+    expect(button).not.toBeNull();
+    // disabled 属性を持たない(architecture.md §6-7「判定は書かない」の維持)。
+    expect((button as { readonly props: { readonly disabled?: unknown } }).props.disabled).toBe(
+      undefined,
+    );
+    button?.props.onClick();
+    expect(onEnqueue).toHaveBeenCalledOnce();
+  });
+
+  it("insufficient=false(省略時)は▲記号を出さない(既存呼び出し/既存テストとの後方互換)", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry({ techId: id("techPottery") }),
+      selectedMedium: "paper",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      costPreview: { resourceId: id("paper"), amountApprox: 20 },
+    });
+    expect(flattenText(vnode)).not.toContain("▲");
+  });
+});
+
+describe("[M71/R6-C03] CodifyTechRow: 選択中媒体が作業中なら投入フォームを畳む", () => {
+  it("選択中媒体(石板)が pendingRecords に有れば、コストプレビュー/投入ボタンの代わりに案内文を出す", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        techId: id("techPottery"),
+        pendingRecords: [
+          {
+            entityId: id("techPotteryRecordStone"),
+            medium: "stoneTablet",
+            progressApprox: 10,
+            requiredWorkApprox: 100,
+          },
+        ],
+      }),
+      selectedMedium: "stoneTablet",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+      costPreview: { resourceId: id("clay"), amountApprox: 20 },
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("選択中の媒体(石板)は既に作業中です");
+    // 案内文の直後に投入フォームがそのまま残っていない(見た目上二重投稿できない)。
+    expect(text).not.toContain("必要資源");
+    expect(findButton(vnode)).toBeNull();
+  });
+
+  it("選択中媒体(紙)は作業中でなければ通常どおり投入フォームを出す(石板だけが作業中でも紙は独立)", () => {
+    const onEnqueue = vi.fn();
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        techId: id("techPottery"),
+        pendingRecords: [
+          {
+            entityId: id("techPotteryRecordStone"),
+            medium: "stoneTablet",
+            progressApprox: 10,
+            requiredWorkApprox: 100,
+          },
+        ],
+      }),
+      selectedMedium: "paper",
+      onMediumChange: () => undefined,
+      onEnqueue,
+      costPreview: { resourceId: id("paper"), amountApprox: 5 },
+    });
+    const text = flattenText(vnode);
+    expect(text).not.toContain("既に作業中です");
+    expect(text).toContain("必要資源");
+    const button = findButton(vnode);
+    expect(button).not.toBeNull();
+    button?.props.onClick();
+    expect(onEnqueue).toHaveBeenCalledWith(id("techPottery"), "paper");
+  });
+});
+
 describe("[M54] CodifyTechRow: 作業中の記録の取消(返金なし・GDD 6.2)", () => {
   it("onCancel 省略時は取消ボタンを描かない(既存呼び出し互換)", () => {
     const vnode = CodifyTechRow({
@@ -461,14 +551,31 @@ describe("CodifySuggestionRow(おまかせ成文化 1 件・GDD 2.1)", () => {
 });
 
 describe("CodifySuggestionPanel(提案→確認→適用・GDD 2.1)", () => {
-  it("提案 0 件は「対象がありません」を出し、適用ボタンを出さない(捏造しない)", () => {
+  it("提案 0 件・除外理由も 0 件は「対象がありません」(理由なし)を出し、適用ボタンを出さない(捏造しない)", () => {
     const vnode = CodifySuggestionPanel({
       suggestions: [],
+      exclusions: [],
+      outcome: null,
+      onApply: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("対象がありません(保持者がいる未成文の技術がありません)");
+    expect(findButton(vnode)).toBeNull();
+  });
+
+  // [M71/R6-A01] 除外理由つきの空メッセージ(在庫フィルタで全滅した場合)。
+  it("[M71/R6-A01] 提案 0 件だが除外理由があれば、理由(媒体別件数)を空メッセージに含める", () => {
+    const vnode = CodifySuggestionPanel({
+      suggestions: [],
+      exclusions: [{ techId: id("techFireStarting"), medium: "paper", resourceId: id("paper") }],
       outcome: null,
       onApply: () => undefined,
     });
     const text = flattenText(vnode);
     expect(text).toContain("対象がありません");
+    expect(text).toContain("対象 1件は媒体(紙)の在庫が不足しているため提案できません");
+    // 内部 ID(paper 自体はラベル名と同一なので resourceId ではなく medium 経由の
+    // 和名を確認する)や旧来の固定文言に無い理由説明が加わっていることを見る。
     expect(findButton(vnode)).toBeNull();
   });
 
@@ -476,6 +583,7 @@ describe("CodifySuggestionPanel(提案→確認→適用・GDD 2.1)", () => {
     const onApply = vi.fn();
     const vnode = CodifySuggestionPanel({
       suggestions: [suggestion()],
+      exclusions: [],
       outcome: null,
       onApply,
     });
@@ -489,6 +597,7 @@ describe("CodifySuggestionPanel(提案→確認→適用・GDD 2.1)", () => {
   it("適用結果(outcome)を表示する", () => {
     const vnode = CodifySuggestionPanel({
       suggestions: [suggestion()],
+      exclusions: [],
       outcome: { appliedCount: 1, total: 2, stoppedAtTechId: id("techPottery") },
       onApply: () => undefined,
     });

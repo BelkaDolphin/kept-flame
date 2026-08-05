@@ -23,7 +23,7 @@ import type { MemoirEntry } from "../../../engine/state/state";
 import type { MemoirFeedEntry } from "../../derived";
 import { distanceBandLabel, residentDisplayName } from "../contentLabels";
 import { formatGameClock } from "../format";
-import { labelizeLogText } from "../idLabelize";
+import { labelizeLogText, returnLogOverflowNote } from "../idLabelize";
 import type { ScreenProps } from "../screenProps";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./chronicleScreen.css";
@@ -89,6 +89,9 @@ export function ChronicleScreen({ store, onNavigate }: ScreenProps) {
 
   const renderedLog = useSignalValue(store.derived.renderedLog);
   const memoirFeed = useSignalValue(store.derived.memoirFeed);
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり・
+  // ExpeditionScreen.tsx §2)。[M71/R6-A03] 廃材転換の注記に storage 定義が要る。
+  const content = store.peekContent();
 
   return (
     <section class="kf-chronicle-screen" aria-labelledby="kf-chronicle-screen-title">
@@ -104,15 +107,22 @@ export function ChronicleScreen({ store, onNavigate }: ScreenProps) {
         <p class="kf-chronicle-screen__empty">帰還ログはまだありません。</p>
       ) : (
         <ul class="kf-chronicle__log-list">
-          {renderedLog.entries.map((entry) => (
-            <li class="kf-chronicle__log-row" key={`${String(entry.tick)}:${entry.text}`}>
-              <span class="kf-chronicle__log-tick">{formatGameClock(entry.tick)}</span>
-              {/* [M61/FC4] 保存済み文字列は engine が埋め込んだ内部ID(event/資源)を
-                  含むことがある。表示直前に labelizeLogText で和名へ変換する
-                  (state自体は書き換えない・既存セーブの過去ログも直る)。 */}
-              <span class="kf-chronicle__log-text">{labelizeLogText(entry.text)}</span>
-            </li>
-          ))}
+          {renderedLog.entries.map((entry) => {
+            // [M71/R6-A03] あふれた分の廃材転換を注記(§ idLabelize.ts の doc)。
+            const overflowNote = returnLogOverflowNote(entry.text, content.storage);
+            return (
+              <li class="kf-chronicle__log-row" key={`${String(entry.tick)}:${entry.text}`}>
+                <span class="kf-chronicle__log-tick">{formatGameClock(entry.tick)}</span>
+                {/* [M61/FC4] 保存済み文字列は engine が埋め込んだ内部ID(event/資源)を
+                    含むことがある。表示直前に labelizeLogText で和名へ変換する
+                    (state自体は書き換えない・既存セーブの過去ログも直る)。 */}
+                <span class="kf-chronicle__log-text">{labelizeLogText(entry.text)}</span>
+                {overflowNote !== "" && (
+                  <span class="kf-chronicle__log-overflow-note"> {overflowNote}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {renderedLog.foldedCount > 0 && (

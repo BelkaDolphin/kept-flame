@@ -247,13 +247,26 @@ export function FacilityDetailPanel({
 export interface FacilityPickerProps {
   readonly roster: readonly FacilityRosterEntry[];
   readonly onPick: (cellIndex: number) => void;
+  /**
+   * [M71/R6-A04] 現在選択中の施設 ID。**常設セレクタ化**に伴い追加(§ 直後の
+   * doc 参照)。省略時は null 扱い(既存呼び出し/既存テストとの後方互換)——
+   * 未選択なら従来どおりの案内文言、選択中ならどれが選ばれているか
+   * (`aria-pressed`)を示し、案内文言も「切り替え」の言い方へ変える。
+   */
+  readonly selectedFacilityId?: EntityId | null;
 }
 
 /**
- * 選択中の施設が無いときのフォールバック。②へ強制送還する案内だけでなく、
- * 既に建っている施設から直接選べるようにする(m-1)。
+ * 施設の選択/切り替え(m-1 の未選択時フォールバックを常設セレクタへ拡張)。
+ *
+ * **[M71/R6-A04] 施設を選ぶと一覧が消え、別施設へは②格子ビューの往復
+ * (+2タップ)が毎回必要という指摘への対応**: 選択済みかどうかに関わらず
+ * 常にこの一覧を描く(呼び出し側 `FacilityScreen` が `detail` の有無で分岐
+ * するのをやめ、`FacilityPicker` の下(または横)に詳細を並べて表示する形へ
+ * 変更)。①格子ビューでのタップ選択は従来どおり有効なまま(この一覧は
+ * それに代わる「もう1つの選び方」を追加するだけ)。
  */
-export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
+export function FacilityPicker({ roster, onPick, selectedFacilityId = null }: FacilityPickerProps) {
   if (roster.length === 0) {
     return (
       <p class="kf-facility-screen__empty">
@@ -264,7 +277,9 @@ export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
   return (
     <section class="kf-facility-picker" aria-label="施設を選ぶ">
       <p class="kf-screen-intro">
-        施設が選択されていません。一覧から選ぶか、格子ビューで施設をタップして選択してください。
+        {selectedFacilityId === null
+          ? "施設が選択されていません。一覧から選ぶか、格子ビューで施設をタップして選択してください。"
+          : "一覧から選ぶと他の施設へ切り替えられます(格子ビューへ往復する必要はありません)。"}
       </p>
       <ul class="kf-facility-picker__list">
         {roster.map((facility) => (
@@ -272,6 +287,7 @@ export function FacilityPicker({ roster, onPick }: FacilityPickerProps) {
             <button
               type="button"
               class="kf-facility-picker__button"
+              aria-pressed={facility.facilityId === selectedFacilityId}
               onClick={() => onPick(facility.cellIndex)}
             >
               {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})・Lv
@@ -402,9 +418,15 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
-      {detail === null ? (
-        <FacilityPicker roster={facilityRoster} onPick={handlePickFacility} />
-      ) : (
+      {/* [M71/R6-A04] 選択後もピッカーを残す(常設セレクタ化)。以前は
+          `detail === null` のときだけ描いていたため、選択後に別施設へ切り替える
+          には②格子ビューへ毎回往復する必要があった。 */}
+      <FacilityPicker
+        roster={facilityRoster}
+        onPick={handlePickFacility}
+        selectedFacilityId={detail?.facilityId ?? null}
+      />
+      {detail !== null && (
         <>
           <FacilityDetailPanel
             detail={detail}

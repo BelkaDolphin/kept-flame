@@ -1108,6 +1108,12 @@ export interface StoreDerived {
    */
   readonly codifySuggestions: ReadonlyComputed<readonly CodifySuggestionView[]>;
   /**
+   * [M71/R6-A01] `codifySuggestions` の在庫フィルタ(R5-A08)で除外された候補の
+   * 理由一覧。CodifyScreen.tsx の空メッセージが理由を語れるようにするための値
+   * (`CodifySuggestionExclusionView` の doc 参照)。
+   */
+  readonly codifySuggestionExclusions: ReadonlyComputed<readonly CodifySuggestionExclusionView[]>;
+  /**
    * [M32] ⑦探索本部の派遣候補(GDD 8.1 [2026-07-30裁定]②「寿命を持たない
    * 住民は派遣拒否」を候補列挙の段階で先に除外・M27 と同じ立場)。
    */
@@ -1629,10 +1635,23 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     { name: "codifyTechs" },
   );
 
-  // [M31] おまかせ成文化の提案(§7 参照)。
+  // [M31] おまかせ成文化の提案(§7 参照)。[M71/R6-A01] 除外理由
+  // (`codifySuggestionExclusions`)も同じ 1 回の分割(`partitionCodifySuggestions`)
+  // から作る——`suggestCodification` の呼び出しを 2 重化しないため、まず
+  // 分割結果そのものを 1 個の computed に持たせ、2 つの公開 computed はそこから
+  // 射影するだけにする(computed から computed を読む・reactive.ts の通常の
+  // 合成)。
+  const codifySuggestionPartition = computed<CodifySuggestionPartition>(
+    () => partitionCodifySuggestions(sources.state.value, sources.content.value),
+    { name: "codifySuggestionPartition" },
+  );
   const codifySuggestions = computed<readonly CodifySuggestionView[]>(
-    () => buildCodifySuggestions(sources.state.value, sources.content.value),
+    () => codifySuggestionPartition.value.accepted,
     { name: "codifySuggestions" },
+  );
+  const codifySuggestionExclusions = computed<readonly CodifySuggestionExclusionView[]>(
+    () => codifySuggestionPartition.value.excluded,
+    { name: "codifySuggestionExclusions" },
   );
 
   // [M32] ⑦探索本部/⑧冒険記ビューア/⑨衛星拠点管理(§8 の builder を呼ぶだけ)。
@@ -1691,6 +1710,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     researchTree,
     codifyTechs,
     codifySuggestions,
+    codifySuggestionExclusions,
     expeditionCandidates,
     expeditionDispatches,
     expeditionSlots,
@@ -2352,6 +2372,31 @@ export interface CodifySuggestionView {
   readonly onSchedule: boolean;
 }
 
+/**
+ * [M71/R6-A01] `buildCodifySuggestions` の在庫フィルタ(R5-A08)で**落とされた**
+ * 候補 1 件(除外理由つき)。
+ *
+ * 空メッセージ(CodifyScreen.tsx の `CodifySuggestionPanel`)が「対象がありません
+ * (保持者がいる未成文の技術がありません)」という固定文言のまま、実際には
+ * 除外理由(在庫不足)がある候補が同画面の他行に並んで見える矛盾(R6-A01)への
+ * 対応。ここでは「不足していたコスト資源」だけを持ち、件数集計・文言化は
+ * 画面側の責務とする(`HomeAlert`/`derived.ts` 冒頭の「文言は画面が持つ」規律
+ * どおり)。
+ */
+export interface CodifySuggestionExclusionView {
+  readonly techId: EntityId;
+  readonly medium: RecordMedium;
+  /** 除外理由になった、在庫が足りなかったコスト資源。 */
+  readonly resourceId: EntityId;
+}
+
+/** {@link partitionCodifySuggestions} の戻り値(accepted/excluded を 1 回の
+ * `suggestCodification` 呼び出しから同時に作るための内部型)。 */
+interface CodifySuggestionPartition {
+  readonly accepted: readonly CodifySuggestionView[];
+  readonly excluded: readonly CodifySuggestionExclusionView[];
+}
+
 /** その資源の在庫近似値(受け皿 entity が無ければ 0・`buildReclaimInfo` と同型)。 */
 function resourceStockApproxOrZero(state: GameState, resourceId: EntityId): number {
   for (const resource of entitiesOfKind(state, "resource")) {
@@ -2383,14 +2428,21 @@ function resourceStockApproxOrZero(state: GameState, resourceId: EntityId): numb
  * ままになる(安全側に倒れるだけで、engine の実際のキュー結果とは無関係な表示
  * 専用値なので実害はない)。
  */
-function buildCodifySuggestions(
+// [M71/R6-A01] `buildCodifySuggestions`(旧名)を accepted/excluded を同時に
+// 作る `partitionCodifySuggestions` へ拡張した。落ちた候補も
+// {@link CodifySuggestionExclusionView} として集める理由は 2 つ:
+// ① `suggestCodification` を accepted 用/excluded 用で 2 回呼ぶ無駄を避ける
+// ② 判定条件(在庫 < コスト)を 1 箇所にしか書かないことで、accepted と
+//    excluded の基準が将来ズレる事故を構造的に防ぐ。
+function partitionCodifySuggestions(
   state: GameState,
   content: EngineContent,
-): readonly CodifySuggestionView[] {
-  if (content.recordMedia === undefined) return [];
+): CodifySuggestionPartition {
+  if (content.recordMedia === undefined) return { accepted: [], excluded: [] };
   const plan = suggestCodification(state, content, state.tick);
   const printingUnlocked = isPrintingUnlocked(state, content);
-  const result: CodifySuggestionView[] = [];
+  const accepted: CodifySuggestionView[] = [];
+  const excluded: CodifySuggestionExclusionView[] = [];
   for (const suggestion of plan.suggestions) {
     const costPlan = planCodification(
       content,
@@ -2399,8 +2451,15 @@ function buildCodifySuggestions(
       printingUnlocked,
     );
     const stockApprox = resourceStockApproxOrZero(state, costPlan.costResourceId);
-    if (stockApprox < toApproxNumber(costPlan.costFix)) continue;
-    result.push({
+    if (stockApprox < toApproxNumber(costPlan.costFix)) {
+      excluded.push({
+        techId: suggestion.techId,
+        medium: suggestion.medium,
+        resourceId: costPlan.costResourceId,
+      });
+      continue;
+    }
+    accepted.push({
       techId: suggestion.techId,
       medium: suggestion.medium,
       codifyId: suggestion.codifyId,
@@ -2411,7 +2470,7 @@ function buildCodifySuggestions(
       onSchedule: suggestion.onSchedule,
     });
   }
-  return result;
+  return { accepted, excluded };
 }
 
 // --- 8. 探索本部/冒険記/衛星拠点(⑦⑧⑨・M32)------------------------------------

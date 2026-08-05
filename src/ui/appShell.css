@@ -138,6 +138,8 @@
    `.kf-app__hud-scroll` という**内側のスクロール領域**へ隔離する。 */
 
 .kf-app__hud {
+  /* [M71/R6-C05] 下の `::after` 矢印(絶対配置)の基準にする。 */
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   align-items: center;
@@ -149,6 +151,32 @@
      (通常幅では 1 行に収まり、折り返しは事実上発生しない)。 */
   flex-wrap: wrap;
   row-gap: 0.2rem;
+}
+
+/* [M71/R6-C05] 資源チップの横スクロールに、端フェード(下の
+   `.kf-app__hud-scroll` の mask-image)だけでなく矢印記号も重ねる(二重の
+   手がかり)。フェードは「収まっているときの実害が無い」設計(M61/FC2 の
+   doc)だったが、8資源中2種(銅/穀物)が隠れても手がかりに気づけない事例が
+   Round 6 で再指摘された(appShell.css:159-165 = `.kf-app__hud-scroll` 本体)
+   ため、より明示的な矢印を追加する。JS のオーバーフロー検出は持ち込まず
+   (M61/FC2 の方針を維持)常設で出す——`.kf-app__hud-scroll` 自身は
+   overflow-x:auto の中身なのでそこへ直接矢印を置くとスクロールで一緒に
+   流れてしまう。親 `.kf-app__hud` に `position:relative` を張り、その右端へ
+   絶対配置することで、スクロール量に関わらず常に画面右端に留まる。 */
+.kf-app__hud::after {
+  content: "›";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.1rem 0 0.7rem;
+  font-size: 1.15em;
+  font-weight: 700;
+  color: var(--kf-ink-muted);
+  background: linear-gradient(to right, transparent, var(--kf-surface-panel) 55%);
+  pointer-events: none;
 }
 
 /* [M61/FC2] 資源チップだけがここで横スクロールする(固定チップを巻き込まない)。
@@ -653,6 +681,12 @@
   font-size: var(--kf-fs-micro);
   color: var(--kf-ink-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* [M71/R6-A03] あふれた分の廃材転換注記(ChronicleScreen.tsx の
+   .kf-chronicle__log-overflow-note と同じ役割・数値は持たない事実の注記)。 */
+.kf-digest__log-overflow-note {
+  color: var(--kf-ink-muted);
 }
 
 .kf-digest__folded {

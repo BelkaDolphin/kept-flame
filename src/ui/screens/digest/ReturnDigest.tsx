@@ -34,7 +34,7 @@ import { useMemo } from "preact/hooks";
 
 import { buildReturnDigest, type DigestLeadKind, type DigestRowId } from "../../derived";
 import { formatGameClock, formatTickSpan } from "../format";
-import { labelizeLogText } from "../idLabelize";
+import { labelizeLogText, returnLogOverflowNote } from "../idLabelize";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import type { ScreenProps } from "../screenProps";
 
@@ -113,6 +113,9 @@ export function ReturnDigest({ store, onNavigate, bootTick }: ScreenProps) {
   // (derived.ts §1(b) の用途制限がまさに「②の凡例/総数と⑫帰還ダイジェスト」)。
   const gridSummary = useSignalValue(store.derived.gridSummary);
   const tick = useSignalValue(store.derived.tick);
+  // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり・
+  // ExpeditionScreen.tsx §2)。[M71/R6-A03] 廃材転換の注記に storage 定義が要る。
+  const content = store.peekContent();
 
   const digest = useMemo(
     // `tick` は依存配列のためだけに読む(state の参照は peek で取る)。
@@ -186,13 +189,21 @@ export function ReturnDigest({ store, onNavigate, bootTick }: ScreenProps) {
 
       {digest.logEntries.length > 0 && (
         <ul class="kf-digest__logs">
-          {digest.logEntries.map((entry) => (
-            <li class="kf-digest__log" key={`${String(entry.tick)}:${entry.text}`}>
-              <span class="kf-digest__log-tick">{formatGameClock(entry.tick)}</span>
-              {/* [M61/FC4] ChronicleScreen.tsx と同じ表示時ID変換。 */}
-              {labelizeLogText(entry.text)}
-            </li>
-          ))}
+          {digest.logEntries.map((entry) => {
+            // [M71/R6-A03] あふれた分の廃材転換を注記(ChronicleScreen.tsx と
+            // 同じ idLabelize.ts の関数。§ そちらの doc 参照)。
+            const overflowNote = returnLogOverflowNote(entry.text, content.storage);
+            return (
+              <li class="kf-digest__log" key={`${String(entry.tick)}:${entry.text}`}>
+                <span class="kf-digest__log-tick">{formatGameClock(entry.tick)}</span>
+                {/* [M61/FC4] ChronicleScreen.tsx と同じ表示時ID変換。 */}
+                {labelizeLogText(entry.text)}
+                {overflowNote !== "" && (
+                  <span class="kf-digest__log-overflow-note"> {overflowNote}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

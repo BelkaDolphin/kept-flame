@@ -236,6 +236,13 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
   // formatResourceAmount(他画面のコスト表示と同じ丸め・桁区切り規則)、
   // 確率%は formatApproxDecimal1(常に小数第1位)、ROI比は 0.25 のような値も
   // 判別できるよう formatApproxDecimal2 を使う。
+  //
+  // [M71/R6-C04] 逸失生産(機会費用)/期待損失は ROI 式(GDD 8.6)の分母を
+  // 成す項で、分子の期待報酬と同じ単位(`rewardResourceId` 相当の資源換算量・
+  // `forgoneOutputPerWorkerTickFix`/`rareAssetValueFix` とも同じ換算・
+  // rules/exploration.ts の explorationRoi の doc 参照)なのに、隣の期待報酬行
+  // だけ資源名が付き、この2つは単位なしのままだった(R5-A12 の残り)。
+  // 同じ rewardResourceId を付けて統一する。
   return (
     <section class="kf-expedition__roi" aria-label="派遣前 ROI">
       <p class="kf-expedition__roi-reward">
@@ -244,9 +251,11 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
       </p>
       <p class="kf-expedition__roi-forgone">
         逸失生産(機会費用): {formatResourceAmount(toApproxNumber(report.forgoneOutputFix))}
+        {rewardResourceId !== null ? resourceLabel(rewardResourceId) : ""}
       </p>
       <p class="kf-expedition__roi-loss" data-testid="expedition-b-loss">
         (B)喪失リスク: 期待損失 {formatResourceAmount(toApproxNumber(report.expectedRareLossFix))}
+        {rewardResourceId !== null ? resourceLabel(rewardResourceId) : ""}
         (対象 (B) 資産 {report.rareAssetCount} 件・全滅確率{" "}
         {formatApproxDecimal1(toApproxNumber(report.wipeProbabilityFix) * 100)}%)
       </p>

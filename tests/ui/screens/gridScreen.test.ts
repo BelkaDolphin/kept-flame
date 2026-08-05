@@ -252,7 +252,7 @@ describe("ReclaimPanel(瓦礫の開墾・GDD 9.1 / M52申し送り)", () => {
     expect(onReclaim).toHaveBeenCalledOnce();
   });
 
-  it("[M63/R4-A12/A13] 端数のある在庫は整数切り捨て(HUD と揃える)・コストは実額で整形ヘルパを通す", () => {
+  it("[M63/R4-A12/A13・M71/R6-A06 で改訂] 端数のある在庫は整数切り捨て(HUD と揃える)・コストは整形ヘルパを通す", () => {
     const info: ReclaimInfo = {
       available: true,
       nextCostApprox: 30.712345,
@@ -266,10 +266,12 @@ describe("ReclaimPanel(瓦礫の開墾・GDD 9.1 / M52申し送り)", () => {
     expect(text).not.toContain("417.29");
     expect(text).not.toContain("30.712345");
     expect(text).toContain("417"); // 在庫は整数切り捨て(formatResourceStock)。
-    expect(text).toContain("30.7"); // コストは実額(formatResourceAmount・小数第1位)。
+    // [M71/R6-A06] 「約」を付ける場合は整数へ丸める(旧: 小数第1位「30.7」を
+    // そのまま出していた=「約」との併記が粒度不揃いだった・reclaimCostText 参照)。
+    expect(text).toContain("約31");
   });
 
-  it("[M70/R5-A05] 小数を含むコストには「約」を前置する(1枚目60/2枚目69の整数表示との不揃いの緩和)", () => {
+  it("[M71/R6-A06] 小数を含むコストは「約」+整数へ丸める(「約」と小数第1位の併記という粒度の不揃いを解消)", () => {
     const decimalInfo: ReclaimInfo = {
       available: true,
       nextCostApprox: 79.4,
@@ -282,7 +284,10 @@ describe("ReclaimPanel(瓦礫の開墾・GDD 9.1 / M52申し送り)", () => {
       info: decimalInfo,
       onReclaim: () => undefined,
     });
-    expect(flattenText(decimalVnode)).toContain("約79.4");
+    const decimalText = flattenText(decimalVnode);
+    expect(decimalText).toContain("約79");
+    // 「約」と小数第1位の併記(旧「約79.4」)をやめた(R6-A06)。
+    expect(decimalText).not.toContain("79.4");
 
     const integerInfo: ReclaimInfo = {
       available: true,

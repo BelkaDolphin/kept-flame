@@ -620,6 +620,7 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
     };
     const vnode = CodifySuggestionPanel({
       suggestions: [suggestion],
+      exclusions: [],
       outcome: null,
       onApply: () => undefined,
     });
@@ -630,7 +631,12 @@ describe("44px 最小タップ領域 — 実際にレンダーした vnode と�
   it("CodifySuggestionPanel(提案 0 件は適用ボタンを出さない・捏造しない)", () => {
     const found: InteractiveElement[] = [];
     collectInteractive(
-      CodifySuggestionPanel({ suggestions: [], outcome: null, onApply: () => undefined }),
+      CodifySuggestionPanel({
+        suggestions: [],
+        exclusions: [],
+        outcome: null,
+        onApply: () => undefined,
+      }),
       found,
     );
     expect(found).toHaveLength(0);

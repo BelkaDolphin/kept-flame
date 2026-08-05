@@ -120,6 +120,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* [M71/R6-C02] 在庫不足は色 + 記号(▲・FacilityCatalogButton/ReclaimPanel と
+   同じ方針)で示す。ボタンは disabled にしない(architecture.md §6-7)。 */
+.kf-codify-row__cost-preview--insufficient {
+  color: #a11334;
+  font-weight: 600;
+}
+
 .kf-codify-row__enqueue-button {
   min-width: 44px;
   min-height: 44px;
@@ -131,6 +138,18 @@
   background: #ffffff;
   color: #24201c;
   cursor: pointer;
+}
+
+.kf-codify-row__enqueue-button--insufficient {
+  border-color: #a11334;
+  color: #a11334;
+}
+
+/* [M71/R6-C03] 選択中媒体が作業中のときの案内文(投入フォームの代わり)。 */
+.kf-codify-row__medium-in-progress {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0 0 0.4rem;
 }
 
 .kf-codify-assist {

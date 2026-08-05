@@ -174,15 +174,23 @@ export function FacilityCatalogPanel({
 // --- 2. 瓦礫の開墾パネル(GDD 9.1・hooks 不使用) -----------------------------
 
 /**
- * [M70/R5-A05] 開墾コストの表示テキスト。逓増式(`base×1.15^解放数`)は
+ * [M70/R5-A05→M71/R6-A06] 開墾コストの表示テキスト。逓増式(`base×1.15^解放数`)は
  * cap 到達まで整数で割り切れる保証が無く、通算枚数が進むと突然「79.4」の
  * ような小数が出て(1枚目60/2枚目69は整数だった)体裁が不揃いに見える
- * (R5-A05)。値そのものは変えず、`formatResourceAmount` が小数を出す回
- * だけ「約」を前置して「これは近似表示である」ことを一貫させる。
+ * (R5-A05)。
+ *
+ * **[M71/R6-A06] R5-A05 の修正(「約」+小数第1位の併記)自体が粒度の不揃い
+ * だった**——「約」は近似であることを示す語なのに、直後に小数第1位まで
+ * 精密に見える数字が続くと「約なのに細かい」という矛盾した印象になる
+ * (「約79.4薪」)。ここでは**「約」を付ける場合は整数へ丸める**ことで
+ * 粒度を1つに統一する(小数を出す/「約」を出す、のどちらか一方にする方針の
+ * うち、他画面の近似値表示(`formatTickSpan`・`約12時間` 等、小数を伴わない
+ * 丸め表示)と同じ形へ揃える)。整数のときは従来どおり「約」を付けない
+ * (実額そのものであり近似ではないため)。
  */
 function reclaimCostText(costApprox: number): string {
   const text = formatResourceAmount(costApprox);
-  return text.includes(".") ? `約${text}` : text;
+  return text.includes(".") ? `約${String(Math.round(costApprox))}` : text;
 }
 
 export interface ReclaimPanelProps {

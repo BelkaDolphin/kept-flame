@@ -43,7 +43,11 @@ import {
 } from "../../../engine/rules/codify";
 import type { RecordMedium } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
-import type { CodifySuggestionView, CodifyTechEntry } from "../../derived";
+import type {
+  CodifySuggestionExclusionView,
+  CodifySuggestionView,
+  CodifyTechEntry,
+} from "../../derived";
 import { mediumLabel, resourceLabel, techLabel } from "../contentLabels";
 import { formatResourceAmount, formatTickSpan } from "../format";
 import { LossClassBadge } from "../LossClassBadge";
@@ -86,6 +90,16 @@ export interface CodifyTechRowProps {
    * `insufficientResource` reject に委ねる方針は維持)。
    */
   readonly costPreview?: { readonly resourceId: EntityId; readonly amountApprox: number } | null;
+  /**
+   * [M71/R6-C02] `costPreview` の資源が現在の在庫で足りないか。省略時は false
+   * (既存呼び出し/既存テストとの後方互換)。**ボタンを disabled にはしない**
+   * ——architecture.md §6-7「置けるか/払えるかは engine の reject に委ねる」を
+   * この画面でも守る(§3 冒頭のコメントと同じ規律・格子カタログの
+   * `FacilityCatalogButton`/`isCatalogEntryInsufficient` と同じ「色+▲記号は
+   * 出すがクリックは常に通す」形)。それでも「事前に▲/理由表示が無く reject
+   * 頼みになっている」という R6-C02 の指摘には、この視覚マーカーで応える。
+   */
+  readonly insufficient?: boolean;
 }
 
 export function CodifyTechRow({
@@ -95,11 +109,24 @@ export function CodifyTechRow({
   onEnqueue,
   onCancel,
   costPreview = null,
+  insufficient = false,
 }: CodifyTechRowProps) {
   function handleMediumChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value as RecordMedium;
     onMediumChange(entry.techId, value);
   }
+
+  // [M71/R6-C03] 選択中の媒体が既に「作業中」(この tech の pendingRecords に
+  // 同じ medium がある)なら、投入すると engine が確実に duplicateRecord で
+  // reject する(commands.ts の applyBeginCodification・「同一媒体の重複は
+  // 作らない」)。作業中一覧のすぐ下に同じフォームが生きたまま並んでいると
+  // 「進行中なのに再投入できる」ように見える(R6-C03)ため、この場合だけ投入
+  // フォーム(コストプレビュー+ボタン)を畳んで案内文へ差し替える——媒体
+  // セレクタ自体は残す(石板が作業中でも紙側は新規に投入できるため。GDD 11.1
+  // 追補「媒体別の並存は可」)。
+  const selectedMediumInProgress = entry.pendingRecords.some(
+    (record) => record.medium === selectedMedium,
+  );
 
   return (
     <li class="kf-codify-row" data-tech-id={entry.techId}>
@@ -165,21 +192,44 @@ export function CodifyTechRow({
           <option value="paper">紙</option>
         </select>
       </label>
-      {costPreview !== null && (
-        <p class="kf-codify-row__cost-preview">
-          {/* [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ(「成文化予告20.0」の
-              不揃い解消)。 */}
-          必要資源: {resourceLabel(costPreview.resourceId)}{" "}
-          {formatResourceAmount(costPreview.amountApprox)}
+      {/* [M71/R6-C03] 選択中媒体が作業中なら、投入フォームの代わりに案内文を
+          出す(engine が確実に reject するフォームを生かしたままにしない)。 */}
+      {selectedMediumInProgress ? (
+        <p class="kf-codify-row__medium-in-progress" role="note">
+          選択中の媒体({mediumLabel(selectedMedium)}
+          )は既に作業中です。完了または取消をお待ちください (別の媒体を選べば新しく投入できます)。
         </p>
+      ) : (
+        <>
+          {costPreview !== null && (
+            <p
+              class={
+                insufficient
+                  ? "kf-codify-row__cost-preview kf-codify-row__cost-preview--insufficient"
+                  : "kf-codify-row__cost-preview"
+              }
+            >
+              {/* [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ(「成文化予告20.0」の
+                  不揃い解消)。[M71/R6-C02] 在庫不足は格子カタログと同じ「▲」記号で
+                  事前に示す(判定・disabled 化はしない・§ 直前の doc 参照)。 */}
+              {insufficient ? "▲ " : ""}
+              必要資源: {resourceLabel(costPreview.resourceId)}{" "}
+              {formatResourceAmount(costPreview.amountApprox)}
+            </p>
+          )}
+          <button
+            type="button"
+            class={
+              insufficient
+                ? "kf-codify-row__enqueue-button kf-codify-row__enqueue-button--insufficient"
+                : "kf-codify-row__enqueue-button"
+            }
+            onClick={() => onEnqueue(entry.techId, selectedMedium)}
+          >
+            キューに入れる
+          </button>
+        </>
       )}
-      <button
-        type="button"
-        class="kf-codify-row__enqueue-button"
-        onClick={() => onEnqueue(entry.techId, selectedMedium)}
-      >
-        キューに入れる
-      </button>
     </li>
   );
 }
@@ -214,14 +264,65 @@ export interface CodifySuggestionApplyOutcome {
   readonly stoppedAtTechId: EntityId | null;
 }
 
+// --- 3a. [M71/R6-A01] 空メッセージの除外理由(hooks 不使用・直接テスト可能) ---
+//
+// 旧文言は「対象がありません(保持者がいる未成文の技術がありません)」の
+// 1 パターン固定だった。実際には derived.ts の在庫フィルタ(R5-A08)が候補を
+// 落としているだけのことがあり、その場合は同じ画面の成文化キュー本体に該当
+// techが並んで見えるため「成文化できる技術が一切無い」という誤った説明になる
+// (R6-A01)。除外理由(`codifySuggestionExclusions`)を媒体別に集計し、
+// 0 件なら旧文言(真に対象が無い)、1 件以上なら理由つきの文言に差し替える。
+
+interface CodifySuggestionExclusionGroup {
+  readonly medium: RecordMedium;
+  readonly count: number;
+}
+
+/** 媒体別に除外件数を集計する(順序は文字コード順で固定・表示の安定性のため)。 */
+export function summarizeCodifySuggestionExclusions(
+  exclusions: readonly CodifySuggestionExclusionView[],
+): readonly CodifySuggestionExclusionGroup[] {
+  const countByMedium = new Map<RecordMedium, number>();
+  for (const exclusion of exclusions) {
+    countByMedium.set(exclusion.medium, (countByMedium.get(exclusion.medium) ?? 0) + 1);
+  }
+  return [...countByMedium.entries()]
+    .map(([medium, count]) => ({ medium, count }))
+    .sort((a, b) => (a.medium < b.medium ? -1 : a.medium > b.medium ? 1 : 0));
+}
+
+/**
+ * おまかせ成文化の提案が 0 件のときの説明文。除外理由が無ければ旧来どおり
+ * 「対象が無い」だけを言う(真にゼロ件・R5-A08 以前と同じ文言=既存の意味を
+ * 変えない)。除外理由があれば、何件が何の媒体の在庫不足で落ちたかを添える
+ * (内部 ID・reject コードの生値は出さない・和名は `mediumLabel` 経由)。
+ */
+export function codifySuggestionEmptyMessage(
+  exclusions: readonly CodifySuggestionExclusionView[],
+): string {
+  if (exclusions.length === 0) {
+    return "対象がありません(保持者がいる未成文の技術がありません)。";
+  }
+  const reasons = summarizeCodifySuggestionExclusions(exclusions)
+    .map(
+      (group) =>
+        `対象 ${String(group.count)}件は媒体(${mediumLabel(group.medium)})の在庫が不足しているため提案できません`,
+    )
+    .join("・");
+  return `対象がありません(${reasons})。`;
+}
+
 export interface CodifySuggestionPanelProps {
   readonly suggestions: readonly CodifySuggestionView[];
+  /** [M71/R6-A01] 空メッセージの理由づけに使う(§ 直前の doc 参照)。 */
+  readonly exclusions: readonly CodifySuggestionExclusionView[];
   readonly outcome: CodifySuggestionApplyOutcome | null;
   readonly onApply: () => void;
 }
 
 export function CodifySuggestionPanel({
   suggestions,
+  exclusions,
   outcome,
   onApply,
 }: CodifySuggestionPanelProps) {
@@ -229,9 +330,7 @@ export function CodifySuggestionPanel({
     <section class="kf-codify-assist" aria-label="おまかせ成文化">
       <h3 class="kf-codify-assist__title">おまかせ成文化の提案</h3>
       {suggestions.length === 0 ? (
-        <p class="kf-codify-assist__empty">
-          対象がありません(保持者がいる未成文の技術がありません)。
-        </p>
+        <p class="kf-codify-assist__empty">{codifySuggestionEmptyMessage(exclusions)}</p>
       ) : (
         <>
           <ol class="kf-codify-assist__list">
@@ -285,6 +384,29 @@ export function seedMissingMediumDefaults(
   return changed ? next : previous;
 }
 
+// --- 3c. [M71/R6-A05] 媒体選択の画面またぎ持ち越し(hooks 不使用) -------------
+//
+// `mediumSelections` はコンポーネントローカルの `useState` だが、画面遷移の
+// たびに `CodifyScreen` はアンマウント→リマウントされる(ADR-027(2)・
+// `AppShell.tsx` の `ScreenHost` が `key={screenId}` で毎回作り直す)。素の
+// `useState(new Map())` だと選択は毎回消え、リマウント後は §3b の
+// `defaultMediumFor`(在庫依存のヒューリスティック)がゼロから再評価される。
+// `beginCodification` は着手時に資源を**全額前払い**し `cancelCodification`
+// は返金しない(§2)ため、「石板で投入」した直後は粘土在庫が既に減っている
+// ——取消後に画面を往復すると、その減った在庫を見た `defaultMediumFor` が
+// 「紙」側へ倒れる。これが R6-A05 の実際の機構であり(取消コマンド自体が
+// 選択をリセットするのではない)、コンポーネント内だけで直すことはできない
+// (アンマウントで useState が丸ごと破棄されるため)。
+//
+// モジュールスコープの Map(このファイルが読み込まれている間だけ生存)へ
+// 直前の選択を都度書き写しておき、次回マウント時の初期値に使う。
+// **store.sources のような GameState 側の永続化は意図的に選ばない**——
+// techId は content 由来の安定 ID であり、別ワールド(新規ゲーム/インポート)
+// へ選択が persist しても実害が無い(単なる好みの引き継ぎで、実際に押せるかは
+// engine の reject が最終判定・§3 冒頭の「判定は書かない」規律のとおり)ため、
+// state.ts の直列化・ADR-012 のセーブ互換を巻き込む必要が無い。
+const persistedMediumSelections = new Map<EntityId, RecordMedium>();
+
 // --- 4. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 export function CodifyScreen({ store, onNavigate }: ScreenProps) {
@@ -293,14 +415,38 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
 
   const techs = useSignalValue(store.derived.codifyTechs);
   const suggestions = useSignalValue(store.derived.codifySuggestions);
+  // [M71/R6-A01] 空メッセージの理由づけに使う(CodifySuggestionPanel へ渡すだけ)。
+  const suggestionExclusions = useSignalValue(store.derived.codifySuggestionExclusions);
   const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   // [M62/FC5a] 「行ごとの現在の選択」(既定値を含む)。旧 `mediumOverrides` から
   // 改名——以前はユーザーの明示的な変更**だけ**を持つ差分マップだったが、今は
   // 初めて見た techId の既定値もここへ書き込んで固定する(§3b の doc 参照)。
-  const [mediumSelections, setMediumSelections] = useState<ReadonlyMap<EntityId, RecordMedium>>(
-    new Map(),
-  );
+  // [M71/R6-A05] 初期値は `persistedMediumSelections`(§3c)からの複製——マウント
+  // のたびに空へ戻さない。
+  const [mediumSelections, setMediumSelectionsState] = useState<
+    ReadonlyMap<EntityId, RecordMedium>
+  >(() => new Map(persistedMediumSelections));
+
+  /**
+   * [M71/R6-A05] `setMediumSelectionsState` の薄いラッパ。呼び出し側
+   * (`handleMediumChange`/§3b の `useEffect`)は今までどおり
+   * `setMediumSelections(updater)` を呼ぶだけでよく、ここで
+   * `persistedMediumSelections`(§3c)への書き写しを一括して行う——次に
+   * この画面がリマウントしたときの初期値になる。
+   */
+  function setMediumSelections(
+    updater: (previous: ReadonlyMap<EntityId, RecordMedium>) => ReadonlyMap<EntityId, RecordMedium>,
+  ): void {
+    setMediumSelectionsState((previous) => {
+      const next = updater(previous);
+      if (next !== previous) {
+        persistedMediumSelections.clear();
+        for (const [techId, medium] of next) persistedMediumSelections.set(techId, medium);
+      }
+      return next;
+    });
+  }
   const [suggestionOutcome, setSuggestionOutcome] = useState<CodifySuggestionApplyOutcome | null>(
     null,
   );
@@ -378,6 +524,16 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
     return { resourceId: plan.costResourceId, amountApprox: toApproxNumber(plan.costFix) };
   }
 
+  /**
+   * [M71/R6-C02] `costPreviewFor` の資源が現在の在庫で足りないか(表示専用の
+   * 目印・判定はしない。§ `CodifyTechRowProps.insufficient` の doc 参照)。
+   */
+  function isInsufficientFor(entry: CodifyTechEntry): boolean {
+    const preview = costPreviewFor(entry);
+    if (preview === null) return false;
+    return stockApprox(preview.resourceId) < preview.amountApprox;
+  }
+
   function handleMediumChange(techId: EntityId, medium: RecordMedium): void {
     setMediumSelections((previous) => {
       const next = new Map(previous);
@@ -440,6 +596,14 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
   /**
    * [M54] 作業中の記録を取り消す(`cancelCodification`・GDD 6.2)。
    * 返金は一切無い(§2)ので、成功トーストでもその旨をもう一度明記する。
+   *
+   * [M71/R6-C01] おまかせ成文化の成功バナー(`suggestionOutcome`)もここで
+   * クリアする。取消は `suggestionOutcome` を一切参照しない独立の操作だが、
+   * バナーは「以前の適用結果」を表示し続ける一方通行の state のため、取消後も
+   * 古い「1/1件を適用しました」が残ったまま`codifySuggestions`側は「対象が
+   * ありません」に変わるという矛盾並存が起きていた(R6-C01)。画面遷移(→
+   * アンマウント)なら自然に消えるが、同一画面内で取消しただけでは消えない
+   * ため、ここで明示的に消す。
    */
   function handleCancel(codifyId: EntityId): void {
     const result = store.dispatch({
@@ -451,6 +615,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
       return;
     }
     setLastRejection(null);
+    setSuggestionOutcome(null);
     toastStack.push("成文化の記録を取り消した(支払った資源は戻りません)");
   }
 
@@ -501,6 +666,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
 
       <CodifySuggestionPanel
         suggestions={suggestions}
+        exclusions={suggestionExclusions}
         outcome={suggestionOutcome}
         onApply={handleApplySuggestions}
       />
@@ -520,6 +686,7 @@ export function CodifyScreen({ store, onNavigate }: ScreenProps) {
               onEnqueue={handleEnqueue}
               onCancel={handleCancel}
               costPreview={costPreviewFor(entry)}
+              insufficient={isInsufficientFor(entry)}
             />
           ))}
         </ul>

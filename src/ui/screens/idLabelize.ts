@@ -51,6 +51,8 @@
 //   を直接通している(§3 参照)。
 // ---------------------------------------------------------------------------
 
+import { toRaw } from "../../engine/fp";
+import type { StorageParams } from "../../engine/rules/types";
 import { entityIdFromString } from "../../engine/state/state";
 import { eventLabel, facilityLabel, resourceLabel, techLabel } from "./contentLabels";
 
@@ -85,4 +87,48 @@ export function labelizeLogText(text: string): string {
     if (tech !== token) return tech;
     return token;
   });
+}
+
+// ---------------------------------------------------------------------------
+// [M71/R6-A03] 帰還ログの「あふれた分」が全損に読める問題への注記
+// ---------------------------------------------------------------------------
+//   `rules/exploration.ts` の `renderReturnLog` は実受領額(M64)とあふれた量
+//   (「保管上限のため 175 は持ち帰れなかった」)までは言うが、あふれのうち
+//   幾らが廃材へ転換されたか(GDD 6.7 のスポンジ機構)は言わない——建設/増築
+//   トーストが「薪28+廃材7」と内訳を見せるのに対して非対称になっている
+//   (R6-A03)。
+//
+//   engine 側は `wasteGainFix`(この 1 件で実際に生じた廃材量)を
+//   `creditWasteGain` へ渡した直後に捨てており、`RewardIntake`
+//   (acceptedFix/excessFix のみ)にも帰還ログにも残さない(engine 変更は
+//   本タスクの制約で不可)。かつ過去ログから遡って正確な転換量を導出すること
+//   もできない——廃材資源の在庫は他の発生源(施設産出のオーバーフロー等)とも
+//   合算されており、1 件の帰還にどれだけ帰属するかは state からは特定できない。
+//
+//   そのため**数値は作らない**(タスク指示どおりの正直な開示)。ログ本文に
+//   「持ち帰れなかった」があり、かつその資源の `wasteConversionRatio` が
+//   実際に 0 より大きいとき(=廃材化が本当に起きる資源のとき)だけ、事実の
+//   注記(「一部は廃材として回収される」)を添える——0 の資源(廃材化しない
+//   設計)にまで添えると、それこそ逆に嘘になるため付けない。
+
+const RETURN_LOG_OVERFLOW_PHRASE = "は持ち帰れなかった";
+/** 帰還ログの summary 行にだけ現れる「報酬 <資源ID> <整数>」の資源ID部分
+ * (§1 の `ID_TOKEN_PATTERN` と同じ「ラテン文字列だけを拾う」精神・拾う範囲を
+ * 「報酬 」の直後 1 トークンだけに絞って誤爆を避ける)。 */
+const REWARD_RESOURCE_TOKEN_PATTERN = /報酬 ([a-z][a-zA-Z0-9_]*) /;
+
+/**
+ * 帰還ログ本文(表示時変換前の生テキスト)に添える、廃材転換の注記。
+ * 添えるべき事実が無ければ空文字列(呼び出し側は空文字列なら何も描かない)。
+ */
+export function returnLogOverflowNote(text: string, storage: StorageParams | undefined): string {
+  if (storage === undefined) return "";
+  if (!text.includes(RETURN_LOG_OVERFLOW_PHRASE)) return "";
+  const match = REWARD_RESOURCE_TOKEN_PATTERN.exec(text);
+  const rawResourceId = match?.[1];
+  if (rawResourceId === undefined) return "";
+  const resourceId = entityIdFromString(rawResourceId);
+  const ratioFix = storage.wasteConversionRatioByResourceId.get(resourceId);
+  if (ratioFix === undefined || toRaw(ratioFix) <= 0) return "";
+  return "あふれた分の一部は廃材として回収されます。";
 }
