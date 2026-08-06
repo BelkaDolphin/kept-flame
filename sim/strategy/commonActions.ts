@@ -129,8 +129,11 @@ function openFacilitiesByDefPriority(
   return result;
 }
 
-/** 現在その定義の施設で働いている住民の総数(定義 ID 別)。 */
-function workerCountByDefId(state: GameState): Map<EntityId, number> {
+/**
+ * 現在その定義の施設で働いている住民の総数(定義 ID 別)。[Phase A] §4b の
+ * 実地要件充足判定(まだ誰も働いていない施設を見つける)にも使うため export する。
+ */
+export function workerCountByDefId(state: GameState): Map<EntityId, number> {
   const counts = new Map<EntityId, number>();
   for (const facility of entitiesOfKind(state, "facility")) {
     counts.set(facility.defId, (counts.get(facility.defId) ?? 0) + facility.workerIds.length);
@@ -588,6 +591,169 @@ export function pickResearchTargets(
 /** `beginResearch` コマンドを組み立てる(researchId は techId から決定論的に導出)。 */
 export function researchCommand(techId: EntityId): BeginResearchCommand {
   return { kind: "beginResearch", researchId: entityIdFromString(`research${techId}`), techId };
+}
+
+// --- 4b. 実地要件施設の先回り充足([Phase A]・GDD 5 / 12.1 `fieldRequirement`) --
+//
+// [2026-08-06裁定・台帳v20 必-5] tech 全 24 本に `fieldRequirement`(該当施設で
+// 該当レシピを N 回稼働・GDD 5)が定義済みだが、engine 側は count のみが将来
+// 実効化される予定でまだ実装していない(M67・台帳v20 の「M67 の地雷」)。
+// このタスクの時点で研究は一切ゲートされないため、以下の 2 関数は**今回の
+// nightly gate の数値には影響しない**(fieldRequirement を読むだけで、まだ
+// 何も強制しない)。狙いは M67 が実効化した瞬間に explorationFirst のような
+// 「過酷業務(forge)を回避する」bot が永久停止しないよう、**研究予定 tech が
+// 要求する施設を先回りで建設・配属しておく**能力を今のうちに bot へ持たせて
+// おくこと。
+//
+// explorationFirst の forge/foundry 回避(bots.ts §3)自体は変更しない
+// (ユーザー承認済みだが、それでも「過酷業務を避ける」という bot の戦略差は
+// GDD 11.4-1 の観測対象として意味を保っている)。代わりに「研究予定 tech が
+// その施設を要求する tick だけ」bots.ts 側で建設/配属へ一時的に割り込ませる
+// (§3a の倉庫と同じ「1 tick 1 特別枠」の規模感)。
+//
+// **「研究予定 tech」= 現在選択中の 1 本だけ**にする(`currentResearchTechId`)。
+//
+// **配属側は優先度の差し込みではなく「余った住民だけを使う」方式にする**
+// ({@link buildFieldRequirementStaffingCommand})。[Phase A] 実装の最初の版は
+// 建設・配属の両方を `defPriority` の先頭へ差し込んでいたが、
+// `buildAssignmentCommands` の均等配属(§2 の doc)は**無配属の住民しか動かさず、
+// 一度決まった配属は動かさない**ため、たった 1 tick の割り込みでもその日
+// たまたま無配属だった住民を恒久的に奪い、後から通常優先順へ戻しても
+// 二度と埋まらない(住民 8 人に施設 12〜13 種という小規模な盤面では
+// 「その日空いていた住民」の奪い合いがそのまま固定化する)。実測: hearth の
+// 唯一の就労者が要求施設側へ奪われ、以後 hearth が恒久的に無人化 =
+// 薪産出が run 後半でゼロに張り付く構造的ソフトロック(`gdd-11.4-2a` 構造
+// fail・`tests/sim/nightlyGate.test.ts` で検出)。
+//
+// 対策 = 通常の `buildAssignmentCommands`(policies.assignment・無改変)を
+// **先に**実行し、そこで無配属のまま残った住民だけを実地要件施設へ回す
+// (bots.ts 側で「今 tick に他の提案が使った住民 ID」を集合として渡す)。
+// これなら通常配属が誰も奪われず、実地要件側は「今日どうせ誰も割り当てられ
+// なかった余剰」だけを使う——奪い合いが構造的に起きない。
+//
+// 建設側は「余りものだけ」にする必要が無い(1 basisを新設するだけで既存施設の
+// 就労者を奪わない)ため、引き続き `defPriority` の先頭へ差し込む方式のまま
+// (`fieldFacilityIdsNeedingConstruction`)。
+//
+// **割り込みは「まだ満たしていない」間だけ**にする(建設は現基数 0 の間だけ、
+// 配属は施設が建っていて就労者 0 の間だけ)。1 基建って 1 人就けば通常の
+// 優先順へ戻す(= この施設だけを優遇し続けない)。
+
+/**
+ * tech ID の集合から、その `fieldRequirement.facility`(= `TechDef.fieldFacilityId`)
+ * を重複なく集める(未定義の tech / fieldFacilityId 省略時は無視)。
+ * 戻り値の順序は `techIds` の走査順で最初に現れた施設 ID から([Phase A])。
+ */
+export function fieldFacilityIdsFor(
+  techIds: readonly EntityId[],
+  content: EngineContent,
+): readonly EntityId[] {
+  const seen = new Set<EntityId>();
+  const result: EntityId[] = [];
+  for (const techId of techIds) {
+    const facilityId = content.techDefs.get(techId)?.fieldFacilityId;
+    if (facilityId === undefined || seen.has(facilityId)) continue;
+    seen.add(facilityId);
+    result.push(facilityId);
+  }
+  return result;
+}
+
+/**
+ * {@link fieldFacilityIdsFor} のうち、**まだ 1 基も建っていない**ものだけを
+ * 残す(建設側の優先度差し込みに使う)。1 基建てば以後は通常の
+ * `buildFacilityCommand` の「現基数最小」規則に任せる。
+ */
+export function fieldFacilityIdsNeedingConstruction(
+  techIds: readonly EntityId[],
+  state: GameState,
+  content: EngineContent,
+): readonly EntityId[] {
+  const counts = facilityCountByDefId(state);
+  return fieldFacilityIdsFor(techIds, content).filter((id) => (counts.get(id) ?? 0) === 0);
+}
+
+/**
+ * {@link fieldFacilityIdsFor} のうち、**施設は建っているが就労者が 0 人**の
+ * ものだけを残す(配属側の優先度差し込みに使う)。まだ影も形も無い施設は
+ * 配属できないので除外し、1 人就けば以後は通常の `buildAssignmentCommands`
+ * の「就労者最少」規則に任せる(= この施設だけを優遇し続けない)。
+ */
+export function fieldFacilityIdsNeedingStaffing(
+  techIds: readonly EntityId[],
+  state: GameState,
+  content: EngineContent,
+): readonly EntityId[] {
+  const facilityCounts = facilityCountByDefId(state);
+  const workerCounts = workerCountByDefId(state);
+  return fieldFacilityIdsFor(techIds, content).filter(
+    (id) => (facilityCounts.get(id) ?? 0) > 0 && (workerCounts.get(id) ?? 0) === 0,
+  );
+}
+
+export interface FieldRequirementStaffingResult {
+  readonly command: AssignResidentCommand | undefined;
+  readonly recallGuardLog: readonly RecallGuardLogEntry[];
+}
+
+/**
+ * 実地要件施設(`facilityId`)へ、**通常の均等配属が使わなかった余りの住民**
+ * だけで 1 人配属する(§4b 冒頭の doc「奪い合いを避ける」設計)。
+ *
+ * `alreadyAssignedResidentIds` は同一 tick 内で他の提案(呼び出し側が先に
+ * 実行した通常の `buildAssignmentCommands`)が既に使った住民 ID。これに
+ * 含まれる住民には触れない。空きスロットが無い/対象施設が存在しない/
+ * 使える余り住民が居ない(過酷業務なら {@link recallGuardBlocks} 込み)の
+ * いずれかなら `command: undefined`。
+ */
+export function buildFieldRequirementStaffingCommand(
+  state: GameState,
+  content: EngineContent,
+  facilityId: EntityId,
+  alreadyAssignedResidentIds: ReadonlySet<EntityId>,
+  tick: number,
+  botId: string,
+): FieldRequirementStaffingResult {
+  const def = content.facilityDefs.get(facilityId);
+  if (def === undefined) return { command: undefined, recallGuardLog: [] };
+
+  let targetFacilityId: EntityId | undefined;
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (facility.defId !== facilityId) continue;
+    const slots = facilityWorkerSlots(def, facility.level);
+    const openSlots =
+      slots === undefined ? Number.POSITIVE_INFINITY : slots - facility.workerIds.length;
+    if (openSlots <= 0) continue;
+    targetFacilityId = facility.id;
+    break;
+  }
+  if (targetFacilityId === undefined) return { command: undefined, recallGuardLog: [] };
+
+  const recallGuardLog: RecallGuardLogEntry[] = [];
+  for (const resident of livingIdleResidents(state)) {
+    if (alreadyAssignedResidentIds.has(resident.id)) continue;
+    if (def.harshWork) {
+      const check = recallGuardBlocks(state, content, resident, "harshAssignment", tick, botId);
+      if (check.blocked) {
+        if (check.logEntry !== null) recallGuardLog.push(check.logEntry);
+        continue;
+      }
+    }
+    return {
+      command: { kind: "assignResident", residentId: resident.id, facilityId: targetFacilityId },
+      recallGuardLog,
+    };
+  }
+  return { command: undefined, recallGuardLog };
+}
+
+/**
+ * 現在研究点を受け取っている研究対象の tech ID(`rules/research.ts` の
+ * `currentResearch` そのまま。何も進行していなければ undefined)。
+ * 「研究予定 tech」を実地要件の対象へ絞り込む入口として使う([Phase A] §4b)。
+ */
+export function currentResearchTechId(state: GameState): EntityId | undefined {
+  return currentResearch(state)?.techId;
 }
 
 // --- 5. 成文化(GDD 6.2 / M27 アシスト) --------------------------------------

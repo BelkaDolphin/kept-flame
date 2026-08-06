@@ -57,9 +57,13 @@ import {
   buildAssignmentCommands,
   buildDispatchCommands,
   buildFacilityCommand,
+  buildFieldRequirementStaffingCommand,
   buildReclaimCommand,
   buildWarehouseCommand,
   codifyCommand,
+  currentResearchTechId,
+  fieldFacilityIdsNeedingConstruction,
+  fieldFacilityIdsNeedingStaffing,
   pickResearchTargets,
   researchCommand,
   type AssignmentPolicy,
@@ -167,6 +171,33 @@ function decideGeneric(
   const researchTechIds = pickResearchTargets(state, content, policies.preferCriticalPathResearch);
   for (const techId of researchTechIds) commands.push(researchCommand(techId));
 
+  // [Phase A] 「研究予定 tech」= 今日新たに選択された主対象、無ければ現在
+  // 選択中の 1 本(`currentResearchTechId`)。その fieldRequirement が要求する
+  // 施設(commonActions.ts §4b)を先回りで建設・配属する。M67(engine 側の
+  // fieldRequirement 実効化)が入っても explorationFirst の forge 回避
+  // (§3 冒頭の doc)で bot が恒久停止しないための先回り(台帳v20 必-5)。
+  // 対象は常に高々 1 本(§4b の doc の教訓)。まだ何も研究していない run では
+  // undefined で建設側の優先順は素通り(= 従来の policies.build と 1 bit も
+  // 違わない)。
+  const primaryResearchTechId =
+    researchTechIds.length > 0
+      ? researchTechIds[researchTechIds.length - 1]
+      : currentResearchTechId(state);
+  const fieldRequirementTechIds =
+    primaryResearchTechId === undefined ? [] : [primaryResearchTechId];
+  const fieldFacilityIdsToBuild = fieldFacilityIdsNeedingConstruction(
+    fieldRequirementTechIds,
+    state,
+    content,
+  );
+  const buildPolicy: BuildPolicy =
+    fieldFacilityIdsToBuild.length === 0
+      ? policies.build
+      : {
+          ...policies.build,
+          defPriority: [...fieldFacilityIdsToBuild, ...policies.build.defPriority],
+        };
+
   // 開墾は建設より先に積む(同一 tick で「開けた枠へ建てる」が成立するように)。
   const reclaimCmd = buildReclaimCommand(state, content, policies.reclaimMinFreeCells);
   if (reclaimCmd !== undefined) commands.push(reclaimCmd);
@@ -178,13 +209,39 @@ function decideGeneric(
   if (warehouseCmd !== undefined) {
     commands.push(warehouseCmd);
   } else {
-    const buildCmd = buildFacilityCommand(state, content, policies.build);
+    const buildCmd = buildFacilityCommand(state, content, buildPolicy);
     if (buildCmd !== undefined) commands.push(buildCmd);
   }
 
+  // 通常の均等配属は無改変のポリシーで先に行う(§4b 冒頭の doc:実地要件側が
+  // 優先度を割り込ませると既存施設の就労者を奪う)。
   const assignResult = buildAssignmentCommands(state, content, policies.assignment, tick, botId);
   commands.push(...assignResult.commands);
   recallGuardLog.push(...assignResult.recallGuardLog);
+
+  // [Phase A] 実地要件施設は、通常配属が使わなかった**余りの住民**だけで補う
+  // (commonActions.ts §4b `buildFieldRequirementStaffingCommand`)。
+  const fieldFacilityIdsToStaff = fieldFacilityIdsNeedingStaffing(
+    fieldRequirementTechIds,
+    state,
+    content,
+  );
+  const fieldFacilityIdToStaff = fieldFacilityIdsToStaff[0];
+  if (fieldFacilityIdToStaff !== undefined) {
+    const alreadyAssignedResidentIds = new Set(
+      assignResult.commands.map((command) => command.residentId),
+    );
+    const staffing = buildFieldRequirementStaffingCommand(
+      state,
+      content,
+      fieldFacilityIdToStaff,
+      alreadyAssignedResidentIds,
+      tick,
+      botId,
+    );
+    if (staffing.command !== undefined) commands.push(staffing.command);
+    recallGuardLog.push(...staffing.recallGuardLog);
+  }
 
   if (policies.codifyActively) {
     const codifyCmd = codifyCommand(state, content, tick);
@@ -289,6 +346,13 @@ export const researchFirstBot: StrategyBot = makeStrategyBot("researchFirst", {
 export const explorationFirstBot: StrategyBot = makeStrategyBot("explorationFirst", {
   preferCriticalPathResearch: false,
   // 過酷業務(forge/foundry)は建てない = 候補から外す(M36 と同じ思想を 14 種版へ)。
+  // [Phase A] この既定の回避は変更しない(ユーザー承認済みだが「過酷業務を
+  // 避ける」という bot の戦略差自体には意味がある・台帳v20 必-5)。ただし
+  // 研究予定 tech が forge/foundry を fieldRequirement で要求する tick だけ、
+  // decideGeneric 側で defPriority の先頭へ一時的に差し込む(この配列自体は
+  // 素通しのまま)。回避を恒久的に外すのではなく「要件時のみ建てる」を選んだ
+  // 理由 = 本 bot の観測対象(GDD 11.4-1「過酷業務を避ける戦略」)を Phase A で
+  // 潰さないため。
   build: {
     defPriority: prioritized([EXPLORATION_HQ_DEF_ID, HEARTH_DEF_ID, WORKBENCH_DEF_ID]).filter(
       (id) => id !== FORGE_DEF_ID && id !== FOUNDRY_DEF_ID,
