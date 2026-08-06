@@ -54,6 +54,7 @@
 //   **見張り台/療養所**: `content/facility.json` にこの種の追加フィールドが
 //   一切無く、engine 側の参照も確認できなかった(統率者側でも再確認済み)。
 //   「効果は未実装(建設しても資源を消費するのみ)」のまま。
+//   → **[M73/R8-02 fatal] この記述は M66 で無効になった**(下の §4)。
 //
 // ===========================================================================
 // 3. [M62/FC9・R2-C01] カタログ効果ヒントの非対称の解消
@@ -63,15 +64,59 @@
 //   施設だけヒントが無い非対称があった。`workerEffectHintText` は Lv1 時点の
 //   基礎産出(隣接乗数・稼働就労者数を含まない近似値。カタログは建設前で盤面
 //   位置が未定のため)を示す、対称な第4のヒント文言。
+//
+// ===========================================================================
+// 4. [M73/R8-02 fatal] 見張り台 / 療養所の効果は M66 で実装済み
+// ===========================================================================
+//   §2 末尾の「見張り台/療養所は効果未実装」は **M66 で無効になった**のに、
+//   本ファイルの `facilityEffectKind()` が 2 つの新フィールドを判定しないまま
+//   だったため、両施設は 3 体一致・8 箇所で「効果は未実装(建設しても資源を
+//   消費するのみ)」と表示され続けていた(Round 8 実測・虚偽表示)。
+//   増築警告「効果が未実装のため増築しても効果は変わりません」も同根の虚偽で、
+//   実際にはどちらの効果曲線も Lv 単調増加である(schema/facility.ts が
+//   単調非減少を必須検証)。
+//
+//   **見張り台(`defenseCurve` → `FacilityDef.defenseByLevel`)**:
+//   `engine/rules/raid.ts` の `colonyDefenseFix` が「防衛係数を持つ施設の
+//   Lv 別値 ×(外周なら配置ボーナス)」を総和し、`resolveRaid` が
+//   `Σ防衛戦力 + seededRoll >= 襲撃強度` で撃退を決める。よって実効果は
+//   「襲撃への防衛戦力 + Lv 別の寄与」+「外周に置くと倍率が乗る」。
+//
+//   **療養所(`careCapacityCurve` → `FacilityDef.careCapacityByLevel`)**:
+//   `engine/rules/care.ts` の `careCapacityOf` が Lv 別値を総和し、
+//   `careRecipientsAt` が「その tick に想起困難中の生存住民を枠数まで」自動で
+//   休養させる(配属コマンドは無い)。回復は `balance.care.restRecoveryTicks`
+//   (発生からの経過)まで**短縮**され、抽選された持続がそれより短いときは
+//   延ばさない。よって実効果は「同時に休養できる人数 + Lv 別の枠」+
+//   「想起困難の住民が自動で休養して回復が早まる」。
+//
+//   **配置ボーナス倍率 / 休養までの時間は content 側(`balance.raid` /
+//   `balance.care`)にある**が、本ファイルは `def`+`level` だけを引数に取る
+//   設計(state/content 非依存)なので、§2「保管庫」の加算式のように文言へ
+//   焼き込まず **呼び出し側から任意で渡す**形にした(渡されなければその一文を
+//   出さない=捏造しない)。数値の正本は engine/content 側にあり複製しない。
 // ---------------------------------------------------------------------------
 
-import type { FacilityDef } from "../../engine/rules/types";
+import type { EngineContent, FacilityDef } from "../../engine/rules/types";
 import { toApproxNumber } from "../../engine/fp";
 import type { EntityId } from "../../engine/state/state";
 import { resourceLabel } from "./contentLabels";
-import { formatRatePerMinute, formatResourceAmount } from "./format";
+import {
+  formatApproxDecimal1,
+  formatRatePerMinute,
+  formatResourceAmount,
+  formatTickSpan,
+} from "./format";
 
-export type FacilityEffectKind = "worker" | "bedCapacity" | "storageCapacity" | "none";
+export type FacilityEffectKind =
+  | "worker"
+  | "bedCapacity"
+  | "storageCapacity"
+  /** [M73/R8-02] 見張り台(襲撃への防衛戦力・§4)。 */
+  | "defense"
+  /** [M73/R8-02] 療養所(想起困難の休養枠・§4)。 */
+  | "careCapacity"
+  | "none";
 
 function hasAnyWorkerSlot(def: FacilityDef): boolean {
   return (def.workerSlotsByLevel ?? []).some((count) => count > 0);
@@ -87,6 +132,11 @@ export function facilityEffectKind(def: FacilityDef): FacilityEffectKind {
   if (hasAnyWorkerSlot(def)) return "worker";
   if (def.bedCapacityByLevel !== undefined) return "bedCapacity";
   if (def.storage !== undefined) return "storageCapacity";
+  // [M73/R8-02] M66 で実効化された 2 種(§4)。宣言順は「既存 3 種を 1 bit も
+  // 動かさない」ことを優先して末尾へ足す(寝床/保管庫と両立する定義は現行
+  // content に無いので、判定順が表示を変えることは実際には起きない)。
+  if (def.defenseByLevel !== undefined) return "defense";
+  if (def.careCapacityByLevel !== undefined) return "careCapacity";
   return "none";
 }
 
@@ -142,8 +192,138 @@ export function storageCapacityEffectText(def: FacilityDef, level = 1): string |
   );
 }
 
-/** 効果未実装の施設に添える固定文言(見張り台/療養所のみ・§2)。 */
+/**
+ * [M73/R8-02] `level`(1始まり)時点の防衛係数(`defenseByLevel` が無ければ null)。
+ * 「配列より大きい Lv は最後の段」規約は `bedCapacityAt` と同じ。
+ */
+export function defenseAt(def: FacilityDef, level: number): number | null {
+  const curve = def.defenseByLevel;
+  if (curve === undefined || curve.length === 0) return null;
+  const fix = curve[level - 1] ?? curve[curve.length - 1];
+  return fix === undefined ? null : toApproxNumber(fix);
+}
+
+/**
+ * [M73/R8-02] 見張り台のカタログ/詳細向け効果文言(§4)。
+ *
+ * `perimeterMulApprox` は外周セルに置いたときの配置ボーナス倍率
+ * (`balance.raid.perimeterDefenseMul`)。**呼び出し側が content から渡す**
+ * (省略/null ならその一文を出さない=数値を捏造しない・§4 末尾)。
+ */
+export function defenseEffectText(
+  def: FacilityDef,
+  level = 1,
+  perimeterMulApprox: number | null = null,
+): string | null {
+  const value = defenseAt(def, level);
+  if (value === null) return null;
+  const perimeter =
+    perimeterMulApprox === null || perimeterMulApprox <= 1
+      ? "格子の外周(縁)に置くと寄与が上がります。"
+      : `格子の外周(縁)に置くと寄与が${formatApproxDecimal1(perimeterMulApprox)}倍になります。`;
+  return (
+    `襲撃に対する防衛戦力に加算(このLv${String(level)}の寄与は +${formatResourceAmount(value)})。` +
+    `${perimeter}防衛戦力が襲撃の強さを上回れば撃退でき、届かなければ蓄えの一部を奪われます。` +
+    `増築すると寄与が増えます。`
+  );
+}
+
+/**
+ * [M73/R8-02] `level`(1始まり)時点の休養枠(`careCapacityByLevel` が無ければ null)。
+ */
+export function careCapacityAt(def: FacilityDef, level: number): number | null {
+  const curve = def.careCapacityByLevel;
+  if (curve === undefined || curve.length === 0) return null;
+  return curve[level - 1] ?? curve[curve.length - 1] ?? null;
+}
+
+/**
+ * [M73/R8-02] 療養所のカタログ/詳細向け効果文言(§4)。
+ *
+ * `restRecoveryText` は「休養で回復するまでの時間」の**整形済み**文言
+ * (`balance.care.restRecoveryTicks` を `formatTickSpan` に通したもの)。
+ * 呼び出し側が content から渡す(省略/null ならその一文を出さない)。
+ */
+export function careCapacityEffectText(
+  def: FacilityDef,
+  level = 1,
+  restRecoveryText: string | null = null,
+): string | null {
+  const value = careCapacityAt(def, level);
+  if (value === null) return null;
+  const recovery =
+    restRecoveryText === null
+      ? "回復までの時間が短くなります。"
+      : `休養に入ると${restRecoveryText}で回復します(それより早く回復する見込みのときは短い方が優先されます)。`;
+  return (
+    `同時に休養できる枠(このLv${String(level)}の枠は ${String(value)}人)。` +
+    `想起困難の住民が枠の空いている範囲で自動的に休養します(配属の操作は不要)。${recovery}` +
+    `枠が足りないときは一部の住民だけが休養します。増築すると枠が増えます。`
+  );
+}
+
+/** 効果未実装の施設に添える固定文言(現行 content には該当なし・§2/§4)。 */
 export const DORMANT_FACILITY_EFFECT_TEXT = "効果は未実装(建設しても資源を消費するのみ)";
+
+/**
+ * [M73/R8-02] 効果文言のうち **content 側にしか無い係数**(§4 末尾)。
+ * `def`+`level` からは分からないので呼び出し側が渡す。null は「渡されなかった」
+ * = その一文を出さない(捏造しない)。
+ */
+export interface FacilityEffectExtras {
+  /** 外周配置ボーナス倍率(`balance.raid.perimeterDefenseMul`)。 */
+  readonly perimeterDefenseMulApprox: number | null;
+  /** 休養で回復するまでの整形済み時間(`balance.care.restRecoveryTicks`)。 */
+  readonly restRecoveryText: string | null;
+}
+
+/** 係数を 1 つも持たない既定値(content に raid/care ブロックが無い盤面)。 */
+export const NO_FACILITY_EFFECT_EXTRAS: FacilityEffectExtras = {
+  perimeterDefenseMulApprox: null,
+  restRecoveryText: null,
+};
+
+/** [M73/R8-02] content から {@link FacilityEffectExtras} を取り出す(判定は無い)。 */
+export function facilityEffectExtrasOf(content: EngineContent): FacilityEffectExtras {
+  const raid = content.raid;
+  const care = content.care;
+  return {
+    perimeterDefenseMulApprox:
+      raid === undefined ? null : toApproxNumber(raid.perimeterDefenseMulFix),
+    restRecoveryText: care === undefined ? null : formatTickSpan(care.restRecoveryTicks),
+  };
+}
+
+/**
+ * [M73/R8-02] 種別に応じた効果文言の単一入口(②カタログと③施設詳細が同じ文言を
+ * 見せるための集約点)。種別ごとの分岐を画面側で 2 度書かないためのもので、
+ * 個別の文言関数はそのまま公開したまま(既存呼び出し元との後方互換)。
+ */
+export function facilityEffectTextOf(
+  def: FacilityDef,
+  level: number,
+  extras: FacilityEffectExtras = NO_FACILITY_EFFECT_EXTRAS,
+): string | null {
+  const kind = facilityEffectKind(def);
+  switch (kind) {
+    case "worker":
+      return workerEffectHintText(def, level);
+    case "bedCapacity":
+      return bedCapacityEffectText(def, level);
+    case "storageCapacity":
+      return storageCapacityEffectText(def, level);
+    case "defense":
+      return defenseEffectText(def, level, extras.perimeterDefenseMulApprox);
+    case "careCapacity":
+      return careCapacityEffectText(def, level, extras.restRecoveryText);
+    case "none":
+      return DORMANT_FACILITY_EFFECT_TEXT;
+    default: {
+      const unhandled: never = kind;
+      throw new TypeError(`未知の施設効果種別 ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
 
 /**
  * [M62/FC9・R2-C01] `level`(1始まり)時点の基礎産出(`outputPerTickByLevel` の

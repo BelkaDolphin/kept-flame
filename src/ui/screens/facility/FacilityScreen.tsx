@@ -48,7 +48,9 @@ import { facilityLabel, residentDisplayName, resourceLabel, techLabel } from "..
 import {
   bedCapacityEffectText,
   DORMANT_FACILITY_EFFECT_TEXT,
+  facilityEffectExtrasOf,
   facilityEffectKind,
+  facilityEffectTextOf,
   storageCapacityEffectText,
   type FacilityEffectKind,
 } from "../facilityEffect";
@@ -124,6 +126,13 @@ export interface FacilityDetailPanelProps {
    */
   readonly storageEffectText?: string | null;
   /**
+   * [M73/R8-02] `effectKind` が `"defense"`(見張り台)/ `"careCapacity"`(療養所)
+   * のときの効果文言(`facilityEffect.ts` §4)。M66 で実装済みの効果を持つ
+   * ——「効果は未実装」も「増築しても効果は変わりません」も出さない。
+   * 省略時は非表示(既存呼び出し元/既存テストとの後方互換)。
+   */
+  readonly effectText?: string | null;
+  /**
    * [M61/FC11・R1-A14] 増築後の産出見込み(実行前プレビュー)。`null` = 出さない
    * (上限Lv・寝床/非稼働・content にLv曲線が無い等)。値は「増築ボタンを押す前に
    * 効果が分かる」ための表示専用近似値であり、engine 側の再計算(§3 の規律)は
@@ -141,11 +150,15 @@ export function FacilityDetailPanel({
   effectKind = "worker",
   bedEffectText = null,
   storageEffectText = null,
+  effectText = null,
   nextLevelOutputApprox = null,
 }: FacilityDetailPanelProps) {
   const isDormant = effectKind === "none";
   const isBedCapacity = effectKind === "bedCapacity";
   const isStorageCapacity = effectKind === "storageCapacity";
+  // [M73/R8-02] 見張り台/療養所。就労スロットを持たない点は寝床/保管庫と同じ
+  // なので産出/就労の行は出さず、実効果(Lv 別カーブ)だけを見せる。
+  const isCurveEffect = effectKind === "defense" || effectKind === "careCapacity";
   return (
     <section class="kf-facility-detail" aria-label="施設詳細">
       <TagIconDefs />
@@ -177,6 +190,10 @@ export function FacilityDetailPanel({
       ) : isStorageCapacity ? (
         <p class="kf-facility-detail__storage-capacity" data-effect-kind="storageCapacity">
           {storageEffectText}
+        </p>
+      ) : isCurveEffect ? (
+        <p class="kf-facility-detail__curve-effect" data-effect-kind={effectKind}>
+          {effectText}
         </p>
       ) : (
         <>
@@ -324,6 +341,17 @@ function storageEffectTextOf(
 }
 
 /**
+ * [M73/R8-02] 見張り台/療養所の効果文言(`facilityEffect.ts` §4)。②カタログと
+ * 同じ `facilityEffectTextOf` を通すので、両画面で文言が食い違わない。
+ * 現在の Lv を渡すので「このLvの寄与/枠」は実際の値になる。
+ */
+function curveEffectTextOf(content: EngineContent, defId: EntityId, level: number): string | null {
+  const def = content.facilityDefs.get(defId);
+  if (def === undefined) return null;
+  return facilityEffectTextOf(def, level, facilityEffectExtrasOf(content));
+}
+
+/**
  * [M61/FC11・R1-A14] 増築後の産出見込み(`FacilityDetailPanel` の doc 参照)。
  * `outputPerTickApprox × (次Lv基礎産出 / 現Lv基礎産出)`。基礎産出が 0(非稼働
  * 施設・寝床)・Lv曲線が欠けている・既に上限Lv、のいずれかなら null(捏造しない)。
@@ -434,6 +462,7 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
             effectKind={facilityEffectKindOf(content, detail.defId)}
             bedEffectText={bedEffectTextOf(content, detail.defId, detail.level)}
             storageEffectText={storageEffectTextOf(content, detail.defId, detail.level)}
+            effectText={curveEffectTextOf(content, detail.defId, detail.level)}
             nextLevelOutputApprox={nextLevelOutputApproxOf(content, detail)}
           />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />

@@ -32,13 +32,7 @@ import type { EntityId } from "../../../engine/state/state";
 import type { CellViewModel, FacilityCatalogEntry, ReclaimInfo, ResourceView } from "../../derived";
 import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, resourceLabel } from "../contentLabels";
-import {
-  bedCapacityEffectText,
-  DORMANT_FACILITY_EFFECT_TEXT,
-  facilityEffectKind,
-  storageCapacityEffectText,
-  workerEffectHintText,
-} from "../facilityEffect";
+import { facilityEffectExtrasOf, facilityEffectTextOf } from "../facilityEffect";
 import { formatResourceAmount, formatResourceStock } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
@@ -273,29 +267,17 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
   const toastStack = useToastStack();
 
   const effectHintByDefId = useMemo(() => {
+    // [M73/R8-02] 種別ごとの分岐は `facilityEffectTextOf`(facilityEffect.ts)へ
+    // 集約した。以前はこの場に 4 分岐が展開されていたため、M66 で実効化された
+    // 見張り台/療養所が「効果は未実装」の枝へ落ち続けていた(③施設詳細側と
+    // 二重に分岐を書いていたことが、片方だけ直す事故の温床でもあった)。
+    // 内訳: 寝床/保管庫は実効果(facilityEffect.ts §2)、見張り台/療養所は
+    // M66 の実効果(§4)、worker 系は Lv1 基礎産出の目安(§3・R2-C01 の対称化)。
+    const extras = facilityEffectExtrasOf(content);
     const hints = new Map<EntityId, string>();
     for (const [defId, def] of content.facilityDefs) {
-      const kind = facilityEffectKind(def);
-      if (kind === "bedCapacity") {
-        const text = bedCapacityEffectText(def, 1);
-        if (text !== null) hints.set(defId, text);
-      } else if (kind === "storageCapacity") {
-        // [M61/FC6・2026-08-02差し戻し] 保管庫: 「効果は未実装」ではなく実効果
-        // (facilityEffect.ts §2「保管庫」)。[M63/R4-A01] 「現在庫が上限超なら
-        // 建てると不利益」という警告は加算方式の下では逆情報だったため撤去
-        // (facilityEffect.ts §2 追記参照。継続的な上限到達の警告は
-        // HUD/ホームアラートの担当)。
-        const text = storageCapacityEffectText(def, 1);
-        if (text !== null) hints.set(defId, text);
-      } else if (kind === "none") {
-        hints.set(defId, DORMANT_FACILITY_EFFECT_TEXT);
-      } else {
-        // [M62/FC9・R2-C01] worker系(通常稼働)施設にも対称にヒントを出す
-        // (以前は寝床/保管庫/非稼働の3 kindだけで、通常施設だけヒントが
-        // 無い非対称があった)。基礎産出0(捏造しない対象外)なら出さない。
-        const text = workerEffectHintText(def, 1);
-        if (text !== null) hints.set(defId, text);
-      }
+      const text = facilityEffectTextOf(def, 1, extras);
+      if (text !== null) hints.set(defId, text);
     }
     return hints;
   }, [content]);

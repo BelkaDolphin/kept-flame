@@ -186,6 +186,33 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     expect(text).not.toContain("就労");
   });
 
+  it("[M73/R8-02] effectKind='defense' は effectText を出し「効果は未実装」も虚偽の増築警告も出さない", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ level: 1, maxLevel: 5 }),
+      onUpgrade: () => undefined,
+      effectKind: "defense",
+      effectText: "襲撃に対する防衛戦力に加算(このLv1の寄与は +20)。",
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("防衛戦力に加算");
+    expect(text).not.toContain("効果は未実装");
+    expect(text).not.toContain("増築しても効果は変わりません");
+    expect(text).not.toContain("就労");
+  });
+
+  it("[M73/R8-02] effectKind='careCapacity' は effectText を出し「効果は未実装」も虚偽の増築警告も出さない", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ level: 1, maxLevel: 5 }),
+      onUpgrade: () => undefined,
+      effectKind: "careCapacity",
+      effectText: "同時に休養できる枠(このLv1の枠は 1人)。",
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("休養できる枠");
+    expect(text).not.toContain("効果は未実装");
+    expect(text).not.toContain("増築しても効果は変わりません");
+  });
+
   it("研究点産出(resourceId=null)は「研究点」と表示する", () => {
     const vnode = FacilityDetailPanel({
       detail: detailView({ outputKind: "research", outputResourceId: null }),
