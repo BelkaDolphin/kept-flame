@@ -4,19 +4,33 @@
     "destTags": ["near"],
     "nodes": [
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 161,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
           {
             "label": "瓦礫を慎重に踏み分ける",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
           {
             "label": "がむしゃらに乗り越える",
-            "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 }
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
           },
-          { "label": "隊列を崩して強行する", "effect": { "injuryRiskMul": 1.5 } }
+          {
+            "label": "隊列を崩して強行する",
+            "effect": {
+              "injuryRiskMul": 1.5
+            }
+          }
         ],
         "branches": [
           {
@@ -32,9 +46,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 153,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -50,10 +66,20 @@
         ]
       },
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "隊列を整えて進む", "effect": { "successMod": 0.1 } }],
+        "difficulty": 158,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "隊列を整えて進む",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -68,9 +94,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -92,15 +120,26 @@
     "destTags": ["near"],
     "nodes": [
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 161,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
           {
             "label": "物音を立てず様子を見る",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
-          { "label": "一気に追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "一気に追い払う",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -116,9 +155,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 153,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -134,9 +175,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 153,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -152,10 +195,20 @@
         ]
       },
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "休憩を挟んで進む", "effect": { "successMod": 0.1 } }],
+        "difficulty": 213,
+        "R": 66,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "休憩を挟んで進む",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -176,12 +229,27 @@
     "destTags": ["near"],
     "nodes": [
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "vigor": 0.6, "fortitude": 0.4 },
+        "difficulty": 161,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.6,
+          "fortitude": 0.4
+        },
         "choices": [
-          { "label": "低い姿勢で慎重に進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "一気に奥まで踏み込む", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "低い姿勢で慎重に進む",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "一気に奥まで踏み込む",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -197,9 +265,12 @@
         ]
       },
       {
-        "difficulty": 100,
-        "R": 35,
-        "statWeights": { "fortitude": 0.5, "will": 0.5 },
+        "difficulty": 153,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.5,
+          "will": 0.5
+        },
         "choices": [],
         "branches": [
           {
@@ -215,9 +286,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 153,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -233,9 +306,11 @@
         ]
       },
       {
-        "difficulty": 90,
-        "R": 30,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -257,12 +332,27 @@
     "destTags": ["far"],
     "nodes": [
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
-          { "label": "風下から回り込む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "最短路を強行突破する", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "風下から回り込む",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "最短路を強行突破する",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -278,12 +368,26 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
-          { "label": "物陰から様子を伺う", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "一気に蹴散らす", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "物陰から様子を伺う",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "一気に蹴散らす",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -299,9 +403,11 @@
         ]
       },
       {
-        "difficulty": 120,
-        "R": 35,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -317,9 +423,11 @@
         ]
       },
       {
-        "difficulty": 110,
-        "R": 35,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -335,10 +443,20 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "交代しながら進む", "effect": { "successMod": 0.1 } }],
+        "difficulty": 213,
+        "R": 66,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "交代しながら進む",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -359,12 +477,26 @@
     "destTags": ["far"],
     "nodes": [
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
-          { "label": "迂回して刺激しない", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "一気に押し通る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "迂回して刺激しない",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "一気に押し通る",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -380,9 +512,11 @@
         ]
       },
       {
-        "difficulty": 120,
-        "R": 35,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -398,10 +532,20 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "隊列を詰めて進む", "effect": { "successMod": 0.1 } }],
+        "difficulty": 160,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "隊列を詰めて進む",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -416,9 +560,11 @@
         ]
       },
       {
-        "difficulty": 110,
-        "R": 35,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -434,9 +580,13 @@
         ]
       },
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "vigor": 0.3,
+          "dexterity": 0.3,
+          "fortitude": 0.4
+        },
         "choices": [],
         "branches": [
           {
@@ -463,9 +613,11 @@
     "destTags": ["far"],
     "nodes": [
       {
-        "difficulty": 120,
-        "R": 35,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -481,9 +633,11 @@
         ]
       },
       {
-        "difficulty": 110,
-        "R": 35,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -499,12 +653,27 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
-          { "label": "瓦礫を避けて進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "瓦礫を乗り越えて急ぐ", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "瓦礫を避けて進む",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "瓦礫を乗り越えて急ぐ",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -520,9 +689,12 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
         "choices": [],
         "branches": [
           {
@@ -538,15 +710,26 @@
         ]
       },
       {
-        "difficulty": 140,
-        "R": 45,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 216,
+        "R": 66,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
           {
             "label": "物陰に隠れてやり過ごす",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
-          { "label": "正面から追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "正面から追い払う",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -568,16 +751,33 @@
     "destTags": ["deep"],
     "nodes": [
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
           {
             "label": "熱気を避けて慎重に進む",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
-          { "label": "熱気を突っ切る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } },
-          { "label": "隊列を崩して強行する", "effect": { "injuryRiskMul": 1.5 } }
+          {
+            "label": "熱気を突っ切る",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          },
+          {
+            "label": "隊列を崩して強行する",
+            "effect": {
+              "injuryRiskMul": 1.5
+            }
+          }
         ],
         "branches": [
           {
@@ -593,12 +793,26 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
-          { "label": "闇に紛れてやり過ごす", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "松明で照らし追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "闇に紛れてやり過ごす",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "松明で照らし追い払う",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -614,9 +828,11 @@
         ]
       },
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -632,9 +848,11 @@
         ]
       },
       {
-        "difficulty": 130,
-        "R": 40,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -650,10 +868,20 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "交代で先頭に立つ", "effect": { "successMod": 0.1 } }],
+        "difficulty": 162,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "交代で先頭に立つ",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -668,9 +896,12 @@
         ]
       },
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [],
         "branches": [
           {
@@ -692,9 +923,11 @@
     "destTags": ["deep"],
     "nodes": [
       {
-        "difficulty": 130,
-        "R": 40,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -710,12 +943,27 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
-          { "label": "水位の低い縁を進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "最短の水路を泳ぎ切る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "水位の低い縁を進む",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "最短の水路を泳ぎ切る",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -731,15 +979,26 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
           {
             "label": "水音を立てず様子を見る",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
-          { "label": "一気に払いのける", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "一気に払いのける",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -755,9 +1014,11 @@
         ]
       },
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -773,9 +1034,12 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
         "choices": [],
         "branches": [
           {
@@ -791,9 +1055,13 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "vigor": 0.3,
+          "dexterity": 0.3,
+          "fortitude": 0.4
+        },
         "choices": [],
         "branches": [
           {
@@ -820,9 +1088,11 @@
     "destTags": ["deep"],
     "nodes": [
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -838,12 +1108,27 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
-          { "label": "氷を避けて慎重に進む", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "氷を割って一気に進む", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "氷を避けて慎重に進む",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "氷を割って一気に進む",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -859,12 +1144,26 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 165,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
-          { "label": "物陰から様子を伺う", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "松明で追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "物陰から様子を伺う",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "松明で追い払う",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -880,10 +1179,20 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
-        "choices": [{ "label": "体を温めながら進む", "effect": { "successMod": 0.1 } }],
+        "difficulty": 162,
+        "R": 50,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
+        "choices": [
+          {
+            "label": "体を温めながら進む",
+            "effect": {
+              "successMod": 0.1
+            }
+          }
+        ],
         "branches": [
           {
             "cond": "injuryCount == 0",
@@ -898,9 +1207,11 @@
         ]
       },
       {
-        "difficulty": 130,
-        "R": 40,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 157,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -916,9 +1227,13 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.3, "dexterity": 0.3, "fortitude": 0.4 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "vigor": 0.3,
+          "dexterity": 0.3,
+          "fortitude": 0.4
+        },
         "choices": [],
         "branches": [
           {
@@ -945,15 +1260,27 @@
     "destTags": ["deep"],
     "nodes": [
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "vigor": 0.5, "fortitude": 0.5 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "vigor": 0.5,
+          "fortitude": 0.5
+        },
         "choices": [
           {
             "label": "灰塵を避けて慎重に登る",
-            "effect": { "successMod": 0.15, "rewardMod": -0.1 }
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
           },
-          { "label": "灰塵の中を一気に登る", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "灰塵の中を一気に登る",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -969,12 +1296,26 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "combatPower": 1.0 },
+        "difficulty": 163,
+        "R": 50,
+        "statWeights": {
+          "combatPower": 1
+        },
         "choices": [
-          { "label": "息を潜めてやり過ごす", "effect": { "successMod": 0.15, "rewardMod": -0.1 } },
-          { "label": "一気に追い払う", "effect": { "rewardMod": 0.2, "difficultyMod": 0.1 } }
+          {
+            "label": "息を潜めてやり過ごす",
+            "effect": {
+              "successMod": 0.15,
+              "rewardMod": -0.1
+            }
+          },
+          {
+            "label": "一気に追い払う",
+            "effect": {
+              "rewardMod": 0.2,
+              "difficultyMod": 0.1
+            }
+          }
         ],
         "branches": [
           {
@@ -990,9 +1331,11 @@
         ]
       },
       {
-        "difficulty": 130,
-        "R": 40,
-        "statWeights": { "intellect": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "intellect": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -1008,9 +1351,11 @@
         ]
       },
       {
-        "difficulty": 150,
-        "R": 45,
-        "statWeights": { "dexterity": 1.0 },
+        "difficulty": 155,
+        "R": 50,
+        "statWeights": {
+          "dexterity": 1
+        },
         "choices": [],
         "branches": [
           {
@@ -1026,9 +1371,12 @@
         ]
       },
       {
-        "difficulty": 170,
-        "R": 55,
-        "statWeights": { "fortitude": 0.6, "will": 0.4 },
+        "difficulty": 206,
+        "R": 66,
+        "statWeights": {
+          "fortitude": 0.6,
+          "will": 0.4
+        },
         "choices": [],
         "branches": [
           {
