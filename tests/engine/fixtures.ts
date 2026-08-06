@@ -182,8 +182,36 @@ export function content(overrides: Partial<EngineContent> = {}): EngineContent {
     // 明示的に渡したときだけ素通しする(既存呼び出し元は誰も渡していない
     // ので挙動は変わらない・追加のみ)。
     ...(overrides.storage !== undefined ? { storage: overrides.storage } : {}),
+    // [M66] `care`(GDD 11.2 の療養所休養)/ `raid`(GDD 11.7 段10 の襲撃)も
+    // storage と同じ扱い: base に既定値を持たず、渡されたときだけ素通しする
+    // (= 既存の呼び出し元の挙動は 1 bit も変わらない)。
+    ...(overrides.care !== undefined ? { care: overrides.care } : {}),
+    ...(overrides.raid !== undefined ? { raid: overrides.raid } : {}),
+    // [M66] 襲撃強度の「時代逓増」(GDD 11.1)を測るのに到達エラが要る。
+    // 同じく渡されたときだけ素通しする(既定は「エラ概念なし」のまま)。
+    ...(overrides.eraDefs !== undefined ? { eraDefs: overrides.eraDefs } : {}),
   };
 }
+
+/** [M66] 療養所(GDD 6.1): 就労枠を持たず休養枠だけを提供する設備。 */
+export const INFIRMARY: FacilityDef = {
+  id: id("infirmary"),
+  tags: ["clean"],
+  harshWork: false,
+  outputPerTickByLevel: lvCurve(1),
+  output: { kind: "research" },
+  careCapacityByLevel: [1, 1, 2, 2, 3],
+};
+
+/** [M66] 見張り台(GDD 6.1 / 6.2): 防衛係数だけを提供する設備。 */
+export const WATCHTOWER: FacilityDef = {
+  id: id("watchtower"),
+  tags: ["noise"],
+  harshWork: false,
+  outputPerTickByLevel: lvCurve(1),
+  output: { kind: "research" },
+  defenseByLevel: [fixFromInt(20), fixFromInt(23), fixFromInt(26), fixFromInt(30), fixFromInt(34)],
+};
 
 // --- entity ----------------------------------------------------------------
 

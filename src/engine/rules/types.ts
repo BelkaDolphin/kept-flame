@@ -134,6 +134,21 @@ export interface FacilityDef {
    * = golden vector に影響しない(`workerSlotsByLevel` と同じ性質)。
    */
   readonly cost?: FacilityCostDef;
+  /**
+   * [M66] Lv 別の同時休養枠(index 0 = Lv1・**整数の人数**)。GDD 11.2 の回復条件
+   * 「療養所で休養1日」の受け皿であり、実装は `rules/care.ts`。
+   *
+   * **省略時はこの施設が休養枠を提供しない**。盤面の休養枠が 0 なら
+   * `careRecipientsAt` は常に空を返す = M66 以前と 1 bit も違わない。
+   */
+  readonly careCapacityByLevel?: readonly number[];
+  /**
+   * [M66] Lv 別の防衛係数(index 0 = Lv1)。GDD 6.2「見張り台 → 外周ほど防衛係数
+   * 上昇」の Σ防衛戦力の項であり、実装は `rules/raid.ts`。
+   *
+   * **省略時はこの施設が防衛に寄与しない**。
+   */
+  readonly defenseByLevel?: readonly Fix[];
 }
 
 /**
@@ -1049,6 +1064,45 @@ export interface EngineContent {
    * シナリオはこのブロックを持たないので、golden vector の既存分は不活性。
    */
   readonly research?: ResearchPacingParams;
+  /**
+   * [M66] 療養所の休養(GDD 11.2 の回復条件の第2枝)。**省略時は休養が働かない**
+   * (= M66 以前と 1 bit も違わない)。既存 conformance シナリオはこのブロックを
+   * 持たないので、golden vector の既存分は不活性。
+   */
+  readonly care?: CareParams;
+  /**
+   * [M66] 襲撃(GDD 11.7 段10 / 11.1 の戦闘式)。**省略時は襲撃が一度も起きない**
+   * (= M66 以前と 1 bit も違わない)。`care` と同じ立場。
+   */
+  readonly raid?: RaidParams;
+}
+
+/**
+ * [M66] 療養所の休養パラメータ(GDD 11.2「回復条件: …または療養所で休養1日」)。
+ * 休養枠そのものは施設側(`FacilityDef.careCapacityByLevel`)にある。
+ */
+export interface CareParams {
+  /** 休養で想起困難が解けるまでの tick(GDD の「1日」= 1440)。 */
+  readonly restRecoveryTicks: number;
+}
+
+/**
+ * [M66] 襲撃パラメータ(GDD 11.1「戦闘: 勝敗 = (Σ防衛戦力 × 配置ボーナス +
+ * seededRoll) vs 襲撃強度(時代逓増)」/ GDD 11.7 段10)。
+ */
+export interface RaidParams {
+  /** 襲撃判定の周期(tick)。判定 tick は絶対グリッド `n × intervalTicks`。 */
+  readonly intervalTicks: number;
+  /** 到達エラ 1 における襲撃強度。 */
+  readonly baseStrengthFix: Fix;
+  /** 到達エラが 1 段上がるごとの強度増分(「時代逓増」)。 */
+  readonly strengthGrowthPerEraFix: Fix;
+  /** seededRoll の上限(0〜この値の一様整数)。 */
+  readonly rollRange: number;
+  /** 外周セルの防衛施設に掛かる配置ボーナス(GDD 6.2「外周ほど」)。 */
+  readonly perimeterDefenseMulFix: Fix;
+  /** 撃退失敗時に各資源から失われる比率。 */
+  readonly lootRatioFix: Fix;
 }
 
 /**

@@ -56,6 +56,10 @@
  *                    vector が構造的に踏みようがないドメインである点は `exodus`
  *                    と同じ(rules/exodus.ts §0 参照)。hash アドレス方式
  *                    (住民の生成順に依存しない)。
+ *   raid           : [M66] 襲撃判定の seededRoll(GDD 11.1 の戦闘式 / 11.7 段10)。
+ *                    salt = (襲撃の連番 = tick / intervalTicks)。1 回の襲撃につき
+ *                    1 個しか引かず、hash アドレス方式ゆえストリーム状態を持たない
+ *                    (= 襲撃を実装しても既存の逐次ストリームの乱数列が動かない)。
  *   recall         : 想起困難の発生ベルヌーイ試行(GDD 11.2 / 段階1・ADR-009/018(1))。
  *                    salt = (fnv1a32(residentId), fnv1a32(techId), coarseStepIndex)。
  *                    per-step 全再評価が順序非依存であることを構造で保証するため
@@ -77,6 +81,7 @@ const DOMAIN_TAG_LIST = [
   "lifespan",
   "memoir",
   "newGame",
+  "raid",
   "recall",
   "recallDuration",
 ] as const;

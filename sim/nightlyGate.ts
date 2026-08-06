@@ -1231,6 +1231,10 @@ export interface NightlyGateReport {
     readonly recallGuardBlockCount: number;
     readonly recallOccurrenceCount: number;
     readonly minLivingPopulation: number;
+    /** [M66] 解決した襲撃の回数(GDD 11.7 段10)。 */
+    readonly raidCount: number;
+    /** [M66] うち撃退できた回数(見張り台の防衛係数が効いた証跡)。 */
+    readonly raidRepelledCount: number;
   }[];
 }
 
@@ -1292,6 +1296,8 @@ export function runNightlyGate(options: NightlyGateOptions = {}): NightlyGateRep
       recallGuardBlockCount: record.result.recallGuardLog.length,
       recallOccurrenceCount: record.result.metrics.recallOccurrenceCount,
       minLivingPopulation: record.result.metrics.minLivingPopulation,
+      raidCount: record.result.metrics.raidCount,
+      raidRepelledCount: record.result.metrics.raidRepelledCount,
     })),
   };
 }

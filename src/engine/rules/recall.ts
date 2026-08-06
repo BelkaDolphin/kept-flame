@@ -50,8 +50,12 @@
 //       content に無い tech は住民単位の全停止へフォールバックする
 //       (rules/techMemory.ts §1・§2)。
 //       これに伴い **同一住民の別 tech は独立に発生する**(下記)。
-//   (c) **回復条件** — [縮約のまま] 「通常業務就労かつ士気 ≥40 を持続、または
-//       療養所で休養1日」は未実装で、持続 d(1〜2 日・seed 決定論)の満了のみ。
+//   (c) **回復条件** — [M66 で第2枝を実装] 「通常業務就労かつ士気 ≥40 を持続」は
+//       縮約のまま(持続 d の満了のみ)だが、「**または療養所で休養1日**」は
+//       `rules/care.ts` として実装した。発生した (u,t) の回復 tick は
+//       「発生 + 抽選持続」と「発生 + `balance.care.restRecoveryTicks`」の
+//       **早い方**になる(療養所の休養枠に入れた住民のみ)。content に
+//       `care` ブロックが無い / 盤面に休養枠が無い場合は M66 以前と同一。
 //
 //   **発生の抑制は (住民, tech) 単位**(M13)。T5 は「既に想起困難中の**住民**には
 //   新規発生を積まない」という住民単位の抑制だったが、GDD 11.2 は
@@ -91,6 +95,7 @@ import {
   type GameState,
   type ResidentState,
 } from "../state/state";
+import { careRecipientsAt, recoveryTickWithCare } from "./care";
 import { isTechImpaired, masteryResistBaseFix, setTechImpairedUntil } from "./techMemory";
 import { RulesError, requireFacilityDef, type AdvanceContext, type EngineContent } from "./types";
 
@@ -254,10 +259,22 @@ export function evaluateRecallCoarseStep(
 
       const durationDraw = drawFromStream(next, DOMAIN_TAGS.recallDuration);
       next = durationDraw.state;
-      const untilTick =
+      const drawnUntilTick =
         stepTick +
         uniformIntFromDraw(durationDraw.value, params.durationMinTicks, params.durationMaxTicks);
-      next = setTechImpairedUntil(next, resident.id, techId, untilTick);
+      // [M66] まず抽選どおりに書いてから、療養所の休養枠に入るかを判定して
+      // 短縮する(GDD 11.2「療養所で休養1日」・rules/care.ts §1(a)(b))。
+      // 枠の判定は**発生を書き込んだ後の state** で行う: この住民自身も
+      // 「想起困難中」として枠を数える対象だからである。住民の走査は ID 昇順で、
+      // `careRecipientsAt` も ID 昇順に枠を埋めるので、後から発生した上位 ID の
+      // 住民が既に処理した下位 ID の住民の枠を奪うことはない(同一ステップ内で
+      // 判定が安定する)。`content.care` が無ければ短縮は起きない。
+      next = setTechImpairedUntil(next, resident.id, techId, drawnUntilTick);
+      const underCare = careRecipientsAt(next, content, stepTick).includes(resident.id);
+      const untilTick = recoveryTickWithCare(content, stepTick, drawnUntilTick, underCare);
+      if (untilTick !== drawnUntilTick) {
+        next = setTechImpairedUntil(next, resident.id, techId, untilTick);
+      }
       occurrences.push({ residentId: resident.id, techId, untilTick });
     }
   }

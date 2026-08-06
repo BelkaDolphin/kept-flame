@@ -229,9 +229,12 @@ describe("壊れた rngState の拒否", () => {
     };
   }
 
+  // [M66] 旧版はここで "raid" を未登録タグの例に使っていたが、M66 で襲撃の
+  // seededRoll 用に "raid" が**実際に登録された**ため未登録の例を差し替えた
+  // (主張「レジストリ外の domainTag はセーブから復元できない」は不変)。
   it("レジストリ外の domainTag", () => {
-    expect(() => fromSerializable(withRngState({ raid: [1, 2, 3, 4] }))).toThrow(SerializeError);
-    expect(isDomainTag("raid")).toBe(false);
+    expect(() => fromSerializable(withRngState({ siege: [1, 2, 3, 4] }))).toThrow(SerializeError);
+    expect(isDomainTag("siege")).toBe(false);
   });
 
   it("4 語でない配列", () => {
@@ -281,7 +284,8 @@ describe("domainTags レジストリ(T5 で追加した分)", () => {
     for (const tag of ["adjacency", "exploration", "recall", "recallDuration"]) {
       expect(isDomainTag(tag)).toBe(true);
     }
-    for (const tag of ["production", "research", "raid", "Recall", ""]) {
+    // [M66] "raid" は登録済みになったので未登録側の例から外す(上記と同じ理由)。
+    for (const tag of ["production", "research", "siege", "Recall", ""]) {
       expect(isDomainTag(tag)).toBe(false);
     }
   });

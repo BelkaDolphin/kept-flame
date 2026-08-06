@@ -51,9 +51,12 @@ describe("assertUniqueDomainTags: ランタイムでの重複登録拒否(ADR-02
 
 describe("型: レジストリ外のdomainTagは型エラーになる(ADR-024(2)、@ts-expect-error)", () => {
   it("レジストリに存在しない文字列はDomainTagへ代入できない", () => {
-    // @ts-expect-error "raid" はDOMAIN_TAG_LIST(domainTags.ts)に未登録のため
-    // DomainTag型(= "exploration")へ代入できずコンパイルエラーになる。
-    const rejected: DomainTag = "raid";
+    // @ts-expect-error "siege" はDOMAIN_TAG_LIST(domainTags.ts)に未登録のため
+    // DomainTag型へ代入できずコンパイルエラーになる。
+    // [M66] 旧版はここで "raid" を未登録の例に使っていたが、M66 で襲撃の
+    // seededRoll 用に "raid" が**実際に登録された**ため、未登録の例を差し替えた
+    // (テストの主張「レジストリ外の文字列は代入できない」は不変)。
+    const rejected: DomainTag = "siege";
     void rejected;
   });
 

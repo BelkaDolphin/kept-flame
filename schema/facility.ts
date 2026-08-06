@@ -83,6 +83,23 @@
 //       どちらが正かの解釈が生まれる)。
 //   単一形は**そのまま読み続ける**(既存 content は 1 バイトも変えずに通る)。
 //   engine 側の写し方は `schema/engineContent.ts` の `toFacilityCost` を参照。
+//
+// ---------------------------------------------------------------------------
+// [M66] 追加フィールド `careCapacityCurve`(療養所)/ `defenseCurve`(見張り台)
+// ---------------------------------------------------------------------------
+// GDD 6.1 の施設14種のうち、就労スロット 0 の 4 種(寝床/保管庫/見張り台/療養所)は
+// 「Lv 別カーブ 1 本で効果を表す設備」である。寝床は `bedCapacityCurve`(M11)、
+// 保管庫は `storageCapacityCurve`(M5)を既に持っており、M66 は残る 2 種へ同じ形で
+// 1 本ずつ足す(**省略可**・省略時はその効果を提供しない = M66 以前と 1 bit も
+// 違わない)。
+//
+//   careCapacityCurve : GDD 11.2「回復条件: …または**療養所で休養1日**」の
+//                       同時休養枠(人数・整数)。engine 側の実装は
+//                       `src/engine/rules/care.ts`。
+//   defenseCurve      : GDD 6.2「見張り台 → 外周ほど防衛係数上昇」/ GDD 11.1
+//                       「戦闘: 勝敗 = (Σ防衛戦力 × 配置ボーナス + seededRoll)
+//                       vs 襲撃強度(時代逓増)」の Σ防衛戦力の項。engine 側の
+//                       実装は `src/engine/rules/raid.ts`。
 // ---------------------------------------------------------------------------
 
 import {
@@ -219,6 +236,16 @@ export interface FacilityContent {
    * JSON に無ければ null(同上)。
    */
   readonly upgradeCostCurve: readonly number[] | null;
+  /**
+   * [M66] Lv 別の同時休養枠(人数・整数)。GDD 11.2 の「療養所で休養1日」。
+   * JSON に無ければ null(= この施設は休養枠を提供しない)。
+   */
+  readonly careCapacityCurve: readonly number[] | null;
+  /**
+   * [M66] Lv 別の防衛係数。GDD 6.2「見張り台」/ GDD 11.1 の戦闘式の Σ防衛戦力。
+   * JSON に無ければ null(= この施設は防衛に寄与しない)。
+   */
+  readonly defenseCurve: readonly number[] | null;
 }
 
 const SLOT_LEVEL_KEYS = ["lv1", "lv2", "lv3", "lv4", "lv5"] as const;
@@ -445,6 +472,84 @@ function validateBedCapacityCurve(
   return values;
 }
 
+/** [M66] 同時休養枠の値域。人数なので**非負整数**(寝床上限カーブと同じ立場)。 */
+const CARE_CAPACITY_VALUE_RANGE = { min: 0, max: 1_000 };
+
+/**
+ * [M66] `careCapacityCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負整数・単調非減少。
+ *
+ * 単調非減少を強制する理由は {@link validateBedCapacityCurve} と同じ
+ * (増築すると休養枠が減る設定は「Lv を上げるほど守られる人数が減る」形になる)。
+ */
+function validateCareCapacityCurve(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (arr.length !== LV_CURVE_LENGTH) {
+    issues.add(
+      path,
+      `careCapacityCurve は長さ ${String(LV_CURVE_LENGTH)}(Lv1〜Lv5)が必須(実際: ${String(arr.length)})`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const n = expectInteger(arr[i], `${path}[${String(i)}]`, issues, CARE_CAPACITY_VALUE_RANGE);
+    if (n === undefined) return undefined;
+    const previous = values[i - 1];
+    if (previous !== undefined && n < previous) {
+      issues.add(
+        `${path}[${String(i)}]`,
+        `careCapacityCurve は単調非減少が必須(Lv を上げて休養枠が減らない)。${String(previous)} の次が ${String(n)}`,
+      );
+      return undefined;
+    }
+    values.push(n);
+  }
+  return values;
+}
+
+/** [M66] 防衛係数の値域。戦闘式の左辺の項なので小数可・非負。 */
+const DEFENSE_VALUE_RANGE = { min: 0, max: 1_000_000 };
+
+/**
+ * [M66] `defenseCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負・単調非減少。
+ * 「増築すると弱くなる見張り台」を設定ミスとして止める。
+ */
+function validateDefenseCurve(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): readonly number[] | undefined {
+  const arr = expectArray(raw, path, issues);
+  if (arr === undefined) return undefined;
+  if (arr.length !== LV_CURVE_LENGTH) {
+    issues.add(
+      path,
+      `defenseCurve は長さ ${String(LV_CURVE_LENGTH)}(Lv1〜Lv5)が必須(実際: ${String(arr.length)})`,
+    );
+    return undefined;
+  }
+  const values: number[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const n = expectNumber(arr[i], `${path}[${String(i)}]`, issues, DEFENSE_VALUE_RANGE);
+    if (n === undefined) return undefined;
+    const previous = values[i - 1];
+    if (previous !== undefined && n < previous) {
+      issues.add(
+        `${path}[${String(i)}]`,
+        `defenseCurve は単調非減少が必須(Lv を上げて防衛係数が下がらない)。${String(previous)} の次が ${String(n)}`,
+      );
+      return undefined;
+    }
+    values.push(n);
+  }
+  return values;
+}
+
 /** [M5] `storedResourceIds`(省略可)の検証。ID 規則に一致する文字列の配列。 */
 function validateStoredResourceIds(
   raw: unknown,
@@ -644,6 +749,19 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
       ? null
       : (validateUpgradeCostCurve(rawUpgradeCostCurve, "$.upgradeCostCurve", issues) ?? undefined);
 
+  // [M66] 追加の省略可フィールド(ファイル冒頭 [M66])。
+  const rawCareCapacityCurve = obj["careCapacityCurve"];
+  const careCapacityCurve =
+    rawCareCapacityCurve === undefined
+      ? null
+      : (validateCareCapacityCurve(rawCareCapacityCurve, "$.careCapacityCurve", issues) ??
+        undefined);
+  const rawDefenseCurve = obj["defenseCurve"];
+  const defenseCurve =
+    rawDefenseCurve === undefined
+      ? null
+      : (validateDefenseCurve(rawDefenseCurve, "$.defenseCurve", issues) ?? undefined);
+
   if (
     id === undefined ||
     tags === undefined ||
@@ -658,7 +776,9 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     storedResourceIds === undefined ||
     bedCapacityCurve === undefined ||
     buildCost === undefined ||
-    upgradeCostCurve === undefined
+    upgradeCostCurve === undefined ||
+    careCapacityCurve === undefined ||
+    defenseCurve === undefined
   ) {
     return fail(issues.list());
   }
@@ -678,5 +798,7 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
     bedCapacityCurve,
     buildCost,
     upgradeCostCurve,
+    careCapacityCurve,
+    defenseCurve,
   });
 }

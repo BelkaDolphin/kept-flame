@@ -153,6 +153,7 @@ import type {
   OutpostParams,
   OutpostTypeDef,
   OutpostUpkeepParams,
+  RaidParams,
   RecallRiskParams,
   ReclaimParams,
   RecordMediaParams,
@@ -174,6 +175,7 @@ import type {
   ExodusBalanceContent,
   ExplorationContent,
   OutpostBalanceContent,
+  RaidContent,
   ReclaimBalanceContent,
   RecordMediaContent,
   RecordMediumContent,
@@ -691,10 +693,26 @@ function toFacilityDef(content: FacilityContent, issues: IssueCollector): Facili
           cost,
           bedCapacityByLevel: [...beds],
         };
-  if (statWeights === null && storage === null) return base;
-  if (statWeights === null) return { ...base, storage: storage as FacilityStorageDef };
-  if (storage === null) return { ...base, statWeights };
-  return { ...base, statWeights, storage };
+  let def: FacilityDef = base;
+  if (statWeights !== null) def = { ...def, statWeights };
+  if (storage !== null) def = { ...def, storage: storage as FacilityStorageDef };
+  // [M66] 休養枠(人数・整数なので FP 変換を通さない)/ 防衛係数(戦闘式の項なので
+  // FP へ変換する)。どちらも省略可で、キー不在が「効果を提供しない」の意味。
+  if (content.careCapacityCurve !== null) {
+    def = { ...def, careCapacityByLevel: [...content.careCapacityCurve] };
+  }
+  if (content.defenseCurve !== null) {
+    const defenseByLevel: Fix[] = [];
+    for (let level = 0; level < content.defenseCurve.length; level++) {
+      const raw = content.defenseCurve[level];
+      if (raw === undefined) continue;
+      const fix = toFix(raw, `${path}.defenseCurve[${String(level)}]`, issues, "Lv 別防衛係数");
+      if (fix === undefined) return undefined;
+      defenseByLevel.push(fix);
+    }
+    def = { ...def, defenseByLevel };
+  }
+  return def;
 }
 
 // --- 3b. trait(§1(e)・M5) -------------------------------------------------
@@ -2047,6 +2065,49 @@ function toReclaimParams(
   };
 }
 
+// --- 6g2. raid(GDD 11.1 / 11.7 段10)— M66 -------------------------------------
+
+/**
+ * [M66] `balance.raid` → engine の {@link RaidParams}(GDD 11.1 の戦闘式)。
+ *
+ * 周期 tick と seededRoll の上限は**整数のまま**写す(tick と数え上げなので
+ * `ExplorationBandParams` のノード数と同じ扱い)。強度・配置ボーナス・略奪率は
+ * 戦闘式の係数なので 1e6 化する。
+ */
+function toRaidParams(content: RaidContent, issues: IssueCollector): RaidParams | undefined {
+  const path = "balance.raid";
+  const baseStrengthFix = toFix(content.baseStrength, `${path}.baseStrength`, issues, "襲撃強度");
+  const strengthGrowthPerEraFix = toFix(
+    content.strengthGrowthPerEra,
+    `${path}.strengthGrowthPerEra`,
+    issues,
+    "襲撃強度のエラ逓増",
+  );
+  const perimeterDefenseMulFix = toFix(
+    content.perimeterDefenseMul,
+    `${path}.perimeterDefenseMul`,
+    issues,
+    "外周の配置ボーナス",
+  );
+  const lootRatioFix = toFix(content.lootRatio, `${path}.lootRatio`, issues, "略奪率");
+  if (
+    baseStrengthFix === undefined ||
+    strengthGrowthPerEraFix === undefined ||
+    perimeterDefenseMulFix === undefined ||
+    lootRatioFix === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    intervalTicks: content.intervalTicks,
+    baseStrengthFix,
+    strengthGrowthPerEraFix,
+    rollRange: content.rollRange,
+    perimeterDefenseMulFix,
+    lootRatioFix,
+  };
+}
+
 // --- 6h. exodus(GDD 10.2〜10.5)— M28 -----------------------------------------
 
 /**
@@ -2228,6 +2289,12 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   //   EngineContent へキーを足さない** = 実地要件がゲートとして働かない
   //   (M67 以前と 1 bit も違わない・既存 conformance シナリオがこの経路)。
   const research = bundle.balance.research;
+  // [M66] 療養所の休養(GDD 11.2)/ 襲撃(GDD 11.7 段10)。同じく省略可で、
+  //   ブロック不在なら EngineContent へキーを足さない(= M66 以前と 1 bit も
+  //   違わない・既存 conformance シナリオがこの経路)。
+  const care = bundle.balance.care;
+  const raid =
+    bundle.balance.raid === null ? null : (toRaidParams(bundle.balance.raid, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -2250,7 +2317,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     exploration === undefined ||
     outpost === undefined ||
     reclaim === undefined ||
-    exodus === undefined
+    exodus === undefined ||
+    raid === undefined
   ) {
     return fail(issues.list());
   }
@@ -2283,11 +2351,16 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   // [M28] 大移動 / 継承点(GDD 10.2〜10.5)。同上。
   const withExodus = exodus === null ? withReclaim : { ...withReclaim, exodus };
   // [M67] 研究ペーシング(GDD 5.2)。同上。
-  return ok(
+  const withResearch =
     research === null
       ? withExodus
-      : { ...withExodus, research: { recipeRunTicks: research.recipeRunTicks } },
-  );
+      : { ...withExodus, research: { recipeRunTicks: research.recipeRunTicks } };
+  // [M66] 療養所の休養 / 襲撃。同上。
+  const withCare =
+    care === null
+      ? withResearch
+      : { ...withResearch, care: { restRecoveryTicks: care.restRecoveryTicks } };
+  return ok(raid === null ? withCare : { ...withCare, raid });
 }
 
 /**

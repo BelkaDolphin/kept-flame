@@ -289,6 +289,50 @@ export function collapseAdditiveBuildCostWidening(base: JsonObject, head: JsonOb
   return collapsed;
 }
 
+// ---------------------------------------------------------------------------
+// §3c: [M66] 既存 entity への**新規フィールド追加**を additive として認識する
+// ---------------------------------------------------------------------------
+//
+//   M66(見張り台/療養所の効果実装)は、既存の facility entity へ Lv 別カーブを
+//   1 本足す(`infirmary.careCapacityCurve` / `watchtower.defenseCurve`)。
+//   これは M5 の `storageCapacityCurve`・M11 の `bedCapacityCurve`・M50 の
+//   `buildCost` とまったく同じ「省略可フィールドの追加」であり、schema 側も
+//   engine 側も**キー不在 = 従来の挙動**という契約で受けている
+//   (schema/facility.ts 冒頭 [M66] / src/engine/rules/types.ts)。
+//
+//   §3 の素の規則では「オブジェクトのキー集合の変化」= 意味変更 reject になる
+//   ため、ここで **1 形だけ**を additive として認識する:
+//
+//     **entity のトップレベルに、base に無いキーが head で増えているだけ**なら、
+//     その新規キーを比較対象から外してから §3 の比較に掛ける。
+//
+//   これは判定基準の緩和ではなく、GDD 12.4/12.5-2 が禁じているもの
+//   (既存 ID の削除・リネーム・既存フィールドの意味変更)を 1 つも通さない:
+//     - base に有るキーが head から消えたら、キー集合は依然として食い違うので
+//       reject(新規キーだけを外すので、欠落は隠れない)。
+//     - 既存キーの値の非数値変更は従来どおり reject(比較対象に残る)。
+//     - **ネストしたオブジェクト内**のキー追加は対象外(トップレベルのみ)。
+//       `output.kind` の隣に別解釈のキーを足す、といった既存意味の上書きを
+//       通さないため。
+//     - 新規キーの中身そのものは base に対応が無い = 「新しく足したもの」。
+// ---------------------------------------------------------------------------
+
+/**
+ * [M66] head のトップレベル新規キーを取り除いた head を返す(§3c)。
+ * 新規キーが 1 つも無ければ head をそのまま返す。純関数・テストから直接叩ける
+ * よう export する。
+ */
+export function omitAdditiveNewFields(base: JsonObject, head: JsonObject): JsonObject {
+  const addedKeys = Object.keys(head).filter((key) => base[key] === undefined);
+  if (addedKeys.length === 0) return head;
+  const kept: Record<string, JsonValue> = {};
+  for (const key of Object.keys(head)) {
+    if (addedKeys.includes(key)) continue;
+    kept[key] = head[key] as JsonValue;
+  }
+  return kept;
+}
+
 export type EntityChangeStatus =
   "unchanged" | "numericTuning" | "newlyTombstoned" | "resurrected" | "semanticChange";
 
@@ -309,10 +353,9 @@ export function diffEntity(id: string, base: JsonObject, head: JsonObject): Enti
   const headTombstoned = head[TOMBSTONE_FIELD] === true;
 
   const baseRest = omitKey(base, TOMBSTONE_FIELD);
-  const headRest = collapseAdditiveBuildCostWidening(
-    omitKey(base, TOMBSTONE_FIELD),
-    omitKey(head, TOMBSTONE_FIELD),
-  );
+  // [M65 §3b → M66 §3c] 新形式の**認識**を 2 段で行ってから §3 の比較に掛ける。
+  const headWidened = collapseAdditiveBuildCostWidening(baseRest, omitKey(head, TOMBSTONE_FIELD));
+  const headRest = omitAdditiveNewFields(baseRest, headWidened);
   const changedPaths: string[] = [];
   diffValueNonNumeric(baseRest, headRest, "$", changedPaths);
 

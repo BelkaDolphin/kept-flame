@@ -7,6 +7,17 @@
   "research": {
     "recipeRunTicks": 15
   },
+  "care": {
+    "restRecoveryTicks": 1440
+  },
+  "raid": {
+    "intervalTicks": 4320,
+    "baseStrength": 30,
+    "strengthGrowthPerEra": 25,
+    "rollRange": 40,
+    "perimeterDefenseMul": 1.5,
+    "lootRatio": 0.05
+  },
   "recallRiskParams": {
     "base_p": 0.036,
     "p_max": 0.35,

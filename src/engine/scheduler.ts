@@ -124,6 +124,7 @@ import { resolveExpedition } from "./rules/exploration";
 import { deathTickOf } from "./rules/lifespan";
 import { recordDeathMemoir } from "./rules/memoir";
 import { applyOutpostSupply, computeOutpostSupplyRates } from "./rules/outpost";
+import { nextRaidTick, resolveRaid } from "./rules/raid";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
 import { applyProduction, computeProductionRates, type ProductionRates } from "./rules/production";
 import {
@@ -184,7 +185,7 @@ export function clampOfflineTickDelta(tickDelta: number): number {
  * 未実装の段も**番号だけ予約**してある(後から挿入しても既存の相対順序が動かない)。
  */
 export const PIPELINE_STAGE = {
-  /** 襲撃判定(未実装)。 */
+  /** 襲撃判定([M66] 結線済み・GDD 11.7 段10 / 11.1 の戦闘式・rules/raid.ts)。 */
   raid: 10,
   /** 負傷反映(未実装)。 */
   injury: 20,
@@ -232,10 +233,11 @@ export const PIPELINE_STAGE = {
   dust: 90,
 } as const;
 
-/** 離散事象の種類(T5 の 3 種 + M11 の 2 種 + M21 の 1 種 + M50 の 1 種)。 */
+/** 離散事象の種類(T5 の 3 種 + M11 の 2 種 + M21 の 1 種 + M50 の 1 種 + M66 の 1 種)。 */
 export type SchedulerEventKind =
   | "codifyComplete"
   | "expeditionReturn"
+  | "raid"
   | "recallRecover"
   | "residentArrival"
   | "residentDeath"
@@ -245,6 +247,7 @@ export type SchedulerEventKind =
 const STAGE_BY_KIND: { readonly [K in SchedulerEventKind]: number } = {
   codifyComplete: PIPELINE_STAGE.codify,
   expeditionReturn: PIPELINE_STAGE.exploration,
+  raid: PIPELINE_STAGE.raid,
   recallRecover: PIPELINE_STAGE.recallRecover,
   residentArrival: PIPELINE_STAGE.arrival,
   residentDeath: PIPELINE_STAGE.death,
@@ -275,8 +278,14 @@ export function classifyEventBoundary(kind: SchedulerEventKind): BoundaryClass {
     // なる)報酬を在庫へ入れるので、同じく (B) レート変化イベントである。
     // [M50] `codifyComplete` は成文化キューの先頭を次のジョブへ進める(= 学者の
     // 作業が向かう先が変わる)ので、`researchComplete` と同じ (B) である。
+    // [M66] `raid` は撃退に失敗すると在庫が減る = 次の区間の建設可否が変わるが、
+    // **生産レートそのものは変えない**。それでも (B) に分類するのは、この分類が
+    // 「(C) の粗粒度ステップかどうか」を区別するためのものであり、確率抽選を
+    // 伴いつつ (C) のグリッドに載らない襲撃は (B) 側に置くのが自然だからである
+    // (区間の切れ方は同じ)。
     case "codifyComplete":
     case "expeditionReturn":
+    case "raid":
     case "recallRecover":
     case "researchComplete":
     case "residentArrival":
@@ -596,6 +605,14 @@ export function buildEventQueue(state: GameState, ctx: AdvanceContext, toTick: n
     queue.push({ tick: arrivalTick, kind: "residentArrival", entityId: null });
   }
 
+  // [M66] 襲撃(GDD 11.7 段10)。晴天漂着と同じ絶対グリッド方式なので、
+  // state にカウンタを持たずに次の判定 tick が決まる(rules/raid.ts §1(e))。
+  // content に raid ブロックが無ければ null = 一度も積まれない。
+  const raidTick = nextRaidTick(ctx.content, state.tick);
+  if (raidTick !== null && raidTick < toTick) {
+    queue.push({ tick: raidTick, kind: "raid", entityId: null });
+  }
+
   return queue;
 }
 
@@ -797,6 +814,15 @@ export interface ScheduleReport {
    * `rateChangeEventCount` を 1 増やすことによる既存カウンタ経由。
    */
   readonly codificationCompleteCount: number;
+  /**
+   * [M66] 解決した襲撃の回数(GDD 11.7 段10)。golden vector のカウンタ 5 種には
+   * **入れない**(`conformance/goldenVector.ts` の `countersOfReport` は固定 5
+   * フィールド・`techLossCount` と同じ扱い)。襲撃は `rateChangeEventCount` を
+   * 1 増やすので既存カウンタ経由でも観測できる。
+   */
+  readonly raidCount: number;
+  /** [M66] うち撃退できた回数(GDD 11.1 の「勝敗」の勝ち側)。 */
+  readonly raidRepelledCount: number;
   /** `collectSegments` を有効にしたときだけ非空。 */
   readonly segments: readonly SegmentRecord[];
 }
@@ -857,6 +883,8 @@ export function runSchedule(
   let explorationCasualtyCount = 0;
   let explorationRescueCount = 0;
   let codificationCompleteCount = 0;
+  let raidCount = 0;
+  let raidRepelledCount = 0;
 
   if (toTick === state.tick) {
     return {
@@ -875,6 +903,8 @@ export function runSchedule(
       explorationCasualtyCount,
       explorationRescueCount,
       codificationCompleteCount,
+      raidCount,
+      raidRepelledCount,
       segments,
     };
   }
@@ -976,6 +1006,22 @@ export function runSchedule(
           const nextStep = cursor + ctx.content.coarseTickMinutes;
           if (nextStep < toTick) {
             queue.pushAfter({ tick: nextStep, kind: "stochasticStep", entityId: null }, cursor);
+          }
+          break;
+        }
+        case "raid": {
+          // [M66] 襲撃判定(GDD 11.7 段10)。撃退に失敗すると在庫の一部が
+          // 略奪される(住民は死なない = GDD 11.1 の全滅回避フェイルセーフ・
+          // rules/raid.ts §1(d))。次の判定 tick は必ず積み直す(周期グリッドを
+          // 切らさない —— 晴天漂着と同じ規約)。
+          const raidResult = resolveRaid(next, ctx, cursor);
+          next = raidResult.state;
+          rateChangeEventCount++;
+          raidCount++;
+          if (raidResult.repelled) raidRepelledCount++;
+          const nextRaid = nextRaidTick(ctx.content, cursor + 1);
+          if (nextRaid !== null && nextRaid < toTick) {
+            queue.pushAfter({ tick: nextRaid, kind: "raid", entityId: null }, cursor);
           }
           break;
         }
@@ -1144,6 +1190,8 @@ export function runSchedule(
     explorationCasualtyCount,
     explorationRescueCount,
     codificationCompleteCount,
+    raidCount,
+    raidRepelledCount,
     segments,
   };
 }

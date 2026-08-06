@@ -342,6 +342,45 @@ export interface ResearchPacingContent {
   readonly recipeRunTicks: number;
 }
 
+/**
+ * [M66] 療養所の休養(GDD 11.2 の回復条件のうち「療養所で休養1日」)のパラメータ。
+ * **ブロックごと省略可**(欠落は null = 休養機構が不活性 = M66 以前と同じ挙動)。
+ *
+ * 休養枠そのものは施設側(`facility.careCapacityCurve`)にあり、ここには
+ * 「何 tick で回復するか」だけを置く(施設は上限値管理に役割限定・GDD 12.1)。
+ */
+export interface CareContent {
+  /**
+   * 休養による想起困難の回復までの tick(GDD 11.2「休養1日」= 1440)。
+   * 抽選された持続(1〜2日)がこれより長い場合に**この値へ短縮**される
+   * (延長はしない = 休養が悪化させることはない)。
+   */
+  readonly restRecoveryTicks: number;
+}
+
+/**
+ * [M66] 襲撃(GDD 11.7 段10「襲撃判定」/ GDD 11.1「戦闘」)のパラメータ。
+ * **ブロックごと省略可**(欠落は null = 襲撃が一度も起きない = M66 以前と同じ挙動)。
+ *
+ * GDD 11.1 の式 `勝敗 = (Σ防衛戦力 × 配置ボーナス + seededRoll) vs 襲撃強度(時代逓増)`
+ * をそのまま写す。Σ防衛戦力は施設側(`facility.defenseCurve`)、配置ボーナスは
+ * {@link RaidContent.perimeterDefenseMul}(GDD 6.2「外周ほど防衛係数上昇」)。
+ */
+export interface RaidContent {
+  /** 襲撃判定の周期(tick・絶対グリッド)。晴天漂着と同じ「周期 × n」方式。 */
+  readonly intervalTicks: number;
+  /** 到達エラ 1 における襲撃強度。 */
+  readonly baseStrength: number;
+  /** 到達エラが 1 段上がるごとに加算される強度(GDD 11.1「時代逓増」)。 */
+  readonly strengthGrowthPerEra: number;
+  /** seededRoll の上限(0〜この値の一様整数)。 */
+  readonly rollRange: number;
+  /** 外周セルに置かれた防衛施設の配置ボーナス倍率(GDD 6.2)。 */
+  readonly perimeterDefenseMul: number;
+  /** 撃退に失敗したとき各資源の在庫から失われる比率(GDD 8.5 と同じ「理不尽全滅はしない」曲線)。 */
+  readonly lootRatio: number;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -370,6 +409,10 @@ export interface BalanceContent {
   readonly reclaim: ReclaimBalanceContent | null;
   /** [M28] GDD 10.2〜10.5 の大移動 / 継承点。JSON に無ければ null(周回不可)。 */
   readonly exodus: ExodusBalanceContent | null;
+  /** [M66] GDD 11.2 の療養所休養。JSON に無ければ null(休養機構が不活性)。 */
+  readonly care: CareContent | null;
+  /** [M66] GDD 11.7 段10 の襲撃。JSON に無ければ null(襲撃が起きない)。 */
+  readonly raid: RaidContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -1407,6 +1450,103 @@ function validateResearchPacing(
 /** [M67] レシピ 1 回の稼働 tick 換算の値域(1 tick 〜 1 ゲーム年ぶん)。 */
 const RECIPE_RUN_TICKS_RANGE: NumericRange = { min: 1, max: 525_600 };
 
+/** [M66] 休養回復 tick の値域(1 tick 〜 30 ゲーム日)。 */
+const REST_RECOVERY_TICKS_RANGE: NumericRange = { min: 1, max: 43_200 };
+
+/**
+ * [M66] `care`(省略可)の検証。`restRecoveryTicks` は 1 以上の整数
+ * (0 を許すと「発生した瞬間に回復する」= 想起困難が観測不能になる)。
+ */
+function validateCare(raw: unknown, path: string, issues: IssueCollector): CareContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const restRecoveryTicks = expectInteger(
+    obj["restRecoveryTicks"],
+    `${path}.restRecoveryTicks`,
+    issues,
+    REST_RECOVERY_TICKS_RANGE,
+  );
+  if (restRecoveryTicks === undefined) return undefined;
+  return { restRecoveryTicks };
+}
+
+/** [M66] 襲撃周期の値域(1 tick 〜 1 ゲーム年ぶん)。 */
+const RAID_INTERVAL_TICKS_RANGE: NumericRange = { min: 1, max: 525_600 };
+/** [M66] 襲撃強度 / 防衛係数 / seededRoll の値域(GDD 11.1 の戦闘式の項)。 */
+const RAID_STRENGTH_RANGE: NumericRange = { min: 0, max: 1_000_000 };
+/** [M66] 配置ボーナス倍率の値域(1.0 未満 = 外周が不利、は設定ミスとして止める)。 */
+const RAID_PERIMETER_MUL_RANGE: NumericRange = { min: 1, max: 10 };
+/** [M66] 略奪率の値域。1.0(全損)は「理不尽全滅はしない」曲線(GDD 8.5)に反するので上限 0.5。 */
+const RAID_LOOT_RATIO_RANGE: NumericRange = { min: 0, max: 0.5 };
+
+/**
+ * [M66] `raid`(省略可)の検証。GDD 11.1 の戦闘式の各項がそろっているかだけを見る
+ * (値の妥当性 = バランスは sim 側の担当)。
+ */
+function validateRaid(raw: unknown, path: string, issues: IssueCollector): RaidContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const intervalTicks = expectInteger(
+    obj["intervalTicks"],
+    `${path}.intervalTicks`,
+    issues,
+    RAID_INTERVAL_TICKS_RANGE,
+  );
+  const baseStrength = expectNumber(
+    obj["baseStrength"],
+    `${path}.baseStrength`,
+    issues,
+    RAID_STRENGTH_RANGE,
+  );
+  const strengthGrowthPerEra = expectNumber(
+    obj["strengthGrowthPerEra"],
+    `${path}.strengthGrowthPerEra`,
+    issues,
+    RAID_STRENGTH_RANGE,
+  );
+  const rollRange = expectInteger(obj["rollRange"], `${path}.rollRange`, issues, {
+    min: 0,
+    max: UNIFORM_SPAN_LIMIT,
+  });
+  const perimeterDefenseMul = expectNumber(
+    obj["perimeterDefenseMul"],
+    `${path}.perimeterDefenseMul`,
+    issues,
+    RAID_PERIMETER_MUL_RANGE,
+  );
+  const lootRatio = expectNumber(
+    obj["lootRatio"],
+    `${path}.lootRatio`,
+    issues,
+    RAID_LOOT_RATIO_RANGE,
+  );
+  if (
+    intervalTicks === undefined ||
+    baseStrength === undefined ||
+    strengthGrowthPerEra === undefined ||
+    rollRange === undefined ||
+    perimeterDefenseMul === undefined ||
+    lootRatio === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    intervalTicks,
+    baseStrength,
+    strengthGrowthPerEra,
+    rollRange,
+    perimeterDefenseMul,
+    lootRatio,
+  };
+}
+
+/**
+ * [M66] seededRoll の上限が `uniformIntFromDraw` の一様性保証レンジ
+ * (`src/engine/stochastic.ts` の `UNIFORM_SPAN_MAX` = 2^21)を超えないための境界。
+ * schema は engine を import しない(層の分離)ので値を写して持つ。
+ */
+const UNIFORM_SPAN_LIMIT = 2_097_151;
+
 function validateReclaim(
   raw: unknown,
   path: string,
@@ -1708,6 +1848,12 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
   const rawExodus = obj["exodus"];
   const exodus =
     rawExodus === undefined ? null : (validateExodus(rawExodus, "$.exodus", issues) ?? undefined);
+  const rawCare = obj["care"];
+  const care =
+    rawCare === undefined ? null : (validateCare(rawCare, "$.care", issues) ?? undefined);
+  const rawRaid = obj["raid"];
+  const raid =
+    rawRaid === undefined ? null : (validateRaid(rawRaid, "$.raid", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -1724,7 +1870,9 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     exploration === undefined ||
     outpost === undefined ||
     reclaim === undefined ||
-    exodus === undefined
+    exodus === undefined ||
+    care === undefined ||
+    raid === undefined
   ) {
     return fail(issues.list());
   }
@@ -1745,5 +1893,7 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     outpost,
     reclaim,
     exodus,
+    care,
+    raid,
   });
 }

@@ -192,6 +192,10 @@ export interface StrategyRunMetrics {
   readonly recallOccurrenceCount: number;
   /** [M38] 想起困難の判定対象になった延べ「住民 × ゲーム週」(11.4-8 の分母)。 */
   readonly residentWeeksObserved: number;
+  /** [M66] run 中に解決した襲撃の回数(GDD 11.7 段10 の実 run 観測)。 */
+  readonly raidCount: number;
+  /** [M66] うち撃退できた回数(見張り台の防衛係数が効いたことの証跡)。 */
+  readonly raidRepelledCount: number;
 }
 
 export interface StrategyRunResult {
@@ -347,6 +351,10 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
   let dispatchedRareAssetCount = 0;
   let recallOccurrenceCount = 0;
   let residentWeekTicks = 0;
+  // [M66] 襲撃(GDD 11.7 段10)の実 run 観測。engine の ScheduleReport が返す
+  // カウンタをそのまま積むだけで、bot の意思決定には一切影響しない。
+  let raidCount = 0;
+  let raidRepelledCount = 0;
 
   const bot = options.bot;
   const start = performance.now();
@@ -359,6 +367,8 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     const report = advanceWithReport(state, ctx, boundary);
     state = report.state;
     recallOccurrenceCount += report.recallOccurrenceCount;
+    raidCount += report.raidCount;
+    raidRepelledCount += report.raidRepelledCount;
     residentWeekTicks += populationBefore * (state.tick - tickBefore);
     cursor = state.tick;
 
@@ -470,6 +480,8 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     inheritPointsPerCycle,
     recallOccurrenceCount,
     residentWeeksObserved: residentWeekTicks / (GAME_DAY_TICKS * 7),
+    raidCount,
+    raidRepelledCount,
   };
 
   return { state, content, metrics, recallGuardLog, samples, elapsedMs };
