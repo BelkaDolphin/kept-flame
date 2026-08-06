@@ -234,6 +234,61 @@ export function diffValueNonNumeric(
 
 type JsonArray = readonly JsonValue[];
 
+// ---------------------------------------------------------------------------
+// §3b: [M65] `buildCost` の単一形 → 複数資源形への拡幅を additive として認識する
+// ---------------------------------------------------------------------------
+//
+//   M65(2026-08-06裁定)で facility の `buildCost` が
+//     単一形 { resourceId, amount }  →  配列形 [ {…}, {…}, … ]
+//   の union になった(schema/facility.ts 冒頭 [M65])。M40 が機械証明した
+//   「消費先の無い資源の接続は additive 規約では実行不能」への回答であり、
+//   **既存施設へコスト行を 1 本足す**のが接続の唯一の手段である。
+//
+//   §3 の素の規則では object → array は「型そのものの変化」= 意味変更 reject に
+//   なるため、ここで **1 形だけ**を additive として認識する:
+//
+//     base が単一形オブジェクト、head が配列で、
+//     **head[0] が base の単一形と §3 の意味で同じ**(数値差だけは許す)なら、
+//     head[0] へ畳んでから §3 の比較に掛ける(= 追加行 [1..] は「新規追加」と
+//     して差分に現れない)。
+//
+//   これは判定基準の緩和ではなく**新形式の認識**である:
+//     - 既存のコスト行(第1行)が保存されていることを構造的に要求する。
+//       第1行の resourceId を書き換えた拡幅は畳まれず、従来どおり reject。
+//     - 配列 → 単一形(行の削除)は畳まれず reject(既存の消費先が消える)。
+//     - 追加行そのものの中身は「新しく足したもの」なので base に対応が無い。
+//   対象キーは facility の `buildCost` のみで、他のフィールド・他カテゴリの
+//   object → array 変化は 1 つも通さない。
+// ---------------------------------------------------------------------------
+
+/** [M65] §3b の拡幅対象キー(facility の建設コスト)。 */
+const BUILD_COST_FIELD = "buildCost";
+
+/**
+ * [M65] head の `buildCost` が「base の単一形を第1行として保存した配列形」なら、
+ * 第1行へ畳んだ head を返す(それ以外は head をそのまま返す・§3b)。
+ * 純関数・テストから直接叩けるよう export する。
+ */
+export function collapseAdditiveBuildCostWidening(base: JsonObject, head: JsonObject): JsonObject {
+  const baseCost = base[BUILD_COST_FIELD];
+  const headCost = head[BUILD_COST_FIELD];
+  if (baseCost === undefined || headCost === undefined) return head;
+  if (jsonKind(baseCost) !== "object" || jsonKind(headCost) !== "array") return head;
+  const headLines = asArray(headCost);
+  const primary = headLines?.[0];
+  if (primary === undefined) return head;
+  // 第1行が base の単一形と(数値差を除いて)同一であることが畳む条件。
+  const lineDiffs: string[] = [];
+  diffValueNonNumeric(baseCost, primary, "$", lineDiffs);
+  if (lineDiffs.length > 0) return head;
+
+  const collapsed: Record<string, JsonValue> = {};
+  for (const key of Object.keys(head)) {
+    collapsed[key] = key === BUILD_COST_FIELD ? primary : (head[key] as JsonValue);
+  }
+  return collapsed;
+}
+
 export type EntityChangeStatus =
   "unchanged" | "numericTuning" | "newlyTombstoned" | "resurrected" | "semanticChange";
 
@@ -254,7 +309,10 @@ export function diffEntity(id: string, base: JsonObject, head: JsonObject): Enti
   const headTombstoned = head[TOMBSTONE_FIELD] === true;
 
   const baseRest = omitKey(base, TOMBSTONE_FIELD);
-  const headRest = omitKey(head, TOMBSTONE_FIELD);
+  const headRest = collapseAdditiveBuildCostWidening(
+    omitKey(base, TOMBSTONE_FIELD),
+    omitKey(head, TOMBSTONE_FIELD),
+  );
   const changedPaths: string[] = [];
   diffValueNonNumeric(baseRest, headRest, "$", changedPaths);
 

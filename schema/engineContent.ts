@@ -145,6 +145,7 @@ import type {
   ExplorationBandParams,
   ExplorationParams,
   FacilityCostDef,
+  FacilityCostLineDef,
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
@@ -182,7 +183,7 @@ import type {
 import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
 import type { CondAst, EventChoice, EventContent, EventResultContent } from "./event";
-import type { FacilityContent, FacilityStatWeights } from "./facility";
+import type { FacilityBuildCostLine, FacilityContent, FacilityStatWeights } from "./facility";
 import type { OutpostTypeContent } from "./outpostType";
 import type { TechContent } from "./tech";
 import type { TraitContent } from "./trait";
@@ -520,7 +521,72 @@ function toFacilityCost(
   const curve = content.upgradeCostCurve;
   if (buildCost === null || curve === null) return undefined;
 
-  const buildFix = toFix(buildCost.amount, `${path}.buildCost.amount`, issues, "建設コスト");
+  // [M65] 単一形は「第1行だけの配列」と同じものとして扱う(schema/facility.ts
+  // 冒頭 [M65])。第1行の増築費はトップレベルの upgradeCostCurve であり、
+  // 第2行以降は各行が自前のカーブを持つ。
+  const lines: readonly FacilityBuildCostLine[] = isBuildCostLineArray(buildCost)
+    ? buildCost
+    : [{ resourceId: buildCost.resourceId, amount: buildCost.amount, upgradeCostCurve: null }];
+  const primary = lines[0];
+  if (primary === undefined) return undefined;
+
+  const primaryLine = toFacilityCostLine(
+    primary.resourceId,
+    primary.amount,
+    curve,
+    `${path}.buildCost`,
+    issues,
+  );
+  if (primaryLine === undefined) return undefined;
+
+  const extraLines: FacilityCostLineDef[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    const linePath = `${path}.buildCost[${String(i)}]`;
+    if (line.upgradeCostCurve === null) {
+      // schema 側が既に強制しているので通常は到達しない(二重防御)。
+      issues.add(`${linePath}.upgradeCostCurve`, "buildCost の第2行以降は増築コストが必須");
+      return undefined;
+    }
+    const converted = toFacilityCostLine(
+      line.resourceId,
+      line.amount,
+      line.upgradeCostCurve,
+      linePath,
+      issues,
+    );
+    if (converted === undefined) return undefined;
+    extraLines.push(converted);
+  }
+  if (extraLines.length === 0) return primaryLine;
+  return {
+    resourceId: primaryLine.resourceId,
+    buildFix: primaryLine.buildFix,
+    upgradeByLevel: primaryLine.upgradeByLevel,
+    extraLines,
+  };
+}
+
+/**
+ * [M65] `buildCost` が配列形か(型ガード)。`Array.isArray` は `readonly T[]` を
+ * 直接 narrowing できないので、述語つきの薄いラッパを置く。
+ */
+function isBuildCostLineArray(
+  value: NonNullable<FacilityContent["buildCost"]>,
+): value is readonly FacilityBuildCostLine[] {
+  return Array.isArray(value);
+}
+
+/** [M65] コスト行 1 本(資源 ID + 建設費 + Lv 別増築費)を engine 表現へ写す。 */
+function toFacilityCostLine(
+  resourceId: string,
+  amount: number,
+  curve: readonly number[],
+  path: string,
+  issues: IssueCollector,
+): FacilityCostLineDef | undefined {
+  const buildFix = toFix(amount, `${path}.amount`, issues, "建設コスト");
   const upgradeByLevel: Fix[] = [];
   for (let level = 0; level < curve.length; level++) {
     const raw = curve[level];
@@ -529,11 +595,7 @@ function toFacilityCost(
     if (fix !== undefined) upgradeByLevel.push(fix);
   }
   if (buildFix === undefined || upgradeByLevel.length !== curve.length) return undefined;
-  return {
-    resourceId: entityIdFromString(buildCost.resourceId),
-    buildFix,
-    upgradeByLevel,
-  };
+  return { resourceId: entityIdFromString(resourceId), buildFix, upgradeByLevel };
 }
 
 function toFacilityDef(content: FacilityContent, issues: IssueCollector): FacilityDef | undefined {

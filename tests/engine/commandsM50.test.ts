@@ -21,7 +21,9 @@ import { advance, createAdvanceContext } from "../../src/engine/advance";
 import {
   apply,
   facilityBuildCostFix,
+  facilityBuildCostLines,
   facilityUpgradeCostFix,
+  facilityUpgradeCostLines,
   type Command,
   type CommandRejectionCode,
 } from "../../src/engine/commands";
@@ -76,6 +78,8 @@ import {
 // --- フィクスチャ -----------------------------------------------------------
 
 const WASTE = id("waste");
+/** [M65] 追加コスト行の資源(木炭)。 */
+const CHARCOAL = id("charcoal");
 
 /** [M50] コスト付きのかまど。Lv1 建設 10 / 増築は Lv1→2 が 20、以降 30/40/50。 */
 const HEARTH_WITH_COST: FacilityDef = {
@@ -316,6 +320,129 @@ describe("[M50] 廃材 3 出口(1): 建設 / 増築コストの 20% 代替(GDD 6
     const board = costBoard(5, [resource("wasteStock", WASTE, 50)]);
     // 代替上限は 2 なので本命資源が 8 要る。在庫 5 では足りない。
     expect(rejectCodeOf(board, CONTENT_COST_WASTE, PLACE)).toBe("insufficientResource");
+  });
+});
+
+// --- 1b. [M65] 複数資源の建設 / 増築コスト -----------------------------------
+//
+//   2026-08-06裁定(ロードマップ M65)。`FacilityCostDef.extraLines` が入った
+//   経路を固定する。**単一資源(extraLines なし)の挙動は §1 が M50 のまま
+//   固定しており、そちらが 1 件も変わらないことが後方互換の証拠**である。
+
+/** [M65] 主資源 = 薪 10 + 追加行 = 木炭 4(増築は 8/12/16/20/24)のかまど。 */
+const HEARTH_MULTI_COST: FacilityDef = {
+  id: HEARTH.id,
+  tags: HEARTH.tags,
+  harshWork: HEARTH.harshWork,
+  outputPerTickByLevel: HEARTH.outputPerTickByLevel,
+  output: HEARTH.output,
+  cost: {
+    resourceId: WOOD,
+    buildFix: fixFromInt(10),
+    upgradeByLevel: [
+      fixFromInt(20),
+      fixFromInt(30),
+      fixFromInt(40),
+      fixFromInt(50),
+      fixFromInt(60),
+    ],
+    extraLines: [
+      {
+        resourceId: CHARCOAL,
+        buildFix: fixFromInt(4),
+        upgradeByLevel: [
+          fixFromInt(8),
+          fixFromInt(12),
+          fixFromInt(16),
+          fixFromInt(20),
+          fixFromInt(24),
+        ],
+      },
+    ],
+  },
+};
+
+const CONTENT_MULTI_COST = contentWith({
+  facilityDefs: new Map([
+    [HEARTH_MULTI_COST.id, HEARTH_MULTI_COST],
+    [STUDY_DESK.id, STUDY_DESK],
+  ]),
+});
+
+const CONTENT_MULTI_COST_WASTE = contentWith({
+  facilityDefs: CONTENT_MULTI_COST.facilityDefs,
+  storage: STORAGE_WITH_WASTE,
+});
+
+function multiCostBoard(woodHuman = 100, charcoalHuman = 100): GameState {
+  return stateOf([
+    facility("fHearth", HEARTH.id, CELL_A),
+    resource("wStock", WOOD, woodHuman),
+    resource("cStock", CHARCOAL, charcoalHuman),
+  ]);
+}
+
+describe("[M65] 複数資源の建設 / 増築コスト", () => {
+  it("配置は全行ぶんを引く(主資源 + 追加行)", () => {
+    const next = accept(multiCostBoard(), CONTENT_MULTI_COST, PLACE);
+    expect(stockOf(next, "wStock")).toBe(90_000_000); // 100 - 10
+    expect(stockOf(next, "cStock")).toBe(96_000_000); // 100 - 4
+    expect(requireEntity(next, id("fNew"), "facility").level).toBe(1);
+  });
+
+  it("増築も全行ぶんを Lv 別カーブで引く", () => {
+    const lv2 = accept(multiCostBoard(), CONTENT_MULTI_COST, UPGRADE);
+    expect(stockOf(lv2, "wStock")).toBe(80_000_000); // 100 - 20
+    expect(stockOf(lv2, "cStock")).toBe(92_000_000); // 100 - 8
+    expect(requireEntity(lv2, id("fHearth"), "facility").level).toBe(2);
+  });
+
+  it("追加行の資源が足りなければ reject し、state は 1 bit も動かない", () => {
+    const before = multiCostBoard(100, 3);
+    const result = apply(before, CONTENT_MULTI_COST, PLACE);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("insufficientResource");
+    expect(result.rejection.resourceId).toBe(CHARCOAL);
+    expect(result.rejection.requiredRaw).toBe(4_000_000);
+    expect(result.rejection.availableRaw).toBe(3_000_000);
+    expect(JSON.stringify(toSerializable(before))).toBe(
+      JSON.stringify(toSerializable(multiCostBoard(100, 3))),
+    );
+  });
+
+  it("不足の報告順は「主資源 → 追加行」(決定論)", () => {
+    const result = apply(multiCostBoard(1, 1), CONTENT_MULTI_COST, PLACE);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.resourceId).toBe(WOOD);
+  });
+
+  it("廃材代替は第1行(主資源)にだけ掛かる(廃材在庫の二重コミットを避ける)", () => {
+    const board = stateOf([
+      facility("fHearth", HEARTH.id, CELL_A),
+      resource("wStock", WOOD, 100),
+      resource("cStock", CHARCOAL, 100),
+      resource("wasteStock", WASTE, 50),
+    ]);
+    const next = accept(board, CONTENT_MULTI_COST_WASTE, PLACE);
+    // 主資源 10 のうち 20% = 2 が廃材。追加行の木炭 4 は満額。
+    expect(stockOf(next, "wStock")).toBe(92_000_000);
+    expect(stockOf(next, "cStock")).toBe(96_000_000);
+    expect(stockOf(next, "wasteStock")).toBe(48_000_000);
+  });
+
+  it("facilityBuildCostLines / facilityUpgradeCostLines が全行を返す", () => {
+    const buildLines = facilityBuildCostLines(HEARTH_MULTI_COST);
+    expect(buildLines.map((line) => line.resourceId)).toEqual([WOOD, CHARCOAL]);
+    expect(buildLines.map((line) => toRaw(line.costFix))).toEqual([10_000_000, 4_000_000]);
+    const upgradeLines = facilityUpgradeCostLines(HEARTH_MULTI_COST, 2);
+    expect(upgradeLines.map((line) => toRaw(line.costFix))).toEqual([30_000_000, 12_000_000]);
+    // 単一資源の定義は 1 行だけ(M50 と同じ経路)。
+    expect(facilityBuildCostLines(HEARTH_WITH_COST).map((line) => line.resourceId)).toEqual([WOOD]);
+    // コスト定義そのものが無ければ空 = 無料。
+    expect(facilityBuildCostLines(HEARTH)).toEqual([]);
+    expect(facilityUpgradeCostLines(HEARTH, 1)).toEqual([]);
   });
 });
 

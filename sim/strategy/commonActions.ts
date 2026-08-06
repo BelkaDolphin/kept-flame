@@ -17,7 +17,7 @@
 import {
   CONCURRENT_DISPATCH_MAX,
   activeDispatchCount,
-  facilityBuildCostFix,
+  facilityBuildCostLines,
   facilityWorkerSlots,
   type AssignResidentCommand,
   type BeginCodificationCommand,
@@ -27,7 +27,7 @@ import {
   type ReclaimCellCommand,
 } from "../../src/engine/commands";
 import { compareUtf16 } from "../../src/engine/canonicalize";
-import { toRaw, FIX_ONE, type Fix } from "../../src/engine/fp";
+import { toRaw, FIX_ONE } from "../../src/engine/fp";
 import {
   findOccupancyConflict,
   footprintFitsGrid,
@@ -53,7 +53,12 @@ import { currentResearch } from "../../src/engine/rules/research";
 import { resolveCapacityByResourceId } from "../../src/engine/rules/storage";
 import { isTechUnlocked, researchEntityOfTech } from "../../src/engine/rules/techMemory";
 import { isCriticalPathTech } from "../../src/engine/rules/techTree";
-import { prereqsOfTech, type DistanceBand, type EngineContent } from "../../src/engine/rules/types";
+import {
+  prereqsOfTech,
+  type DistanceBand,
+  type EngineContent,
+  type FacilityDef,
+} from "../../src/engine/rules/types";
 import {
   entitiesOfKind,
   entityIdFromString,
@@ -242,15 +247,20 @@ function resourceStockRaw(state: GameState, resourceId: EntityId): number {
   return 0;
 }
 
-function canAffordBuild(
-  state: GameState,
-  def: { readonly cost?: { readonly resourceId: EntityId } },
-  costFix: Fix | undefined,
-): boolean {
-  if (costFix === undefined) return true;
-  const resourceId = def.cost?.resourceId;
-  if (resourceId === undefined) return true;
-  return resourceStockRaw(state, resourceId) >= toRaw(costFix);
+/**
+ * [M65] 建設コストの全行(複数資源)に対して在庫が足りるか。
+ *
+ * M65 以前は「主資源 1 行」しか見ておらず、`buildCost` が複数資源になった
+ * 段(engine の `payFacilityCost`)と食い違うと **bot が払えない建設を提案し
+ * 続けて他の候補も建たない**(候補は `canAffordBuild` で絞られるため)。
+ * 計測器の述語を engine の判定と一致させるための追従であり、bot の戦略
+ * (何をどの順で建てるか)は 1 mm も変えていない。
+ */
+function canAffordBuild(state: GameState, def: FacilityDef): boolean {
+  for (const line of facilityBuildCostLines(def)) {
+    if (resourceStockRaw(state, line.resourceId) < toRaw(line.costFix)) return false;
+  }
+  return true;
 }
 
 /** M26 アシストを使わない素朴な配置(§「配置戦略違い」bot 用)。セル番号昇順の first-fit。 */
@@ -328,7 +338,7 @@ export function buildFacilityCommand(
     if (defId === undefined) continue;
     const def = content.facilityDefs.get(defId);
     if (def === undefined) continue;
-    if (!canAffordBuild(state, def, facilityBuildCostFix(def))) continue;
+    if (!canAffordBuild(state, def)) continue;
     const footprint = def.footprint ?? UNIT_FOOTPRINT;
     if (!isValidFootprintDims(footprint)) continue;
     candidates.push({ defId, footprint, count: counts.get(defId) ?? 0, priorityIndex: i });
@@ -430,7 +440,7 @@ export function buildWarehouseCommand(
 
   const def = content.facilityDefs.get(warehouseDefId);
   if (def === undefined) return undefined;
-  if (!canAffordBuild(state, def, facilityBuildCostFix(def))) return undefined;
+  if (!canAffordBuild(state, def)) return undefined;
   const footprint = def.footprint ?? UNIT_FOOTPRINT;
   if (!isValidFootprintDims(footprint)) return undefined;
 

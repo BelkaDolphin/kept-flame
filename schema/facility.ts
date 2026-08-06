@@ -56,6 +56,33 @@
 //                      1 本だけ別の長さになるとオーサリング側の検算(6桁 floor の
 //                      表計算・docs/measurements/authoring-procedure.md)が
 //                      施設ごとに 2 種類の列数を持つことになるためである。
+//
+// ---------------------------------------------------------------------------
+// [M65] `buildCost` の複数資源化(2026-08-06裁定・台帳v20 必-5 / ロードマップ M65)
+// ---------------------------------------------------------------------------
+// M40 が「消費先の無い資源6種(木炭/銅ほか)の消費先接続は content の additive
+// 規約では実行不能」と機械証明した(`buildCost.resourceId` の張り替えは
+// content-semantics-gate が意味変更として全件 reject する・
+// docs/measurements/balance-m40-e2-recalibration-2026-08-03.json の
+// `structuralFinding_consumptionSinks`)。その案A(推奨)がここで入る。
+//
+//   `buildCost` は **単一オブジェクト形(M50)と配列形(M65)の union** になった。
+//     単一形: { "resourceId": "clay", "amount": 25 }             ← 既存 content
+//     配列形: [ { "resourceId": "clay", "amount": 25 },          ← 第1行 = 主資源
+//               { "resourceId": "charcoal", "amount": 8,
+//                 "upgradeCostCurve": [9,11,13,16,19] } ]        ← 第2行以降
+//
+//   規約(1 つの (資源, Lv) に対する費用の出所を必ず 1 箇所にするための非対称):
+//     - **第1行(index 0)は `upgradeCostCurve` を持てない**。その行の増築費は
+//       トップレベルの `upgradeCostCurve` である(= 単一形と同じ意味)。
+//     - **第2行以降(index >= 1)は `upgradeCostCurve` が必須**。省略を許すと
+//       「建てるのは有料だが増築はこの資源だけ無料」が書き忘れで静かに成立する
+//       (ローダーが `harshWork` / `output` の欠落を reject するのと同じ立場)。
+//       建設のみの出口にしたいときは `[0,0,0,0,0]` を明示する。
+//     - 行の資源 ID は重複禁止(同じ資源を 2 行に分けて書く意味が無く、
+//       どちらが正かの解釈が生まれる)。
+//   単一形は**そのまま読み続ける**(既存 content は 1 バイトも変えずに通る)。
+//   engine 側の写し方は `schema/engineContent.ts` の `toFacilityCost` を参照。
 // ---------------------------------------------------------------------------
 
 import {
@@ -133,6 +160,24 @@ export interface FacilityBuildCost {
   readonly amount: number;
 }
 
+/**
+ * [M65] 複数資源形({@link FacilityBuildCostContent})の 1 行(ファイル冒頭 [M65])。
+ *
+ * `upgradeCostCurve` は **第2行以降でのみ非 null**。第1行は常に null であり、
+ * その行の増築費はトップレベルの `upgradeCostCurve` が持つ。
+ */
+export interface FacilityBuildCostLine {
+  readonly resourceId: string;
+  readonly amount: number;
+  readonly upgradeCostCurve: readonly number[] | null;
+}
+
+/**
+ * [M65] `buildCost` が取りうる形。単一オブジェクト形(M50・後方互換)か、
+ * 1 行以上の配列形(M65)。ファイル冒頭 [M65] の節が規約の正本。
+ */
+export type FacilityBuildCostContent = FacilityBuildCost | readonly FacilityBuildCostLine[];
+
 /** [M50] 建設/増築コストの値域。0(無料)も許す(バランス調整段の自由度)。 */
 const COST_VALUE_RANGE = { min: 0, max: 1_000_000_000 };
 
@@ -165,8 +210,10 @@ export interface FacilityContent {
   /**
    * [M50] Lv1 で建てるときのコスト(GDD 12.1 [2026-07-30裁定])。
    * JSON に無ければ null(= engine へ写す段で reject。ファイル冒頭 [M50] の節)。
+   *
+   * [M65] 複数資源の配列形も受け付ける(ファイル冒頭 [M65] の節)。
    */
-  readonly buildCost: FacilityBuildCost | null;
+  readonly buildCost: FacilityBuildCostContent | null;
   /**
    * [M50] Lv 別の増築コスト。**index i = Lv(i+1) → Lv(i+2)**(ファイル冒頭 [M50])。
    * JSON に無ければ null(同上)。
@@ -430,6 +477,77 @@ function validateBuildCost(
 }
 
 /**
+ * [M65] 配列形 `buildCost` の検証(ファイル冒頭 [M65] の規約)。
+ *
+ * 第1行は `upgradeCostCurve` を持てず、第2行以降は必須。資源 ID の重複も止める。
+ * 空配列は reject する(「コストを書いたのに 1 行も無い」= 書き忘れ)。
+ */
+function validateBuildCostLines(
+  raw: readonly unknown[],
+  path: string,
+  issues: IssueCollector,
+): readonly FacilityBuildCostLine[] | undefined {
+  if (raw.length === 0) {
+    issues.add(path, "buildCost の配列形は 1 行以上が必須(空配列は無料と区別できない)");
+    return undefined;
+  }
+  const lines: FacilityBuildCostLine[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const linePath = `${path}[${String(i)}]`;
+    const obj = expectRecord(raw[i], linePath, issues);
+    if (obj === undefined) return undefined;
+    const resourceId = validateId(obj["resourceId"], `${linePath}.resourceId`, issues);
+    const amount = expectNumber(obj["amount"], `${linePath}.amount`, issues, COST_VALUE_RANGE);
+    if (resourceId === undefined || amount === undefined) return undefined;
+    if (seen.has(resourceId)) {
+      issues.add(linePath, `資源 "${resourceId}" が buildCost に 2 行ある(1 資源 1 行)`);
+      return undefined;
+    }
+    seen.add(resourceId);
+
+    const rawCurve = obj["upgradeCostCurve"];
+    if (i === 0) {
+      if (rawCurve !== undefined) {
+        issues.add(
+          `${linePath}.upgradeCostCurve`,
+          "buildCost の第1行は増築コストを持てない" +
+            "(第1行の増築費はトップレベルの upgradeCostCurve・schema/facility.ts 冒頭 [M65])",
+        );
+        return undefined;
+      }
+      lines.push({ resourceId, amount, upgradeCostCurve: null });
+      continue;
+    }
+    if (rawCurve === undefined) {
+      issues.add(
+        `${linePath}.upgradeCostCurve`,
+        "buildCost の第2行以降は増築コストの明示が必須" +
+          "(建設のみの出口なら [0,0,0,0,0] と書く・schema/facility.ts 冒頭 [M65])",
+      );
+      return undefined;
+    }
+    const curve = validateUpgradeCostCurve(rawCurve, `${linePath}.upgradeCostCurve`, issues);
+    if (curve === undefined) return undefined;
+    lines.push({ resourceId, amount, upgradeCostCurve: curve });
+  }
+  return lines;
+}
+
+/**
+ * [M65] `buildCost`(省略可)の検証。単一オブジェクト形(M50)と配列形(M65)の
+ * どちらも受ける(ファイル冒頭 [M65])。
+ */
+function validateBuildCostContent(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): FacilityBuildCostContent | undefined {
+  if (Array.isArray(raw)) return validateBuildCostLines(raw, path, issues);
+  return validateBuildCost(raw, path, issues);
+}
+
+/**
  * [M50] `upgradeCostCurve`(省略可)の検証。Lv1〜Lv5 の 5 個・非負・**単調非減少**。
  *
  * 単調非減少を強制するのは「Lv を上げるほど増築が安くなる」設定ミスを止めるため
@@ -519,7 +637,7 @@ export function validateFacility(raw: unknown): ValidationResult<FacilityContent
   const buildCost =
     rawBuildCost === undefined
       ? null
-      : (validateBuildCost(rawBuildCost, "$.buildCost", issues) ?? undefined);
+      : (validateBuildCostContent(rawBuildCost, "$.buildCost", issues) ?? undefined);
   const rawUpgradeCostCurve = obj["upgradeCostCurve"];
   const upgradeCostCurve =
     rawUpgradeCostCurve === undefined

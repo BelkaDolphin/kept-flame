@@ -137,15 +137,10 @@ export interface FacilityDef {
 }
 
 /**
- * [M50] 施設 1 基の建設 / 増築コスト(GDD 12.1 [2026-07-30裁定] / GDD 6.7 の
- * 廃材 3 出口(1))。
- *
- * **支払う資源は施設 1 基につき 1 種**である。複数資源のレシピ形にしなかったのは、
- * GDD 12.1 の裁定が facility 行へ `buildCost` と増築コストカーブの 2 項だけを
- * 足すと定めており、多資源レシピの置き場は recipe カテゴリ(MVP 対象外)だから
- * である。recipe が入る段でここを `ReadonlyMap<EntityId, Fix>` へ広げること。
+ * [M65] 施設 1 基のコスト行 1 本(1 資源ぶん)。{@link FacilityCostDef} の
+ * 第2行以降がこの形で並ぶ。
  */
-export interface FacilityCostDef {
+export interface FacilityCostLineDef {
   /** コストを引き落とす resource 定義 ID。 */
   readonly resourceId: EntityId;
   /** Lv1 で建てるときのコスト。 */
@@ -155,6 +150,29 @@ export interface FacilityCostDef {
    * 揃えてあるので最後の要素(Lv5 → Lv6)は読まれない(schema/facility.ts [M50])。
    */
   readonly upgradeByLevel: readonly Fix[];
+}
+
+/**
+ * [M50] 施設 1 基の建設 / 増築コスト(GDD 12.1 [2026-07-30裁定] / GDD 6.7 の
+ * 廃材 3 出口(1))。
+ *
+ * **[M65] 複数資源になった**(2026-08-06裁定・ロードマップ M65)。M50 は「支払う
+ * 資源は施設 1 基につき 1 種」だったが、M40 が「消費先の無い資源6種の接続は
+ * content の additive 規約では実行不能」と機械証明したため、コスト行を増やせる形
+ * へ広げた(schema/facility.ts 冒頭 [M65])。
+ *
+ * **第1行(主資源)を平置きのまま残してある**のは、M50 形の呼び出し側
+ * (`src/ui/derived.ts` の建設/増築カード等)を 1 行も変えずに通すためであり、
+ * 単一資源の content では {@link extraLines} が undefined = M50 と 1 bit も
+ * 違わない経路になる。追加行の支払いは `commands.ts` の `payFacilityCost` が
+ * 主資源のあとに続けて引く。
+ */
+export interface FacilityCostDef extends FacilityCostLineDef {
+  /**
+   * [M65] 2 種目以降のコスト行(content の記載順)。**省略 = 単一資源**
+   * (M50 と同一挙動)。空配列にはしない(undefined に畳む)。
+   */
+  readonly extraLines?: readonly FacilityCostLineDef[];
 }
 
 /**

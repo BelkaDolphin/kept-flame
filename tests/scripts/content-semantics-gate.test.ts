@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { JsonValue } from "../../src/engine/canonicalize";
 import {
+  collapseAdditiveBuildCostWidening,
   collectReferenceEdges,
   collectTombstonedIds,
   diffCategory,
@@ -223,6 +224,84 @@ describe("diffEntity", () => {
       { id: "techA", [TOMBSTONE_FIELD]: false },
     );
     expect(diff.status).toBe("resurrected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M65] §3b: buildCost の単一形 → 複数資源形の拡幅を additive として認識する。
+// 「新形式の認識」であって判定基準の緩和ではないこと(既存行が保存されている
+// ときだけ通り、書き換え/削除は従来どおり reject されること)を固定する。
+// ---------------------------------------------------------------------------
+
+describe("[M65] buildCost 拡幅の additive 認識(§3b)", () => {
+  const singleForm = {
+    id: "forge",
+    buildCost: { amount: 25, resourceId: "clay" },
+    upgradeCostCurve: [30, 36, 43, 52, 62],
+  };
+
+  it("第1行を保存したままコスト行を足すのは additive(unchanged 扱い)", () => {
+    const diff = diffEntity("forge", singleForm, {
+      id: "forge",
+      buildCost: [
+        { amount: 25, resourceId: "clay" },
+        { amount: 6, resourceId: "charcoal", upgradeCostCurve: [7, 8, 10, 12, 14] },
+      ],
+      upgradeCostCurve: [30, 36, 43, 52, 62],
+    });
+    expect(diff.status).toBe("unchanged");
+    expect(diff.changedPaths).toEqual([]);
+  });
+
+  it("拡幅と同時の数値調整は numericTuning(GDD 12.5-8 の範囲内)", () => {
+    const diff = diffEntity("forge", singleForm, {
+      id: "forge",
+      buildCost: [
+        { amount: 20, resourceId: "clay" },
+        { amount: 6, resourceId: "charcoal", upgradeCostCurve: [7, 8, 10, 12, 14] },
+      ],
+      upgradeCostCurve: [30, 36, 43, 52, 62],
+    });
+    expect(diff.status).toBe("numericTuning");
+  });
+
+  it("第1行の資源を書き換える拡幅は従来どおり semanticChange", () => {
+    const diff = diffEntity("forge", singleForm, {
+      id: "forge",
+      buildCost: [
+        { amount: 25, resourceId: "charcoal" },
+        { amount: 6, resourceId: "clay", upgradeCostCurve: [7, 8, 10, 12, 14] },
+      ],
+      upgradeCostCurve: [30, 36, 43, 52, 62],
+    });
+    expect(diff.status).toBe("semanticChange");
+    expect(diff.changedPaths).toContain("$.buildCost");
+  });
+
+  it("配列形 → 単一形(行の削除)は semanticChange", () => {
+    const arrayForm = {
+      id: "forge",
+      buildCost: [
+        { amount: 25, resourceId: "clay" },
+        { amount: 6, resourceId: "charcoal", upgradeCostCurve: [7, 8, 10, 12, 14] },
+      ],
+      upgradeCostCurve: [30, 36, 43, 52, 62],
+    };
+    expect(diffEntity("forge", arrayForm, singleForm).status).toBe("semanticChange");
+  });
+
+  it("buildCost 以外のフィールドの object → array 変化は畳まない", () => {
+    const diff = diffEntity(
+      "forge",
+      { id: "forge", output: { kind: "resource" } },
+      { id: "forge", output: [{ kind: "resource" }] },
+    );
+    expect(diff.status).toBe("semanticChange");
+  });
+
+  it("collapseAdditiveBuildCostWidening は畳めない入力を素通しする(純関数)", () => {
+    const head = { id: "forge", buildCost: [{ amount: 25, resourceId: "charcoal" }] };
+    expect(collapseAdditiveBuildCostWidening(singleForm, head)).toBe(head);
   });
 });
 

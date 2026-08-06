@@ -148,6 +148,7 @@ import {
   prereqsOfTech,
   type DistanceBand,
   type EngineContent,
+  type FacilityCostLineDef,
   type FacilityDef,
   type RecordMedium,
 } from "./rules/types";
@@ -934,6 +935,18 @@ function facilityCostWasteSubstitution(
 }
 
 /**
+ * [M65] 支払い 1 行(資源 + その回に払う量)。`FacilityCostDef` の「行」を
+ * 建設 / 増築のどちらか一方の額まで解決したもの。
+ */
+export interface ResolvedCostLine {
+  readonly resourceId: EntityId;
+  readonly costFix: Fix;
+}
+
+/** [M65] 無料(コスト定義なし)を表す共有の空配列。 */
+const NO_COST_LINES: readonly ResolvedCostLine[] = [];
+
+/**
  * [M50] 建設 / 増築コストの支払い(§3b)。事前検査に落ちたら
  * {@link CommandRejected}、通ったら支払い済みの state を返す。
  *
@@ -941,47 +954,88 @@ function facilityCostWasteSubstitution(
  * `def.cost === undefined` なので**無料**である。実 content は
  * `schema/engineContent.ts` が欠落を reject するので、この経路は本番に無い
  * (rules/types.ts の `FacilityDef.cost` の doc)。
+ *
+ * **[M65] 複数資源対応**(rules/types.ts の `FacilityCostDef.extraLines`)。
+ * 廃材による一部代替(GDD 6.7 の 3 出口(1))を掛けるのは **第1行(主資源)だけ**
+ * である。理由は 2 つ:
+ *   (a) 廃材在庫は 1 つしかないので、行ごとに独立に「最大 20% まで代替」を
+ *       決めると合計が在庫を超え、**払えるはずの建設が在庫不足で reject される**
+ *       (代替は緩和のための機構なのに、逆に締める方向へ働く)。
+ *   (b) 第1行だけに掛ける限り、単一資源 content での挙動は M50 と 1 bit も
+ *       変わらない(既存 golden vector が動かないことの根拠)。
+ * 追加行は自分の資源で満額払う。
  */
 function payFacilityCost(
   state: GameState,
   content: EngineContent,
-  costFix: Fix | undefined,
-  costResourceId: EntityId | undefined,
+  lines: readonly ResolvedCostLine[],
   kind: CommandKind,
   index: number,
   subjectId: EntityId,
 ): CommandRejected | { readonly state: GameState } {
-  if (costFix === undefined || costResourceId === undefined || toRaw(costFix) <= 0) {
-    return { state };
+  const primary = lines[0];
+  if (primary === undefined || toRaw(primary.costFix) <= 0) {
+    // 主資源が 0(または定義なし)でも追加行は払う必要がある。
+    return payExtraCostLines(state, lines, new Map(), new Map(), kind, index, subjectId);
   }
+  const costFix = primary.costFix;
   const substitution = facilityCostWasteSubstitution(state, content, costFix);
   const wasteResourceId = content.storage?.wasteResourceId ?? null;
 
-  // 挿入順 = 「本命の資源 → 廃材」。不足の報告順が決定論的に決まる(§3b)。
+  // 挿入順 = 「本命の資源 → 廃材 → 追加行」。不足の報告順が決定論的に決まる(§3b)。
   const costs = new Map<EntityId, number>();
   const remaining = toRaw(substitution.remainingCostFix);
-  if (remaining > 0) costs.set(costResourceId, remaining);
+  if (remaining > 0) costs.set(primary.resourceId, remaining);
   const wasteSpent = toRaw(substitution.wasteSpentFix);
   if (wasteSpent > 0 && wasteResourceId !== null) {
     costs.set(wasteResourceId, (costs.get(wasteResourceId) ?? 0) + wasteSpent);
   }
 
-  const unaffordable = rejectIfUnaffordable(state, costs, kind, index, subjectId);
-  if (unaffordable !== null) return unaffordable;
-
   const costFixes = new Map<EntityId, Fix>();
-  if (remaining > 0) costFixes.set(costResourceId, substitution.remainingCostFix);
+  if (remaining > 0) costFixes.set(primary.resourceId, substitution.remainingCostFix);
   if (wasteSpent > 0 && wasteResourceId !== null) {
     costFixes.set(
       wasteResourceId,
       addFix(costFixes.get(wasteResourceId) ?? FIX_ZERO, substitution.wasteSpentFix),
     );
   }
+  return payExtraCostLines(state, lines, costs, costFixes, kind, index, subjectId);
+}
+
+/**
+ * [M65] 主資源ぶんを積んだコスト表へ追加行を足し、在庫検査 → 支払いを行う。
+ * 追加行が 1 つも無い(= 単一資源 content)場合は M50 と同じ 2 行の処理になる。
+ */
+function payExtraCostLines(
+  state: GameState,
+  lines: readonly ResolvedCostLine[],
+  costs: Map<EntityId, number>,
+  costFixes: Map<EntityId, Fix>,
+  kind: CommandKind,
+  index: number,
+  subjectId: EntityId,
+): CommandRejected | { readonly state: GameState } {
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    const raw = toRaw(line.costFix);
+    if (raw <= 0) continue;
+    costs.set(line.resourceId, (costs.get(line.resourceId) ?? 0) + raw);
+    costFixes.set(
+      line.resourceId,
+      addFix(costFixes.get(line.resourceId) ?? FIX_ZERO, line.costFix),
+    );
+  }
+  if (costs.size === 0) return { state };
+  const unaffordable = rejectIfUnaffordable(state, costs, kind, index, subjectId);
+  if (unaffordable !== null) return unaffordable;
   return { state: spendResources(state, costFixes) };
 }
 
 /**
  * [M50] その施設定義を Lv1 で建てるコスト。定義が無ければ undefined(無料)。
+ * [M65] 追加行がある場合も**第1行(主資源)の値**を返す(既存呼び出し側の意味を
+ * 変えない)。全行は {@link facilityBuildCostLines}。
  */
 export function facilityBuildCostFix(def: FacilityDef): Fix | undefined {
   return def.cost?.buildFix;
@@ -998,9 +1052,49 @@ export function facilityBuildCostFix(def: FacilityDef): Fix | undefined {
 export function facilityUpgradeCostFix(def: FacilityDef, fromLevel: number): Fix | undefined {
   const cost = def.cost;
   if (cost === undefined) return undefined;
-  const curve = cost.upgradeByLevel;
+  return upgradeCostOfLine(cost, fromLevel);
+}
+
+/** [M65] コスト行 1 本の `fromLevel` → `fromLevel + 1` 増築費。 */
+function upgradeCostOfLine(line: FacilityCostLineDef, fromLevel: number): Fix | undefined {
+  const curve = line.upgradeByLevel;
   if (curve.length === 0) return undefined;
   return curve[fromLevel - 1] ?? curve[curve.length - 1];
+}
+
+/**
+ * [M65] 建設で払う全コスト行(`{resourceId, costFix}` の列。第1行が主資源)。
+ * `def.cost` が無ければ空 = 無料。
+ */
+export function facilityBuildCostLines(def: FacilityDef): readonly ResolvedCostLine[] {
+  const cost = def.cost;
+  if (cost === undefined) return NO_COST_LINES;
+  const lines: ResolvedCostLine[] = [{ resourceId: cost.resourceId, costFix: cost.buildFix }];
+  for (const extra of cost.extraLines ?? []) {
+    lines.push({ resourceId: extra.resourceId, costFix: extra.buildFix });
+  }
+  return lines;
+}
+
+/**
+ * [M65] `fromLevel` → `fromLevel + 1` の増築で払う全コスト行(第1行が主資源)。
+ * `def.cost` が無ければ空 = 無料。
+ */
+export function facilityUpgradeCostLines(
+  def: FacilityDef,
+  fromLevel: number,
+): readonly ResolvedCostLine[] {
+  const cost = def.cost;
+  if (cost === undefined) return NO_COST_LINES;
+  const primaryFix = upgradeCostOfLine(cost, fromLevel);
+  if (primaryFix === undefined) return NO_COST_LINES;
+  const lines: ResolvedCostLine[] = [{ resourceId: cost.resourceId, costFix: primaryFix }];
+  for (const extra of cost.extraLines ?? []) {
+    const fix = upgradeCostOfLine(extra, fromLevel);
+    if (fix === undefined) continue;
+    lines.push({ resourceId: extra.resourceId, costFix: fix });
+  }
+  return lines;
 }
 
 // --- 4. 個別コマンドの適用 -------------------------------------------------
@@ -1105,8 +1199,7 @@ function applyPlaceFacility(
   const paid = payFacilityCost(
     state,
     content,
-    facilityBuildCostFix(def),
-    def.cost?.resourceId,
+    facilityBuildCostLines(def),
     "placeFacility",
     index,
     command.defId,
@@ -1218,8 +1311,7 @@ function applyUpgradeFacility(
   const paid = payFacilityCost(
     state,
     content,
-    facilityUpgradeCostFix(def, facility.level),
-    def.cost?.resourceId,
+    facilityUpgradeCostLines(def, facility.level),
     "upgradeFacility",
     index,
     facility.id,
