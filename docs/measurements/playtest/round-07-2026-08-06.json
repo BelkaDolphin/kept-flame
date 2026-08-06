@@ -70,7 +70,17 @@
     "E_layout": "6/6 → 6/6(維持)",
     "fatal": "0 → 0",
     "consoleErrors": "0 → 0",
-    "resolved": ["R6-A01", "R6-A04", "R6-A05", "R6-A06", "R6-C01", "R6-C02", "R6-C03", "R6-C04", "R6-C05"],
+    "resolved": [
+      "R6-A01",
+      "R6-A04",
+      "R6-A05",
+      "R6-A06",
+      "R6-C01",
+      "R6-C02",
+      "R6-C03",
+      "R6-C04",
+      "R6-C05"
+    ],
     "carriedUnmeasured": ["R6-A03(実装済み・単体テスト裏付け・live未確認のみ残)"],
     "outOfScopeCarried": ["R6-A02(ROI乖離→M41帯・台帳v19 必-2)", "R6-B01(15秒巻き戻り→記録・同)"],
     "recurred": []
