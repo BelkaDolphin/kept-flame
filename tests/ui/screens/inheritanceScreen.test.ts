@@ -151,3 +151,43 @@ describe("engine の継承点計算を直接呼ぶだけ(UI 側の再計算な�
     expect(inheritTierCost(params, inheritTierOf(afterPurchase, "caravanCapacity"))).toBe(75);
   });
 });
+
+describe("[M73/R8-06] 残高不足の文言(不足N点 + 次の周回で届く見込み)", () => {
+  const base = {
+    track: "caravanCapacity",
+    currentTier: 0,
+    maxTier: 4,
+    currentBonus: 0,
+    bonusPerTier: 2,
+    nextCost: 50,
+    insufficientBalance: true,
+    onPurchase: () => undefined,
+  } as const;
+
+  it("不足量を「あと何点」で言う", () => {
+    const text = flattenText(InheritTrackRow({ ...base, availablePoints: 49 }));
+    expect(text).toContain("あと1点足りません");
+  });
+
+  it("いまの獲得見込みで届くなら「次の周回では購入できる見込み」と言う", () => {
+    const text = flattenText(
+      InheritTrackRow({ ...base, availablePoints: 49, earnedIfExodusNow: 68 }),
+    );
+    expect(text).toContain("+68点");
+    expect(text).toContain("次の周回では購入できる見込み");
+  });
+
+  it("届かないなら届かないと言い、獲得点を増やす手がかりを添える(捏造しない)", () => {
+    const text = flattenText(
+      InheritTrackRow({ ...base, nextCost: 200, availablePoints: 10, earnedIfExodusNow: 20 }),
+    );
+    expect(text).toContain("次の周回でもまだ届きません");
+    expect(text).toContain("成文化");
+  });
+
+  it("残高が渡されなければ従来どおり不足量を出さない(後方互換)", () => {
+    const text = flattenText(InheritTrackRow(base));
+    expect(text).toContain("残高が足りません");
+    expect(text).not.toContain("あと");
+  });
+});

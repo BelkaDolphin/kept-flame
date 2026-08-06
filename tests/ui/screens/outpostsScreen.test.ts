@@ -103,7 +103,7 @@ function cardHandlers() {
 }
 
 describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画面に出ているか)", () => {
-  it("タイプ名(GDD 9.2の用語)・供給・維持費・ネット収益・危険度・ROIを表示する", () => {
+  it("タイプ名(GDD 9.2の用語)・供給・維持費・ネット収益・危険度・採算を表示する", () => {
     const vnode = OutpostCard({ outpost: outpost(), ...cardHandlers() });
     const text = flattenText(vnode);
     expect(text).toContain("鉱山");
@@ -113,7 +113,9 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
     // [束B/B-2] 英語のまま出ていた "hazard" をプレイヤー語(危険度)へ改めた。
     expect(text).toContain("危険度");
     expect(text).not.toContain("hazard");
-    expect(text).toContain("ROI");
+    // [M73/R8-08] 英語の金融用語「ROI」は出さない(和語「投資効率」へ)。
+    expect(text).toContain("採算(投資効率)");
+    expect(text).not.toContain("ROI");
   });
 
   it("(B)喪失リスク項を隠さない(GDD 8.6 を援用・本タスクの検収条件)", () => {
@@ -132,9 +134,9 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
     expect(flattenText(vnode)).toContain("放棄を検討");
   });
 
-  it("ROI が null(分母0)なら「算出不可」", () => {
+  it("採算が算出できない(分母0)なら理由を添えて言う", () => {
     const vnode = OutpostCard({ outpost: outpost({ roiApprox: null }), ...cardHandlers() });
-    expect(flattenText(vnode)).toContain("算出不可");
+    expect(flattenText(vnode)).toContain("算出できません");
   });
 
   it("[M54] 常駐者ごとに解除ボタンを持ち、押すと onUnstation(residentId) が呼ばれる", () => {

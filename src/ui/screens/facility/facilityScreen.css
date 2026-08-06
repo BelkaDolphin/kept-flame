@@ -108,6 +108,14 @@
   color: #5b534b;
 }
 
+/* [M73/R8-10] Lv 別基礎産出の曲線(就労者0でも増築の効果が読めるように)。 */
+.kf-facility-detail__level-curve {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0.15rem 0 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .kf-facility-detail__impairment-note {
   font-size: var(--kf-fs-sub);
   color: #a11334;

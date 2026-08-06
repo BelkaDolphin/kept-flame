@@ -220,7 +220,19 @@ export interface RoiPanelProps {
   readonly teamSize: number;
 }
 
-/** ROI と(B)損失リスク項(本タスクの検収条件)。 */
+/**
+ * 投資効率(ROI)と(B)損失リスク項(M32 の検収条件)。
+ *
+ * **[M73/R8-08] 3 点を直す**:
+ *   (a) 「ROI」だけが英語の金融用語のまま残っていた(軸D規約=内部語・英語生値を
+ *       露出しない)。**「投資効率」**へ和語化し、比であることを式で添える。
+ *   (b) 目的地別の値になっていなかった(engine 側 API は Phase D で入っていたのに
+ *       UI が渡していなかった)。結線は画面本体側で済ませ、ここでは
+ *       `report.sourceEventIds` から**何を根拠にした見積りか**を注記する。
+ *   (c) 近似値である注記が無かった。ここは事前期待値(乱数を 0..R 一様として
+ *       解析的に解いた確率モデル)であって、実際の解決は決定論で 1 つに決まる
+ *       (rules/exploration.ts の explorationRoi の doc)。その差を 1 行で言う。
+ */
 export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) {
   if (teamSize === 0) {
     return <p class="kf-expedition__roi-inactive">住民を選ぶと予測を表示します。</p>;
@@ -244,7 +256,7 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
   // だけ資源名が付き、この2つは単位なしのままだった(R5-A12 の残り)。
   // 同じ rewardResourceId を付けて統一する。
   return (
-    <section class="kf-expedition__roi" aria-label="派遣前 ROI">
+    <section class="kf-expedition__roi" aria-label="派遣前の見込み">
       <p class="kf-expedition__roi-reward">
         期待報酬: {formatResourceAmount(toApproxNumber(report.expectedRewardFix))}
         {rewardResourceId !== null ? resourceLabel(rewardResourceId) : ""}
@@ -260,12 +272,23 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
         {formatApproxDecimal1(toApproxNumber(report.wipeProbabilityFix) * 100)}%)
       </p>
       <p class="kf-expedition__roi-value">
-        ROI:{" "}
+        投資効率(期待報酬 ÷ 逸失生産と喪失リスクの合計):{" "}
         {report.roiFix === null
-          ? "算出不可(分母0)"
+          ? "算出できません(比べる相手が0のため)"
           : formatApproxDecimal2(toApproxNumber(report.roiFix))}
       </p>
       <p class="kf-expedition__roi-travel">往復所要: {formatTickSpan(report.travelTicks)}</p>
+      {/* [M73/R8-08] 近似であることの注記(§ 直前の doc (c))。目的地を選んでいれば
+          その行き先の実体から、選べる行き先が無い距離帯なら距離帯の平均的な難度
+          からの見積りであることも併せて言う。 */}
+      <p class="kf-expedition__roi-note" role="note">
+        {report.sourceEventIds.length === 0
+          ? "この距離帯には具体的な行き先の記録がないため、距離帯の平均的な難度から見積もっています。"
+          : report.sourceEventIds.length === 1
+            ? "選んでいる行き先の内容から見積もった値です。"
+            : "この距離帯で行ける先すべての平均から見積もった値です。"}
+        実際の成否は出発後に決まるため、この数値は目安です。
+      </p>
     </section>
   );
 }
@@ -387,9 +410,15 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
     });
   }
 
+  // [M73/R8-08] 目的地と方針を engine の ROI へ渡す(既存 API の結線漏れ)。
+  // 以前は帯平均のままだったので、近郊の3目的地で表示が 1 文字も変わらなかった。
   const roiReport = useMemo(
-    () => previewExplorationRoi(store.peekState(), content, band, selectedMemberIds),
-    [store, content, band, selectedMemberIds],
+    () =>
+      previewExplorationRoi(store.peekState(), content, band, selectedMemberIds, {
+        destinationId: effectiveDestinationId,
+        stance,
+      }),
+    [store, content, band, selectedMemberIds, effectiveDestinationId, stance],
   );
   const rewardResourceId = content.exploration?.byBand[band].rewardResourceId ?? null;
 
@@ -536,7 +565,7 @@ export function ExpeditionScreen({ store, onNavigate }: ScreenProps) {
         )}
       </section>
 
-      <h3 class="kf-expedition-screen__subtitle">派遣前の見込み(ROI)</h3>
+      <h3 class="kf-expedition-screen__subtitle">派遣前の見込み</h3>
       {/* [M61/FC3・R1-C03] sticky確定バーとの実測重なり補正(§1のdoc参照)。
           候補一覧の件数が変わると内容の総高さも変わるので、それを
           recomputeKey にして測り直す。 */}

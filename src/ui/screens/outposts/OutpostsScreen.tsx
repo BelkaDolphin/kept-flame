@@ -159,7 +159,11 @@ export function OutpostCard({
         (対象 (B) 資産 {outpost.rareAssetCount} 件)
       </p>
       <p class="kf-outpost-card__roi">
-        採算(ROI): {outpost.roiApprox === null ? "算出不可(分母0)" : outpost.roiApprox.toFixed(2)}
+        {/* [M73/R8-08] 英語の金融用語「ROI」を落とす(⑦探索本部と同じ和語化)。 */}
+        採算(投資効率):{" "}
+        {outpost.roiApprox === null
+          ? "算出できません(比べる相手が0のため)"
+          : outpost.roiApprox.toFixed(2)}
       </p>
       {/* [M61/FC8・R1-D05] 拠点放棄が確認0段(即時実行)だった。大移動(1段)・
           最初からやり直す(2段)と同じ「取り消せない操作は必ず確認を挟む」形へ
@@ -455,9 +459,9 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
           拠点網の(B)喪失リスク合計: {overview.network.totalExpectedRareLossApprox.toFixed(2)}
         </p>
         <p class="kf-outposts-screen__network-roi">
-          拠点網全体の採算(ROI):{" "}
+          拠点網全体の採算(投資効率):{" "}
           {overview.network.roiApprox === null
-            ? "算出不可(分母0)"
+            ? "算出できません(比べる相手が0のため)"
             : overview.network.roiApprox.toFixed(2)}
         </p>
       </section>

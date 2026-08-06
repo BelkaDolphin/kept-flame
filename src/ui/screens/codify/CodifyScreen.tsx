@@ -139,21 +139,44 @@ export function CodifyTechRow({
         保持者 {entry.holderIds.length}人{entry.uniqueHolder ? "(唯一保持)" : ""}
       </p>
 
-      {entry.holderIds.length > 0 && (
-        <p class="kf-codify-row__risk">
-          {/* [M61/FC5⑤] 生tick("約127830tick")を formatTickSpan へ。
-              「寿命モデル未設定」は実装用語のため落とす("無期限"はそのまま残す)。 */}
-          残存想定: {entry.hasDeadline ? `約${formatTickSpan(entry.residualTick)}` : "無期限"}
-          {entry.maxRecallRiskPercentApprox !== null &&
-            `・想起リスク約${entry.maxRecallRiskPercentApprox.toFixed(1)}%/日`}
-        </p>
+      {/* [M73/R8-11] **記録済みの行では残存想定/想起リスクを「守られている」文脈へ
+          畳む**。以前は未記録の行と同じ形でこの2値が残っていたため、成文化して
+          守られたことが表示から読み取れなかった(残存想定は「保持者を失うまでの
+          猶予」・想起リスクは「思い出せなくなる確率」であり、記録が1枚でもあれば
+          技術そのものは失われない=rules/codify.ts の isCodified が喪失判定を
+          止める)。数値そのものは畳んだ中に残す(情報は減らさない)。 */}
+      {entry.isCodified ? (
+        <>
+          <p class="kf-codify-row__recorded kf-codify-row__recorded--safe">
+            記録済み({entry.recordedMedia.map((medium) => mediumLabel(medium)).join("・")})
+            ——保持者を失ってもこの技術は残ります。
+          </p>
+          {entry.holderIds.length > 0 && (
+            <details class="kf-codify-row__risk-fold">
+              <summary class="kf-codify-row__risk-summary">保持者の状態(参考)</summary>
+              <p class="kf-codify-row__risk">
+                残存想定: {entry.hasDeadline ? `約${formatTickSpan(entry.residualTick)}` : "無期限"}
+                {entry.maxRecallRiskPercentApprox !== null &&
+                  `・想起リスク約${entry.maxRecallRiskPercentApprox.toFixed(1)}%/日`}
+                (記録があるため、これらは技術の喪失には繋がりません)
+              </p>
+            </details>
+          )}
+        </>
+      ) : (
+        <>
+          {entry.holderIds.length > 0 && (
+            <p class="kf-codify-row__risk">
+              {/* [M61/FC5⑤] 生tick("約127830tick")を formatTickSpan へ。
+                  「寿命モデル未設定」は実装用語のため落とす("無期限"はそのまま残す)。 */}
+              残存想定: {entry.hasDeadline ? `約${formatTickSpan(entry.residualTick)}` : "無期限"}
+              {entry.maxRecallRiskPercentApprox !== null &&
+                `・想起リスク約${entry.maxRecallRiskPercentApprox.toFixed(1)}%/日`}
+            </p>
+          )}
+          <p class="kf-codify-row__recorded">未記録</p>
+        </>
       )}
-
-      <p class="kf-codify-row__recorded">
-        {entry.isCodified
-          ? `記録済み(${entry.recordedMedia.map((medium) => mediumLabel(medium)).join("・")})`
-          : "未記録"}
-      </p>
 
       {entry.pendingRecords.length > 0 && (
         <ul class="kf-codify-row__pending">

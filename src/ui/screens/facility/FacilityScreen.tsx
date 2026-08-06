@@ -58,6 +58,7 @@ import {
   facilityEffectKind,
   facilityEffectTextOf,
   storageCapacityEffectText,
+  workerBaseOutputAt,
   type FacilityEffectKind,
 } from "../facilityEffect";
 import { formatApproxDecimal1, formatRatePerMinute, formatResourceAmount } from "../format";
@@ -161,6 +162,31 @@ export interface FacilityDetailPanelProps {
    * 表示上の目印・②カタログの `insufficient` と同じ立場)。省略時は false。
    */
   readonly upgradeInsufficient?: boolean;
+  /**
+   * [M73/R8-10] Lv 別の**基礎産出**(index 0 = Lv1。`outputPerTickByLevel` の各段を
+   * 近似値へ落としたもの)。就労者が 0 人の施設は現在の産出が全 Lv で 0/分になり、
+   * 増築で何が伸びるのか事前に読めなかった(T7 減点主因の片翼)。就労者の寄与と
+   * 隣接乗数を**含まない**素の値なので、文言でその旨を明示する。
+   * 省略/空なら出さない(捏造しない)。
+   */
+  readonly levelOutputCurve?: readonly number[];
+}
+
+/**
+ * [M73/R8-10] Lv 別基礎産出の 1 行。全段 0(縮約施設・非稼働)なら null。
+ * 現在の Lv には印を付ける(どこから伸びるのかが読めるようにする)。
+ */
+export function levelOutputCurveText(
+  curve: readonly number[],
+  currentLevel: number,
+): string | null {
+  if (curve.length === 0 || curve.every((value) => value === 0)) return null;
+  const parts = curve.map((value, index) => {
+    const level = index + 1;
+    const marker = level === currentLevel ? "◀ 現在" : "";
+    return `Lv${String(level)} ${formatRatePerMinute(value)}${marker}`;
+  });
+  return parts.join(" → ");
 }
 
 /**
@@ -197,8 +223,10 @@ export function FacilityDetailPanel({
   effectText = null,
   nextLevelOutputApprox = null,
   upgradeInsufficient = false,
+  levelOutputCurve = [],
 }: FacilityDetailPanelProps) {
   const upgradeCostLines = upgradeCostLinesOf(detail);
+  const curveText = levelOutputCurveText(levelOutputCurve, detail.level);
   const isDormant = effectKind === "none";
   const isBedCapacity = effectKind === "bedCapacity";
   const isStorageCapacity = effectKind === "storageCapacity";
@@ -265,6 +293,14 @@ export function FacilityDetailPanel({
             <p class="kf-facility-detail__impairment-note" role="note">
               ▲ 想起困難のため一部の就労者の生産が止まっています(下の就労者一覧を参照)。
               知識は人の記憶に宿るため、時間が経てば思い出して回復します。
+            </p>
+          )}
+          {/* [M73/R8-10] 就労者0人だと上の産出行が全Lvで「0/分 → 0/分」になり、
+              増築で何が伸びるのか事前に読めなかった。Lv 別の基礎産出(就労者の
+              寄与・隣接ボーナスを含まない素の値)を並べて曲線が読めるようにする。 */}
+          {curveText !== null && (
+            <p class="kf-facility-detail__level-curve">
+              Lv別の基礎産出(就労者の寄与と隣接ボーナスを含まない目安): {curveText}
             </p>
           )}
           <p class="kf-facility-detail__slots">
@@ -413,6 +449,22 @@ function curveEffectTextOf(content: EngineContent, defId: EntityId, level: numbe
 }
 
 /**
+ * [M73/R8-10] Lv 別の基礎産出(`workerBaseOutputAt` を全 Lv ぶん引くだけ)。
+ * content に定義が無ければ空(捏造しない)。
+ */
+function levelOutputCurveOf(content: EngineContent, defId: EntityId): readonly number[] {
+  const def = content.facilityDefs.get(defId);
+  if (def === undefined) return [];
+  const curve: number[] = [];
+  for (let level = 1; level <= def.outputPerTickByLevel.length; level++) {
+    const value = workerBaseOutputAt(def, level);
+    if (value === null) continue;
+    curve.push(value);
+  }
+  return curve;
+}
+
+/**
  * [M61/FC11・R1-A14] 増築後の産出見込み(`FacilityDetailPanel` の doc 参照)。
  * `outputPerTickApprox × (次Lv基礎産出 / 現Lv基礎産出)`。基礎産出が 0(非稼働
  * 施設・寝床)・Lv曲線が欠けている・既に上限Lv、のいずれかなら null(捏造しない)。
@@ -520,6 +572,7 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
             effectText={curveEffectTextOf(content, detail.defId, detail.level)}
             nextLevelOutputApprox={nextLevelOutputApproxOf(content, detail)}
             upgradeInsufficient={isUpgradeCostInsufficient(detail, resources)}
+            levelOutputCurve={levelOutputCurveOf(content, detail.defId)}
           />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />
         </>

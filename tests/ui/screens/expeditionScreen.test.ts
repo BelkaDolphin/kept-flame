@@ -127,7 +127,7 @@ describe("RoiPanel(GDD 8.6・検収条件=(B)損失リスク項が画面に出�
     expect(flattenText(vnode)).toContain("算出できません");
   });
 
-  it("(B)喪失リスクの期待損失・対象件数・全滅確率・ROIをすべて表示する", () => {
+  it("(B)喪失リスクの期待損失・対象件数・全滅確率・投資効率をすべて表示する", () => {
     const member = candidateResident("aMember");
     const state = createGameState(META, [member, resource("wStock", id("wood"))]);
     const content = m32Content();
@@ -140,7 +140,11 @@ describe("RoiPanel(GDD 8.6・検収条件=(B)損失リスク項が画面に出�
     expect(text).toContain("(B)喪失リスク");
     expect(text).toContain("期待損失");
     expect(text).toContain("全滅確率");
-    expect(text).toContain("ROI");
+    // [M73/R8-08] 「ROI」は和語「投資効率」へ(軸D規約=英語生値を露出しない)。
+    expect(text).toContain("投資効率");
+    expect(text).not.toContain("ROI");
+    // 近似であることの注記(実際の成否は出発後に決まる)。
+    expect(text).toContain("目安");
   });
 });
 
@@ -265,5 +269,39 @@ describe("[台帳v18 必-1] rewardMayOverflow(倉庫満杯の見込み判定・e
 
   it("対象資源の ResourceView が無ければ false(捏造しない)", () => {
     expect(rewardMayOverflow([], id("wood"), 100)).toBe(false);
+  });
+});
+
+describe("[M73/R8-08] 見込みの根拠と近似の注記", () => {
+  const member = candidateResident("aMember");
+  const state = createGameState(META, [member, resource("wStock", id("wood"))]);
+
+  /** `sourceEventIds` だけを差し替えた表示用レポート(注記の出し分けは本数だけで決まる)。 */
+  function reportWithSources(sourceEventIds: readonly ReturnType<typeof id>[]) {
+    const base = previewExplorationRoi(state, m32Content(), "near", [member.id]);
+    if (base === null) throw new Error("report が null(フィクスチャの exploration ブロック欠落)");
+    return { ...base, sourceEventIds };
+  }
+
+  function textOf(report: ReturnType<typeof reportWithSources>): string {
+    return flattenText(RoiPanel({ report, rewardResourceId: id("wood"), teamSize: 1 }));
+  }
+
+  it("目的地1本(engine が destinationId で絞った場合)は「選んでいる行き先の内容から」", () => {
+    expect(textOf(reportWithSources([id("eventNearA")]))).toContain("選んでいる行き先の内容から");
+  });
+
+  it("複数本(帯平均)は「行ける先すべての平均から」", () => {
+    expect(textOf(reportWithSources([id("eventNearA"), id("eventNearB")]))).toContain(
+      "行ける先すべての平均から",
+    );
+  });
+
+  it("行き先の記録が無い距離帯は手続きモデルであることを明かす", () => {
+    expect(textOf(reportWithSources([]))).toContain("具体的な行き先の記録がないため");
+  });
+
+  it("どの場合も確率モデルの目安であることを言う(実際の成否は出発後に決まる)", () => {
+    expect(textOf(reportWithSources([id("eventNearA")]))).toContain("目安");
   });
 });

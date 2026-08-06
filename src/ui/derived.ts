@@ -77,7 +77,11 @@ import {
   recordMediaOfTech,
 } from "../engine/rules/codify";
 import { residentCombatPower } from "../engine/rules/combat";
-import { explorationRoi, type ExplorationRoiReport } from "../engine/rules/exploration";
+import {
+  explorationRoi,
+  type ExplorationRoiOptions,
+  type ExplorationRoiReport,
+} from "../engine/rules/exploration";
 import { outpostNetworkRoi } from "../engine/rules/outpost";
 import { populationViewOf, type PopulationView } from "../engine/rules/population";
 import {
@@ -3068,13 +3072,21 @@ export function explorationDestinationsForBand(
  * 画面に出ているか)。**`explorationRoi` をそのまま呼ぶ**(UI 独自の式を
  * 書かない)。content に exploration ブロックが無ければ null(= 派遣システム
  * そのものが不活性)。
+ *
+ * **[M73/R8-08] `options` を素通しする**。Phase D で engine 側に
+ * `destinationId`/`stance` 指定の API が入っていたのに UI が渡していなかったため、
+ * 近郊の 3 目的地で表示が 1 文字も変わらない(= 帯平均のまま)状態だった
+ * (Round 8 実測)。方針(撤退重視/強行)も choices の選ばれ方を変えて難度と報酬を
+ * 動かすので、画面で選んだ値をそのまま渡す。目的地に対応する event が content に
+ * 無ければ engine 側が M21 の手続きモデルへフォールバックする(捏造はしない)。
  */
 export function previewExplorationRoi(
   state: GameState,
   content: EngineContent,
   band: DistanceBand,
   memberIds: readonly EntityId[],
+  options: ExplorationRoiOptions = {},
 ): ExplorationRoiReport | null {
   if (content.exploration === undefined) return null;
-  return explorationRoi(state, content, band, memberIds);
+  return explorationRoi(state, content, band, memberIds, options);
 }

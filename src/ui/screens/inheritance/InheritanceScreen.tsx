@@ -35,6 +35,7 @@ import { useState } from "preact/hooks";
 import type { CommandRejection } from "../../../engine/commands";
 import {
   availableInheritPoints,
+  earnedInheritPoints,
   inheritBonusOf,
   inheritTierCost,
   inheritTierMax,
@@ -60,6 +61,19 @@ export interface InheritTrackRowProps {
   readonly nextCost: number | null;
   /** [束B/B-4] 残高不足で確実に失敗するか(判定ではなく表示上の目印)。 */
   readonly insufficientBalance: boolean;
+  /**
+   * [M73/R8-06] 現在の残高。**不足量を「あと何点」の形で言う**ために渡す
+   * (Round 8: 初回周回は獲得49点に対し3項目とも1段目50点で、何一つ買えないうえ
+   * 不足量も次の周回で届くのかも手がかりが無かった)。省略時は不足量を出さない。
+   */
+  readonly availablePoints?: number | null;
+  /**
+   * [M73/R8-06] いま大移動した場合に得られる継承点(engine の
+   * `earnedInheritPoints` の値)。「次の周回で届く見込み」を**捏造せずに**言う
+   * ための材料であり、`残高 + これ >= 次段コスト` なら届く見込みと言える。
+   * 省略時はその一文を出さない。
+   */
+  readonly earnedIfExodusNow?: number | null;
   readonly onPurchase: (track: InheritTrack) => void;
 }
 
@@ -76,10 +90,19 @@ export function InheritTrackRow({
   bonusPerTier,
   nextCost,
   insufficientBalance,
+  availablePoints = null,
+  earnedIfExodusNow = null,
   onPurchase,
 }: InheritTrackRowProps) {
   const atMax = nextCost === null;
   const willFail = !atMax && insufficientBalance;
+  // [M73/R8-06] 不足量(あと何点)と、次の周回で届く見込みかどうか。
+  const shortfall =
+    nextCost === null || availablePoints === null ? null : Math.max(0, nextCost - availablePoints);
+  const reachableNextRun =
+    nextCost === null || availablePoints === null || earnedIfExodusNow === null
+      ? null
+      : availablePoints + earnedIfExodusNow >= nextCost;
   return (
     <li class="kf-inherit-row" data-track={track}>
       <h3 class="kf-inherit-row__title">{inheritTrackLabel(track)}</h3>
@@ -92,7 +115,21 @@ export function InheritTrackRow({
           : `次の1段のコスト: ${nextCost}点`}
       </p>
       {willFail && (
-        <p class="kf-inherit-row__insufficient">残高が足りません。押しても購入できません。</p>
+        <p class="kf-inherit-row__insufficient">
+          {shortfall === null
+            ? "残高が足りません。押しても購入できません。"
+            : `残高があと${String(shortfall)}点足りません。押しても購入できません。`}
+          {/* [M73/R8-06] 「次の周回で届くのか」を engine の獲得式
+              (`earnedInheritPoints`)から言う。獲得見込みは今の盤面(到達エラ・
+              成文化率・生存住民数)で決まるので、届かない場合は何を伸ばせばよいかも
+              添える(数値の調整そのものは content 側の担当)。 */}
+          {reachableNextRun === true &&
+            earnedIfExodusNow !== null &&
+            `いま大移動すると+${String(earnedIfExodusNow)}点なので、次の周回では購入できる見込みです。`}
+          {reachableNextRun === false &&
+            earnedIfExodusNow !== null &&
+            `いま大移動しても+${String(earnedIfExodusNow)}点なので、次の周回でもまだ届きません(成文化を進める・住民を増やす・より先の時代へ到達すると獲得点が増えます)。`}
+        </p>
       )}
       <button
         type="button"
@@ -146,6 +183,8 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
   const cumulative = state.progression.cumulativeInheritPoints;
   const spent = spentInheritPoints(state.progression, params);
   const maxTier = inheritTierMax(params);
+  // [M73/R8-06] いま大移動した場合の獲得点(engine の獲得式そのまま・GDD 10.3)。
+  const earnedNow = earnedInheritPoints(state, content);
 
   function handlePurchase(track: InheritTrack): void {
     const result = store.dispatch({
@@ -194,6 +233,8 @@ export function InheritanceScreen({ store, onNavigate }: ScreenProps) {
               bonusPerTier={params.trackBonusPerTier[track]}
               nextCost={nextCost}
               insufficientBalance={nextCost !== null && nextCost > available}
+              availablePoints={available}
+              earnedIfExodusNow={earnedNow}
               onPurchase={handlePurchase}
             />
           );

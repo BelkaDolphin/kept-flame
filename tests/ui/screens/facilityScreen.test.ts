@@ -277,6 +277,29 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
     expect(flattenText(vnode)).toContain("増築コスト: 薪 45");
   });
 
+  it("[M73/R8-10] 就労者0でも Lv 別の基礎産出曲線が読める(素の値である旨を明示する)", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ workers: [], outputPerTickApprox: 0, level: 2 }),
+      onUpgrade: () => undefined,
+      levelOutputCurve: [0.5, 1, 1.5, 2, 2.5],
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("Lv別の基礎産出");
+    expect(text).toContain("就労者の寄与と隣接ボーナスを含まない");
+    expect(text).toContain("◀ 現在");
+    // 現在Lv=2 の位置に印が付く(Lv1 側ではない)。
+    expect(text.indexOf("◀ 現在")).toBeGreaterThan(text.indexOf("Lv1"));
+  });
+
+  it("[M73/R8-10] 全Lvの基礎産出が0(縮約施設)なら曲線を出さない(捏造しない)", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({ workers: [] }),
+      onUpgrade: () => undefined,
+      levelOutputCurve: [0, 0, 0, 0, 0],
+    });
+    expect(flattenText(vnode)).not.toContain("Lv別の基礎産出");
+  });
+
   it("[M73/R8-03 fatal] 増築コストの複数資源(M65 の extraLines)を全行表示する", () => {
     const vnode = FacilityDetailPanel({
       detail: detailView({

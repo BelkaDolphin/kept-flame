@@ -242,6 +242,28 @@ describe("CodifyTechRow: 保持者・唯一保持・記録済み・作業中", (
     expect(text).toContain("石板");
   });
 
+  it("[M73/R8-11] 記録済みの行は「もう失われない」ことを言い、参考値は畳んだ中に残す", () => {
+    const vnode = CodifyTechRow({
+      entry: techEntry({
+        isCodified: true,
+        recordedMedia: ["stoneTablet"],
+        holderIds: [id("aRui")],
+        hasDeadline: true,
+        residualTick: 5000,
+        maxRecallRiskPercentApprox: 3.5,
+      }),
+      selectedMedium: "paper",
+      onMediumChange: () => undefined,
+      onEnqueue: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("保持者を失ってもこの技術は残ります");
+    expect(text).not.toContain("未記録");
+    // 情報は減らさない(畳んだ中に残存想定/想起リスクが残る)。
+    expect(text).toContain("残存想定");
+    expect(text).toContain("技術の喪失には繋がりません");
+  });
+
   it("作業中の記録(pendingRecords)は進行度を表示する", () => {
     const vnode = CodifyTechRow({
       entry: techEntry({

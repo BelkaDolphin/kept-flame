@@ -57,7 +57,12 @@ import { NAV_GROUPS, navGroupOfScreen, type NavGroupId } from "./navGroups";
 import { NotificationOptInBanner } from "./NotificationOptInBanner";
 import { OnboardingGuide } from "./onboarding/OnboardingGuide";
 import { ONBOARDING_STEPS } from "./onboarding/steps";
-import { residentDisplayName, resourceLabel, techLabel } from "./screens/contentLabels";
+import {
+  mediumLabel,
+  residentDisplayName,
+  resourceLabel,
+  techLabel,
+} from "./screens/contentLabels";
 import { formatGameClock, formatResourceStock } from "./screens/format";
 import { labelizeLogText } from "./screens/idLabelize";
 import { SCREEN_META, type ScreenId } from "./screens";
@@ -389,6 +394,47 @@ export function ArrivalWatcher({ store, onArrival }: ArrivalWatcherProps) {
 }
 
 /**
+ * [M73/R8-11] 成文化(記録の完成)の通知。研究完了・探索帰還にはトーストがあるのに
+ * 成文化だけ無かった(GDD 4.2 の「解禁 → 実地稼働 → 成文化」の最後の一歩であり、
+ * これが完了通知を持たないのは中核ループの取りこぼし)。
+ *
+ * 検知は他のウォッチャと同じ差分検知。`store.derived.codify`(codify entity の
+ * 一覧)で `completed` が新たに true になった entity を拾う——完成の権威は
+ * engine の段50(`PIPELINE_STAGE.codify`)であり、ここは観測だけ。
+ */
+export interface CodificationCompletionWatcherProps {
+  readonly store: GameStore;
+  readonly onComplete: (text: string) => void;
+}
+
+export function CodificationCompletionWatcher({
+  store,
+  onComplete,
+}: CodificationCompletionWatcherProps) {
+  const codify = useSignalValue(store.derived.codify);
+  const previousCompletedRef = useRef<ReadonlySet<EntityId> | null>(null);
+
+  useEffect(() => {
+    const completedNow = new Set(
+      codify.filter((entry) => entry.completed).map((entry) => entry.entityId),
+    );
+    const previous = previousCompletedRef.current;
+    if (previous !== null) {
+      for (const entry of codify) {
+        if (!entry.completed || previous.has(entry.entityId)) continue;
+        onComplete(
+          `「${techLabel(entry.techId)}」を${mediumLabel(entry.medium)}に書き残した(記録が完成した)`,
+        );
+      }
+    }
+    previousCompletedRef.current = completedNow;
+    // 依存配列は意図的に `codify` だけ(上の Watcher 群と同じ理由)。
+  }, [codify]);
+
+  return null;
+}
+
+/**
  * [M73/R8-05] 襲撃(M66・3日周期)の通知。上の 3 つ(帰還/研究完了/漂着)と同じ
  * 差分検知方式で、`store.derived.raidTally`(engine の自己申告カウンタ
  * `ScheduleReport.raidCount` を積んだ揮発の累計・sources.ts の doc)の増分を見る。
@@ -706,6 +752,8 @@ export function AppShell({
       {/* [M73/R8-05] 襲撃(撃退/略奪)の通知。これも tick 進行の結果なので
           個々の画面の成功トーストには乗らない(§1-5 と同じ理由)。 */}
       <RaidWatcher store={store} onRaid={globalToasts.push} />
+      {/* [M73/R8-11] 成文化完了(段50)の通知。研究完了/帰還と同じ扱いへ揃える。 */}
+      <CodificationCompletionWatcher store={store} onComplete={globalToasts.push} />
       <ToastStackView toasts={globalToasts.toasts} />
       {installPromotion && (
         <InstallPromotionBanner

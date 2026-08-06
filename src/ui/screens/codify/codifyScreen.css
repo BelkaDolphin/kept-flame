@@ -62,6 +62,23 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* [M73/R8-11] 記録済み(守られている)行は、未記録の警告表示と混ざらない色で
+   「もう失われない」ことを示す。参考値(残存想定/想起リスク)は畳んだ中に残す。 */
+.kf-codify-row__recorded--safe {
+  color: #2f5d3a;
+  font-weight: 600;
+}
+
+.kf-codify-row__risk-fold {
+  font-size: var(--kf-fs-sub);
+  margin: 0 0 0.25rem;
+}
+
+.kf-codify-row__risk-summary {
+  color: #5b534b;
+  cursor: pointer;
+}
+
 .kf-codify-row__pending {
   list-style: none;
   margin: 0 0 0.4rem;
