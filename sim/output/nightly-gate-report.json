@@ -242,11 +242,11 @@
     },
     {
       "comparator": "<",
-      "detail": "全 run の全標本で最大 0.161247。content の storage.baseCapacity に上限が定義されている",
+      "detail": "全 run の全標本で最大 0.208028。content の storage.baseCapacity に上限が定義されている",
       "gddRef": "GDD 11.4-7",
       "id": "gdd-11.4-7c",
       "inequality": "max_(run, 標本) オーバーフロー損失率 < 0.15",
-      "measured": 161247,
+      "measured": 208028,
       "owner": "balance",
       "status": "fail",
       "threshold": 150000,

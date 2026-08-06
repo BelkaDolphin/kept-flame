@@ -252,6 +252,32 @@ export function writeCapacityOutcome(
 //   telescoping を必要としない —— よって会計を動かさなくても分割不変性は
 //   1 mm も損なわれない。
 
+// ===========================================================================
+// 2c. [Phase B] 廃材の会計は「その廃材がどこから来たか」で分かれる
+// ===========================================================================
+//   **[2026-08-06裁定・台帳v20 必-3(2)]** M64 は報酬**本体**を生産会計
+//   (`cumulativeProduced` / `cumulativeOverflow`)へ入れないと決めた(§2b の
+//   (1)(2))。ところが、あふれ救済で生まれた**廃材**だけは
+//   {@link creditWasteGain} が施設産出とまったく同じ経路を通っていたため、
+//   一括入荷(探索報酬)由来の廃材が生産会計を動かしていた。
+//
+//   これは「指標に外部収入を混ぜない」という §2b の原則との**ずれ**であり、
+//   しかも指標を悪化方向へ動かす逆進性を持つ: 探索報酬があふれるほど
+//   廃材が積まれ、廃材自身の保管上限を超えた分が GDD 11.4-7c
+//   (オーバーフロー損失率)の**分子**へ入る(Phase A 実測で分子の 45.7%)。
+//   報酬本体は分母に入らないのに、その副産物だけが分子に入る形になっていた。
+//
+//   よって廃材の会計を由来で分ける:
+//     `"produced"` … 施設産出 / 拠点供給((A) 区間の連続流)由来。従来どおり
+//                     生産会計へ算入する。**この経路は 1 bit も変えていない**。
+//     `"excluded"` … 一括入荷(探索報酬)由来。在庫と上限クランプは同じだが
+//                     生産会計は動かさない(報酬本体と同じ扱い)。
+//   分割不変性(§3 の telescoping)は損なわれない: 一括入荷は離散事象で 1 回
+//   だけ起きるので区間分割が有り得ず、そもそも telescoping を必要としない。
+
+/** [Phase B] 廃材を生産会計へ算入するか(§2c)。 */
+export type WasteAccounting = "produced" | "excluded";
+
 /** [M64] 入荷 1 件ぶんの受入結果({@link applyCappedIntake} / {@link applyCappedLumpIntake})。 */
 export interface CappedIntakeOutcome {
   /** 反映後の state。 */
@@ -376,6 +402,9 @@ export function applyCappedLumpIntake(
  * [M64] スポンジで生じた廃材を廃材資源の在庫へ入れる(§2b の単一入口)。
  * 廃材自身にも上限があれば適用するが、その超過は破棄する(変換率 0 で渡す)。
  *
+ * **[M67/Phase B・2026-08-06裁定・台帳v20 必-3(2)] 会計に算入するかは由来で分かれる**
+ * (§2c)。`accounting` を省略すると従来どおり `"produced"`(= 施設産出由来)。
+ *
  * `contextLabel` は例外メッセージの接頭辞(呼び出し元の関数名)。
  *
  * @throws {RulesError} 廃材の resource entity が state に無い場合
@@ -387,6 +416,7 @@ export function creditWasteGain(
   capacityByResourceId: ReadonlyMap<EntityId, Fix>,
   wasteGainFix: Fix,
   contextLabel: string,
+  accounting: WasteAccounting = "produced",
 ): GameState {
   const wasteResourceId = storage?.wasteResourceId;
   if (wasteResourceId === undefined || wasteResourceId === null) return state;
@@ -400,11 +430,15 @@ export function creditWasteGain(
         setField(r, "stock", addFix(r.stock, wasteGainFix)),
       );
     }
-    return writeCapacityOutcome(
-      state,
-      resource.id,
-      applyGainWithCapacity(resource, wasteGainFix, capacity, FIX_ZERO),
-    );
+    const outcome = applyGainWithCapacity(resource, wasteGainFix, capacity, FIX_ZERO);
+    if (accounting === "excluded") {
+      // §2c: 一括入荷由来は在庫だけ動かし、生産会計(cumulativeProduced /
+      // cumulativeOverflow)には触れない。クランプ式は施設産出とまったく同じ。
+      return updateEntity(state, resource.id, "resource", (r) =>
+        setField(r, "stock", outcome.stock),
+      );
+    }
+    return writeCapacityOutcome(state, resource.id, outcome);
   }
   throw new RulesError(
     `${contextLabel}: 廃材 "${wasteResourceId}" の resource entity が state に無い` +

@@ -825,12 +825,16 @@ function applyExpeditionReward(
     rewardFix,
   );
   return {
+    // [Phase B・台帳v20 必-3(2)] あふれ救済で生まれた廃材も**報酬本体と同じく
+    // 生産会計へ入れない**(rules/storage.ts §2c)。M64 は本体だけを外していた
+    // ため、外部収入の副産物が GDD 11.4-7c の分子を押し上げる逆進性が残っていた。
     state: creditWasteGain(
       outcome.state,
       content.storage,
       capacityByResourceId,
       outcome.wasteGainFix,
       "applyExpeditionReward",
+      "excluded",
     ),
     intake: { acceptedFix: outcome.acceptedFix, excessFix: outcome.excessFix },
   };

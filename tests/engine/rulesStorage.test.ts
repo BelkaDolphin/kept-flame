@@ -4,8 +4,11 @@ import { advance, createAdvanceContext } from "../../src/engine/advance";
 import { FIX_ZERO, fixFromInt, fixFromRaw, toRaw, type Fix } from "../../src/engine/fp";
 import { applyProduction, computeProductionRates } from "../../src/engine/rules/production";
 import {
+  applyCappedIntake,
+  applyCappedLumpIntake,
   colonyOverflowLossRate,
   convertWasteToResearchPoints,
+  creditWasteGain,
   overflowLossRate,
   resolveCapacityByResourceId,
   spendResources,
@@ -387,5 +390,128 @@ describe("資源消費(spendResources)", () => {
     const state = stateOf([resource("rWood", WOOD, 10)]);
     const costs = new Map<EntityId, Fix>([[id("iron"), fixFromInt(1)]]);
     expect(() => spendResources(state, costs)).toThrow(RulesError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [Phase B・2026-08-06裁定・台帳v20 必-3(2)] 廃材の会計は由来で分かれる(§2c)。
+// 施設産出 / 拠点供給((A) 区間の連続流)由来は従来どおり生産会計へ算入し、
+// 一括入荷(探索報酬)由来は在庫だけ動かして会計へ算入しない。
+// ---------------------------------------------------------------------------
+
+describe("[Phase B] 廃材の会計は由来で分岐する(GDD 11.4-7c の分子/分母)", () => {
+  /** 薪は上限 10・超過の 50% が廃材へ。廃材自身は上限 3(= あふれる)。 */
+  const SPONGE_STORAGE = storageParams({
+    capacity: [
+      [WOOD, 10],
+      [WASTE, 3],
+    ],
+    ratio: [[WOOD, 500_000]],
+  });
+
+  function wasteBoard(): GameState {
+    return stateOf([
+      resource("rWaste", WASTE, 0),
+      resource("rWood", WOOD, 0),
+      resource("rGrain", id("grain"), 0),
+    ]);
+  }
+
+  it("施設産出由来(連続流)の廃材は従来どおり生産会計へ算入する", () => {
+    const content = contentOf({ storage: SPONGE_STORAGE });
+    const capacity = resolveCapacityByResourceId(wasteBoard(), content);
+    const intake = applyCappedIntake(
+      wasteBoard(),
+      content.storage,
+      capacity,
+      resourceOf(wasteBoard(), "rWood"),
+      fixFromInt(30),
+    );
+    const next = creditWasteGain(
+      intake.state,
+      content.storage,
+      capacity,
+      intake.wasteGainFix,
+      "test",
+    );
+    // 超過 20 の 50% = 10 が廃材。上限 3 なので在庫 3・超過 7。
+    const waste = resourceOf(next, "rWaste");
+    expect(toRaw(waste.stock)).toBe(3_000_000);
+    expect(toRaw(waste.cumulativeProduced ?? FIX_ZERO)).toBe(10_000_000);
+    expect(toRaw(waste.cumulativeOverflow ?? FIX_ZERO)).toBe(7_000_000);
+  });
+
+  it("一括入荷由来の廃材は在庫だけ動かし、生産会計を動かさない", () => {
+    const content = contentOf({ storage: SPONGE_STORAGE });
+    const capacity = resolveCapacityByResourceId(wasteBoard(), content);
+    const intake = applyCappedLumpIntake(
+      wasteBoard(),
+      content.storage,
+      capacity,
+      resourceOf(wasteBoard(), "rWood"),
+      fixFromInt(30),
+    );
+    const next = creditWasteGain(
+      intake.state,
+      content.storage,
+      capacity,
+      intake.wasteGainFix,
+      "test",
+      "excluded",
+    );
+    const waste = resourceOf(next, "rWaste");
+    // 在庫・上限クランプは施設産出とまったく同じ。
+    expect(toRaw(waste.stock)).toBe(3_000_000);
+    // 会計だけが動かない(報酬本体と同じ扱い・GDD 8.1⑥)。
+    expect(waste.cumulativeProduced).toBeUndefined();
+    expect(waste.cumulativeOverflow).toBeUndefined();
+  });
+
+  it("除外した廃材は GDD 11.4-7c の分子にも分母にも入らない", () => {
+    const content = contentOf({ storage: SPONGE_STORAGE });
+    const capacity = resolveCapacityByResourceId(wasteBoard(), content);
+    const lump = applyCappedLumpIntake(
+      wasteBoard(),
+      content.storage,
+      capacity,
+      resourceOf(wasteBoard(), "rWood"),
+      fixFromInt(30),
+    );
+    const excluded = creditWasteGain(
+      lump.state,
+      content.storage,
+      capacity,
+      lump.wasteGainFix,
+      "test",
+      "excluded",
+    );
+    // 報酬本体も廃材も会計に触れていないので、盤面の損失率は 0 のまま。
+    expect(toRaw(colonyOverflowLossRate(excluded))).toBe(0);
+  });
+
+  it("探索報酬の帰還経路が excluded を通る(applyExpeditionReward 相当の往復)", () => {
+    // `rules/exploration.ts` の applyExpeditionReward は creditWasteGain へ
+    // "excluded" を渡す。ここでは同じ入口を直接踏んで、既定("produced")との
+    // 差が会計フィールドの有無として現れることを固定する。
+    const content = contentOf({ storage: SPONGE_STORAGE });
+    const capacity = resolveCapacityByResourceId(wasteBoard(), content);
+    const produced = creditWasteGain(
+      wasteBoard(),
+      content.storage,
+      capacity,
+      fixFromInt(10),
+      "test",
+    );
+    const excluded = creditWasteGain(
+      wasteBoard(),
+      content.storage,
+      capacity,
+      fixFromInt(10),
+      "test",
+      "excluded",
+    );
+    expect(stockOf(produced, "rWaste")).toBe(stockOf(excluded, "rWaste"));
+    expect(resourceOf(produced, "rWaste").cumulativeProduced).not.toBeUndefined();
+    expect(resourceOf(excluded, "rWaste").cumulativeProduced).toBeUndefined();
   });
 });
