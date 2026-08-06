@@ -42,7 +42,13 @@ import type { CommandRejection } from "../../../engine/commands";
 import { toApproxNumber } from "../../../engine/fp";
 import type { EngineContent } from "../../../engine/rules/types";
 import type { EntityId } from "../../../engine/state/state";
-import type { FacilityDetailView, FacilityRosterEntry, FacilityWorkerView } from "../../derived";
+import type {
+  CostLineView,
+  FacilityDetailView,
+  FacilityRosterEntry,
+  FacilityWorkerView,
+  ResourceView,
+} from "../../derived";
 import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, residentDisplayName, resourceLabel, techLabel } from "../contentLabels";
 import {
@@ -61,12 +67,7 @@ import { TagChip } from "../grid/TagChip";
 import { TagIconDefs } from "../grid/TagIcons";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
-import {
-  resourceSpendBreakdownPhrase,
-  resourceStockFix,
-  useToastStack,
-  ToastStackView,
-} from "../Toast";
+import { resourceSpendPhrase, resourceStockFix, useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./facilityScreen.css";
 
@@ -142,6 +143,36 @@ export interface FacilityDetailPanelProps {
    * 厳密に一致する)。
    */
   readonly nextLevelOutputApprox?: number | null;
+  /**
+   * [M73/R8-03] 増築コストの**いずれかの行**の在庫が足りないか(判定ではなく
+   * 表示上の目印・②カタログの `insufficient` と同じ立場)。省略時は false。
+   */
+  readonly upgradeInsufficient?: boolean;
+}
+
+/**
+ * [M73/R8-03] 表示用の増築コスト行(第1行 = 主資源)。`upgradeCostLines` を持たない
+ * 呼び出し(既存テストフィクスチャ)では主資源 1 行に畳む(後方互換)。
+ */
+export function upgradeCostLinesOf(detail: FacilityDetailView): readonly CostLineView[] {
+  if (detail.upgradeCostLines !== undefined) return detail.upgradeCostLines;
+  if (detail.upgradeCostApprox === null || detail.upgradeCostResourceId === null) return [];
+  return [{ resourceId: detail.upgradeCostResourceId, amountApprox: detail.upgradeCostApprox }];
+}
+
+/**
+ * [M73/R8-03] 増築コストのどれか 1 行でも在庫が足りないか(②カタログの
+ * `isCatalogEntryInsufficient` と同型・表示のみ)。
+ */
+export function isUpgradeCostInsufficient(
+  detail: FacilityDetailView,
+  resources: readonly ResourceView[],
+): boolean {
+  return upgradeCostLinesOf(detail).some((line) => {
+    const stock =
+      resources.find((resource) => resource.resourceId === line.resourceId)?.stockApprox ?? 0;
+    return stock < line.amountApprox;
+  });
 }
 
 export function FacilityDetailPanel({
@@ -152,7 +183,9 @@ export function FacilityDetailPanel({
   storageEffectText = null,
   effectText = null,
   nextLevelOutputApprox = null,
+  upgradeInsufficient = false,
 }: FacilityDetailPanelProps) {
+  const upgradeCostLines = upgradeCostLinesOf(detail);
   const isDormant = effectKind === "none";
   const isBedCapacity = effectKind === "bedCapacity";
   const isStorageCapacity = effectKind === "storageCapacity";
@@ -237,14 +270,29 @@ export function FacilityDetailPanel({
         </>
       )}
       <div class="kf-facility-detail__upgrade">
-        <p class="kf-facility-detail__upgrade-cost">
-          {detail.upgradeCostApprox === null || detail.upgradeCostResourceId === null
+        {/* [M73/R8-03 fatal] M65 の複数資源コストを全行出す(以前は第1行だけで、
+            写字室の増築は「薪17」表示・実消費 薪17+粘土7 だった)。在庫不足の
+            「▲」も全行で判定する(判定ではなく表示上の目印・§3 の規律どおり
+            ボタンは非活性にしない)。 */}
+        <p
+          class={
+            upgradeInsufficient
+              ? "kf-facility-detail__upgrade-cost kf-facility-detail__upgrade-cost--insufficient"
+              : "kf-facility-detail__upgrade-cost"
+          }
+        >
+          {upgradeCostLines.length === 0
             ? detail.level >= detail.maxLevel
               ? "既に上限Lvです。"
               : "増築コストはかかりません。"
             : // [M63/R4-A12 系] 生の数値を直接埋め込んでいた(整形ヘルパを通していない
               // ため float 起因の端数がそのまま出うる)。formatResourceAmount へ統一。
-              `増築コスト: ${resourceLabel(detail.upgradeCostResourceId)} ${formatResourceAmount(detail.upgradeCostApprox)}`}
+              `${upgradeInsufficient ? "▲ " : ""}増築コスト: ${upgradeCostLines
+                .map(
+                  (line) =>
+                    `${resourceLabel(line.resourceId)} ${formatResourceAmount(line.amountApprox)}`,
+                )
+                .join("・")}`}
         </p>
         {isDormant && detail.level < detail.maxLevel && (
           <p class="kf-facility-detail__dormant-upgrade-warning">
@@ -380,6 +428,8 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
   const detail = useSignalValue(store.derived.selectedFacilityDetail);
   const breakdown = useSignalValue(store.derived.selectedCellBreakdown);
   const facilityRoster = useSignalValue(store.derived.facilityRoster);
+  // [M73/R8-03] 増築コスト全行の在庫不足「▲」に使う(②カタログと同じ表示のみ)。
+  const resources = useSignalValue(store.derived.resources);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
   // content は起動後に差し替わらないので非追跡の peek で読む(他画面前例どおり・
@@ -390,15 +440,18 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
     // [M70/R5-A04] 消費量表示の差分は Fix のまま取る(resourceStockFix・
     // Toast.tsx の spentAmountText doc 参照。近似値どうしの減算は IEEE754 の
     // 丸め誤差で ±1 ずれることがある)。
-    const beforeStockFix =
-      current.upgradeCostResourceId === null
-        ? null
-        : resourceStockFix(store.peekState(), current.upgradeCostResourceId);
-    // [M63/R4-A14] 増築コストも建設と同じ廃材代替(GDD 6.7・最大20%)を受ける
-    // ので、廃材資源の在庫も併せて控える。
-    const wasteResourceId = content.storage?.wasteResourceId ?? null;
-    const wasteBeforeStockFix =
-      wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
+    // [M73/R8-03] M65 の追加コスト行も同じ形で控える(主資源 → 廃材 → 追加行の
+    // 順は engine の payFacilityCost の引き落とし順)。
+    const costResourceIds: readonly (EntityId | null)[] = [
+      current.upgradeCostResourceId,
+      content.storage?.wasteResourceId ?? null,
+      ...upgradeCostLinesOf(current)
+        .slice(1)
+        .map((line) => line.resourceId),
+    ];
+    const beforeStockFixes = costResourceIds.map((resourceId) =>
+      resourceId === null ? null : resourceStockFix(store.peekState(), resourceId),
+    );
     const result = store.dispatch({
       type: "commandApplied",
       command: { kind: "upgradeFacility", facilityId: current.facilityId },
@@ -408,23 +461,12 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
       return;
     }
     setLastRejection(null);
-    const afterStockFix =
-      current.upgradeCostResourceId === null
-        ? null
-        : resourceStockFix(store.peekState(), current.upgradeCostResourceId);
-    const wasteAfterStockFix =
-      wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
-    const diff = resourceSpendBreakdownPhrase(
-      {
-        resourceId: current.upgradeCostResourceId,
-        beforeStockFix,
-        afterStockFix,
-      },
-      {
-        resourceId: wasteResourceId,
-        beforeStockFix: wasteBeforeStockFix,
-        afterStockFix: wasteAfterStockFix,
-      },
+    const diff = resourceSpendPhrase(
+      costResourceIds.map((resourceId, index) => ({
+        resourceId,
+        beforeStockFix: beforeStockFixes[index] ?? null,
+        afterStockFix: resourceId === null ? null : resourceStockFix(store.peekState(), resourceId),
+      })),
     );
     toastStack.push(
       `${facilityLabel(current.defId)}をLv${String(current.level + 1)}へ増築した${diff.length > 0 ? `(${diff})` : ""}`,
@@ -464,6 +506,7 @@ export function FacilityScreen({ store, onNavigate }: ScreenProps) {
             storageEffectText={storageEffectTextOf(content, detail.defId, detail.level)}
             effectText={curveEffectTextOf(content, detail.defId, detail.level)}
             nextLevelOutputApprox={nextLevelOutputApproxOf(content, detail)}
+            upgradeInsufficient={isUpgradeCostInsufficient(detail, resources)}
           />
           <CellBreakdownView cellId={detail.cellId} breakdown={breakdown} includeIconDefs={false} />
         </>

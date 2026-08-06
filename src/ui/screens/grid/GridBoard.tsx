@@ -68,7 +68,7 @@ import {
   type PlacementPreviewCell,
 } from "../../derived";
 import type { GameStore } from "../../store";
-import { resourceStockFix } from "../Toast";
+import { resourceStockFix, type ResourceSpendSnapshot } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./gridBoard.css";
 import { CELL_SIZE_PX, DEFAULT_SCALE, MIN_TAP_TARGET_PX } from "./gridConstants";
@@ -415,6 +415,11 @@ export interface PlacementSuccessInfo {
   readonly wasteResourceId: EntityId | null;
   readonly wasteBeforeStockFix: Fix | null;
   readonly wasteAfterStockFix: Fix | null;
+  /**
+   * [M73/R8-03 fatal] M65 の追加コスト行(第2行以降)の前後在庫。主資源/廃材と
+   * 同じ Fix のまま持つ。省略時(既存呼び出し互換)は追加行なし扱い。
+   */
+  readonly extraSnapshots?: readonly ResourceSpendSnapshot[];
 }
 
 export interface GridBoardProps {
@@ -557,13 +562,18 @@ export function GridBoard({
         // [M63/R4-A14] 廃材代替の内訳も出すため、廃材資源の在庫も併せて控える。
         // [M70/R5-A04] Fix のまま控える(近似値どうしの減算による ±1 ずれの解消
         // ・Toast.tsx の spentAmountText doc 参照)。
-        const costResourceId =
-          store.peekContent().facilityDefs.get(action.command.defId)?.cost?.resourceId ?? null;
+        const cost = store.peekContent().facilityDefs.get(action.command.defId)?.cost;
+        const costResourceId = cost?.resourceId ?? null;
         const beforeStockFix =
           costResourceId === null ? null : resourceStockFix(store.peekState(), costResourceId);
         const wasteResourceId = store.peekContent().storage?.wasteResourceId ?? null;
         const wasteBeforeStockFix =
           wasteResourceId === null ? null : resourceStockFix(store.peekState(), wasteResourceId);
+        // [M73/R8-03] 追加コスト行(M65)の資源も同じ形で控える。
+        const extraResourceIds = (cost?.extraLines ?? []).map((line) => line.resourceId);
+        const extraBeforeStockFixes = extraResourceIds.map((resourceId) =>
+          resourceStockFix(store.peekState(), resourceId),
+        );
 
         const result = store.dispatch({ type: "commandApplied", command: action.command });
         // commandApplied を dispatch した直後は DispatchResult.command が
@@ -583,6 +593,11 @@ export function GridBoard({
             wasteResourceId,
             wasteBeforeStockFix,
             wasteAfterStockFix,
+            extraSnapshots: extraResourceIds.map((resourceId, index) => ({
+              resourceId,
+              beforeStockFix: extraBeforeStockFixes[index] ?? null,
+              afterStockFix: resourceStockFix(store.peekState(), resourceId),
+            })),
           });
         }
         return;

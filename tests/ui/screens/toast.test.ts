@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import { fixFromInt, fixFromRaw } from "../../../src/engine/fp";
 import { entityIdFromString } from "../../../src/engine/state/state";
-import { resourceSpendBreakdownPhrase } from "../../../src/ui/screens/Toast";
+import { resourceSpendBreakdownPhrase, resourceSpendPhrase } from "../../../src/ui/screens/Toast";
 
 const id = entityIdFromString;
 const FIREWOOD = id("firewood");
@@ -109,5 +109,38 @@ describe("[M70/R5-A04] resourceSpendBreakdownPhrase: 固定小数点のまま差
       { resourceId: null, beforeStockFix: null, afterStockFix: null },
     );
     expect(text).toBe("薪1");
+  });
+});
+
+// --- [M73/R8-03 fatal] 任意本数の消費内訳句 -----------------------------------
+
+describe("[M73/R8-03] resourceSpendPhrase(M65 複数資源コストの消費内訳)", () => {
+  const CLAY = id("clay");
+
+  it("主資源 + 追加行を全部つなぐ(第2行が黙って落ちない)", () => {
+    const text = resourceSpendPhrase([
+      { resourceId: FIREWOOD, beforeStockFix: fixFromInt(60), afterStockFix: fixFromInt(43) },
+      { resourceId: WASTE, beforeStockFix: fixFromInt(20), afterStockFix: fixFromInt(20) },
+      { resourceId: CLAY, beforeStockFix: fixFromInt(30), afterStockFix: fixFromInt(23) },
+    ]);
+    expect(text).toBe("薪17+粘土7");
+  });
+
+  it("主資源 + 廃材代替 + 追加行の3本が並ぶ(engine の引き落とし順)", () => {
+    const text = resourceSpendPhrase([
+      { resourceId: FIREWOOD, beforeStockFix: fixFromInt(60), afterStockFix: fixFromInt(46) },
+      { resourceId: WASTE, beforeStockFix: fixFromInt(20), afterStockFix: fixFromInt(17) },
+      { resourceId: CLAY, beforeStockFix: fixFromInt(30), afterStockFix: fixFromInt(24) },
+    ]);
+    expect(text).toBe("薪14+廃材3+粘土6");
+  });
+
+  it("1本も動いていなければ空文字列(呼び出し側は丸括弧ごと付けない)", () => {
+    expect(
+      resourceSpendPhrase([
+        { resourceId: FIREWOOD, beforeStockFix: fixFromInt(60), afterStockFix: fixFromInt(60) },
+        { resourceId: null, beforeStockFix: null, afterStockFix: null },
+      ]),
+    ).toBe("");
   });
 });

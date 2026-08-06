@@ -169,3 +169,26 @@ export function resourceSpendBreakdownPhrase(
   }
   return `${resourceLabel(primary.resourceId)}${primaryText}+${resourceLabel(waste.resourceId)}${wasteText}`;
 }
+
+/**
+ * [M73/R8-03 fatal] **任意本数**の消費内訳句(「薪14+粘土6」)。
+ *
+ * M65 で施設コストが複数資源になったのに、建設/増築の成功トーストは
+ * {@link resourceSpendBreakdownPhrase}(主資源 + 廃材の 2 本固定)しか作れず、
+ * 第2行以降の消費が黙って落ちていた(Round 8 実測: 写字室の増築トーストが
+ * 「薪17」だけで粘土7を出さない)。
+ *
+ * 渡す順序は engine が引き落とす順(主資源 → 廃材 → 追加行・`payFacilityCost`)
+ * に合わせること。**判定は一切しない**——前後の在庫差分という観測だけを見る
+ * (2 本版と同じ規律)。動きが無かった資源は句から落ち、1 本も動いていなければ
+ * 空文字列(呼び出し側は空なら丸括弧ごと付けない)。
+ */
+export function resourceSpendPhrase(snapshots: readonly ResourceSpendSnapshot[]): string {
+  const parts: string[] = [];
+  for (const snapshot of snapshots) {
+    const text = spentAmountText(snapshot);
+    if (text === null || snapshot.resourceId === null) continue;
+    parts.push(`${resourceLabel(snapshot.resourceId)}${text}`);
+  }
+  return parts.join("+");
+}

@@ -38,6 +38,7 @@ import type {
   EngineContent,
   EraDef,
   EventDef,
+  FacilityDef,
   ReclaimParams,
   RecordMediaParams,
   TechDef,
@@ -853,6 +854,43 @@ describe("[M30] facilityCatalog(②施設カタログ・content のみに依存)
     const studyDeskEntry = catalog.find((entry) => entry.defId === STUDY_DESK.id);
     expect(studyDeskEntry?.outputKind).toBe("research");
     expect(studyDeskEntry?.outputResourceId).toBeNull();
+  });
+
+  it("[M73/R8-03 fatal] 複数資源コスト(M65 の extraLines)が全行入る", () => {
+    // 主資源 薪14 + 追加行 粘土6(実 content の写字室と同じ形)。
+    const scriptorium: FacilityDef = {
+      id: id("scriptorium"),
+      tags: ["lore"],
+      harshWork: false,
+      outputPerTickByLevel: [1, 2, 3, 4, 5].map(fixFromInt),
+      output: { kind: "research" },
+      cost: {
+        resourceId: WOOD,
+        buildFix: fixFromInt(14),
+        upgradeByLevel: [17, 20, 24, 29, 35].map(fixFromInt),
+        extraLines: [
+          {
+            resourceId: id("clay"),
+            buildFix: fixFromInt(6),
+            upgradeByLevel: [7, 8, 10, 12, 14].map(fixFromInt),
+          },
+        ],
+      },
+    };
+    const store = createGameStore({
+      state: boardState(),
+      content: content({
+        facilityDefs: new Map([...boardContent().facilityDefs, [scriptorium.id, scriptorium]]),
+      }),
+    });
+    const entry = store.derived.facilityCatalog.value.find(
+      (candidate) => candidate.defId === scriptorium.id,
+    );
+    expect(entry?.buildCostApprox).toBe(14);
+    expect(entry?.buildCostLines).toEqual([
+      { resourceId: WOOD, amountApprox: 14 },
+      { resourceId: id("clay"), amountApprox: 6 },
+    ]);
   });
 
   it("盤面(state)が変わってもカタログの参照は変わらない(content のみ依存・再計算なし)", () => {

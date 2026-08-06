@@ -117,6 +117,9 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
   });
 
   it("[束B/B-4] コストを併記し、在庫不足は色(専用クラス)+記号(▲)の両方で示す", () => {
+    // [M73/R8-03] 表記は「コスト 資源名 数量」へ揃えた(③増築カードの
+    // 「増築コスト: 薪 45」・⑥成文化の「必要資源: 粘土 20」と同じ並び。
+    // 複数資源を「・」で連ねたときに数量と資源名の対応が崩れないため)。
     const entry = catalogEntry({ buildCostApprox: 30, buildCostResourceId: id("firewood") });
     const affordable = FacilityCatalogButton({
       entry,
@@ -124,7 +127,7 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
       insufficient: false,
       onPick: () => undefined,
     });
-    expect(flattenText(affordable)).toContain("コスト 30 薪");
+    expect(flattenText(affordable)).toContain("コスト 薪 30");
     expect(flattenText(affordable)).not.toContain("▲");
 
     const insufficient = FacilityCatalogButton({
@@ -135,9 +138,26 @@ describe("FacilityCatalogButton(施設カタログ1件)", () => {
     });
     const text = flattenText(insufficient);
     expect(text).toContain("▲");
-    expect(text).toContain("コスト 30 薪");
+    expect(text).toContain("コスト 薪 30");
     const button = insufficient.props.children as { readonly props: { readonly class: string } };
     expect(button.props.class).toContain("kf-catalog__button--insufficient");
+  });
+
+  it("[M73/R8-03 fatal] 複数資源コスト(M65 の extraLines)を全行表示する", () => {
+    const entry = catalogEntry({
+      defId: id("scriptorium"),
+      buildCostApprox: 14,
+      buildCostResourceId: id("firewood"),
+      buildCostLines: [
+        { resourceId: id("firewood"), amountApprox: 14 },
+        { resourceId: id("clay"), amountApprox: 6 },
+      ],
+    });
+    const text = flattenText(
+      FacilityCatalogButton({ entry, active: false, insufficient: false, onPick: () => undefined }),
+    );
+    expect(text).toContain("薪 14");
+    expect(text).toContain("粘土 6");
   });
 
   it("[束B/B-4] コストが無い(buildCostApprox=null)施設は「コストなし」と表示する", () => {
@@ -204,6 +224,73 @@ describe("FacilityCatalogPanel(②の施設カタログ全体)", () => {
     };
     cancelButton.props.onClick();
     expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("[M73/R8-03 fatal] 第2行以降の在庫不足も「▲」で示す(以前は主資源だけ見ていた)", () => {
+    const watchtower = catalogEntry({
+      defId: id("watchtower"),
+      buildCostApprox: 30,
+      buildCostResourceId: id("firewood"),
+      buildCostLines: [
+        { resourceId: id("firewood"), amountApprox: 30 },
+        { resourceId: id("copper"), amountApprox: 5 },
+      ],
+    });
+    // 薪は足りるが銅が 0 = engine は insufficientResource で拒否する状況。
+    const vnode = FacilityCatalogPanel({
+      catalog: [watchtower],
+      pendingDefId: null,
+      resources: [
+        {
+          entityId: id("resFirewood"),
+          resourceId: id("firewood"),
+          stockFix: fixFromInt(100),
+          stockApprox: 100,
+          capacityApprox: null,
+          atCapacity: false,
+        },
+      ],
+      onPick: () => undefined,
+      onCancel: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("▲");
+  });
+
+  it("[M73/R8-03] 全行の在庫が足りていれば「▲」を出さない", () => {
+    const watchtower = catalogEntry({
+      defId: id("watchtower"),
+      buildCostApprox: 30,
+      buildCostResourceId: id("firewood"),
+      buildCostLines: [
+        { resourceId: id("firewood"), amountApprox: 30 },
+        { resourceId: id("copper"), amountApprox: 5 },
+      ],
+    });
+    const vnode = FacilityCatalogPanel({
+      catalog: [watchtower],
+      pendingDefId: null,
+      resources: [
+        {
+          entityId: id("resFirewood"),
+          resourceId: id("firewood"),
+          stockFix: fixFromInt(100),
+          stockApprox: 100,
+          capacityApprox: null,
+          atCapacity: false,
+        },
+        {
+          entityId: id("resCopper"),
+          resourceId: id("copper"),
+          stockFix: fixFromInt(9),
+          stockApprox: 9,
+          capacityApprox: null,
+          atCapacity: false,
+        },
+      ],
+      onPick: () => undefined,
+      onCancel: () => undefined,
+    });
+    expect(flattenText(vnode)).not.toContain("▲");
   });
 });
 

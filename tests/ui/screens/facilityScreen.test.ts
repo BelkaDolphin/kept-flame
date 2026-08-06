@@ -8,11 +8,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { fixFromInt } from "../../../src/engine/fp";
 import { entityIdFromString } from "../../../src/engine/state/state";
 import type { FacilityDetailView, FacilityWorkerView } from "../../../src/ui/derived";
 import {
   FacilityDetailPanel,
   FacilityWorkerRow,
+  isUpgradeCostInsufficient,
 } from "../../../src/ui/screens/facility/FacilityScreen";
 
 const id = entityIdFromString;
@@ -256,6 +258,52 @@ describe("FacilityDetailPanel(選択施設の Lv/産出/就労者/増築)", () =
       onUpgrade: () => undefined,
     });
     expect(flattenText(vnode)).toContain("増築コスト: 薪 45");
+  });
+
+  it("[M73/R8-03 fatal] 増築コストの複数資源(M65 の extraLines)を全行表示する", () => {
+    const vnode = FacilityDetailPanel({
+      detail: detailView({
+        upgradeCostApprox: 17,
+        upgradeCostResourceId: id("firewood"),
+        upgradeCostLines: [
+          { resourceId: id("firewood"), amountApprox: 17 },
+          { resourceId: id("clay"), amountApprox: 7 },
+        ],
+      }),
+      onUpgrade: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("薪 17");
+    expect(text).toContain("粘土 7");
+  });
+
+  it("[M73/R8-03] 在庫不足(どれか1行)は「▲」で示すが増築ボタンは非活性にしない", () => {
+    const detail = detailView({
+      upgradeCostApprox: 17,
+      upgradeCostResourceId: id("firewood"),
+      upgradeCostLines: [
+        { resourceId: id("firewood"), amountApprox: 17 },
+        { resourceId: id("clay"), amountApprox: 7 },
+      ],
+    });
+    expect(
+      isUpgradeCostInsufficient(detail, [
+        {
+          entityId: id("resFirewood"),
+          resourceId: id("firewood"),
+          stockFix: fixFromInt(100),
+          stockApprox: 100,
+          capacityApprox: null,
+          atCapacity: false,
+        },
+      ]),
+    ).toBe(true);
+    const vnode = FacilityDetailPanel({
+      detail,
+      onUpgrade: () => undefined,
+      upgradeInsufficient: true,
+    });
+    expect(flattenText(vnode)).toContain("▲");
   });
 
   it("[束B/B-2] 既に上限Lvなら「既に上限Lvです」と表示する", () => {

@@ -29,7 +29,13 @@ import { GRID_CELL_COUNT } from "../../../engine/adjacency";
 import type { CommandRejection, CommandResult } from "../../../engine/commands";
 import { toApproxNumber } from "../../../engine/fp";
 import type { EntityId } from "../../../engine/state/state";
-import type { CellViewModel, FacilityCatalogEntry, ReclaimInfo, ResourceView } from "../../derived";
+import type {
+  CellViewModel,
+  CostLineView,
+  FacilityCatalogEntry,
+  ReclaimInfo,
+  ResourceView,
+} from "../../derived";
 import { cellCoordinateLabel } from "../cellCoordinate";
 import { facilityLabel, resourceLabel } from "../contentLabels";
 import { facilityEffectExtrasOf, facilityEffectTextOf } from "../facilityEffect";
@@ -38,7 +44,7 @@ import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import {
   resourceDeltaPhrase,
-  resourceSpendBreakdownPhrase,
+  resourceSpendPhrase,
   resourceStockApprox,
   useToastStack,
   ToastStackView,
@@ -52,16 +58,39 @@ import { LegendPanel, type LegendOvercrowdInfo } from "./LegendPanel";
 
 // --- 1. 施設カタログ(hooks を使わないので直接テスト可能) --------------------
 
-/** [束B/B-4] コスト資源の在庫が足りているか(判定ではなく表示上の目印)。 */
+/**
+ * [M73/R8-03] 表示用のコスト行(第1行 = 主資源)。`buildCostLines` を持たない
+ * 呼び出し(既存テストフィクスチャ)では主資源 1 行に畳む(後方互換)。
+ */
+export function catalogCostLines(entry: FacilityCatalogEntry): readonly CostLineView[] {
+  if (entry.buildCostLines !== undefined) return entry.buildCostLines;
+  if (entry.buildCostApprox === null || entry.buildCostResourceId === null) return [];
+  return [{ resourceId: entry.buildCostResourceId, amountApprox: entry.buildCostApprox }];
+}
+
+/**
+ * [束B/B-4] コスト資源の在庫が足りているか(判定ではなく表示上の目印)。
+ *
+ * **[M73/R8-03 fatal] 全行を見る**。以前は主資源 1 行だけを見ていたため、
+ * 見張り台(銅)・療養所(穀物)のように第2行が足りないケースで「▲ が出ないのに
+ * reject される」形になっていた(Round 8 実測)。
+ */
 function isCatalogEntryInsufficient(
   entry: FacilityCatalogEntry,
   resources: readonly ResourceView[],
 ): boolean {
-  if (entry.buildCostApprox === null || entry.buildCostResourceId === null) return false;
-  const stock =
-    resources.find((resource) => resource.resourceId === entry.buildCostResourceId)?.stockApprox ??
-    0;
-  return stock < entry.buildCostApprox;
+  return catalogCostLines(entry).some((line) => {
+    const stock =
+      resources.find((resource) => resource.resourceId === line.resourceId)?.stockApprox ?? 0;
+    return stock < line.amountApprox;
+  });
+}
+
+/** [M73/R8-03] 「薪 14・粘土 6」形式のコスト表記(全行)。 */
+export function costLinesText(lines: readonly CostLineView[]): string {
+  return lines
+    .map((line) => `${resourceLabel(line.resourceId)} ${formatResourceAmount(line.amountApprox)}`)
+    .join("・");
 }
 
 export interface FacilityCatalogButtonProps {
@@ -96,6 +125,7 @@ export function FacilityCatalogButton({
   const classes = ["kf-catalog__button"];
   if (active) classes.push("kf-catalog__button--active");
   if (insufficient) classes.push("kf-catalog__button--insufficient");
+  const costLines = catalogCostLines(entry);
   return (
     <li>
       <button
@@ -109,10 +139,13 @@ export function FacilityCatalogButton({
         <span class="kf-catalog__footprint" aria-hidden="true">
           {entry.footprint.width}×{entry.footprint.height}
         </span>
+        {/* [M73/R8-03 fatal] M65 の複数資源コストを全行出す(以前は第1行だけを
+            出しており、表示どおりの資源を持っていても reject される「払えない
+            コスト表示」になっていた)。整形は他画面と同じ formatResourceAmount。 */}
         <span class="kf-catalog__cost">
-          {entry.buildCostApprox === null || entry.buildCostResourceId === null
+          {costLines.length === 0
             ? "コストなし"
-            : `${insufficient ? "▲ " : ""}コスト ${entry.buildCostApprox} ${resourceLabel(entry.buildCostResourceId)}`}
+            : `${insufficient ? "▲ " : ""}コスト ${costLinesText(costLines)}`}
         </span>
         {effectHint !== null && <span class="kf-catalog__effect-hint">{effectHint}</span>}
       </button>
@@ -316,7 +349,10 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
   // `resourceSpendBreakdownPhrase` へ切り替える(旧「薪 60→30」の前後在庫表記
   // だと廃材代替で減った分が見えなかった)。
   function handlePlacementSuccess(info: PlacementSuccessInfo): void {
-    const diff = resourceSpendBreakdownPhrase(
+    // [M73/R8-03] M65 の追加コスト行も出す(2本固定の
+    // resourceSpendBreakdownPhrase では第2行以降が黙って落ちていた)。
+    // 並びは engine が引き落とす順(主資源 → 廃材 → 追加行)。
+    const diff = resourceSpendPhrase([
       {
         resourceId: info.resourceId,
         beforeStockFix: info.beforeStockFix,
@@ -327,7 +363,8 @@ export function GridScreen({ store, onNavigate }: ScreenProps) {
         beforeStockFix: info.wasteBeforeStockFix,
         afterStockFix: info.wasteAfterStockFix,
       },
-    );
+      ...(info.extraSnapshots ?? []),
+    ]);
     toastStack.push(`${facilityLabel(info.defId)}を建てた${diff.length > 0 ? `(${diff})` : ""}`);
   }
 

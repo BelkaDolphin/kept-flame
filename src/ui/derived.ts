@@ -768,6 +768,74 @@ function displayFacilityWorkerSlots(def: FacilityDef, level: number): number | u
   return slots[level - 1] ?? slots[slots.length - 1];
 }
 
+/**
+ * [M73/R8-03 fatal] コスト行 1 本の表示値(engine の
+ * `commands.ts` の `ResolvedCostLine` と同型・第1行が主資源)。
+ *
+ * **なぜ derived 側に持つのか**: M65 で施設コストが複数資源になったのに、UI は
+ * 第1行(主資源)しか持っていなかったため、②カタログ・③増築カード・成功トースト
+ * のすべてが「表示どおりの資源では払えないコスト」を出していた(Round 8 実測
+ * 4 件・写字室は表示 薪14 に対し実消費 薪14+粘土6)。
+ *
+ * 値の作り方は `commands.ts` の `facilityBuildCostLines`/`facilityUpgradeCostLines`
+ * と**同じ**だが、§3-2 冒頭 doc のとおり `src/ui/**` は `engine/commands.ts` を
+ * import できない(単一入口 = `store.ts` のみ・`tests/engine/commands.test.ts`
+ * の検分が固定している)。ここで要るのは「払えるか」の**判定**ではなく
+ * `def.cost` の**構造**(行の並び・Lv 別配列のフォールバック)から決まる表示専用の
+ * 値であり、`displayFacilityMaxLevel`/`buildCostApprox` と同じ立場の意図的な複製
+ * である(在庫と突き合わせる「▲」も色分けのための表示であり、拒否の権威は
+ * engine の `insufficientResource` にある)。
+ */
+export interface CostLineView {
+  readonly resourceId: EntityId;
+  readonly amountApprox: number;
+}
+
+/** コスト定義を持たない(無料の)施設のための共有の空配列。 */
+const NO_COST_LINES: readonly CostLineView[] = [];
+
+/** [M73/R8-03] Lv1 建設の全コスト行(第1行が主資源・`def.cost` 省略なら空=無料)。 */
+function displayFacilityBuildCostLines(def: FacilityDef): readonly CostLineView[] {
+  const cost = def.cost;
+  if (cost === undefined) return NO_COST_LINES;
+  const lines: CostLineView[] = [
+    { resourceId: cost.resourceId, amountApprox: toApproxNumber(cost.buildFix) },
+  ];
+  for (const extra of cost.extraLines ?? []) {
+    lines.push({ resourceId: extra.resourceId, amountApprox: toApproxNumber(extra.buildFix) });
+  }
+  return lines;
+}
+
+/**
+ * [M73/R8-03] `fromLevel` → `fromLevel + 1` の増築の全コスト行。主資源の段が
+ * 無ければ空(= 無料)——`facilityUpgradeCostLines` と同じ規約。
+ */
+function displayFacilityUpgradeCostLines(
+  def: FacilityDef,
+  fromLevel: number,
+): readonly CostLineView[] {
+  const cost = def.cost;
+  if (cost === undefined) return NO_COST_LINES;
+  const primaryFix = displayUpgradeCostOfLine(cost.upgradeByLevel, fromLevel);
+  if (primaryFix === undefined) return NO_COST_LINES;
+  const lines: CostLineView[] = [
+    { resourceId: cost.resourceId, amountApprox: toApproxNumber(primaryFix) },
+  ];
+  for (const extra of cost.extraLines ?? []) {
+    const fix = displayUpgradeCostOfLine(extra.upgradeByLevel, fromLevel);
+    if (fix === undefined) continue;
+    lines.push({ resourceId: extra.resourceId, amountApprox: toApproxNumber(fix) });
+  }
+  return lines;
+}
+
+/** コスト行 1 本の `fromLevel` → `fromLevel + 1` 増築費(index は Lv-1・配列超えは最後の段)。 */
+function displayUpgradeCostOfLine(curve: readonly Fix[], fromLevel: number): Fix | undefined {
+  if (curve.length === 0) return undefined;
+  return curve[fromLevel - 1] ?? curve[curve.length - 1];
+}
+
 /** [M30] 施設カタログ 1 件(②の「何を建てるか」・content のみに依存)。 */
 export interface FacilityCatalogEntry {
   readonly defId: EntityId;
@@ -785,6 +853,13 @@ export interface FacilityCatalogEntry {
    */
   readonly buildCostApprox: number | null;
   readonly buildCostResourceId: EntityId | null;
+  /**
+   * [M73/R8-03 fatal] **実際に払う全コスト行**(第1行 = 上の
+   * `buildCostApprox`/`buildCostResourceId` と同じ主資源)。M65 の複数資源コストを
+   * 画面が 1 行も落とさずに出すための値({@link CostLineView} の doc)。
+   * 省略時(既存テストフィクスチャ互換)は「主資源だけ」として扱う。
+   */
+  readonly buildCostLines?: readonly CostLineView[];
 }
 
 function facilityCatalogEntryOf(def: FacilityDef): FacilityCatalogEntry {
@@ -797,6 +872,7 @@ function facilityCatalogEntryOf(def: FacilityDef): FacilityCatalogEntry {
     outputResourceId: def.output.kind === "resource" ? def.output.resourceId : null,
     buildCostApprox: def.cost === undefined ? null : toApproxNumber(def.cost.buildFix),
     buildCostResourceId: def.cost?.resourceId ?? null,
+    buildCostLines: displayFacilityBuildCostLines(def),
   };
 }
 
@@ -893,6 +969,12 @@ export interface FacilityDetailView {
    */
   readonly upgradeCostApprox: number | null;
   readonly upgradeCostResourceId: EntityId | null;
+  /**
+   * [M73/R8-03 fatal] **実際に払う全コスト行**(第1行 = 上の
+   * `upgradeCostApprox`/`upgradeCostResourceId` と同じ主資源)。上限 Lv では空。
+   * 省略時(既存テストフィクスチャ互換)は「主資源だけ」として扱う。
+   */
+  readonly upgradeCostLines?: readonly CostLineView[];
 }
 
 /**
@@ -903,9 +985,7 @@ export interface FacilityDetailView {
 function displayFacilityUpgradeCostFix(def: FacilityDef, fromLevel: number): Fix | undefined {
   const cost = def.cost;
   if (cost === undefined) return undefined;
-  const curve = cost.upgradeByLevel;
-  if (curve.length === 0) return undefined;
-  return curve[fromLevel - 1] ?? curve[curve.length - 1];
+  return displayUpgradeCostOfLine(cost.upgradeByLevel, fromLevel);
 }
 
 /**
@@ -968,6 +1048,12 @@ function buildFacilityDetail(
     multiplierApprox: cell.multiplierApprox,
     upgradeCostApprox: upgradeCostFix === undefined ? null : toApproxNumber(upgradeCostFix),
     upgradeCostResourceId: upgradeCostFix === undefined ? null : (def.cost?.resourceId ?? null),
+    // [M73/R8-03] 上限 Lv なら増築先が無いので空(主資源の行だけを null にして
+    // 追加行が残る、という不整合を作らない)。
+    upgradeCostLines:
+      facilityEntity.level >= maxLevel
+        ? NO_COST_LINES
+        : displayFacilityUpgradeCostLines(def, facilityEntity.level),
   };
 }
 
