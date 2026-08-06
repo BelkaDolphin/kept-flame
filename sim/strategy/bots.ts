@@ -285,7 +285,7 @@ export const greedyBot: StrategyBot = makeStrategyBot("greedy", {
   codifyActively: false,
   dispatch: {
     bands: ["near"],
-    teamSize: 2,
+    teamSize: 3,
     maxNewDispatchesPerTick: 1,
     minIdlePoolSlack: 2,
     stance: "cautious",
@@ -323,7 +323,7 @@ export const researchFirstBot: StrategyBot = makeStrategyBot("researchFirst", {
   codifyActively: false,
   dispatch: {
     bands: ["near"],
-    teamSize: 2,
+    teamSize: 3,
     maxNewDispatchesPerTick: 1,
     minIdlePoolSlack: 2,
     stance: "cautious",
@@ -367,7 +367,7 @@ export const explorationFirstBot: StrategyBot = makeStrategyBot("explorationFirs
   codifyActively: false,
   dispatch: {
     bands: ["near", "far", "deep"],
-    teamSize: 2,
+    teamSize: 3,
     // [M38] M36 は `CONCURRENT_DISPATCH_MAX` + `minIdlePoolSlack: 0` で「毎日
     // 盤面から取れるだけ取る」だったが、施設14種化後の実 run ではそれが
     // **薪の産出レートを run 全域で 0 にする**(全員が毎日引き剥がされ、
@@ -402,7 +402,7 @@ export const placementVariantBot: StrategyBot = makeStrategyBot("placementVarian
   codifyActively: false,
   dispatch: {
     bands: ["near"],
-    teamSize: 2,
+    teamSize: 3,
     maxNewDispatchesPerTick: 1,
     minIdlePoolSlack: 2,
     stance: "cautious",
@@ -442,7 +442,7 @@ export const codifyFirstBot: StrategyBot = makeStrategyBot("codifyFirst", {
   codifyActively: true,
   dispatch: {
     bands: ["near"],
-    teamSize: 2,
+    teamSize: 3,
     maxNewDispatchesPerTick: 1,
     minIdlePoolSlack: 2,
     stance: "cautious",

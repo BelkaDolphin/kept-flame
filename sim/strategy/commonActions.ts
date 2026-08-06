@@ -788,6 +788,69 @@ export function firstEventIdForBand(
   return undefined;
 }
 
+/**
+ * 現在建っている施設の建設コスト資源 ∪ 開墾コスト資源([Phase A]・
+ * `sim/nightlyGate.ts` の `criticalResourceIdsOf` と同じ考え方 — GDD 11.4-2
+ * 「ソフトロックゼロ」が実際に見ている「クリティカル資源」の定義)。
+ */
+function criticalBuildResourceIds(state: GameState, content: EngineContent): ReadonlySet<EntityId> {
+  const ids = new Set<EntityId>();
+  const reclaimResourceId = content.reclaim?.costResourceId;
+  if (reclaimResourceId !== undefined) ids.add(reclaimResourceId);
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const resourceId = content.facilityDefs.get(facility.defId)?.cost?.resourceId;
+    if (resourceId !== undefined) ids.add(resourceId);
+  }
+  return ids;
+}
+
+/**
+ * クリティカル資源(上記)を産出する施設**定義**のうち、現在の就労者が
+ * 丁度 1 人だけのものを見つけ、その住民 ID を集める([Phase A])。
+ *
+ * 派遣候補プール(`explorationTeamCandidates`)は配属済みの住民も含む
+ * (GDD 8.1・bots.ts §3 冒頭の doc)ため、クリティカル資源の**唯一の**
+ * 就労者を派遣で引き剥がすと、その資源の産出経路が run 残り全体でゼロに
+ * 固定されうる(均等配属 `buildAssignmentCommands` は配属替えをしないため
+ * 一度崩れると回復しない)。
+ *
+ * **対象をクリティカル資源の産出施設だけに絞る**理由: 最初の実装は
+ * 「施設定義を問わず就労者が 1 人だけの全施設」を対象にしたところ、8 人規模の
+ * 盤面では就労者の大半が何かの「唯一の 1 人」になり、`buildDispatchCommands`
+ * の「保護してもなお派遣枠を満たせるか」判定(§ 冒頭の doc)がほぼ常に
+ * 「満たせない」側へ落ちて保護が空振りした(実測: `gdd-11.4-2a` が再発)。
+ * クリティカル資源(通常は 1〜2 施設定義)だけに絞ると保護対象がぐっと減り、
+ * 判定が「満たせる」側に収まりやすくなる。
+ */
+function soleCriticalProducerResidentIds(
+  state: GameState,
+  content: EngineContent,
+): ReadonlySet<EntityId> {
+  const criticalResourceIds = criticalBuildResourceIds(state, content);
+  if (criticalResourceIds.size === 0) return new Set();
+
+  const workerIdsByDefId = new Map<EntityId, EntityId[]>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (facility.workerIds.length === 0) continue;
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "resource") continue;
+    if (!criticalResourceIds.has(def.output.resourceId)) continue;
+    const list = workerIdsByDefId.get(facility.defId);
+    if (list === undefined) {
+      workerIdsByDefId.set(facility.defId, [...facility.workerIds]);
+    } else {
+      list.push(...facility.workerIds);
+    }
+  }
+  const result = new Set<EntityId>();
+  for (const workerIds of workerIdsByDefId.values()) {
+    if (workerIds.length !== 1) continue;
+    const soleWorkerId = workerIds[0];
+    if (soleWorkerId !== undefined) result.add(soleWorkerId);
+  }
+  return result;
+}
+
 function nextDispatchEntityId(state: GameState, salt: number): EntityId {
   for (let n = salt; ; n++) {
     const candidate = entityIdFromString(`dispatch${String(state.tick)}n${String(n)}`);
@@ -823,6 +886,22 @@ export interface DispatchResult {
  * 探索チームを提案する(GDD 11.5 のガード付き)。ガードでブロックされた住民は
  * `suggestExpeditionTeams` の候補プールから除外する(= 派遣しない。GDD 11.5
  * 「派遣に回さない」の実装そのもの)。
+ *
+ * [Phase A] 余裕があれば {@link soleCriticalProducerResidentIds} も除外
+ * リストへ足す——「派遣候補は配属済みの住民も含む」(GDD 8.1)ことと、均等配属
+ * (`buildAssignmentCommands`)が配属替えを一切しないことの組み合わせにより、
+ * クリティカル資源の**唯一の**就労者を派遣で引き剥がすと、その資源の産出経路が
+ * run 残り全体でゼロに固定されうる(実測: teamSize 3 化で
+ * `gdd-11.4-2a`(ソフトロックゼロ)が構造 fail になるケースを
+ * `tests/sim/nightlyGate.test.ts` で検出・再現)。
+ *
+ * **保護は「それでも派遣枠を満たせる場合だけ」のベストエフォート**にする。
+ * GDD 11.5 のガード(想起リスク)は必須(除外しても派遣ゼロになるならゼロで
+ * 正しい)だが、就労者保護まで無条件必須にすると、population が小さい bot
+ * (例: 貪欲・5 日おき 1 回・teamSize 3)がプール不足で**一度も派遣できなく
+ * なる**副作用が実測で出た(`gdd-11.4-11a`「貪欲botの派遣延べ人数 >= 1」が
+ * 構造 fail 化)。保護を足しても閾値を満たせるときだけ足し、満たせないときは
+ * 保護なし(= 従来どおり GDD 11.5 のガードのみ)で派遣する。
  */
 export function buildDispatchCommands(
   state: GameState,
@@ -841,18 +920,28 @@ export function buildDispatchCommands(
   if (availableSlots <= 0) return { commands: [], recallGuardLog: [] };
 
   const recallGuardLog: RecallGuardLogEntry[] = [];
-  const excludeResidentIds: EntityId[] = [];
+  const recallGuardExcludeIds = new Set<EntityId>();
   const candidates = explorationTeamCandidates(state);
   for (const resident of candidates) {
     const check = recallGuardBlocks(state, content, resident, "dispatch", tick, botId);
     if (check.blocked) {
-      excludeResidentIds.push(resident.id);
+      recallGuardExcludeIds.add(resident.id);
       if (check.logEntry !== null) recallGuardLog.push(check.logEntry);
     }
   }
 
+  const threshold = policy.teamSize * availableSlots + policy.minIdlePoolSlack;
+  const withSoleWorkerProtection = new Set([
+    ...recallGuardExcludeIds,
+    ...soleCriticalProducerResidentIds(state, content),
+  ]);
+  const canAffordProtection = candidates.length - withSoleWorkerProtection.size >= threshold;
+  const excludeResidentIds = [
+    ...(canAffordProtection ? withSoleWorkerProtection : recallGuardExcludeIds),
+  ];
+
   const poolSize = candidates.length - excludeResidentIds.length;
-  if (poolSize < policy.teamSize * availableSlots + policy.minIdlePoolSlack) {
+  if (poolSize < threshold) {
     return { commands: [], recallGuardLog };
   }
 
