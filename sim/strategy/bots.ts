@@ -16,8 +16,9 @@
 //
 // 各 bot の戦略差(観測可能な不等式。詳細は M36 / M38 タスク報告を参照):
 //   ・研究優先 は貪欲よりクリティカルパス(GDD 5.1)の到達が速い
-//     (`pickResearchTarget` の `preferCriticalPathResearch=true` が
-//     分岐 tech への寄り道を避ける)
+//     (`pickResearchTargets` の `preferCriticalPath=true` が
+//     分岐 tech への寄り道を避けて選択を CP tech へ向ける。[Phase A] 以降は
+//     バックログの積み方は他 bot と共通で、選択の向け方だけが差になる)
 //   ・探索優先 は貪欲より派遣本数が多い(探索本部を最優先で建て、3 距離帯を
 //     巡回し、**毎日**派遣枠上限まで狙う(`dispatchEveryTicks` = 1 日)・
 //     stance も press)
@@ -59,7 +60,7 @@ import {
   buildReclaimCommand,
   buildWarehouseCommand,
   codifyCommand,
-  pickResearchTarget,
+  pickResearchTargets,
   researchCommand,
   type AssignmentPolicy,
   type BuildPolicy,
@@ -160,8 +161,11 @@ function decideGeneric(
   const commands: Command[] = [];
   const recallGuardLog: RecallGuardLogEntry[] = [];
 
-  const researchTechId = pickResearchTarget(state, content, policies.preferCriticalPathResearch);
-  if (researchTechId !== undefined) commands.push(researchCommand(researchTechId));
+  // [Phase A] 1 日 1 本固定をやめ、その日 reachable な tech を全部バックログへ
+  // 積む(§0 冒頭の doc・commonActions.ts `pickResearchTargets`)。研究点を
+  // 実際に受け取る対象(選択)は従来と同じ規則で決まる 1 本のまま。
+  const researchTechIds = pickResearchTargets(state, content, policies.preferCriticalPathResearch);
+  for (const techId of researchTechIds) commands.push(researchCommand(techId));
 
   // 開墾は建設より先に積む(同一 tick で「開けた枠へ建てる」が成立するように)。
   const reclaimCmd = buildReclaimCommand(state, content, policies.reclaimMinFreeCells);

@@ -533,6 +533,58 @@ export function pickResearchTarget(
   return undefined;
 }
 
+/**
+ * その tick に着手する研究を**複数本**選ぶ([Phase A]・台帳v20 必-3(2))。
+ *
+ * `pickResearchTarget`(単数形)は 1 日 1 回の意思決定につき `beginResearch` を
+ * 高々 1 回しか呼ばないため、bot の E3 到達日が「実際の研究点の供給」ではなく
+ * 「1 日 1 本の意思決定 cadence」でほぼ決まってしまっていた
+ * (`docs/measurements/summary.md` の ERA3_REACH_DAYS 改訂の経緯・nightlyGate.ts
+ * `ERA3_REACH_DAYS_MIN/MAX` の doc を参照)。
+ *
+ * `beginResearch` は「まだ research entity の無い tech」に対しては新規作成 +
+ * 選択、「既にある tech」に対しては選択し直すだけ(§2 `applyBeginResearch`)なので、
+ * **同一 tick で複数回呼んでも研究点が分裂することはない**(常に最後に呼んだ
+ * 対象だけが `currentResearch` になる・`rules/research.ts` §2)。この性質を使い、
+ * 「まだ着手していない reachable tech を**全て**その日のうちに entity 化して
+ * バックログへ積む」ことと「実際に研究点を受け取る対象は従来どおり 1 本」の
+ * 両立を図る:
+ *
+ *   1. 従来の `pickResearchTarget` と**同じ規則**で「今日の主対象」を決める
+ *      (preferCriticalPath なら reachable な CP tech、無ければ何も進行して
+ *      いないときだけ reachable[0])。
+ *   2. reachable な残り全部を先に `beginResearch` してから、主対象(または
+ *      主対象が無いなら現在進行中の研究)を**最後に**呼び直して選択を戻す。
+ *
+ * こうして積んだバックログは、主対象が完了して選択が失効した瞬間に
+ * `currentResearch` のフォールバック(entity ID 昇順で最初の未完了)が自動で
+ * 次を拾う(`rules/research.ts` §2 の (2))。よって主対象が 1 日の途中で完了
+ * すれば、**次の bot 意思決定を待たずに同日中へ別の tech が着手される** ——
+ * これが「研究点が許す限り同日に複数の研究を開始/キューできる」の実体。
+ *
+ * 戻り値は `beginResearch` を呼ぶ順(= 適用順)の tech ID 配列。最後の要素が
+ * その tick の選択勝者になる。
+ */
+export function pickResearchTargets(
+  state: GameState,
+  content: EngineContent,
+  preferCriticalPath: boolean,
+): readonly EntityId[] {
+  const reachable = reachableUnstartedTechIds(state, content);
+  if (reachable.length === 0) return [];
+
+  const primary = pickResearchTarget(state, content, preferCriticalPath);
+  if (primary !== undefined) {
+    return [...reachable.filter((techId) => techId !== primary), primary];
+  }
+
+  // 主対象なし = 割り込まない(preferCriticalPath でない、または CP 候補が
+  // 無く、かつ既に何か進行中)。バックログだけ積み、選択は現在の研究へ戻す。
+  const current = currentResearch(state);
+  if (current === undefined) return reachable;
+  return [...reachable, current.techId];
+}
+
 /** `beginResearch` コマンドを組み立てる(researchId は techId から決定論的に導出)。 */
 export function researchCommand(techId: EntityId): BeginResearchCommand {
   return { kind: "beginResearch", researchId: entityIdFromString(`research${techId}`), techId };
