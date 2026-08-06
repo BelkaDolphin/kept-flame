@@ -388,6 +388,56 @@ export function ArrivalWatcher({ store, onArrival }: ArrivalWatcherProps) {
   return null;
 }
 
+/**
+ * [M73/R8-05] 襲撃(M66・3日周期)の通知。上の 3 つ(帰還/研究完了/漂着)と同じ
+ * 差分検知方式で、`store.derived.raidTally`(engine の自己申告カウンタ
+ * `ScheduleReport.raidCount` を積んだ揮発の累計・sources.ts の doc)の増分を見る。
+ *
+ * Round 8 実測では襲撃は撃退でも略奪でも**完全に無音**で、第10日00:00に全資源が
+ * 同時に約5%減るだけだった。撃退と略奪は結果がまるで違う(前者は無害・後者は
+ * 蓄えを失う)ので、必ず別の文言にする。略奪量は engine が返さない(在庫比率
+ * だけが content にある)ので、比率を `raidOutlook` から引いて「蓄えの約N%」と
+ * 言う——観測していない実数を作らない。
+ *
+ * 長期不在からの復帰(Worker catch-up)で一気に複数回ぶんが届くことがあるので、
+ * 2 回以上まとまったときは 1 本に要約する(`ExpeditionReturnWatcher` と同じ方針)。
+ */
+export interface RaidWatcherProps {
+  readonly store: GameStore;
+  readonly onRaid: (text: string) => void;
+}
+
+export function RaidWatcher({ store, onRaid }: RaidWatcherProps) {
+  const tally = useSignalValue(store.derived.raidTally);
+  const outlook = useSignalValue(store.derived.raidOutlook);
+  const previousRef = useRef<{ count: number; repelledCount: number } | null>(null);
+
+  useEffect(() => {
+    const previous = previousRef.current;
+    if (previous !== null) {
+      const newCount = tally.count - previous.count;
+      const newRepelled = tally.repelledCount - previous.repelledCount;
+      const newLooted = newCount - newRepelled;
+      if (newCount === 1) {
+        onRaid(
+          newRepelled === 1
+            ? "襲撃を撃退した(見張り台の防衛が届いた)"
+            : `襲撃を受けた。蓄えの約${String(Math.round(outlook.lootPercentApprox))}%を奪われた`,
+        );
+      } else if (newCount > 1) {
+        onRaid(
+          `不在のあいだに襲撃が${String(newCount)}回あった(撃退${String(newRepelled)}回・略奪${String(newLooted)}回)`,
+        );
+      }
+    }
+    previousRef.current = { count: tally.count, repelledCount: tally.repelledCount };
+    // 依存配列は意図的に `tally` だけ(上の 3 つの Watcher と同じ理由。
+    // `outlook` は文言に使う比率だけなので、変化のたびに鳴らす必要は無い)。
+  }, [tally]);
+
+  return null;
+}
+
 // --- 2. ナビゲーション(5グループ・[束A] F-5) -------------------------------
 
 export interface ScreenNavProps {
@@ -653,6 +703,9 @@ export function AppShell({
       <ExpeditionReturnWatcher store={store} onReturn={globalToasts.push} />
       <ResearchCompletionWatcher store={store} onComplete={globalToasts.push} />
       <ArrivalWatcher store={store} onArrival={globalToasts.push} />
+      {/* [M73/R8-05] 襲撃(撃退/略奪)の通知。これも tick 進行の結果なので
+          個々の画面の成功トーストには乗らない(§1-5 と同じ理由)。 */}
+      <RaidWatcher store={store} onRaid={globalToasts.push} />
       <ToastStackView toasts={globalToasts.toasts} />
       {installPromotion && (
         <InstallPromotionBanner

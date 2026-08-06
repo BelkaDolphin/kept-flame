@@ -31,7 +31,7 @@ import traitJson from "../content/trait.json";
 import { validateContentBundle, type RawContentBundle } from "../schema/contentBundle";
 import { loadEngineContentOrThrow } from "../schema/engineContent";
 
-import { advance } from "./engine/advance";
+import { advanceWithReport } from "./engine/advance";
 import type { EngineContent } from "./engine/rules/types";
 import type { GameState } from "./engine/state/state";
 import {
@@ -281,6 +281,10 @@ async function boot(): Promise<void> {
           type: "catchUpApplied",
           snapshot: result.snapshot,
           advanceContext: result.advanceContext,
+          // [M73/R8-05] 不在中に起きた襲撃の回数(Worker が返す自己申告カウンタ)。
+          // 復帰時にシェルが通知する材料であり、state には載らない。
+          raidCount: result.counters.raidCount,
+          raidRepelledCount: result.counters.raidRepelledCount,
         });
         return;
       } finally {
@@ -292,9 +296,16 @@ async function boot(): Promise<void> {
       // (600 tick)に合わせる。
       const ctx = store.peekAdvanceContext();
       let state = store.peekState();
+      // [M73/R8-05] このフォールバックでも襲撃の回数を数える(`advanceWithReport`
+      // は `advance` と同じ runSchedule の別入口・挙動は同一)。
+      let raidCount = 0;
+      let raidRepelledCount = 0;
       while (state.tick < toTick) {
         const step = Math.min(toTick - state.tick, LIVE_ADVANCE_MAX_TICK_DELTA);
-        state = advance(state, ctx, state.tick + step);
+        const report = advanceWithReport(state, ctx, state.tick + step);
+        state = report.state;
+        raidCount += report.raidCount;
+        raidRepelledCount += report.raidRepelledCount;
       }
       if (generation !== worldGeneration) return;
       store.dispatch({
@@ -304,6 +315,8 @@ async function boot(): Promise<void> {
           worldSeedU32: ctx.worldSeedU32,
           multiplierByFacilityId: ctx.multiplierByFacilityId,
         },
+        raidCount,
+        raidRepelledCount,
       });
     }
   }

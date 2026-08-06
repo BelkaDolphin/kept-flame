@@ -87,6 +87,7 @@ import {
 } from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
 import { recallRiskPerDay } from "../engine/rules/recall";
+import { colonyDefenseFix, hasDefense, nextRaidTick, raidStrengthFix } from "../engine/rules/raid";
 import { resolveCapacityByResourceId } from "../engine/rules/storage";
 import {
   currentResearch,
@@ -138,7 +139,7 @@ import {
   type CellAdjacencyBreakdown,
 } from "./screens/grid/adjacencyBreakdown";
 import { computed, type ReadonlyComputed } from "./reactive";
-import type { CellPlacement, ReadonlyStoreSources, StoreSources } from "./sources";
+import type { CellPlacement, RaidTally, ReadonlyStoreSources, StoreSources } from "./sources";
 
 /** 8 近傍の一覧は盤面形状だけで決まる静的値なので、モジュール読込時に 1 回作る。 */
 const NEIGHBOR_CELLS: readonly (readonly number[])[] = (() => {
@@ -628,6 +629,10 @@ export const HOME_ALERT_IDS = [
   // 研究がある。「🔬 100% のまま何時間も動かない」の唯一の手がかりが無かった
   // (Round 8 実測)ため、ホームの「いま手を入れるところ」へ導線を出す。
   "researchFieldBlocked",
+  // [M73/R8-05] 襲撃機構は動いているのに盤面の防衛戦力が 0(見張り台が無い/
+  // 外周に無い)。襲撃は無音で蓄えを削るので、備えが無いことだけは先に伝える
+  // (灰=任意。実際に撃退できるかは乱数を含むので断定しない)。
+  "raidUndefended",
   // [M63/R4-A04・GDD 6.7] 保管上限に達している資源がある(産出が頭打ち/廃材化
   // している)ことの黄警告。既存4件と同じ「点灯しているものだけ並ぶ」規律。
   "storageAtCapacity",
@@ -1248,6 +1253,16 @@ export interface StoreDerived {
    * 現在値が出ておらず、寝床が実際に機能していることが伝わらなかった)。
    */
   readonly populationSummary: ReadonlyComputed<PopulationView>;
+  /**
+   * [M73/R8-05] 襲撃の見通し({@link RaidOutlookView})。襲撃機構が不活性な
+   * content では `active: false` の 1 個だけを返す(捏造しない)。
+   */
+  readonly raidOutlook: ReadonlyComputed<RaidOutlookView>;
+  /**
+   * [M73/R8-05] このセッション中に解決した襲撃の累計(揮発・`sources.raidTally`
+   * の写し)。シェルの通知ウォッチャが差分検知に使う。
+   */
+  readonly raidTally: ReadonlyComputed<RaidTally>;
 }
 
 const EMPTY_TAGS: readonly Tag[] = [];
@@ -1631,6 +1646,9 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         // [M73/R8-04] engine の `fieldBlockedResearches` をそのまま数える。
         researchFieldBlocked: fieldBlockedResearches(state, content).length,
         storageAtCapacity: storageAtCapacityResourceCount(state, content),
+        // [M73/R8-05] 襲撃が起きうる盤面で防衛戦力が 0 のときだけ 1 件。判定は
+        // engine の `hasDefense`(rules/raid.ts)をそのまま呼ぶ。
+        raidUndefended: content.raid !== undefined && !hasDefense(state, content) ? 1 : 0,
         expeditionActive: state.dispatchSnapshots.length,
         idleResidents: badges.idleResidentCount,
       };
@@ -1641,6 +1659,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         researchIdle: "warn",
         researchFieldBlocked: "warn",
         storageAtCapacity: "warn",
+        raidUndefended: "info",
         expeditionActive: "info",
         idleResidents: "info",
       };
@@ -1651,6 +1670,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         researchIdle: "research",
         researchFieldBlocked: "research",
         storageAtCapacity: "grid",
+        raidUndefended: "grid",
         expeditionActive: "expedition",
         idleResidents: "residents",
       };
@@ -1811,6 +1831,13 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     () => populationViewOf(sources.state.value, sources.content.value),
     { name: "populationSummary" },
   );
+  // [M73/R8-05] 襲撃の見通し(§9)。tick を読むので毎分再評価されるが、
+  // `equals` で「次回予定/戦力/強度が同じなら再描画しない」まで落とす。
+  const raidOutlook = computed<RaidOutlookView>(
+    () => buildRaidOutlook(sources.state.value, sources.content.value),
+    { equals: raidOutlookEquals, name: "raidOutlook" },
+  );
+  const raidTally = computed<RaidTally>(() => sources.raidTally.value, { name: "raidTally" });
 
   return {
     adjacencyMatrix,
@@ -1844,6 +1871,87 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     renderedLog,
     outpostOverview,
     populationSummary,
+    raidOutlook,
+    raidTally,
+  };
+}
+
+// --- 9. [M73/R8-05] 襲撃の見通し(GDD 11.1 の戦闘式 / 11.7 段10・M66)----------
+//
+//   Round 8 実測: 襲撃(3日周期)は撃退でも略奪でも**完全に無音**で、第10日00:00に
+//   全資源が同時に約5%減るだけだった(UI 出力ゼロ)。襲撃機構の存在自体が
+//   伝わらないので、見張り台を建てる動機も生まれない。
+//
+//   **engine を変えずに出せるものだけを出す**(タスク指示の制約優先順位(1)):
+//   次回の判定 tick(`nextRaidTick`)・盤面の防衛戦力(`colonyDefenseFix`)・
+//   襲撃の強さ(`raidStrengthFix`)・略奪比率(content)は**すべて engine の
+//   読み取り専用関数 / content から取れる**。発生の通知は engine の自己申告
+//   カウンタ(`ScheduleReport.raidCount`)を揮発の累計へ足したもの
+//   (`sources.raidTally`)をシェルが差分検知する。**襲撃の履歴を state へ持たせる
+//   設計は採らない**(直列化に載って golden 89 本が割れる・sources.ts の doc)。
+
+/** [M73/R8-05] 襲撃の見通し(①ホームハブ・③見張り台の判断材料)。 */
+export interface RaidOutlookView {
+  /** content に `raid` ブロックがあるか(無ければ襲撃は一度も起きない)。 */
+  readonly active: boolean;
+  /** 次の襲撃判定 tick(絶対グリッド)。不活性なら null。 */
+  readonly nextRaidTick: number | null;
+  /** 盤面の防衛戦力(外周配置ボーナス込み・`colonyDefenseFix` そのまま)。 */
+  readonly defenseApprox: number;
+  /** 今の襲撃の強さ(`raidStrengthFix` そのまま・到達エラで逓増)。 */
+  readonly strengthApprox: number;
+  /** 撃退に失敗したときに各資源から失われる比率(%表示用)。 */
+  readonly lootPercentApprox: number;
+  /** 乱数の幅を最悪に引いても撃退できるか(= 防衛戦力だけで強さを上回る)。 */
+  readonly repelCertain: boolean;
+  /** 乱数の幅を最良に引いても撃退できないか(= 防衛が絶望的に足りない)。 */
+  readonly repelImpossible: boolean;
+}
+
+const INACTIVE_RAID_OUTLOOK: RaidOutlookView = {
+  active: false,
+  nextRaidTick: null,
+  defenseApprox: 0,
+  strengthApprox: 0,
+  lootPercentApprox: 0,
+  repelCertain: false,
+  repelImpossible: false,
+};
+
+function raidOutlookEquals(a: RaidOutlookView, b: RaidOutlookView): boolean {
+  return (
+    a.active === b.active &&
+    a.nextRaidTick === b.nextRaidTick &&
+    a.defenseApprox === b.defenseApprox &&
+    a.strengthApprox === b.strengthApprox &&
+    a.lootPercentApprox === b.lootPercentApprox &&
+    a.repelCertain === b.repelCertain &&
+    a.repelImpossible === b.repelImpossible
+  );
+}
+
+/**
+ * 襲撃の見通しを組み立てる。**判定式は engine の関数をそのまま呼ぶ**
+ * (`colonyDefenseFix`/`raidStrengthFix`/`nextRaidTick`)。乱数の幅
+ * (`rollRange`)との比較だけはこの層で行うが、これは `resolveRaid` が使う式
+ * `防衛 + roll >= 強さ` の両端(roll=0 と roll=rollRange)を当てはめた
+ * **同じ式の評価**であり、第二の判定モデルではない。
+ */
+function buildRaidOutlook(state: GameState, content: EngineContent): RaidOutlookView {
+  const raid = content.raid;
+  if (raid === undefined) return INACTIVE_RAID_OUTLOOK;
+  const defenseApprox = toApproxNumber(
+    colonyDefenseFix(state, content, raid.perimeterDefenseMulFix),
+  );
+  const strengthApprox = toApproxNumber(raidStrengthFix(state, content));
+  return {
+    active: true,
+    nextRaidTick: nextRaidTick(content, state.tick),
+    defenseApprox,
+    strengthApprox,
+    lootPercentApprox: toApproxNumber(raid.lootRatioFix) * 100,
+    repelCertain: defenseApprox >= strengthApprox,
+    repelImpossible: defenseApprox + raid.rollRange < strengthApprox,
   };
 }
 

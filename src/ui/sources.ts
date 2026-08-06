@@ -142,7 +142,31 @@ export interface ReadonlyStoreSources {
   readonly cellRubble: readonly ReadonlySignal<boolean>[];
   readonly selectedCellIndex: ReadonlySignal<number | null>;
   readonly activeScreen: ReadonlySignal<ScreenId>;
+  /** [M73/R8-05] このセッション中に解決した襲撃の累計({@link RaidTally})。 */
+  readonly raidTally: ReadonlySignal<RaidTally>;
 }
+
+/**
+ * [M73/R8-05] このセッション中に解決した襲撃の累計(GDD 11.7 段10)。
+ *
+ * **セーブに載らない揮発値**である。engine の `ScheduleReport`(advance の
+ * 自己申告カウンタ)が返す `raidCount`/`raidRepelledCount` を dispatch のたびに
+ * 足し込むだけで、**state も golden vector も 1 bit も動かさない**——襲撃の履歴を
+ * state 側へ持たせると直列化(`state/serialize.ts`)に載って golden 89 本が割れる
+ * ため、その設計は採らない(最終報告の申し送り参照)。
+ *
+ * 用途は「襲撃が起きたことに気づけるようにする」ことだけであり、シェルの
+ * 通知ウォッチャ(AppShell §1-5 の帰還/研究完了/漂着と同じ差分検知)が読む。
+ */
+export interface RaidTally {
+  /** 解決した襲撃の回数(このセッション中の累計)。 */
+  readonly count: number;
+  /** うち撃退できた回数。 */
+  readonly repelledCount: number;
+}
+
+/** 襲撃が 1 度も起きていない初期値(共有の不変オブジェクト)。 */
+export const EMPTY_RAID_TALLY: RaidTally = { count: 0, repelledCount: 0 };
 
 /**
  * 単一ストアの根 signal 群(書き込み可能な内側の形)。
@@ -176,6 +200,11 @@ export interface StoreSources extends ReadonlyStoreSources {
   readonly selectedCellIndex: Signal<number | null>;
   /** 現在の画面。権威は platform/router.ts(M29)で、ここはその写し。 */
   readonly activeScreen: Signal<ScreenId>;
+  /**
+   * [M73/R8-05] 襲撃の累計({@link RaidTally})。書き込むのは store.ts の
+   * `ticked`/`catchUpApplied` 分岐だけ(engine の自己申告カウンタの写し)。
+   */
+  readonly raidTally: Signal<RaidTally>;
 }
 
 export interface CreateStoreSourcesInput {
@@ -216,6 +245,7 @@ export function createStoreSources(input: CreateStoreSourcesInput): StoreSources
     cellRubble,
     selectedCellIndex: new Signal<number | null>(null, { name: "selectedCellIndex" }),
     activeScreen: new Signal<ScreenId>(DEFAULT_SCREEN_ID, { name: "activeScreen" }),
+    raidTally: new Signal<RaidTally>(EMPTY_RAID_TALLY, { name: "raidTally" }),
   };
 }
 

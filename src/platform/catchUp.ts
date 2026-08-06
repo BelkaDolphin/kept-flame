@@ -207,6 +207,16 @@ export interface CatchUpCounters {
   readonly stochasticTrialCount: number;
   readonly rateChangeEventCount: number;
   readonly recallOccurrenceCount: number;
+  /**
+   * [M73/R8-05] 不在中に解決した襲撃の回数(GDD 11.7 段10)。ワークロード検証では
+   * なく **UI の通知**のために返す —— 襲撃は撃退でも略奪でも完全に無音で、
+   * 在庫が黙って減るだけだった(Round 8 実測)。前景の tick は
+   * `advanceWithReport` から同じ 2 本を取れるが、Worker catch-up の
+   * `ScheduleReport` は Worker 内にしか無いのでここへ載せて渡す。
+   */
+  readonly raidCount: number;
+  /** [M73/R8-05] うち撃退できた回数。 */
+  readonly raidRepelledCount: number;
 }
 
 /**
@@ -286,6 +296,8 @@ export function runCatchUp(
       stochasticTrialCount: report.stochasticTrialCount,
       rateChangeEventCount: report.rateChangeEventCount,
       recallOccurrenceCount: report.recallOccurrenceCount,
+      raidCount: report.raidCount,
+      raidRepelledCount: report.raidRepelledCount,
     },
   };
 }

@@ -34,6 +34,7 @@
 // ---------------------------------------------------------------------------
 
 import type { HomeAlert, HomeAlertId, UrgencyLevel } from "../../derived";
+import { formatApproxDecimal1, formatGameClock } from "../format";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import type { ScreenProps } from "../screenProps";
 import type { ScreenId } from "../../screens";
@@ -92,6 +93,14 @@ export const HOME_ALERT_TEXT: { readonly [K in HomeAlertId]: HomeAlertText } = {
     label: "保管上限に達している資源がある",
     hint: "産出が頭打ちになっている(一部は廃材化)。保管庫を建てると上限が増える",
     unit: "種",
+  },
+  // [M73/R8-05] 襲撃(3日ごと)は撃退でも略奪でも無音だったため、機構の存在自体が
+  // 伝わっていなかった(見張り台を建てる動機も生まれない)。備えが無いことだけを
+  // 灰(任意)で示す——実際に撃退できるかは乱数を含むので断定しない。
+  raidUndefended: {
+    label: "襲撃への備えがない",
+    hint: "見張り台を建てると防衛戦力が上がる(格子の縁に置くほど有利)",
+    unit: "件",
   },
   expeditionActive: {
     label: "探索に出ている隊がいる",
@@ -158,6 +167,8 @@ export function HomeHub({ store, onNavigate }: ScreenProps) {
   const badges = useSignalValue(store.derived.homeBadges);
   // [M62/FC6b・R2-A08] 寝床上限の現在値表示(engine の既存 derived 呼びのみ)。
   const population = useSignalValue(store.derived.populationSummary);
+  // [M73/R8-05] 襲撃の見通し(次回予定・防衛戦力 vs 強さ)。
+  const raid = useSignalValue(store.derived.raidOutlook);
 
   return (
     <section class="kf-home" aria-labelledby="kf-home-alerts-title">
@@ -205,10 +216,19 @@ export function HomeHub({ store, onNavigate }: ScreenProps) {
 
       <h2 class="kf-home__section-title">コロニーの様子</h2>
       <ul class="kf-stats">
+        {/* [M73/R8-12] 「住民 9」は死亡した住民(記録として残る)を含む総数で、
+            すぐ下の「生存人口/寝床上限 7/9」と食い違って見えた。数える対象を
+            生存者に揃え、亡くなった住民は別行に分けて出す(数を混ぜない)。 */}
         <li class="kf-stats__item">
-          <span class="kf-stats__label">住民</span>
-          <span class="kf-stats__value">{badges.residentCount}</span>
+          <span class="kf-stats__label">住民(生存)</span>
+          <span class="kf-stats__value">{population.living}</span>
         </li>
+        {badges.residentCount > population.living && (
+          <li class="kf-stats__item">
+            <span class="kf-stats__label">亡くなった住民</span>
+            <span class="kf-stats__value">{badges.residentCount - population.living}</span>
+          </li>
+        )}
         {/* [M62/FC6b・R2-A08] 寝床上限の現在値表示。寝床は実は結線済み
             (人口下限保証・晴天漂着の上限に効く・facilityEffect.ts §2「寝床」)
             だが、以前はどの画面にも現在値が出ておらず伝わっていなかった。
@@ -220,6 +240,27 @@ export function HomeHub({ store, onNavigate }: ScreenProps) {
             {population.living}/{population.bedCapacity}
           </span>
         </li>
+        {/* [M73/R8-05] 襲撃の見通し。engine の読み取り専用関数から作った値だけを
+            出す(derived.ts §9)。防衛戦力と襲撃の強さを並べると、見張り台を
+            建てる/外周へ動かす判断がここで付く。 */}
+        {raid.active && (
+          <>
+            <li class="kf-stats__item">
+              <span class="kf-stats__label">次の襲撃</span>
+              <span class="kf-stats__value">
+                {raid.nextRaidTick === null ? "—" : formatGameClock(raid.nextRaidTick)}
+              </span>
+            </li>
+            <li class="kf-stats__item">
+              <span class="kf-stats__label">防衛戦力/襲撃の強さ</span>
+              <span class="kf-stats__value">
+                {formatApproxDecimal1(raid.defenseApprox)}/
+                {formatApproxDecimal1(raid.strengthApprox)}
+                {raid.repelCertain ? "(撃退できる見込み)" : ""}
+              </span>
+            </li>
+          </>
+        )}
         <li class="kf-stats__item">
           <span class="kf-stats__label">施設</span>
           <span class="kf-stats__value">{badges.facilityCount}</span>

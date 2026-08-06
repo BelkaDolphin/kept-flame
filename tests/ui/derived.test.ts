@@ -2035,3 +2035,94 @@ describe("[M62/FC6b・R2-A08] populationSummary(GDD 7.6/7.7・populationViewOf �
     expect(summary.floor).toBe(0);
   });
 });
+
+// --- [M73/R8-05] 襲撃の見通し(derived.ts §9)----------------------------------
+
+describe("[M73/R8-05] raidOutlook(襲撃の可視化・engine の読み取り専用関数のみ)", () => {
+  const WATCHTOWER: FacilityDef = {
+    id: id("watchtower"),
+    tags: [],
+    harshWork: false,
+    outputPerTickByLevel: [0, 0, 0, 0, 0].map(fixFromInt),
+    output: { kind: "research" },
+    workerSlotsByLevel: [0, 0, 0, 0, 0],
+    defenseByLevel: [20, 23, 26, 30, 35].map(fixFromInt),
+  };
+  const RAID_PARAMS = {
+    intervalTicks: 4320,
+    baseStrengthFix: fixFromInt(30),
+    strengthGrowthPerEraFix: fixFromInt(25),
+    rollRange: 40,
+    perimeterDefenseMulFix: fixFromRaw(1_500_000),
+    lootRatioFix: fixFromRaw(50_000),
+  };
+
+  function raidContent(): EngineContent {
+    const base = boardContent();
+    return {
+      ...base,
+      facilityDefs: new Map([...base.facilityDefs, [WATCHTOWER.id, WATCHTOWER]]),
+      raid: RAID_PARAMS,
+    };
+  }
+
+  it("content に raid が無ければ不活性(数値を捏造しない)", () => {
+    const { store } = createTestStore();
+    expect(store.derived.raidOutlook.value.active).toBe(false);
+    expect(store.derived.raidOutlook.value.nextRaidTick).toBeNull();
+  });
+
+  it("次回の襲撃 tick・防衛戦力・襲撃の強さ・略奪比率を engine と一致させる", () => {
+    const content = raidContent();
+    // c0 は格子の外周(x=0,y=0)なので配置ボーナス ×1.5 が乗る = 20×1.5 = 30。
+    const state = boardState([facility("wt1", WATCHTOWER.id, 0)]);
+    const store = createGameStore({ state, content });
+    const outlook = store.derived.raidOutlook.value;
+    expect(outlook.active).toBe(true);
+    expect(outlook.nextRaidTick).toBe(4320);
+    expect(outlook.defenseApprox).toBe(30);
+    expect(outlook.strengthApprox).toBe(30);
+    expect(outlook.lootPercentApprox).toBeCloseTo(5, 6);
+    // 防衛 30 >= 強さ 30 なので乱数を最悪に引いても撃退できる。
+    expect(outlook.repelCertain).toBe(true);
+    expect(outlook.repelImpossible).toBe(false);
+  });
+
+  it("防衛施設が無ければ防衛戦力0で、ホームに「襲撃への備えがない」が灰で点く", () => {
+    const store = createGameStore({ state: boardState(), content: raidContent() });
+    expect(store.derived.raidOutlook.value.defenseApprox).toBe(0);
+    const alert = store.derived.homeAlerts.value.alerts.find(
+      (candidate) => candidate.id === "raidUndefended",
+    );
+    expect(alert?.level).toBe("info");
+    expect(alert?.screen).toBe("grid");
+  });
+
+  it("襲撃機構が不活性なら「備えがない」バッジも点かない(存在しない機構を警告しない)", () => {
+    const { store } = createTestStore();
+    expect(
+      store.derived.homeAlerts.value.alerts.some((candidate) => candidate.id === "raidUndefended"),
+    ).toBe(false);
+  });
+
+  it("raidTally は engine の自己申告カウンタを積んだ揮発値(初期は 0)", () => {
+    const { store } = createTestStore();
+    expect(store.derived.raidTally.value).toEqual({ count: 0, repelledCount: 0 });
+    // 襲撃機構が無い content では tick を進めても増えない。
+    store.dispatch({ type: "ticked", toTick: 100 });
+    expect(store.derived.raidTally.value).toEqual({ count: 0, repelledCount: 0 });
+  });
+
+  it("襲撃が解決すると raidTally が増える(state には何も足さない)", () => {
+    const content = raidContent();
+    const state = boardState();
+    const store = createGameStore({ state, content });
+    // 判定 tick は 4320 の絶対グリッド。前景経路の上限(600 tick)があるので刻む。
+    for (let toTick = 500; toTick <= 4500; toTick += 500) {
+      store.dispatch({ type: "ticked", toTick });
+    }
+    expect(store.derived.raidTally.value.count).toBe(1);
+    // 揮発値であること: state 側に襲撃の履歴が生えていない(golden 非波及の根拠)。
+    expect(Object.keys(store.peekState())).not.toContain("raids");
+  });
+});

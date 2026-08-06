@@ -77,7 +77,7 @@
 //   `dispatch` を呼び返すことは想定していない(再入は禁止)。
 // ---------------------------------------------------------------------------
 
-import { advance, createAdvanceContext } from "../engine/advance";
+import { advanceWithReport, createAdvanceContext } from "../engine/advance";
 import { GRID_CELL_COUNT } from "../engine/adjacency";
 import { apply, type CommandInput, type CommandResult } from "../engine/commands";
 import type { AdvanceContext, EngineContent } from "../engine/rules/types";
@@ -141,6 +141,14 @@ export interface CatchUpAppliedEvent {
   readonly type: "catchUpApplied";
   readonly snapshot: GameState;
   readonly advanceContext: TransferableAdvanceContext;
+  /**
+   * [M73/R8-05] 不在中に解決した襲撃の回数(Worker が返した
+   * `CatchUpCounters` の写し)。省略時(既存呼び出し互換)は 0 = 通知しない。
+   * state には載らない揮発値(sources.ts の `RaidTally` doc)。
+   */
+  readonly raidCount?: number;
+  /** [M73/R8-05] うち撃退できた回数。 */
+  readonly raidRepelledCount?: number;
 }
 
 /**
@@ -328,6 +336,19 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
 
   const mounts = new Set<ScreenMount>();
 
+  /**
+   * [M73/R8-05] engine の自己申告カウンタ(`ScheduleReport`)から襲撃の 2 本だけを
+   * 揮発の累計へ足す。0 件のときは signal を触らない(無変更の再描画を作らない)。
+   */
+  function addRaidTally(count: number, repelledCount: number): void {
+    if (count <= 0) return;
+    const current = sources.raidTally.peek();
+    sources.raidTally.set({
+      count: current.count + count,
+      repelledCount: current.repelledCount + repelledCount,
+    });
+  }
+
   interface InstallOutcome {
     readonly report: SourceSyncReport;
     readonly rebuilt: boolean;
@@ -400,8 +421,14 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       );
     }
 
-    const nextState = advance(current, sources.advanceContext.peek(), event.toTick);
-    const installed = installWorldState(nextState, sources.content.peek(), null, false);
+    // [M73/R8-05] `advance` ではなく `advanceWithReport` を呼ぶ(engine 側は
+    // 同じ `runSchedule` の別入口・**挙動は 1 bit も変わらない**)。返ってくる
+    // 自己申告カウンタのうち襲撃の 2 本だけを揮発の累計へ足し込み、シェルの
+    // 通知ウォッチャが「襲撃が起きた」ことに気づけるようにする(sources.ts の
+    // `RaidTally` doc・state と golden は動かさない)。
+    const report = advanceWithReport(current, sources.advanceContext.peek(), event.toTick);
+    const installed = installWorldState(report.state, sources.content.peek(), null, false);
+    addRaidTally(report.raidCount, report.raidRepelledCount);
     return {
       type: "ticked",
       stateChanged: installed.report.stateChanged,
@@ -425,6 +452,8 @@ export function createGameStore(input: CreateGameStoreInput): GameStore {
       event.advanceContext,
       false,
     );
+    // [M73/R8-05] 不在中の襲撃も通知対象にする(前景 tick と同じ揮発の累計へ)。
+    addRaidTally(event.raidCount ?? 0, event.raidRepelledCount ?? 0);
     return {
       type: "catchUpApplied",
       stateChanged: installed.report.stateChanged,

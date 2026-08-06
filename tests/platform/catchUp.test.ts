@@ -130,6 +130,10 @@ describe("runCatchUp", () => {
       stochasticTrialCount: direct.stochasticTrialCount,
       rateChangeEventCount: direct.rateChangeEventCount,
       recallOccurrenceCount: direct.recallOccurrenceCount,
+      // [M73/R8-05] 不在中の襲撃を UI へ通知するため 2 本追加(engine の
+      // ScheduleReport をそのまま写す・ここでも一致を固定する)。
+      raidCount: direct.raidCount,
+      raidRepelledCount: direct.raidRepelledCount,
     });
   });
 
