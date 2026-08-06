@@ -57,6 +57,7 @@ import {
   buildDispatchCommands,
   buildFacilityCommand,
   buildReclaimCommand,
+  buildWarehouseCommand,
   codifyCommand,
   pickResearchTarget,
   researchCommand,
@@ -166,8 +167,16 @@ function decideGeneric(
   const reclaimCmd = buildReclaimCommand(state, content, policies.reclaimMinFreeCells);
   if (reclaimCmd !== undefined) commands.push(reclaimCmd);
 
-  const buildCmd = buildFacilityCommand(state, content, policies.build);
-  if (buildCmd !== undefined) commands.push(buildCmd);
+  // [Phase A] あふれの接近を検知したら、通常の建設候補選定より倉庫を優先する
+  // (§0 冒頭の doc・commonActions.ts §3a)。1 tick 1 建設の既定は維持するため、
+  // 倉庫が要らない tick だけ従来どおりの `buildFacilityCommand` を使う。
+  const warehouseCmd = buildWarehouseCommand(state, content, WAREHOUSE_DEF_ID);
+  if (warehouseCmd !== undefined) {
+    commands.push(warehouseCmd);
+  } else {
+    const buildCmd = buildFacilityCommand(state, content, policies.build);
+    if (buildCmd !== undefined) commands.push(buildCmd);
+  }
 
   const assignResult = buildAssignmentCommands(state, content, policies.assignment, tick, botId);
   commands.push(...assignResult.commands);

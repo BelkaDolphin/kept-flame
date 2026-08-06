@@ -50,6 +50,7 @@ import {
 import { currentCodification } from "../../src/engine/rules/codify";
 import { nextReclaimCostFix } from "../../src/engine/rules/reclaim";
 import { currentResearch } from "../../src/engine/rules/research";
+import { resolveCapacityByResourceId } from "../../src/engine/rules/storage";
 import { isTechUnlocked, researchEntityOfTech } from "../../src/engine/rules/techMemory";
 import { isCriticalPathTech } from "../../src/engine/rules/techTree";
 import { prereqsOfTech, type DistanceBand, type EngineContent } from "../../src/engine/rules/types";
@@ -350,6 +351,94 @@ export function buildFacilityCommand(
     return { kind: "placeFacility", facilityId, defId: candidate.defId, cellIndex };
   }
   return undefined;
+}
+
+// --- 3a. 倉庫建設(GDD 6.7 の正規あふれ対策・[Phase A]) ----------------------
+//
+// [2026-08-06裁定・台帳v20 必-3(1)] 全 15 run(旧5戦略bot×3seed)で倉庫
+// (warehouse)を建てた bot が 0 だった構造要因の分析(台帳v20)を受けて追加する。
+//
+// `buildFacilityCommand` の「現基数最小 → defPriority 優先順」という一般規則
+// だけに任せると、warehouse は `ALL_FACILITY_DEF_IDS` の中では中位の優先度
+// (bots.ts の各 bot 定義を参照)にしか置かれておらず、その「順番」が回ってくる
+// 頃には盤面の空きセルが 2×2(warehouse の footprint)を取れないほど埋まって
+// いることが多い(初期の空き 12 セルは他の 1×1 施設に先に使われる)。
+// 「あふれの接近を検知したら建てる」という**需要駆動**のトリガをここに独立させ、
+// 通常の建設候補選定より**優先して**倉庫を提案することで、この構造的な後回しを
+// 断ち切る(GDD 6.7 が想定する「あふれたら倉庫を建てる」プレイヤー行動の最小形)。
+//
+// 判断材料は `resolveCapacityByResourceId`(rules/storage.ts の公開 API)と
+// 現在の資源在庫だけであり、bot が既に見ている決定論的な state 以外は使わない。
+
+/**
+ * 保管上限つきの資源のうち、在庫が上限の {@link WAREHOUSE_TRIGGER_RATIO_NUM}/
+ * {@link WAREHOUSE_TRIGGER_RATIO_DEN}(既定 60%)以上に達しているものが
+ * 1 つでもあるか。整数比較(`toRaw` の raw 値同士)で判定し、浮動小数の丸め差を
+ * 結果に持ち込まない。
+ *
+ * **60% は実測比較で選んだ値**(Phase A stage1)。30% まで下げても
+ * 11.4-7c(オーバーフロー損失率)の全 run 最大値は 1 bit も変わらない
+ * (最大値を出しているのは explorationFirst で、この bot は在庫が上限に
+ * 張り付く(比率 1.0)日が何日も続くほど溢れているため、閾値をどれだけ下げても
+ * 検知タイミングは変わらない — ボトルネックは検知の鈍さではなく盤面上に
+ * 倉庫の footprint(2×2)を置ける空きが 1 基ぶんしか無いこと)。それでいて
+ * 閾値を下げると他 4 戦略でも「あと 1 段の余裕がある日」に前倒しで倉庫を
+ * 建ててしまい、その 1 tick 分の建設順序ずれが `gdd-11.4-3-era3-upper`
+ * (E3 到達 <= 18 日)を 1 run 押し出して新規 fail を作る実測結果になった
+ * (30% 閾値: greedy/nightly-c が 19 日)。的が外れている資源を投じて新しい
+ * fail を作らないため 60% に留める。Phase A のヒューリスティック定数であり、
+ * content/balance.json の数値ではない。上限が 1 つも無い盤面では常に false。
+ */
+const WAREHOUSE_TRIGGER_RATIO_NUM = 3;
+const WAREHOUSE_TRIGGER_RATIO_DEN = 5;
+
+export function anyResourceNearingCapacity(state: GameState, content: EngineContent): boolean {
+  const capacities = resolveCapacityByResourceId(state, content);
+  if (capacities.size === 0) return false;
+  for (const resource of entitiesOfKind(state, "resource")) {
+    const capacityFix = capacities.get(resource.resourceId);
+    if (capacityFix === undefined) continue;
+    const capacityRaw = toRaw(capacityFix);
+    if (capacityRaw <= 0) continue;
+    const stockRaw = toRaw(resource.stock);
+    if (stockRaw * WAREHOUSE_TRIGGER_RATIO_DEN >= capacityRaw * WAREHOUSE_TRIGGER_RATIO_NUM) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 保管上限のあふれ(またはその接近)を検知したときだけ、倉庫(warehouse)を
+ * 1 基提案する([Phase A])。`warehouseDefId` は呼び出し側(bots.ts)が持つ
+ * 施設 ID を渡してもらう(commonActions.ts は特定の施設 ID を知らない、という
+ * 既存の設計を踏襲する)。
+ *
+ * 建設ロジック自体は `buildFacilityCommand` と同じ部品(`canAffordBuild` /
+ * `suggestPlacementsAvoidingRubble` を `qualityRatioFix = 1.0` で呼ぶ)を使う —
+ * 「配置戦略違い」bot との比較(§3 冒頭の doc)を壊さないため。
+ */
+export function buildWarehouseCommand(
+  state: GameState,
+  content: EngineContent,
+  warehouseDefId: EntityId,
+): PlaceFacilityCommand | undefined {
+  if (!anyResourceNearingCapacity(state, content)) return undefined;
+
+  const def = content.facilityDefs.get(warehouseDefId);
+  if (def === undefined) return undefined;
+  if (!canAffordBuild(state, def, facilityBuildCostFix(def))) return undefined;
+  const footprint = def.footprint ?? UNIT_FOOTPRINT;
+  if (!isValidFootprintDims(footprint)) return undefined;
+
+  const facilityId = nextFacilityEntityId(state, warehouseDefId);
+  const plan = suggestPlacementsAvoidingRubble(
+    state,
+    content,
+    [{ facilityId, defId: warehouseDefId }],
+    { qualityRatioFix: FIX_ONE },
+  );
+  return placementPlanToCommands(plan)[0];
 }
 
 // --- 3b. 開墾(GDD 9.1・[M38]) -----------------------------------------------
