@@ -152,6 +152,7 @@ import {
   type AdvanceContext,
   type DistanceBand,
   type EngineContent,
+  type EventDef,
   type EventNodeDef,
   type ExplorationBandParams,
   type ExplorationParams,
@@ -984,7 +985,11 @@ export function rareAssetCountOf(
 /** {@link explorationRoi} の内訳(UI・sim・テストが同じ数値を読むための形)。 */
 export interface ExplorationRoiReport {
   readonly band: DistanceBand;
-  /** 期待ノード数(距離帯のノード数レンジの中点)。 */
+  /**
+   * 期待ノード数。
+   * event 実体を参照できたときは**その event のノード数**(候補が複数なら平均)、
+   * 参照できなければ距離帯のノード数レンジの中点(§8)。
+   */
   readonly expectedNodesFix: Fix;
   /** 1 ノードの期待成功確率(安全曲線の入力)。 */
   readonly successProbabilityFix: Fix;
@@ -1002,6 +1007,26 @@ export interface ExplorationRoiReport {
   readonly travelTicks: number;
   /** ROI = 分子 / 分母。分母が 0 なら null(逸失も損失も無い = 比が定義できない)。 */
   readonly roiFix: Fix | null;
+  /**
+   * [Phase D] この見積りが **event 実体**(ノード数・難度・R・statWeights・choices)を
+   * 参照して出されたなら、その根拠になった event の ID(昇順)。距離帯パラメータ
+   * だけの手続きモデルで出したときは空配列(§8)。
+   */
+  readonly sourceEventIds: readonly EntityId[];
+}
+
+/** {@link explorationRoi} の任意入力([Phase D]・省略時の既定は doc を参照)。 */
+export interface ExplorationRoiOptions {
+  /**
+   * 目的地(event content の ID)。指定するとその event **1 本だけ**を見る。
+   * 省略時はその距離帯へ出せる event 全部の平均(= 目的地を選ぶ前の帯の見積り)。
+   */
+  readonly destinationId?: EntityId;
+  /**
+   * 派遣方針(GDD 8.3)。choices の選ばれ方が変わるので難度も報酬も動く。
+   * 省略時は `"cautious"`(UI の既定と同じ・安全側)。
+   */
+  readonly stance?: DispatchStance;
 }
 
 /**
@@ -1015,11 +1040,17 @@ export interface ExplorationRoiReport {
  * **ここは事前期待値(プレイヤーが派遣前に見る指標)であって、実際の解決
  * (§1 のスナップショット)とは別の計算である。** 実解決は決定論で結果が 1 つに
  * 決まるので「確率」を持たないから、ROI 側だけが安全曲線という解析モデルを持つ。
- * 両者を混同しないよう、モデルの入力(難度の中点・R 一様・成功確率の線形式)を
+ * 両者を混同しないよう、モデルの入力(難度・R 一様・成功確率の線形式)を
  * すべてこの関数に閉じてある。
  *
- * 成功確率は「難度 = レンジ中点、roll ~ 一様(0..R)」として
- * `P = clamp((teamPower + R − difficultyMid) / R, 0, 1)` で出す(整数演算のみ)。
+ * **[Phase D・台帳v20 必-2] 成功確率と期待報酬は event 実体から出す(§8)。**
+ * `content.eventDefs` にその距離帯の event があれば、ノード数・難度・R・
+ * statWeights・choices は**実解決 {@link buildDispatchSnapshot} と同じ関数**
+ * (`rules/event.ts`)を通して読む。event が 1 本も無い距離帯だけが従来どおり
+ * 距離帯パラメータの手続きモデル(難度 = レンジ中点・R = 帯の R)へ落ちる。
+ *
+ * どちらの経路でも 1 ノードの成功確率は
+ * `P = clamp((関連チーム総合力 + 装備補正 + R − 難度) / R, 0, 1)`(整数演算のみ)。
  *
  * @throws {RulesError} content に exploration ブロックが無い場合
  */
@@ -1028,6 +1059,7 @@ export function explorationRoi(
   content: EngineContent,
   band: DistanceBand,
   memberIds: readonly EntityId[],
+  options: ExplorationRoiOptions = {},
 ): ExplorationRoiReport {
   const params = content.exploration;
   if (params === undefined) {
@@ -1036,20 +1068,8 @@ export function explorationRoi(
   const bandParams = params.byBand[band];
   requireBandParams(bandParams, band);
 
-  const teamPowerFix = teamPowerWithEquipment(state, content, memberIds);
-  const rollRangeFix = fixFromInt(bandParams.rollRange);
-  const difficultyMidFix = fixFromRawHalfSum(bandParams.difficultyMin, bandParams.difficultyMax);
-  const successProbabilityFix = clampFix(
-    floorDivFix(addFix(subFix(teamPowerFix, difficultyMidFix), rollRangeFix), rollRangeFix),
-    FIX_ZERO,
-    FIX_ONE,
-  );
-  const expectedNodesFix = fixFromRawHalfSum(bandParams.nodeCountMin, bandParams.nodeCountMax);
-
-  const expectedRewardFix = mulFix(
-    mulFix(expectedNodesFix, successProbabilityFix),
-    bandParams.rewardPerNodeFix,
-  );
+  const model = eventRoiModel(state, content, params, bandParams, band, memberIds, options);
+  const { successProbabilityFix, expectedNodesFix, expectedRewardFix, sourceEventIds } = model;
 
   const travelTicks = travelTicksFor(state, content, band, memberIds);
   const forgoneOutputFix = mulFixInt(
@@ -1084,12 +1104,169 @@ export function explorationRoi(
     rareAssetCount,
     travelTicks,
     roiFix,
+    sourceEventIds,
   };
 }
 
 /** `(a + b) / 2` を Fix で(整数演算のみ・floor 丸め)。 */
 function fixFromRawHalfSum(a: number, b: number): Fix {
   return floorDivFix(fixFromInt(a + b), fixFromInt(2));
+}
+
+// --- 6b. [Phase D] ROI の期待値を event 実体から出す(台帳v20 必-2・§8) ------
+//
+// ===========================================================================
+// 8. なぜ距離帯パラメータではなく event 実体を見るのか
+// ===========================================================================
+//   M21 の ROI は距離帯パラメータ(`difficultyMin/Max` の中点・帯の `rollRange`・
+//   `nodeCountMin/Max` の中点)だけで期待値を出していた。ところが M22 以降、
+//   実際の解決 {@link buildDispatchSnapshot} は **event 実体**(ノードごとの
+//   `difficulty` / `rollRange` / `statWeights` / `choices`)で判定する。
+//   両者はまったく別の数値を使うので、同じ盤面・同じチームでも予測と実績が
+//   桁で食い違う(実測 R6-A02: 表示 ROI と実受領額が約 5 倍乖離)。
+//
+//   本節は「予測に使う入力を実解決と同じ場所から取る」ことでこの乖離を根から
+//   断つ。判定値の組み立ては `rules/event.ts` の
+//   {@link selectChoiceIndex} / {@link effectiveDifficultyFix} /
+//   {@link effectiveTeamPowerFix} / {@link nodeRewardFix} / {@link relatedTeamPowerFix}
+//   を**そのまま**呼ぶ(ROI 側に第二の判定式を作らない)。
+//
+//   予測と実解決の違いとして意図的に残すのは 2 つだけである:
+//     (1) roll は引かず「0..R 一様」の解析分布として扱う(= 確率になる)。
+//         実解決は決定論なので確率を持たない(§6 冒頭の doc)。
+//     (2) 分岐(cond)と撤退は見ない。分岐は判定の**後**に決まり、報酬額を
+//         変えるのは choice の `rewardMod` だけなので期待報酬には効かない。
+//
+//   目的地未選択(UI の帯プレビュー)では、その帯へ出せる event 全部の平均を
+//   採る —— 「どれを選ぶか決める前の帯の期待値」という表示の意味に一致し、
+//   かつ event が 1 本しか無い帯では選択時と同じ値になる。
+
+/** {@link eventRoiModel} が返す期待値の束。 */
+interface ExplorationRoiModel {
+  readonly successProbabilityFix: Fix;
+  readonly expectedNodesFix: Fix;
+  readonly expectedRewardFix: Fix;
+  readonly sourceEventIds: readonly EntityId[];
+}
+
+/** ROI 用の候補 event(destinationId 指定ならその 1 本・省略なら帯の全 event を ID 昇順)。 */
+function roiCandidateEvents(
+  content: EngineContent,
+  band: DistanceBand,
+  destinationId: EntityId | undefined,
+): readonly EventDef[] {
+  if (destinationId !== undefined) {
+    const def = eventDefForDestination(content, destinationId, band);
+    return def === undefined ? [] : [def];
+  }
+  const defs = content.eventDefs;
+  if (defs === undefined) return [];
+  const result: EventDef[] = [];
+  for (const def of defs.values()) {
+    if (def.destTags.includes(band)) result.push(def);
+  }
+  return result.sort((a, b) => compareUtf16(a.id, b.id));
+}
+
+/**
+ * 1 ノードの成功確率(0..R 一様の roll に対する解析値)。
+ *
+ * `R = 0` は「乱数の幅が無い = 決定論的に総合力と難度を比べるだけ」なので
+ * 0/1 のどちらかになる(ゼロ除算を作らない)。
+ */
+function nodeSuccessProbabilityFix(teamPowerFix: Fix, difficultyFix: Fix, rollRange: number): Fix {
+  if (rollRange <= 0) {
+    return toRaw(teamPowerFix) >= toRaw(difficultyFix) ? FIX_ONE : FIX_ZERO;
+  }
+  const rollRangeFix = fixFromInt(rollRange);
+  return clampFix(
+    floorDivFix(addFix(subFix(teamPowerFix, difficultyFix), rollRangeFix), rollRangeFix),
+    FIX_ZERO,
+    FIX_ONE,
+  );
+}
+
+/**
+ * 期待値の本体(§8)。event 実体を参照できなければ M21 の手続きモデルへ
+ * **1 bit も変えずに**落ちる(event を 1 本も持たない content の golden/テストを
+ * 動かさないため)。
+ */
+function eventRoiModel(
+  state: GameState,
+  content: EngineContent,
+  params: ExplorationParams,
+  bandParams: ExplorationBandParams,
+  band: DistanceBand,
+  memberIds: readonly EntityId[],
+  options: ExplorationRoiOptions,
+): ExplorationRoiModel {
+  const candidates = roiCandidateEvents(content, band, options.destinationId);
+  if (candidates.length === 0) {
+    // --- 手続きモデル(M21 と同一) ---
+    const teamPowerFix = teamPowerWithEquipment(state, content, memberIds);
+    const difficultyMidFix = fixFromRawHalfSum(bandParams.difficultyMin, bandParams.difficultyMax);
+    const successProbabilityFix = nodeSuccessProbabilityFix(
+      teamPowerFix,
+      difficultyMidFix,
+      bandParams.rollRange,
+    );
+    const expectedNodesFix = fixFromRawHalfSum(bandParams.nodeCountMin, bandParams.nodeCountMax);
+    return {
+      successProbabilityFix,
+      expectedNodesFix,
+      expectedRewardFix: mulFix(
+        mulFix(expectedNodesFix, successProbabilityFix),
+        bandParams.rewardPerNodeFix,
+      ),
+      sourceEventIds: [],
+    };
+  }
+
+  const stance = options.stance ?? "cautious";
+  const countFix = fixFromInt(candidates.length);
+  let nodeCountSumFix = FIX_ZERO;
+  let probabilitySumFix = FIX_ZERO;
+  let rewardSumFix = FIX_ZERO;
+  const sourceEventIds: EntityId[] = [];
+
+  for (const def of candidates) {
+    sourceEventIds.push(def.id);
+    nodeCountSumFix = addFix(nodeCountSumFix, fixFromInt(def.nodes.length));
+    let eventProbabilitySumFix = FIX_ZERO;
+    let eventRewardFix = FIX_ZERO;
+    for (const node of def.nodes) {
+      const choiceIndex = selectChoiceIndex(node, stance);
+      const choice = choiceAt(node, choiceIndex);
+      const difficultyFix = effectiveDifficultyFix(node, choice);
+      const teamPowerFix = effectiveTeamPowerFix(
+        relatedTeamPowerFix(state, content, memberIds, node),
+        params.equipmentBonusFix,
+        node,
+        choice,
+      );
+      const probabilityFix = nodeSuccessProbabilityFix(teamPowerFix, difficultyFix, node.rollRange);
+      eventProbabilitySumFix = addFix(eventProbabilitySumFix, probabilityFix);
+      eventRewardFix = addFix(
+        eventRewardFix,
+        mulFix(probabilityFix, nodeRewardFix(bandParams.rewardPerNodeFix, choice)),
+      );
+    }
+    // ノード数 0 の event は schema が弾く(1 本以上)。念のため 0 除算を作らない。
+    if (def.nodes.length > 0) {
+      probabilitySumFix = addFix(
+        probabilitySumFix,
+        floorDivFix(eventProbabilitySumFix, fixFromInt(def.nodes.length)),
+      );
+    }
+    rewardSumFix = addFix(rewardSumFix, eventRewardFix);
+  }
+
+  return {
+    successProbabilityFix: floorDivFix(probabilitySumFix, countFix),
+    expectedNodesFix: floorDivFix(nodeCountSumFix, countFix),
+    expectedRewardFix: floorDivFix(rewardSumFix, countFix),
+    sourceEventIds,
+  };
 }
 
 // --- 7. 診断クエリ(UI / sim 向け) -----------------------------------------

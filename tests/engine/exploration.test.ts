@@ -173,6 +173,183 @@ function memberIdsOf(state: GameState, count: number): readonly EntityId[] {
   return ids;
 }
 
+// --- 1b. [Phase D] ROI は event 実体を参照する(台帳v20 必-2・R6-A02) --------
+
+/** ROI 検証用の event content(難度 / R / ノード数を狙って作れる最小形)。 */
+function contentWithEvents(events: readonly unknown[]): EngineContent {
+  const bundle: RawContentBundle = {
+    tech: techJson,
+    facility: facilityJson,
+    trait: traitJson,
+    adjacency: adjacencyJson,
+    balance: balanceJson,
+    event: events,
+  };
+  const validated = validateContentBundle(bundle);
+  if (!validated.ok) throw new Error(`content 検証で落ちた: ${JSON.stringify(validated.issues)}`);
+  return loadEngineContentOrThrow(validated.value);
+}
+
+function roiNodeJson(difficulty: number, rollRange: number): Record<string, unknown> {
+  return {
+    difficulty,
+    R: rollRange,
+    statWeights: { vigor: 1 },
+    choices: [],
+    branches: [{ cond: "true", result: "success", logTemplate: "進んだ。" }],
+  };
+}
+
+function roiEventJson(
+  eventId: string,
+  nodes: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  return { id: eventId, destTags: ["near"], nodes };
+}
+
+describe("[Phase D] 探索 ROI は event 実体(ノード数・難度・R)から出す(台帳v20 必-2)", () => {
+  // 新人 = 全ステ中立 50 なので `statWeights {vigor: 1}` の関連総合力は 50 × 人数。
+  // 難度 160 / R 60 なら P(3名) = (150 + 60 − 160)/60 = 5/6、P(2名) = 0。
+  const singleEvent = [
+    roiEventJson("eventNearProbe", [
+      roiNodeJson(160, 60),
+      roiNodeJson(160, 60),
+      roiNodeJson(160, 60),
+      roiNodeJson(160, 60),
+      roiNodeJson(160, 60),
+    ]),
+  ];
+
+  it("ノード数・成功確率・期待報酬が event 定義から決まる(距離帯レンジではない)", () => {
+    const engineContent = contentWithEvents(singleEvent);
+    const state = newcomerBoard(3);
+    const memberIds = memberIdsOf(state, 3);
+    const report = explorationRoi(state, engineContent, "near", memberIds);
+
+    // 距離帯の nodeCountMin/Max は 3/4(中点 3.5)。event は 5 ノードなので 5。
+    expect(approx(report.expectedNodesFix)).toBe(5);
+    expect(report.sourceEventIds).toEqual([id("eventNearProbe")]);
+    // P = (150 + 60 − 160)/60 = 0.833333(floor 丸め)。
+    expect(toRaw(report.successProbabilityFix)).toBe(833333);
+    // 期待報酬 = Σ_node P × rewardPerNode(near = 45)。
+    expect(approx(report.expectedRewardFix)).toBeCloseTo(5 * 0.833333 * 45, 3);
+  });
+
+  it("同じ盤面でも距離帯パラメータのモデルとは別の値になる(R6-A02 の乖離そのもの)", () => {
+    const withEvents = contentWithEvents(singleEvent);
+    const state = newcomerBoard(3);
+    const memberIds = memberIdsOf(state, 3);
+    const eventBased = explorationRoi(state, withEvents, "near", memberIds);
+    const procedural = explorationRoi(state, REAL_CONTENT, "near", memberIds);
+    expect(procedural.sourceEventIds).toEqual([]);
+    expect(toRaw(eventBased.successProbabilityFix)).not.toBe(
+      toRaw(procedural.successProbabilityFix),
+    );
+  });
+
+  it("event が 1 本も無い距離帯は M21 の手続きモデルへ 1 bit も変えずに落ちる", () => {
+    // near だけに event を置いた content で far / deep を見ると、event 抜きの
+    // 実 content と完全に一致する(既存 golden / 縮約 content の互換の根拠)。
+    const withEvents = contentWithEvents(singleEvent);
+    const state = newcomerBoard(3);
+    const memberIds = memberIdsOf(state, 3);
+    for (const band of ["far", "deep"] as const) {
+      const a = explorationRoi(state, withEvents, band, memberIds);
+      const b = explorationRoi(state, REAL_CONTENT, band, memberIds);
+      expect(a.sourceEventIds).toEqual([]);
+      expect(toRaw(a.successProbabilityFix)).toBe(toRaw(b.successProbabilityFix));
+      expect(toRaw(a.expectedRewardFix)).toBe(toRaw(b.expectedRewardFix));
+      expect(toRaw(a.expectedNodesFix)).toBe(toRaw(b.expectedNodesFix));
+    }
+  });
+
+  it("目的地を指定するとその event だけ・省略すると帯の全 event の平均を見る", () => {
+    const engineContent = contentWithEvents([
+      roiEventJson("eventNearEasy", [
+        roiNodeJson(150, 60),
+        roiNodeJson(150, 60),
+        roiNodeJson(150, 60),
+      ]),
+      roiEventJson("eventNearHard", [
+        roiNodeJson(210, 60),
+        roiNodeJson(210, 60),
+        roiNodeJson(210, 60),
+        roiNodeJson(210, 60),
+      ]),
+    ]);
+    const state = newcomerBoard(3);
+    const memberIds = memberIdsOf(state, 3);
+
+    const easy = explorationRoi(state, engineContent, "near", memberIds, {
+      destinationId: id("eventNearEasy"),
+    });
+    const hard = explorationRoi(state, engineContent, "near", memberIds, {
+      destinationId: id("eventNearHard"),
+    });
+    const average = explorationRoi(state, engineContent, "near", memberIds);
+
+    expect(easy.sourceEventIds).toEqual([id("eventNearEasy")]);
+    expect(hard.sourceEventIds).toEqual([id("eventNearHard")]);
+    expect(average.sourceEventIds).toEqual([id("eventNearEasy"), id("eventNearHard")]);
+    // easy: P = 1(150 + 60 >= 150 が roll 0 でも成立)/ hard: P = 0(150 + 60 < 210)。
+    expect(toRaw(easy.successProbabilityFix)).toBe(toRaw(fixFromInt(1)));
+    expect(toRaw(hard.successProbabilityFix)).toBe(0);
+    expect(toRaw(average.successProbabilityFix)).toBe(500000);
+    // ノード数の平均 = (3 + 4)/2 = 3.5。
+    expect(approx(average.expectedNodesFix)).toBe(3.5);
+  });
+
+  it("**GDD 8.1⑤の回復**: 2名は成功確率 0・3名は約 0.75(event 実体で判定)", () => {
+    // 難度 167 / R 66 は台帳v20 必-2 の両立条件(R <= 66.7)の設計点。
+    const engineContent = contentWithEvents([
+      roiEventJson("eventNearCalibrated", [
+        roiNodeJson(167, 66),
+        roiNodeJson(167, 66),
+        roiNodeJson(167, 66),
+      ]),
+    ]);
+    const two = newcomerBoard(2);
+    expect(
+      toRaw(explorationRoi(two, engineContent, "near", memberIdsOf(two, 2)).successProbabilityFix),
+    ).toBe(0);
+    const three = newcomerBoard(3);
+    const p3 = approx(
+      explorationRoi(three, engineContent, "near", memberIdsOf(three, 3)).successProbabilityFix,
+    );
+    expect(p3).toBeGreaterThan(0.7);
+    expect(p3).toBeLessThan(0.8);
+  });
+
+  it("choices は方針(stance)ごとに実解決と同じ関数で選ばれ、難度と報酬に効く", () => {
+    // 慎重 = successMod(左辺 + successMod × R)、大胆 = rewardMod(報酬 ×(1+mod))。
+    const choiceNode = {
+      difficulty: 180,
+      R: 60,
+      statWeights: { vigor: 1 },
+      choices: [
+        { label: "慎重", effect: { successMod: 0.5 } },
+        { label: "大胆", effect: { rewardMod: 0.5 } },
+      ],
+      branches: [{ cond: "true", result: "success", logTemplate: "進んだ。" }],
+    };
+    const engineContent = contentWithEvents([
+      { id: "eventNearChoice", destTags: ["near"], nodes: [choiceNode, choiceNode, choiceNode] },
+    ]);
+    const state = newcomerBoard(3);
+    const memberIds = memberIdsOf(state, 3);
+    const cautious = explorationRoi(state, engineContent, "near", memberIds, {
+      stance: "cautious",
+    });
+    const press = explorationRoi(state, engineContent, "near", memberIds, { stance: "press" });
+    // 慎重: P = (150 + 0.5×60 + 60 − 180)/60 = 1.0 / 大胆: P = (150 + 60 − 180)/60 = 0.5
+    expect(toRaw(cautious.successProbabilityFix)).toBe(toRaw(fixFromInt(1)));
+    expect(toRaw(press.successProbabilityFix)).toBe(500000);
+    // 期待報酬: 慎重 = 3 × 1.0 × 45 / 大胆 = 3 × 0.5 × 45 × 1.5 = 101.25
+    expect(approx(cautious.expectedRewardFix)).toBe(135);
+    expect(approx(press.expectedRewardFix)).toBe(101.25);
+  });
+});
+
 function rareIrreversibleTechId(): EntityId {
   for (const [techId, def] of REAL_CONTENT.techDefs) {
     if (def.lossClass === "rareIrreversible") return techId;
