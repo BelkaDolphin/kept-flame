@@ -262,7 +262,11 @@ describe("loadEngineContent — ダミー content が engine 内部表現へ写�
     if (!result.ok) return;
     const p = result.value.recallRisk;
     // [M39] 実 run 想起頻度 3.359 → 2.66 回/住民/週(GDD 11.4-8 レンジ [1,3])へ校正。
-    expect(toRaw(p.basePFix)).toBe(36_000);
+    // [Phase D / M41] 0.036 → 0.028 へ再校正。Phase A〜D の計測器是正(研究の
+    // 1 日複数本化・実地要件施設の運用・人口の頭打ち解消)で 1 住民が保持する
+    // (住民,tech)ペアが増え、同じ base_p でも 11.4-8b が 3.52 回/住民/週まで
+    // 上がったため。再校正後の実測 = 8a 2.3875 / 8b 2.9557(いずれもレンジ内)。
+    expect(toRaw(p.basePFix)).toBe(28_000);
     expect(toRaw(p.pMaxFix)).toBe(350_000);
     expect(toRaw(p.loadWHarshFix)).toBe(2_000_000);
     expect(toRaw(p.loadWNormalFix)).toBe(500_000);

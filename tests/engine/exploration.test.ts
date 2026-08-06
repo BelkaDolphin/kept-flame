@@ -231,8 +231,8 @@ describe("[Phase D] 探索 ROI は event 実体(ノード数・難度・R)から
     expect(report.sourceEventIds).toEqual([id("eventNearProbe")]);
     // P = (150 + 60 − 160)/60 = 0.833333(floor 丸め)。
     expect(toRaw(report.successProbabilityFix)).toBe(833333);
-    // 期待報酬 = Σ_node P × rewardPerNode(near = 45)。
-    expect(approx(report.expectedRewardFix)).toBeCloseTo(5 * 0.833333 * 45, 3);
+    // 期待報酬 = Σ_node P × rewardPerNode(near = 33)。
+    expect(approx(report.expectedRewardFix)).toBeCloseTo(5 * 0.833333 * 33, 3);
   });
 
   it("同じ盤面でも距離帯パラメータのモデルとは別の値になる(R6-A02 の乖離そのもの)", () => {
@@ -344,9 +344,9 @@ describe("[Phase D] 探索 ROI は event 実体(ノード数・難度・R)から
     // 慎重: P = (150 + 0.5×60 + 60 − 180)/60 = 1.0 / 大胆: P = (150 + 60 − 180)/60 = 0.5
     expect(toRaw(cautious.successProbabilityFix)).toBe(toRaw(fixFromInt(1)));
     expect(toRaw(press.successProbabilityFix)).toBe(500000);
-    // 期待報酬: 慎重 = 3 × 1.0 × 45 / 大胆 = 3 × 0.5 × 45 × 1.5 = 101.25
-    expect(approx(cautious.expectedRewardFix)).toBe(135);
-    expect(approx(press.expectedRewardFix)).toBe(101.25);
+    // 期待報酬: 慎重 = 3 × 1.0 × 33 / 大胆 = 3 × 0.5 × 33 × 1.5 = 74.25
+    expect(approx(cautious.expectedRewardFix)).toBe(99);
+    expect(approx(press.expectedRewardFix)).toBe(74.25);
   });
 });
 

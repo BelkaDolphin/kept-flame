@@ -432,8 +432,9 @@ describe("event ランタイム — branches と帰還ログ", () => {
     const snapshot = snapshotOf(withdrawEvent, EVENT_ID);
     expect(snapshot.nodes).toHaveLength(1);
     expect(snapshot.withdrawn).toBe(true);
-    // [M39] 1 ノード成功ぶんの報酬(near = 45)の半分。
-    expect(toRaw(snapshot.rewardFix)).toBe(22_500_000);
+    // [M39] 1 ノード成功ぶんの報酬の半分。
+    // [Phase D / M41] near の `rewardPerNode` を 45 → 33 へ再校正したので 16.5。
+    expect(toRaw(snapshot.rewardFix)).toBe(16_500_000);
   });
 });
 
@@ -667,33 +668,37 @@ describe("探索報酬の保管上限会計(GDD 6.7 / M64)", () => {
     return resolveExpedition(withDispatch, ctx, DISPATCH_ID, snapshot.returnTick);
   }
 
+  // [Phase D / M41] 上限のテスト用フィクスチャを 100 → 60 へ。near の
+  // `rewardPerNode` を 45 → 33 へ再校正した結果、3 ノード全成功の報酬が
+  // 135 → 99 になり「報酬が上限を超える」というシナリオの前提が上限 100 では
+  // 成立しなくなったため(assert の形と強さは 1 つも変えていない)。
   it("保管上限がある資源では上限までしか受け取らない(R5-A01 の根治)", () => {
-    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const capped = loadWith([], withCapacity({ firewood: 60, waste: 400 }));
     const board = boardOf([resource("resWaste", id("waste"))]);
     const resolved = resolveWith(capped, board);
-    expect(toRaw(resolved.snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(100)));
+    expect(toRaw(resolved.snapshot.rewardFix)).toBeGreaterThan(toRaw(fixFromInt(60)));
 
     const stock = requireEntity(resolved.state, id("resFirewood"), "resource").stock;
-    expect(toRaw(stock)).toBe(toRaw(fixFromInt(100)));
-    expect(toRaw(resolved.rewardIntake.acceptedFix)).toBe(toRaw(fixFromInt(100)));
+    expect(toRaw(stock)).toBe(toRaw(fixFromInt(60)));
+    expect(toRaw(resolved.rewardIntake.acceptedFix)).toBe(toRaw(fixFromInt(60)));
     expect(toRaw(resolved.rewardIntake.excessFix)).toBe(
-      toRaw(resolved.snapshot.rewardFix) - toRaw(fixFromInt(100)),
+      toRaw(resolved.snapshot.rewardFix) - toRaw(fixFromInt(60)),
     );
   });
 
   it("超過分は本拠と同じスポンジ機構で廃材になる(GDD 6.7)", () => {
     // 実 content の wasteConversionRatio.firewood = 0.5。
-    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const capped = loadWith([], withCapacity({ firewood: 60, waste: 400 }));
     const resolved = resolveWith(capped, boardOf([resource("resWaste", id("waste"))]));
     const waste = requireEntity(resolved.state, id("resWaste"), "resource").stock;
     expect(toRaw(waste)).toBe(Math.floor(toRaw(resolved.rewardIntake.excessFix) / 2));
   });
 
   it("**帰還ログの報酬欄は実受領額**であり、あふれた量も黙殺しない(R5-A01)", () => {
-    const capped = loadWith([], withCapacity({ firewood: 100, waste: 400 }));
+    const capped = loadWith([], withCapacity({ firewood: 60, waste: 400 }));
     const resolved = resolveWith(capped, boardOf([resource("resWaste", id("waste"))]));
     const logged = resolved.state.renderedLogs.entries[0];
-    expect(logged?.text).toContain("報酬 firewood 100");
+    expect(logged?.text).toContain("報酬 firewood 60");
     expect(logged?.text).not.toContain(
       `報酬 firewood ${String(Math.floor(toRaw(resolved.snapshot.rewardFix) / 1_000_000))}`,
     );
