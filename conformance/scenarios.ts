@@ -1852,6 +1852,107 @@ function sc41BuildState(worldSeed: string): GameState {
   );
 }
 
+// --- sc42-field-requirement(M67: 研究完了の第2ゲート = 実地要件) -------------
+
+/**
+ * [M67・2026-08-06裁定・台帳v20 必-1] `tech.fieldRequirement.count` の実効化。
+ *
+ * 凍結スナップショットの `balance` には `research` ブロックが無い(= 機構が
+ * 完全に不活性)ので、**このシナリオだけ patch で `recipeRunTicks` を入れる**。
+ * 値は 50 にしてあり、`techFireStarting`(hearth・count 3)の実地要件は
+ * **ちょうど 150 tick** の hearth 稼働になる。
+ *
+ * 1 本のベクタで**発火する側と発火しない側の両方**を観測する:
+ *   - `researchFire`(hearth 要求)= 就労者の居る hearth が毎 tick 1 基稼働する
+ *     ので、tick 150 で要件が満ちる。研究点は初期進行度 29/30 + 書見台の産出で
+ *     tick 1 に満了するため、**完了 tick は max(1, 150) = 150** になる
+ *     (= 実地要件が律速していることが完了 tick そのものに出る)。
+ *   - `researchCopper`(`techSmelting`・forge 要求)= 盤面に forge が無いので
+ *     実地稼働レートが 0。研究点は満了するが**最後まで完了しない**
+ *     (`probe.researchCompletedCount` が 2 でなく 1 に留まる)。
+ *   - 研究点は満了した `researchCopper` へ吸われず `researchFire` へ回る
+ *     (点の行き先が満了側で止まると run 全体の研究が止まる・rules/research.ts §3)。
+ *
+ * **反証(spec §9.2(3))**: patch から `research` ブロックを外して生成し直すと
+ * 両方が tick 1〜2 で完了し `researchCompletedCount` が 2 になる(= このベクタが
+ * 固定しているのは第2ゲートそのもの)。RNG は research entity 2 本 × 住民 2 名の
+ * (C) 判定で消費されるが、判定結果に依存する主張はしていない(sc03 と同じ骨格)。
+ */
+function patchResearchPacing(recipeRunTicks: number): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    return { ...raw, balance: { ...balance, research: { recipeRunTicks } } };
+  };
+}
+
+function sc42BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentKiln", { assignedFacilityId: "facilityHearthA" }),
+    mkResident("residentScribe", { assignedFacilityId: "facilityWorkbenchA" }),
+    mkFacility("facilityHearthA", "hearth", 0, ["residentKiln"], 1),
+    mkFacility("facilityWorkbenchA", "workbench", 20, ["residentScribe"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+    // ID 昇順で researchCopper が先。実地要件(forge)は永久に満たされない。
+    mkResearch("researchCopper", "techSmelting", 86),
+    mkResearch("researchFire", "techFireStarting", 29),
+  ]);
+}
+
+// --- sc43-exp-reward-waste-accounting(Phase B: 一括入荷由来の廃材の会計) ------
+
+/**
+ * [Phase B・2026-08-06裁定・台帳v20 必-3(2)] 探索報酬のあふれ救済で生まれた廃材が
+ * **生産会計(cumulativeProduced / cumulativeOverflow)を動かさない**ことを固定する。
+ *
+ * sc37 は薪にだけ上限を置いており、**廃材には上限が無い**ため
+ * `creditWasteGain` が「上限なし = 在庫へ足すだけ」の分岐を通り、会計フィールドが
+ * そもそも生えなかった(= 由来による分岐が観測できない)。本シナリオは
+ * **薪と廃材の両方に上限を置く**ことでその分岐を踏ませる:
+ *   初期在庫 200 + 報酬 2000 → 上限 1000 で頭打ち、超過 1200 の 50% = 600 が廃材へ。
+ *   廃材の上限は 100 なので在庫 100・超過 500 —— これが従来は生産会計へ
+ *   算入されていた分である。
+ *
+ * **反証(spec §9.2(3))**: `creditWasteGain` の `accounting` を "produced" へ
+ * 戻して生成し直すと、`resourceWaste` に `cumulativeProduced=600` /
+ * `cumulativeOverflow=500` が生え、`canonicalJsonLength` と `stateDigest` が
+ * 動く(= このベクタが会計の分岐そのものを見ている)。
+ *
+ * RNG を引かない(節点は確定値)ので worldSeed 非依存 = C7 対象外(sc37 と同じ)。
+ */
+function sc43BuildState(worldSeed: string): GameState {
+  const node: DispatchNode = {
+    difficultyFix: fixFromInt(100),
+    rollFix: fixFromInt(80),
+    success: true,
+    rewardFix: fixFromInt(2000),
+    injuryFix: fixFromInt(0),
+    rescue: false,
+    logText: "近郊で薪を大量に持ち帰った。",
+  };
+  return createGameState(
+    baseMeta(worldSeed),
+    [
+      mkResident("residentIvy", { dispatched: true }),
+      mkResource("resourceFirewood", "firewood", 200),
+      mkResource("resourceWaste", "waste", 0),
+    ],
+    [],
+    [],
+    [],
+    [
+      mkDispatchSnapshot({
+        id: "dispatchHaul",
+        destinationId: "destNearHaul",
+        band: "near",
+        memberIds: ["residentIvy"],
+        returnTick: 30,
+        nodes: [node],
+        rewardHuman: 2000,
+      }),
+    ],
+  );
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -1971,6 +2072,16 @@ export const SCENARIOS: readonly Scenario[] = [
     id: "sc41-out-supply-cap",
     contentPatch: composePatches(patchAddOutpostType(), patchStorageCapacity({ firewood: 50_000 })),
     buildState: sc41BuildState,
+  },
+  {
+    id: "sc42-field-requirement",
+    contentPatch: patchResearchPacing(50),
+    buildState: sc42BuildState,
+  },
+  {
+    id: "sc43-exp-reward-waste-accounting",
+    contentPatch: patchStorageCapacity({ firewood: 1000, waste: 100 }),
+    buildState: sc43BuildState,
   },
 ];
 

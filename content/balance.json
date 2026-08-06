@@ -1,6 +1,6 @@
 {
   "fpScale": 1000000,
-  "algoVersion": 4,
+  "algoVersion": 5,
   "coarseTickMinutes": 10,
   "offlineClampTick": 4320,
   "safetyFactor": 1.5,

@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 639,
+    "counters": {
+      "rateChangeEventCount": 1,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 6,
+      "stochasticStepCount": 6,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 3,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 1100000000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 60
+    },
+    "stateDigest": "b749d7b7974e340bdb2823e9e32bb987"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["exp-reward-waste-accounting-excluded"],
+  "scenarioId": "sc43-exp-reward-waste-accounting",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 60,
+  "vectorId": "sc43-exp-reward-waste-accounting-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

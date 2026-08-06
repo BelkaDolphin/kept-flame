@@ -1,5 +1,5 @@
 {
-  "algoVersion": 4,
+  "algoVersion": 5,
   "baseContentVectorIds": [
     "sc01-clamp-exact",
     "sc01-clamp-over",
@@ -159,6 +159,12 @@
     {
       "file": "sc41-out-supply-cap-split-alpha.json",
       "vectorId": "sc41-out-supply-cap-split-alpha"
-    }
+    },
+    { "file": "sc42-field-requirement-alpha.json", "vectorId": "sc42-field-requirement-alpha" },
+    {
+      "file": "sc42-field-requirement-split-alpha.json",
+      "vectorId": "sc42-field-requirement-split-alpha"
+    },
+    { "file": "v-7df92bb2.json", "vectorId": "sc43-exp-reward-waste-accounting-alpha" }
   ]
 }

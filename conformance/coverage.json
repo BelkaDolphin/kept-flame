@@ -1152,6 +1152,50 @@
       ],
       "observedBy": ["unit-test"],
       "note": "[M50] tests/engine/commandsM50.test.ts『selectedResearchId の不変条件 (k)』が固定。ぶら下がり参照をロード時に止める(黙ってnullへ倒すと『選んだはずの研究に点が入らない』が本番へ出る)。直列化形でnullを明示した非正準形もrejectする(空terrain/既定progressionの明示を拒むのと同じ理屈)"
+    },
+    {
+      "id": "research-field-requirement-gate",
+      "title": "実地要件(該当施設での稼働 tick)が満ちる tick まで研究完了が保留される(GDD 5.2 の第2ゲート)",
+      "refs": [
+        "GDD 5 / 5.2",
+        "src/engine/rules/research.ts §3",
+        "src/engine/rules/techMemory.ts §4b",
+        "台帳v20 必-1"
+      ],
+      "observedBy": ["digest", "probe"],
+      "note": "[M67] sc42-field-requirement-alpha。研究点は tick 1 に満了するが hearth 稼働 150 tick を待って完了する(完了 tick = max(1,150))"
+    },
+    {
+      "id": "research-field-requirement-unmet",
+      "title": "該当施設が 1 基も稼働していない tech は研究点が満了しても完了しない(実地稼働レート 0)",
+      "refs": [
+        "GDD 5.2",
+        "src/engine/rules/research.ts ticksUntilResearchCompleteGated",
+        "台帳v20 必-1"
+      ],
+      "observedBy": ["probe"],
+      "note": "[M67] sc42-field-requirement-alpha。forge を要求する techSmelting が run 全域で未完了 = researchCompletedCount が 1 に留まる"
+    },
+    {
+      "id": "research-field-points-redirect",
+      "title": "研究点が満了して実地要件待ちの研究には点が入らず、次の未完了研究へ回る",
+      "refs": ["src/engine/rules/research.ts currentResearch / isPointsSaturated", "台帳v20 必-1"],
+      "observedBy": ["digest", "probe"],
+      "note": "[M67] sc42-field-requirement-alpha。点が満了側で止まると run 全体の研究が止まる(実測: 全 bot が E1 で 0 本完了)ため、行き先を移す挙動そのものを固定する"
+    },
+    {
+      "id": "split-at-field-requirement-tick",
+      "title": "分割不変性: 実地要件が満ちる tick(= 完了 tick)ちょうどで advance を区切っても一括実行と一致する",
+      "refs": ["advance.ts §3", "src/engine/rules/research.ts §3", "scheduler.ts §2"],
+      "observedBy": ["split-digest"],
+      "note": "[M67] sc42-field-requirement-split-alpha(splitTicks=[150])"
+    },
+    {
+      "id": "exp-reward-waste-accounting-excluded",
+      "title": "一括入荷(探索報酬)のあふれ救済で生まれた廃材は生産会計(cumulativeProduced/Overflow)を動かさない",
+      "refs": ["GDD 8.1⑥", "GDD 11.4-7c", "src/engine/rules/storage.ts §2c", "台帳v20 必-3(2)"],
+      "observedBy": ["digest"],
+      "note": "[Phase B] sc43-exp-reward-waste-accounting-alpha。薪と廃材の両方に上限を置いて『上限あり』分岐を踏ませる(sc37 は薪だけなので会計フィールドが生えなかった)"
     }
   ]
 }

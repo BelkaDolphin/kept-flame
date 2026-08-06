@@ -494,4 +494,33 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     ["out-split-at-capped-supply"],
     { splitTicks: [500] },
   ),
+
+  // --- sc42-field-requirement(M67: 研究完了の第2ゲート = 実地要件) ---------
+  // 発火(forge 要求で永久未達)と非発火(hearth 要求で tick 150 に充足)を
+  // 同一 run で観測する(scenarios.ts の doc)。
+  plan("sc42-field-requirement-alpha", "sc42-field-requirement", SEEDS.alpha, 400, [
+    "research-field-requirement-gate",
+    "research-field-requirement-unmet",
+    "research-field-points-redirect",
+  ]),
+  plan(
+    "sc42-field-requirement-split-alpha",
+    "sc42-field-requirement",
+    SEEDS.alpha,
+    400,
+    ["split-at-field-requirement-tick"],
+    // 実地要件が満ちる tick(= 完了 tick)ちょうどで区切る。
+    { splitTicks: [150] },
+  ),
+
+  // --- sc43-exp-reward-waste-accounting(Phase B: 一括入荷由来の廃材の会計) --
+  // 廃材にも上限がある盤面(sc37 は薪だけ)なので、由来による会計の分岐が
+  // 状態ダイジェストに現れる。RNG 非依存なので alpha 1 本(sc37 と同じ理由)。
+  plan(
+    "sc43-exp-reward-waste-accounting-alpha",
+    "sc43-exp-reward-waste-accounting",
+    SEEDS.alpha,
+    60,
+    ["exp-reward-waste-accounting-excluded"],
+  ),
 ];

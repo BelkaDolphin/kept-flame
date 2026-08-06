@@ -20,7 +20,7 @@ import { buildVector, diffVectors, loadStoredVector } from "../../tools/genGolde
 const registry = coverageJson as CoverageRegistry;
 
 describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
-  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50/M64 拡張のとおり 79 本ある", () => {
+  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50/M64/PhaseB 拡張のとおり 82 本ある", () => {
     // 37 → 40: M10 で sc17-prod-full-alpha / sc18-sto-overflow-alpha /
     // sc18-sto-overflow-split-alpha の 3 本を追加(spec §9・conformance 拡張 #1)。
     // 40 → 56: M15 で住民系(sc19〜sc27・16 本)を追加(conformance 拡張 #2)。
@@ -46,7 +46,17 @@ describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
     //   76 本は凍結 content の `storage.baseCapacity` が空 = 上限機構に入らない
     //   ため 1 バイトも動いていない(実測)。engine の観測挙動が変わったので
     //   ADR-016(1) に従い `content/balance.json` の algoVersion を 3 → 4 へ bump した。
-    expect(VECTOR_PLANS.length).toBe(79);
+    // 79 → 82: Phase B(2026-08-06裁定・台帳v20)で
+    //   sc42-field-requirement ×2(M67 = 研究完了の第2ゲート・実地要件の発火/非発火と
+    //   充足 tick ちょうどの分割不変性)と
+    //   sc43-exp-reward-waste-accounting ×1(必-3(2) = 一括入荷由来の廃材を生産会計から
+    //   外す)を追加。**既存 79 本は 1 バイトも動いていない**(実測): M67 は凍結
+    //   content に `balance.research` が無いため完全に不活性で、廃材の会計分岐も
+    //   sc37 が薪にしか上限を置いていない(= 廃材は「上限なし」分岐)ため観測されない。
+    //   engine の観測挙動そのものは live content(`content/balance.json`)で変わるので、
+    //   ADR-016(1) に従い algoVersion を 4 → 5 へ bump した(Phase B の 3 項目を
+    //   1 回に束ねる裁定・台帳v20 必-5)。
+    expect(VECTOR_PLANS.length).toBe(82);
   });
 
   it("vectorId に重複が無い", () => {
