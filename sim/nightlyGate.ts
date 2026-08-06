@@ -210,20 +210,31 @@ export const RECALL_PER_RESIDENT_WEEK_MAX = 3;
 /**
  * GDD 11.4-3 の E3 到達レンジ(日)。
  *
- * **[2026-08-02裁定・台帳v15 必-2] [8,16] → [7,18] へ改訂。** M39 の実測で、
- * E3 到達日の律速が「研究点の供給 vs コスト」ではなく **bot が壁テックまでに
- * 踏破する tech の本数**(1 ゲーム日 1 本の意思決定 cadence)であることが判明した。
- * researchFirst はクリティカルパス 7 本 = 7 日、greedy/placementVariant は ID 昇順で
- * E1 8 本 + E2 7 本 + blastFurnace = 16 本 = 16〜18 日。**本数比 2.29 に対し
- * 旧レンジの窓は 16/8 = 2.0 倍しかなく、content 側の数値だけでは原理的に
- * 収められない**(下限を満たすには研究点を律速化する必要があるが、研究優先bot の
- * 研究レートは貪欲bot の約 3.1 倍なので比は約 7 倍へ広がる。実測でも研究施設
- * lvCurve を 1/1600 にすると 7〜18 日 → 7〜27 日へ悪化した)。
- * 証明と実証データは docs/measurements/balance-m39-e1-convergence-2026-08-02.json。
- * **レンジ狭化(bot 側の研究決定 cadence 見直しを含む)は M40/M41 で再訪する。**
+ * **[2026-08-06・Phase D(M41 本体)] [7,18] → [8,16] へ改訂(= GDD 5.2 / 11.4-3 の
+ * 原設計値へ復帰)。** 実測が 15 run すべて 8〜16 日に収まったことによる。
+ *
+ * 経緯:
+ *   ・[2026-08-02裁定・台帳v15 必-2] で [8,16] → [7,18] へ**緩めた**。当時の
+ *     律速は「研究点の供給 vs コスト」ではなく **bot が壁テックまでに踏破する
+ *     tech の本数**(1 ゲーム日 1 本の意思決定 cadence)で、本数比 2.29 に対し
+ *     旧レンジの窓が 16/8 = 2.0 倍しかなく content 数値だけでは原理的に
+ *     収められないと M39 が証明したため
+ *     (docs/measurements/balance-m39-e1-convergence-2026-08-02.json)。
+ *   ・その原因(cadence)は [Phase A] の研究 1 日複数本化で、第2ゲートの不在は
+ *     M67(fieldRequirement 実効化)で解消済み。Phase D では **bot が「研究が
+ *     実地要件で止まっている作業場」を優先して回す**ようになり、戦略差は
+ *     「研究点の供給量」という本来の軸だけに戻った。
+ *   ・Phase D 実測(full profile・5戦略bot × 3seed = 15 run):
+ *     最小 **8.0 日**(greedy 3seed / placementVariant 3seed / codifyFirst nightly-a)・
+ *     最大 **14.0 日**(explorationFirst/nightly-c)。レンジ上限を実測最大の 14 では
+ *     なく設計値 16 に置くのは、**assert を実測へ後追いで貼り替えない**ため
+ *     (余裕 2 日 = 12.5%。M64 のときの「上限 18 日ちょうど・余裕ゼロ」を繰り返さない)。
+ *     正本は sim/output/nightly-gate-report.phaseD.json。
+ * GDD 5.2 のエラ表と GDD 11.4-3 の本文も同日に [8,16] へ戻してある(両者が
+ * 食い違ったまま運用しない、が本改訂の主目的)。
  */
-export const ERA3_REACH_DAYS_MIN = 7;
-export const ERA3_REACH_DAYS_MAX = 18;
+export const ERA3_REACH_DAYS_MIN = 8;
+export const ERA3_REACH_DAYS_MAX = 16;
 /** GDD 11.4-6 の「全系統上限 10〜18 周」。 */
 export const ALL_TRACK_MAX_CYCLES_MIN = 10;
 export const ALL_TRACK_MAX_CYCLES_MAX = 18;
