@@ -48,6 +48,7 @@ import {
   type TeamRequest,
 } from "../../src/engine/assist/exploration";
 import { currentCodification } from "../../src/engine/rules/codify";
+import { populationViewOf } from "../../src/engine/rules/population";
 import { nextReclaimCostFix } from "../../src/engine/rules/reclaim";
 import { currentResearch } from "../../src/engine/rules/research";
 import { resolveCapacityByResourceId } from "../../src/engine/rules/storage";
@@ -71,6 +72,7 @@ import {
   type ResidentState,
 } from "../../src/engine/state/state";
 import { GRID_CELL_COUNT } from "../../src/engine/adjacency";
+import { setField } from "../../src/engine/state/update";
 import { recallGuardBlocks } from "./recallGuard";
 import type { RecallGuardLogEntry } from "./types";
 
@@ -180,8 +182,11 @@ export function buildAssignmentCommands(
   policy: AssignmentPolicy,
   tick: number,
   botId: string,
+  reservedResidentIds: ReadonlySet<EntityId> = new Set(),
 ): AssignmentResult {
-  const idle = livingIdleResidents(state);
+  const idle = livingIdleResidents(state).filter(
+    (resident) => !reservedResidentIds.has(resident.id),
+  );
   if (idle.length === 0) return { commands: [], recallGuardLog: [] };
 
   const openFacilities = openFacilitiesByDefPriority(state, content, policy.defPriority);
@@ -276,6 +281,28 @@ function naivePlacementCell(
     return anchor;
   }
   return null;
+}
+
+/**
+ * [Phase D] その施設定義を**いま盤面のどこかに置けるか**(費用は見ない・幾何だけ)。
+ *
+ * 実地要件が要求する forge は 2×1 なので、空きセルが 2 枚あっても**横に隣接
+ * していなければ置けない**。開墾のしきい値(`reclaimMinFreeCells` = 3)は
+ * 「1×1 が置ける空きセルの枚数」しか見ないため、この状態では開墾も走らず
+ * 建設も通らないまま何日も止まる(実測 explorationFirst/nightly-b: 実地要件で
+ * 詰まった day 27 から forge が建つ day 35 まで 8 日間)。呼び出し側はこの
+ * 述語が false のときだけ、しきい値を無視して開墾を 1 枚走らせる。
+ */
+export function canPlaceFacilityDef(
+  state: GameState,
+  content: EngineContent,
+  defId: EntityId,
+): boolean {
+  const def = content.facilityDefs.get(defId);
+  if (def === undefined) return false;
+  const footprint = def.footprint ?? UNIT_FOOTPRINT;
+  if (!isValidFootprintDims(footprint)) return false;
+  return naivePlacementCell(state, footprint) !== null;
 }
 
 /** 建設の方針。`placement` が bot ごとの差(GDD 11.4-1 の「配置戦略違い」)。 */
@@ -454,6 +481,84 @@ export function buildWarehouseCommand(
   return placementPlanToCommands(plan)[0];
 }
 
+// --- 3a2. 寝床建設(GDD 7.7 の晴天漂着を詰まらせない・[Phase D]) -------------
+//
+// [Phase D] 5戦略bot は寝床(bed)を `ALL_FACILITY_DEF_IDS` の一般順でしか
+// 建てないため、実 run の多くが**寝床上限ちょうどで人口が頭打ち**になる
+// (実測: codifyFirst/nightly-a は寝床 2 基 = 上限 6 人に人口 6 人で 40 日間
+// 張り付き、施設 11 種・26 基に対して就労者が 6 人しか居ない盤面になる)。
+// GDD 7.7 の晴天漂着は「寝床上限内」でしか起きないので、寝床を建てない限り
+// 住民は 1 人も増えない —— つまりこの頭打ちは**盤面の物理的制約ではなく
+// bot が寝床を建てないという計測器側の欠落**である。
+//
+// この欠落が M67(実地要件)と噛み合うと恒久停止になる: 施設数 > 住民数の
+// 盤面では均等配属が全員を先に埋めてしまい、あとから建った forge が
+// 最後まで無人 → `techSmelting` の実地要件が永久に満たされず E3 未到達
+// (`gdd-11.4-3-era3-reached` の残り 1 run の真因)。
+//
+// よって倉庫(§3a)とまったく同じ「需要駆動 + 通常の建設候補選定より優先」の
+// 形で、**人口が寝床上限に達していたら寝床を 1 基**提案する。
+// 判断材料は `populationViewOf`(engine の公開 API)だけで、bot 固有の推定を
+// 持ち込まない。寝床が 1 基も建っていない盤面(= 上限 0)でも提案する
+// (`populationViewOf` の `bedCapacity < 1` では漂着経路そのものが閉じる)。
+
+/**
+ * 寝床を建てる価値があるか([Phase D]・§3a2)。3 条件の連言:
+ *
+ *   (1) `living >= bedCapacity`(= `rules/population.ts` の加入ゲートと同じ
+ *       不等式。晴天漂着が寝床で止まっている)
+ *   (2) 無配属の住民が 1 人も居ない(= 今居る人手は使い切っている)
+ *   (3) 就労枠の空いた施設インスタンスがまだある(= 人を増やせば働き口がある)
+ *
+ * (2)(3) は「寝床を建て続けて盤面を食い潰す」退化を防ぐための条件である。
+ * (2) が無いと、探索で保護加入が毎日湧く探索優先 bot は保護加入が寝床上限を
+ * 無視する(GDD 8.1④)ぶん `living >= bedCapacity` が恒常的に真になり、
+ * **毎日寝床を建て続けて盤面を埋め、forge(2×1)を 1 基も置けなくなる**
+ * (実測: explorationFirst/nightly-c が寝床 7 基・空きセル 0 で E3 未到達)。
+ */
+export function shouldBuildBed(state: GameState, content: EngineContent): boolean {
+  const view = populationViewOf(state, content);
+  if (view.living < view.bedCapacity) return false;
+  if (livingIdleResidents(state).length > 0) return false;
+  return hasOpenWorkerSlot(state, content);
+}
+
+/** 就労枠に空きのある施設インスタンスが 1 つでもあるか({@link shouldBuildBed} (3))。 */
+function hasOpenWorkerSlot(state: GameState, content: EngineContent): boolean {
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined) continue;
+    const slots = facilityWorkerSlots(def, facility.level);
+    if (slots === undefined || slots > facility.workerIds.length) return true;
+  }
+  return false;
+}
+
+/**
+ * 人口が寝床上限で頭打ちのときだけ寝床を 1 基提案する([Phase D]・§3a2)。
+ * 建設ロジックの部品は {@link buildWarehouseCommand} と同一(配置は
+ * `qualityRatioFix = 1.0` の推奨配置)。
+ */
+export function buildBedCommand(
+  state: GameState,
+  content: EngineContent,
+  bedDefId: EntityId,
+): PlaceFacilityCommand | undefined {
+  if (!shouldBuildBed(state, content)) return undefined;
+
+  const def = content.facilityDefs.get(bedDefId);
+  if (def === undefined) return undefined;
+  if (!canAffordBuild(state, def)) return undefined;
+  const footprint = def.footprint ?? UNIT_FOOTPRINT;
+  if (!isValidFootprintDims(footprint)) return undefined;
+
+  const facilityId = nextFacilityEntityId(state, bedDefId);
+  const plan = suggestPlacementsAvoidingRubble(state, content, [{ facilityId, defId: bedDefId }], {
+    qualityRatioFix: FIX_ONE,
+  });
+  return placementPlanToCommands(plan)[0];
+}
+
 // --- 3b. 開墾(GDD 9.1・[M38]) -----------------------------------------------
 
 /**
@@ -493,6 +598,58 @@ export function buildReclaimCommand(
   const costFix = nextReclaimCostFix(state, content);
   if (resourceStockRaw(state, content.reclaim.costResourceId) < toRaw(costFix)) return undefined;
   return { kind: "reclaimCell", cellIndex: cell };
+}
+
+/**
+ * [Phase D] `defId` の施設を**置けるようにする**瓦礫を 1 枚だけ開墾する提案
+ * (置けるようになる瓦礫が無ければ {@link buildReclaimCommand} の既定
+ * =「セル番号最小の瓦礫」へ落ちる)。
+ *
+ * セル番号最小から順に開墾する既定の規則は、2×1 の forge のように**横に
+ * 隣接した 2 枚**を要求する施設に対して極端に効率が悪い(実測 explorationFirst:
+ * 開墾費が上限 300 に張り付いた状態で 1 枚/2 日しか開けられず、開いた枠は
+ * どれも単独 = forge が置けないまま 8 日以上停滞した)。
+ * 「1 枚開墾したら置けるか」を engine の配置検査そのもの
+ * ({@link canPlaceFacilityDef})で試すだけなので、bot 側に独自の幾何判定を
+ * 持ち込まない。
+ */
+export function buildReclaimCommandForFacility(
+  state: GameState,
+  content: EngineContent,
+  defId: EntityId,
+): ReclaimCellCommand | undefined {
+  if (content.reclaim === undefined) return undefined;
+  const costFix = nextReclaimCostFix(state, content);
+  if (resourceStockRaw(state, content.reclaim.costResourceId) < toRaw(costFix)) return undefined;
+  for (const cell of state.terrain.rubbleCells) {
+    if (canPlaceFacilityDef(withoutRubbleCell(state, cell), content, defId)) {
+      return { kind: "reclaimCell", cellIndex: cell };
+    }
+  }
+  const fallback = state.terrain.rubbleCells[0];
+  return fallback === undefined ? undefined : { kind: "reclaimCell", cellIndex: fallback };
+}
+
+/**
+ * 「そのセルの瓦礫だけを取り除いた」仮想 state({@link buildReclaimCommandForFacility}
+ * の試行用 / 同一 tick に開墾と建設を両方積むときの建設側の入力)。
+ *
+ * 実際の開墾コマンドは engine 側で費用も `reclaimedCount` も動かすが、ここで
+ * 見たいのは**配置検査に使う占有情報だけ**なので地形以外は触らない
+ * (bot の判断は決定論的な読み取りのみ)。費用まで写さないので、開墾で在庫が
+ * 減って建設が払えなくなる tick では建設コマンドが engine 側で reject される
+ * ——これは runStrategy.ts §1 が明示する「bot は『今はできない』提案を出す
+ * ことがあり、それはプレイヤー操作の失敗と同じ扱い」の範囲。
+ */
+export function stateWithCellReclaimed(state: GameState, cell: number): GameState {
+  return withoutRubbleCell(state, cell);
+}
+
+function withoutRubbleCell(state: GameState, cell: number): GameState {
+  return setField(state, "terrain", {
+    ...state.terrain,
+    rubbleCells: state.terrain.rubbleCells.filter((c) => c !== cell),
+  });
 }
 
 // --- 4. 研究(GDD 5) ---------------------------------------------------------
@@ -821,6 +978,17 @@ export function buildFieldRequirementStaffingCommand(
  * **無配属が 1 人でも居ればそちらが優先**であり、さらに `allowReassign` が false
  * (= 研究が実際には実地要件で詰まっていない)なら配置替えは一切行わない。
  * 通常時の挙動は Phase A と同一である。
+ *
+ * **[Phase D] 無配属と配置替え候補を「早期 return」ではなく連結で返す。**
+ * Phase B の形は `idle.length > 0` なら配置替え候補を 1 人も見なかったため、
+ * **無配属が居るのにその全員が同一 tick の通常配属で使われてしまう盤面**
+ * (探索優先 bot: 保護加入で無配属が毎日湧き、均等配属がその日のうちに全員
+ * 埋める)では、実地要件施設が永久に無人のまま残った。呼び出し側は
+ * `alreadyAssignedResidentIds` で「今 tick に既に使った住民」を弾くので、
+ * 連結にしておけば**無配属が余っていればそちらが必ず先に選ばれる**という
+ * 優先順は保たれたまま、余りが尽きたときだけ配置替えへ進む。
+ * 実測: `gdd-11.4-3-era3-reached` の未到達 run のうち explorationFirst の 2 本
+ * (nightly-b / nightly-c)がこれで解消する。
  */
 function staffingCandidates(
   state: GameState,
@@ -828,13 +996,13 @@ function staffingCandidates(
   allowReassign: boolean,
 ): readonly ResidentState[] {
   const idle = livingIdleResidents(state);
-  if (idle.length > 0 || !allowReassign) return idle;
+  if (!allowReassign) return idle;
   const protectedIds = new Set<EntityId>([
     ...soleCriticalProducerResidentIds(state, content),
     ...soleResourceProducerResidentIds(state, content),
     ...soleStaffedResearchProducerResidentIds(state, content),
   ]);
-  const result: ResidentState[] = [];
+  const result: ResidentState[] = [...idle];
   for (const resident of entitiesOfKind(state, "resident")) {
     if (!isAliveResident(resident)) continue;
     if (resident.dispatched) continue;
@@ -1025,6 +1193,43 @@ export interface DispatchResult {
 }
 
 /**
+ * [Phase D] **未完了の研究が実地要件で待っている施設**のうち、就労者の居る
+ * インスタンスが盤面に 1 基しか無いものの就労者 ID
+ * ({@link buildDispatchCommands} のベストエフォート保護)。
+ *
+ * 「1 基しか無いとき」に絞るのは、2 基以上稼働していれば 1 人出しても
+ * その施設定義の稼働(= 実地要件の蓄積)が止まらないためで、
+ * {@link soleStaffedResearchProducerResidentIds} と同じ考え方である。
+ */
+function soleFieldRequirementWorkerResidentIds(
+  state: GameState,
+  content: EngineContent,
+): ReadonlySet<EntityId> {
+  const neededDefIds = new Set<EntityId>();
+  for (const research of entitiesOfKind(state, "research")) {
+    if (research.completedTick !== null) continue;
+    const facilityDefId = content.techDefs.get(research.techId)?.fieldFacilityId;
+    if (facilityDefId !== undefined) neededDefIds.add(facilityDefId);
+  }
+  if (neededDefIds.size === 0) return new Set();
+
+  const staffedByDefId = new Map<EntityId, EntityId[][]>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (!neededDefIds.has(facility.defId)) continue;
+    if (facility.workerIds.length === 0) continue;
+    const list = staffedByDefId.get(facility.defId) ?? [];
+    list.push([...facility.workerIds]);
+    staffedByDefId.set(facility.defId, list);
+  }
+  const result = new Set<EntityId>();
+  for (const instances of staffedByDefId.values()) {
+    if (instances.length !== 1) continue;
+    for (const workerId of instances[0] ?? []) result.add(workerId);
+  }
+  return result;
+}
+
+/**
  * 探索チームを提案する(GDD 11.5 のガード付き)。ガードでブロックされた住民は
  * `suggestExpeditionTeams` の候補プールから除外する(= 派遣しない。GDD 11.5
  * 「派遣に回さない」の実装そのもの)。
@@ -1044,6 +1249,23 @@ export interface DispatchResult {
  * なる**副作用が実測で出た(`gdd-11.4-11a`「貪欲botの派遣延べ人数 >= 1」が
  * 構造 fail 化)。保護を足しても閾値を満たせるときだけ足し、満たせないときは
  * 保護なし(= 従来どおり GDD 11.5 のガードのみ)で派遣する。
+ *
+ * **[Phase D] 同じベストエフォート枠へ 2 つ足す。**
+ *   (a) {@link soleFieldRequirementWorkerResidentIds} —— M67 の実地要件は
+ *       「その施設が**稼働している** tick」だけ積み上がり、稼働の判定は生産式と
+ *       同じ「派遣中・想起困難中でない就労者が 1 人以上」である
+ *       (`rules/techMemory.ts` `computeFieldRunGains`)。作業場の唯一の就労者を
+ *       出したまま帰還を待つ日が続くと、研究が待っている作業場が回らない。
+ *   (b) `justAssignedResidentIds` —— **同じ tick に配属したばかりの住民**。
+ *       bot の提案は 1 つの state から一括で組み立てられ適用だけが逐次なので、
+ *       Phase C までの形は「無配属の住民を作業場へ配属し、その同じ住民を同じ
+ *       tick の派遣に載せる」提案を毎日出していた(実測 explorationFirst:
+ *       workbench の就労者が毎日 0 人に戻り、E1 の workbench 系 4 本が 12 日
+ *       以上「点は満了・実地要件だけ未達」で滞留 → E3 到達 30〜36 日)。
+ *       配属した本人をその日のうちに引き剥がすのは人間のプレイでも起こらない
+ *       判断であり、**bot の戦略差(探索優先は派遣が多い)には影響しない**
+ *       (候補プールから 1 日ぶんの新規配属者が抜けるだけで、派遣枠は
+ *       他の候補で埋まる)。
  */
 export function buildDispatchCommands(
   state: GameState,
@@ -1051,6 +1273,7 @@ export function buildDispatchCommands(
   tick: number,
   policy: DispatchPolicy,
   botId: string,
+  justAssignedResidentIds: ReadonlySet<EntityId> = new Set(),
 ): DispatchResult {
   if (content.exploration === undefined || policy.bands.length === 0) {
     return { commands: [], recallGuardLog: [] };
@@ -1073,14 +1296,39 @@ export function buildDispatchCommands(
   }
 
   const threshold = policy.teamSize * availableSlots + policy.minIdlePoolSlack;
-  const withSoleWorkerProtection = new Set([
-    ...recallGuardExcludeIds,
-    ...soleCriticalProducerResidentIds(state, content),
-  ]);
-  const canAffordProtection = candidates.length - withSoleWorkerProtection.size >= threshold;
-  const excludeResidentIds = [
-    ...(canAffordProtection ? withSoleWorkerProtection : recallGuardExcludeIds),
+  // [Phase D] 保護は **all-or-nothing ではなく 1 人ずつ**足す。Phase A/B の形は
+  // 「全部足しても閾値を満たせるなら全部・でなければ 1 人も保護しない」だった
+  // ため、人口の小さい盤面では**保護がまるごと消える**(実測 explorationFirst:
+  // 候補 6〜7 人 / 閾値 5 に対し保護対象が 2 人以上あると全部落ち、hearth の
+  // 唯一の就労者が毎日引き剥がされて techCharcoalKiln の実地要件が 10 日以上
+  // 進まない)。優先順は「クリティカル資源の唯一の就労者 → 研究が待っている
+  // 作業場の唯一の就労者 → 今日配属したばかりの住民」で、同順位は ID 昇順
+  // (全順序 = 決定論)。閾値を割る 1 人手前で止めるので、
+  // `gdd-11.4-11a`(貪欲botの派遣延べ人数 >= 1)を壊さない性質は変わらない。
+  const candidateIds = new Set(candidates.map((resident) => resident.id));
+  const excluded = new Set<EntityId>();
+  for (const residentId of recallGuardExcludeIds) {
+    if (candidateIds.has(residentId)) excluded.add(residentId);
+  }
+  // 今日配属したばかりの住民の除外は**必須**(ベストエフォートではない)。
+  // 同じ tick に「作業場へ配属する」と「探索へ送り出す」を同時に提案するのは
+  // それ自体が自己矛盾で、閾値の都合で矛盾を許すと実地要件が永久に進まない。
+  // 除外の結果プールが閾値を割ればその日は派遣しない(= 人手を使い切った日)。
+  for (const residentId of justAssignedResidentIds) {
+    if (candidateIds.has(residentId)) excluded.add(residentId);
+  }
+  const protectionGroups: readonly (readonly EntityId[])[] = [
+    [...soleCriticalProducerResidentIds(state, content)].sort(compareUtf16),
+    [...soleFieldRequirementWorkerResidentIds(state, content)].sort(compareUtf16),
   ];
+  for (const group of protectionGroups) {
+    for (const residentId of group) {
+      if (!candidateIds.has(residentId) || excluded.has(residentId)) continue;
+      if (candidates.length - (excluded.size + 1) < threshold) continue;
+      excluded.add(residentId);
+    }
+  }
+  const excludeResidentIds = [...excluded];
 
   const poolSize = candidates.length - excludeResidentIds.length;
   if (poolSize < threshold) {

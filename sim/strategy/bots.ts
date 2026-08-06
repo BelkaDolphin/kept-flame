@@ -55,11 +55,15 @@ import type { EngineContent } from "../../src/engine/rules/types";
 import { entityIdFromString, type EntityId, type GameState } from "../../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../../src/engine/stochastic";
 import {
+  anyResourceNearingCapacity,
   buildAssignmentCommands,
+  buildBedCommand,
   buildDispatchCommands,
   buildFacilityCommand,
+  canPlaceFacilityDef,
   buildFieldRequirementStaffingCommand,
   buildReclaimCommand,
+  buildReclaimCommandForFacility,
   buildWarehouseCommand,
   codifyCommand,
   currentResearchTechId,
@@ -68,6 +72,7 @@ import {
   unstaffedCriticalProducerDefIds,
   pickResearchTargets,
   researchCommand,
+  stateWithCellReclaimed,
   type AssignmentPolicy,
   type BuildPolicy,
   type DispatchPolicy,
@@ -185,16 +190,30 @@ function decideGeneric(
     researchTechIds.length > 0
       ? researchTechIds[researchTechIds.length - 1]
       : currentResearchTechId(state);
+  // [Phase D] **実地要件で実際に止まっている研究**を最優先の対象に足す。
+  // Phase B までは「今日バックログへ積んだ tech(researchTechIds)」が空でない
+  // 限りそちらしか見なかったため、いったん `beginResearch` された tech は
+  // 「未着手 tech の一覧」から外れ、その要求施設が建設・配属の対象から
+  // 落ちていた。結果、techSmelting を着手した当日に forge を建てそこねると
+  // (費用不足 / 2×1 の空きなし)、他の reachable tech が尽きるまで forge が
+  // 建たない ——実測 explorationFirst/nightly-b は day 8 で techSmelting を
+  // 着手しながら forge の建設が day 36 まで遅れ、E3 到達が 37 日になっていた。
+  const fieldBlockedTechIds = fieldBlockedResearches(state, content).map(
+    (research) => research.techId,
+  );
   const fieldRequirementTechIds =
-    primaryResearchTechId === undefined ? [] : [primaryResearchTechId];
+    primaryResearchTechId === undefined
+      ? fieldBlockedTechIds
+      : [...fieldBlockedTechIds, primaryResearchTechId];
   // [Phase B / M67] **建設側だけ**は「今日バックログへ積んだ tech 全部」を見る
-  // (配属側は Phase A のとおり主対象 1 本のまま)。M67 で実地要件が実効化すると、
-  // 主対象になってから慌てて建て始める bot(研究優先)は forge の建設が数日
-  // 遅れ、壁テック到達が貪欲より遅くなる(実測: E2/E3 で逆転)。建設側の
-  // 差し込みは既存就労者を奪わない(Phase A §4b の doc)ので、対象を広げても
-  // Phase A が踏んだ構造ソフトロックは起きない。
+  // (配属側は Phase A のとおり主対象 1 本 + [Phase D] 実地要件で止まっている本数)。
+  // M67 で実地要件が実効化すると、主対象になってから慌てて建て始める bot
+  // (研究優先)は forge の建設が数日遅れ、壁テック到達が貪欲より遅くなる
+  // (実測: E2/E3 で逆転)。建設側の差し込みは既存就労者を奪わない
+  // (Phase A §4b の doc)ので、対象を広げても Phase A が踏んだ構造ソフトロックは
+  // 起きない。
   const fieldFacilityIdsToBuild = fieldFacilityIdsNeedingConstruction(
-    researchTechIds.length > 0 ? researchTechIds : fieldRequirementTechIds,
+    [...fieldRequirementTechIds, ...researchTechIds],
     state,
     content,
   );
@@ -207,25 +226,63 @@ function decideGeneric(
         };
 
   // 開墾は建設より先に積む(同一 tick で「開けた枠へ建てる」が成立するように)。
-  const reclaimCmd = buildReclaimCommand(state, content, policies.reclaimMinFreeCells);
+  // [Phase D] 実地要件が要求する施設が**幾何的に置けない**なら、しきい値
+  // (`reclaimMinFreeCells`)を無視して 1 枚開墾する(commonActions.ts の
+  // `canPlaceFacilityDef` の doc)。2×1 の forge は「空きセル 2 枚」でも横に
+  // 隣接していなければ置けず、しきい値だけを見る開墾は走らないため、
+  // 研究が実地要件で止まったまま盤面が動かない状態が何日も続く。
+  // [Phase D] **倉庫(2×2)にも同じ手当てをする**。Phase A の白眉「盤面に
+  // 2×2 の空きが 1 基ぶんしか無いのであふれ検知をいくら鋭くしても 2 棟目が
+  // 建たない」は、開墾のしきい値が 1×1 の空き枚数しか見ないことの帰結である。
+  // あふれが接近しているのに倉庫を置けないなら、そこを開けるための開墾を
+  // 1 枚走らせる(GDD 6.7 の「あふれたら倉庫を建てる」の実行可能化)。
+  // 実地要件(研究の恒久停止)より優先度は下。
+  const unplaceableRoomFacilityId =
+    fieldFacilityIdsToBuild.find((defId) => !canPlaceFacilityDef(state, content, defId)) ??
+    (anyResourceNearingCapacity(state, content) &&
+    !canPlaceFacilityDef(state, content, WAREHOUSE_DEF_ID)
+      ? WAREHOUSE_DEF_ID
+      : undefined);
+  const roomReclaimCmd =
+    unplaceableRoomFacilityId === undefined
+      ? undefined
+      : buildReclaimCommandForFacility(state, content, unplaceableRoomFacilityId);
+  const reclaimCmd =
+    roomReclaimCmd ?? buildReclaimCommand(state, content, policies.reclaimMinFreeCells);
   if (reclaimCmd !== undefined) commands.push(reclaimCmd);
 
   // [Phase A] あふれの接近を検知したら、通常の建設候補選定より倉庫を優先する
   // (§0 冒頭の doc・commonActions.ts §3a)。1 tick 1 建設の既定は維持するため、
   // 倉庫が要らない tick だけ従来どおりの `buildFacilityCommand` を使う。
-  const warehouseCmd = buildWarehouseCommand(state, content, WAREHOUSE_DEF_ID);
-  if (warehouseCmd !== undefined) {
-    commands.push(warehouseCmd);
+  // [Phase D] 同じ枠に寝床(commonActions.ts §3a2)を足す。順序は
+  // 倉庫 → 実地要件で未着工の施設 → 寝床 → 通常。あふれは「今日作った物が
+  // 消える」即時の損失、実地要件の未着工は研究の**恒久停止**、寝床は
+  // 「明日以降の加入が止まる」機会損失であり、損失の重い順に並べる。
+  // (寝床を実地要件より先に置くと、保護加入で人口が寝床上限に張り付き続ける
+  // 探索優先 bot が毎日寝床を建て続け、forge を 1 基も建てないまま E3 未到達に
+  // なる実測結果になった。)
+  // [Phase D] 枠を空けるための開墾を積んだ tick は、**建設側の判断をその開墾
+  // 後の盤面で行う**(commonActions.ts `stateWithCellReclaimed`)。bot の提案は
+  // すべて「その tick の開始時点の state」から組み立てられ適用だけが逐次なので、
+  // 素直に書くと「今あけた枠を別の 1×1 が埋めてしまう」= 開墾しても目的の
+  // 施設が永遠に置けない(実測の真因)。かといって建設を 1 日休ませると、
+  // 同じ経済方針の bot 同士(貪欲 / 配置戦略違い)で建設回数が食い違い、
+  // GDD 11.4-1 の戦略差テストが壊れる。開墾後の盤面で建設を選べば
+  // **どちらも起きない**(同じ tick に「開けて建てる」が成立する)。
+  const buildState =
+    roomReclaimCmd === undefined ? state : stateWithCellReclaimed(state, roomReclaimCmd.cellIndex);
+  const warehouseCmd = buildWarehouseCommand(buildState, content, WAREHOUSE_DEF_ID);
+  const bedCmd =
+    warehouseCmd === undefined && fieldFacilityIdsToBuild.length === 0
+      ? buildBedCommand(buildState, content, BED_DEF_ID)
+      : undefined;
+  const specialCmd = warehouseCmd ?? bedCmd;
+  if (specialCmd !== undefined) {
+    commands.push(specialCmd);
   } else {
-    const buildCmd = buildFacilityCommand(state, content, buildPolicy);
+    const buildCmd = buildFacilityCommand(buildState, content, buildPolicy);
     if (buildCmd !== undefined) commands.push(buildCmd);
   }
-
-  // 通常の均等配属は無改変のポリシーで先に行う(§4b 冒頭の doc:実地要件側が
-  // 優先度を割り込ませると既存施設の就労者を奪う)。
-  const assignResult = buildAssignmentCommands(state, content, policies.assignment, tick, botId);
-  commands.push(...assignResult.commands);
-  recallGuardLog.push(...assignResult.recallGuardLog);
 
   // [Phase A] 実地要件施設は、通常配属が使わなかった**余りの住民**だけで補う
   // (commonActions.ts §4b `buildFieldRequirementStaffingCommand`)。
@@ -242,10 +299,55 @@ function decideGeneric(
       ? fieldFacilityIdsToStaff
       : unstaffedCriticalProducerDefIds(state, content);
   const fieldFacilityIdToStaff = staffTargets[0];
-  if (fieldFacilityIdToStaff !== undefined) {
-    const alreadyAssignedResidentIds = new Set(
-      assignResult.commands.map((command) => command.residentId),
-    );
+  // [Phase D] **研究が実地要件で実際に止まっている間だけ**、その作業場への
+  // 配属を通常の均等配属より先に 1 人だけ確保する。Phase A/B は必ず均等配属を
+  // 先に走らせていたため、無配属の住民がその日ぜんぶ均等配属に吸われる盤面
+  // (探索優先: 保護加入で毎日 3〜4 人湧き、施設も毎日増える)では
+  // **余りが構造的に 0 人**になり、forge が何日も無人のまま残った
+  // (実測 explorationFirst/nightly-b: 研究が techSmelting で 6 日停止)。
+  // 先に取るのは高々 1 人で、しかも研究が止まっている間だけなので、Phase A が
+  // 踏んだ「均等配属の住民を恒久的に奪う」構造(hearth の永久無人化)には
+  // ならない —— 要件が満ちれば翌 tick から通常の均等配属だけに戻る。
+  const staffFirst = fieldBlockedTechIds.length > 0 && fieldFacilityIdsToStaff.length > 0;
+  const priorityStaffing =
+    staffFirst && fieldFacilityIdToStaff !== undefined
+      ? buildFieldRequirementStaffingCommand(
+          state,
+          content,
+          fieldFacilityIdToStaff,
+          new Set(),
+          tick,
+          botId,
+          true,
+        )
+      : undefined;
+  if (priorityStaffing?.command !== undefined) {
+    commands.push(priorityStaffing.command);
+    recallGuardLog.push(...priorityStaffing.recallGuardLog);
+  }
+
+  // 通常の均等配属は無改変のポリシーで行う(§4b 冒頭の doc:実地要件側が
+  // 優先度を割り込ませると既存施設の就労者を奪う)。
+  const reservedResidentIds = new Set<EntityId>();
+  if (priorityStaffing?.command !== undefined) {
+    reservedResidentIds.add(priorityStaffing.command.residentId);
+  }
+  const assignResult = buildAssignmentCommands(
+    state,
+    content,
+    policies.assignment,
+    tick,
+    botId,
+    reservedResidentIds,
+  );
+  commands.push(...assignResult.commands);
+  recallGuardLog.push(...assignResult.recallGuardLog);
+
+  const alreadyAssignedResidentIds = new Set([
+    ...reservedResidentIds,
+    ...assignResult.commands.map((command) => command.residentId),
+  ]);
+  if (priorityStaffing === undefined && fieldFacilityIdToStaff !== undefined) {
     // [Phase B / M67] 実地要件が**実際に研究を止めている**ときだけ、無配属が
     // 居なくても配置替えで 1 人回す(commonActions.ts §4b `staffingCandidates`)。
     // 「対象施設が無人」だけを条件にすると盤面の配属が毎日入れ替わり、資源産出も
@@ -257,7 +359,7 @@ function decideGeneric(
       alreadyAssignedResidentIds,
       tick,
       botId,
-      fieldBlockedResearches(state, content).length > 0 || fieldFacilityIdsToStaff.length === 0,
+      fieldBlockedTechIds.length > 0 || fieldFacilityIdsToStaff.length === 0,
     );
     if (staffing.command !== undefined) commands.push(staffing.command);
     recallGuardLog.push(...staffing.recallGuardLog);
@@ -269,7 +371,20 @@ function decideGeneric(
   }
 
   if (tick % policies.dispatchEveryTicks === 0) {
-    const dispatchResult = buildDispatchCommands(state, content, tick, policies.dispatch, botId);
+    // [Phase D] 同じ tick に配属したばかりの住民は派遣候補から外す
+    // (commonActions.ts `buildDispatchCommands` の doc (b))。
+    const justAssignedResidentIds = new Set(alreadyAssignedResidentIds);
+    for (const command of commands) {
+      if (command.kind === "assignResident") justAssignedResidentIds.add(command.residentId);
+    }
+    const dispatchResult = buildDispatchCommands(
+      state,
+      content,
+      tick,
+      policies.dispatch,
+      botId,
+      justAssignedResidentIds,
+    );
     commands.push(...dispatchResult.commands);
     recallGuardLog.push(...dispatchResult.recallGuardLog);
   }
