@@ -80,6 +80,14 @@ export const HOME_ALERT_TEXT: { readonly [K in HomeAlertId]: HomeAlertText } = {
     hint: "研究キューが空。次に何を解禁するか決める",
     unit: "件",
   },
+  // [M73/R8-04 fatal] 研究点が満了しても実地要件(該当施設での稼働)が残っていると
+  // 完了しない(進捗表示は 100% で止まる)。Round 8 実測ではこの状態の手がかりが
+  // 全画面に 1 文字も無かったので、ホームから研究ツリーへ導線を出す。
+  researchFieldBlocked: {
+    label: "研究が実地要件を待っている",
+    hint: "点は満ちた。該当の施設に人を就けて稼働させると完了する",
+    unit: "件",
+  },
   storageAtCapacity: {
     label: "保管上限に達している資源がある",
     hint: "産出が頭打ちになっている(一部は廃材化)。保管庫を建てると上限が増える",

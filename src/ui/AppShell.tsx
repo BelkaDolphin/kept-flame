@@ -180,8 +180,21 @@ export interface ResearchChipDisplay {
   readonly valueText: string;
 }
 
-/** `chip !== null` の場合の class 名 / 値表示テキストを決める(hooks 不使用)。 */
+/**
+ * `chip !== null` の場合の class 名 / 値表示テキストを決める(hooks 不使用)。
+ *
+ * **[M73/R8-04 fatal] 実地要件待ちを最優先で言う**。研究点が満了しても実地要件
+ * (M67)が未達なら完了しないので、「100%」だけを出すと完了間近にしか見えない
+ * (Round 8 実測: 100% のまま約29ゲーム時間静止)。この状態は研究点レートの
+ * 有無(`stalled`)とは別の理由で止まっているので、文言も分ける。
+ */
 export function researchChipDisplay(chip: ResearchChipView): ResearchChipDisplay {
+  if (chip.awaitingFieldRequirement === true) {
+    return {
+      className: "kf-hud__chip kf-hud__chip--warn",
+      valueText: `${chip.progressPercent}%(実地要件待ち)`,
+    };
+  }
   return {
     className: chip.stalled ? "kf-hud__chip kf-hud__chip--muted" : "kf-hud__chip",
     valueText: chip.stalled ? `${chip.progressPercent}%(停止中)` : `${chip.progressPercent}%`,

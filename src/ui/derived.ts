@@ -80,11 +80,20 @@ import { residentCombatPower } from "../engine/rules/combat";
 import { explorationRoi, type ExplorationRoiReport } from "../engine/rules/exploration";
 import { outpostNetworkRoi } from "../engine/rules/outpost";
 import { populationViewOf, type PopulationView } from "../engine/rules/population";
-import { activeLaborFix, facilityOutputPerTick } from "../engine/rules/production";
+import {
+  activeLaborFix,
+  facilityOutputPerTick,
+  isWorkerActiveAtFacility,
+} from "../engine/rules/production";
 import { reclaimCostFix } from "../engine/rules/reclaim";
 import { recallRiskPerDay } from "../engine/rules/recall";
 import { resolveCapacityByResourceId } from "../engine/rules/storage";
-import { currentResearch } from "../engine/rules/research";
+import {
+  currentResearch,
+  fieldBlockedResearches,
+  fieldRequirementTicks,
+  isFieldRequirementMet,
+} from "../engine/rules/research";
 import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
 import { erasInOrder, techsOfEra } from "../engine/rules/techTree";
 import {
@@ -108,6 +117,7 @@ import {
 import {
   allOutposts,
   entitiesOfKind,
+  getFieldRunTicks,
   isAliveResident,
   livingResidents,
   type CodifyState,
@@ -312,6 +322,17 @@ export interface ResearchChipView {
    * 等)で進捗が凍っている状態。`hasActiveResearchProduction` 参照。
    */
   readonly stalled: boolean;
+  /**
+   * [M73/R8-04 fatal] 研究点は満了しているのに実地要件(M67)が未達で完了できない
+   * 状態。**この旗が立っているときの `progressPercent` は 100 でも完了しない**
+   * ——「🔬 100%」のまま何時間も動かない見え方(Round 8 実測)を、チップ自身が
+   * 「実地要件待ち」と言うことで解く。
+   *
+   * 立つのは「実地要件待ちの研究しか残っていない」場合だけである(それ以外は
+   * `currentResearch` が点の行き先を次の研究へ回すので、チップは進んでいる方を
+   * 指す)。省略時(既存テストフィクスチャ互換)は false 扱い。
+   */
+  readonly awaitingFieldRequirement?: boolean;
 }
 
 /**
@@ -603,6 +624,10 @@ export const HOME_ALERT_IDS = [
   "recallImpaired",
   "codifyPending",
   "researchIdle",
+  // [M73/R8-04 fatal] 研究点は満了したのに実地要件(M67)が未達で完了できない
+  // 研究がある。「🔬 100% のまま何時間も動かない」の唯一の手がかりが無かった
+  // (Round 8 実測)ため、ホームの「いま手を入れるところ」へ導線を出す。
+  "researchFieldBlocked",
   // [M63/R4-A04・GDD 6.7] 保管上限に達している資源がある(産出が頭打ち/廃材化
   // している)ことの黄警告。既存4件と同じ「点灯しているものだけ並ぶ」規律。
   "storageAtCapacity",
@@ -1435,19 +1460,28 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     () => {
       const state: GameState = sources.state.value;
       const content: EngineContent = sources.content.value;
-      const current = currentResearch(state);
+      // [M73/R8-04 fatal] **content を渡す**(M67 のリダイレクト追従)。以前は
+      // 引数 1 つで呼んでいたため、点が満了して実地要件待ちの研究をチップが
+      // 指し続け、「🔬 100%」が完了せず動かない見え方になっていた。
+      const current = currentResearch(state, content);
       if (current === undefined) return null;
       const def = content.techDefs.get(current.techId);
       if (def === undefined) return null; // 参照整合は engine 側が保証するが、表示側は捏造しない。
       const stalled = !hasActiveResearchProduction(state, content);
+      // リダイレクト先が無い(全部が実地要件待ち)ときだけ立つ旗。判定は engine の
+      // `isFieldRequirementMet` をそのまま呼ぶ(UI に条件を書かない)。
+      const awaitingFieldRequirement = !isFieldRequirementMet(state, content, current);
       const costApprox = toApproxNumber(def.researchCostFix);
-      if (costApprox <= 0) return { techId: current.techId, progressPercent: 100, stalled };
+      if (costApprox <= 0) {
+        return { techId: current.techId, progressPercent: 100, stalled, awaitingFieldRequirement };
+      }
       const progressApprox = toApproxNumber(current.progress);
       const clampedApprox = Math.min(progressApprox, costApprox);
       return {
         techId: current.techId,
         progressPercent: Math.floor((clampedApprox / costApprox) * 100),
         stalled,
+        awaitingFieldRequirement,
       };
     },
     { name: "researchChip" },
@@ -1594,6 +1628,8 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: badges.impairedResidentCount,
         codifyPending: pendingCodifyTechCount(state, content),
         researchIdle: badges.activeResearchCount === 0 ? 1 : 0,
+        // [M73/R8-04] engine の `fieldBlockedResearches` をそのまま数える。
+        researchFieldBlocked: fieldBlockedResearches(state, content).length,
         storageAtCapacity: storageAtCapacityResourceCount(state, content),
         expeditionActive: state.dispatchSnapshots.length,
         idleResidents: badges.idleResidentCount,
@@ -1603,6 +1639,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: "warn",
         codifyPending: "warn",
         researchIdle: "warn",
+        researchFieldBlocked: "warn",
         storageAtCapacity: "warn",
         expeditionActive: "info",
         idleResidents: "info",
@@ -1612,6 +1649,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         recallImpaired: "residents",
         codifyPending: "codify",
         researchIdle: "research",
+        researchFieldBlocked: "research",
         storageAtCapacity: "grid",
         expeditionActive: "expedition",
         idleResidents: "residents",
@@ -2274,6 +2312,100 @@ export interface ResearchTreeEntry {
   readonly progressApprox: number | null;
   /** 単一キュー(research.ts §2)の先頭 = 実際に研究点が入っている対象か。 */
   readonly isCurrentResearchTarget: boolean;
+  /**
+   * [M73/R8-04 fatal] M67 実地要件({@link FieldRequirementView})。要件を持たない
+   * tech / `content.research` が無い content では null。省略時(既存テスト
+   * フィクスチャ互換)も null 扱い。
+   */
+  readonly fieldRequirement?: FieldRequirementView | null;
+  /**
+   * [M73/R8-04 fatal] 研究点は満了したのに実地要件が未達で**完了できない**状態。
+   * この行の「進行度 40/40」「100%」が完了を意味しないことを画面が言うための旗
+   * (engine 側の `isPointsSaturated` と同じ条件・研究点はこの研究を飛ばして
+   * 次へ回されている)。省略時は false 扱い。
+   */
+  readonly awaitingFieldRequirement?: boolean;
+}
+
+/**
+ * [M73/R8-04 fatal] M67 実地要件の表示値(GDD 5「該当施設で該当レシピを N 回稼働」)。
+ *
+ * Round 8 実測: 研究点が満了しても実地要件が未達なら完了しないのに、UI は
+ * 「研究中: 進行度 40/40」「100%」を出し続けて約29ゲーム時間静止した(= 100% 表示が
+ * 完了を意味しない虚偽表示)。要件の内容・進捗・行き先のどれも全画面に無かった。
+ *
+ * **レシピ名を出さない理由**: content の `tech.fieldRequirement.recipe` は
+ * 識別子のまま据え置きで(recipe カテゴリは MVP 対象外)、ローダーが
+ * `TechDef` へ写していない(`rules/types.ts` の `fieldRequirementCount` doc)。
+ * engine が持っていない情報を UI で作らない(捏造しない)ので、要件は
+ * 「該当施設での稼働 N 回」として見せる。
+ */
+export interface FieldRequirementView {
+  /** 稼働が数えられる施設(`TechDef.fieldFacilityId`)。省略 content では null。 */
+  readonly facilityDefId: EntityId | null;
+  /** 必要な稼働回数(`tech.fieldRequirement.count`)。 */
+  readonly requiredCount: number;
+  /** 済んだ回数(切り捨て。1 回 = `research.recipeRunTicks` tick の稼働)。 */
+  readonly completedCount: number;
+  /** 充足済みか(`isFieldRequirementMet` と同じ意味)。 */
+  readonly met: boolean;
+  /**
+   * その施設が**いま**稼働しているか(稼働就労者が 1 人以上)。engine が蓄積に
+   * 使う述語(`isWorkerActiveAtFacility`)をそのまま呼ぶので、「建ててあるのに
+   * 誰も就いていないので永久に進まない」状態を正直に出せる。
+   */
+  readonly facilityRunning: boolean;
+}
+
+/**
+ * [M73/R8-04] 実地要件の表示値を組み立てる。`content.research` が無い / tech に
+ * `fieldRequirementCount` が無い(= 要件なし)なら null。
+ *
+ * 必要 tick は engine の `fieldRequirementTicks`(唯一の正本)をそのまま呼び、
+ * 「回数 × 1回の tick 数」の掛け算を UI 側で書き直さない。
+ */
+function fieldRequirementViewOf(
+  state: GameState,
+  content: EngineContent,
+  techId: EntityId,
+): FieldRequirementView | null {
+  const requiredTicks = fieldRequirementTicks(content, techId);
+  if (requiredTicks <= 0) return null;
+  const def = content.techDefs.get(techId);
+  const requiredCount = def?.fieldRequirementCount ?? 0;
+  const runTicks = content.research?.recipeRunTicks ?? 0;
+  const accumulatedTicks = toApproxNumber(getFieldRunTicks(state, techId) ?? FIX_ZERO);
+  const facilityDefId = def?.fieldFacilityId ?? null;
+  return {
+    facilityDefId,
+    requiredCount,
+    completedCount:
+      runTicks <= 0 ? 0 : Math.min(requiredCount, Math.floor(accumulatedTicks / runTicks)),
+    met: accumulatedTicks >= requiredTicks,
+    facilityRunning: facilityDefId !== null && isFacilityDefRunning(state, content, facilityDefId),
+  };
+}
+
+/**
+ * [M73/R8-04] その施設定義の基が 1 つでも「稼働就労者つき」で建っているか。
+ * 判定は engine の `isWorkerActiveAtFacility`(実地稼働の蓄積・生産式が使うのと
+ * 同一の述語)をそのまま呼ぶ——UI 側に「稼働とは何か」を書かない。
+ */
+function isFacilityDefRunning(
+  state: GameState,
+  content: EngineContent,
+  facilityDefId: EntityId,
+): boolean {
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (facility.defId !== facilityDefId) continue;
+    for (const workerId of facility.workerIds) {
+      const resident = state.entityStateById.get(workerId);
+      if (resident === undefined || resident.kind !== "resident") continue;
+      if (isWorkerActiveAtFacility(state, content, resident, facilityDefId, state.tick))
+        return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -2314,7 +2446,16 @@ function buildResearchTree(state: GameState, content: EngineContent): readonly R
     // (`currentResearch` と違い一意性を強制する場ではないため)。
     if (!researchByTechId.has(entry.techId)) researchByTechId.set(entry.techId, entry);
   }
-  const current = currentResearch(state);
+  // [M73/R8-04 fatal] **content を渡す**。省略すると M67 のリダイレクト
+  // (点が満了して実地要件待ちの研究を飛ばす・rules/research.ts の
+  // `isPointsSaturated`)が効かず、「選択中」と「実際に点が入っている研究」が
+  // ずれたまま表示される(Phase B からの申し送り)。
+  const current = currentResearch(state, content);
+  // [M73/R8-04] 点は満了したが実地要件待ちで完了できない研究(engine の
+  // `fieldBlockedResearches` をそのまま呼ぶ・UI 側に条件を書かない)。
+  const fieldBlockedTechIds = new Set(
+    fieldBlockedResearches(state, content).map((research) => research.techId),
+  );
   const techIds = orderedTechIds(content);
 
   const result: ResearchTreeEntry[] = [];
@@ -2356,6 +2497,8 @@ function buildResearchTree(state: GameState, content: EngineContent): readonly R
       status,
       progressApprox,
       isCurrentResearchTarget: current !== undefined && current.techId === techId,
+      fieldRequirement: fieldRequirementViewOf(state, content, techId),
+      awaitingFieldRequirement: fieldBlockedTechIds.has(techId),
     });
   }
   return result;

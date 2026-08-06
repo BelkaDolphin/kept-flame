@@ -164,6 +164,19 @@
   margin: 0.15rem 0 0;
 }
 
+/* [M73/R8-04] 実地要件の 1 行。完了を止めている(実地要件待ち)ときだけ
+   警告色 + 「▲」記号(色だけに頼らない・他画面と同じ方針)。 */
+.kf-research-row__field-requirement {
+  font-size: var(--kf-fs-sub);
+  color: #4a4a4a;
+  margin: 0.15rem 0 0;
+}
+
+.kf-research-row__field-requirement--blocking {
+  color: #7a5a00;
+  font-weight: 600;
+}
+
 .kf-research-screen__nav {
   display: flex;
   gap: 0.5rem;

@@ -290,6 +290,17 @@ describe("[2026-08-02差し戻し・台帳v10 必-1] researchChipDisplay(研究�
     expect(display.className).toBe("kf-hud__chip kf-hud__chip--muted");
     expect(display.valueText).toBe("43%(停止中)");
   });
+
+  it("[M73/R8-04 fatal] 実地要件待ちは 100% でも「実地要件待ち」と言う(停止中より優先)", () => {
+    const display = researchChipDisplay({
+      techId: id("techFireStarting"),
+      progressPercent: 100,
+      stalled: true,
+      awaitingFieldRequirement: true,
+    });
+    expect(display.className).toBe("kf-hud__chip kf-hud__chip--warn");
+    expect(display.valueText).toBe("100%(実地要件待ち)");
+  });
 });
 
 describe("表示整形(実時刻・ロケールに依存しない)", () => {

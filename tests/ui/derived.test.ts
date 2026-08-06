@@ -1206,6 +1206,82 @@ describe("[M31] researchTree(⑤研究ツリー・GDD 5/7.4)", () => {
     // ID の辞書順なら techAAA... が先だが、エラ順(e1=order1 → e2=order2)が勝つ。
     expect(ids).toEqual([lateIdButEarlyEra.id, earlyIdButLateEra.id]);
   });
+
+  // --- [M73/R8-04 fatal] M67 実地要件の表示値 ---------------------------------
+
+  it("実地要件(施設×回数)と進捗・稼働中かどうかを載せる", () => {
+    // TECH_ALPHA は fieldFacilityId=かまど。要件 4 回 × 1回15tick = 60tick。
+    const withField: TechDef = { ...TECH_ALPHA, fieldRequirementCount: 4 };
+    const testContent: EngineContent = {
+      ...researchTreeContent(),
+      // boardState は rBronze(techBronze)を含むので content 側にも要る
+      // (currentResearch に content を渡すようになったため参照整合が要求される)。
+      techDefs: new Map([
+        [withField.id, withField],
+        [TECH_BRONZE.id, TECH_BRONZE],
+      ]),
+      research: { recipeRunTicks: 15 },
+    };
+    // かまど(fHearth)には稼働就労者 aRui がいる(boardState の既定)。
+    const state = boardState([research("rAlpha", withField.id, 0)]);
+    const store = createGameStore({ state, content: testContent });
+    const entry = store.derived.researchTree.value.find((e) => e.techId === withField.id);
+    expect(entry?.fieldRequirement).toEqual({
+      facilityDefId: HEARTH.id,
+      requiredCount: 4,
+      completedCount: 0,
+      met: false,
+      facilityRunning: true,
+    });
+  });
+
+  it("研究点が満了して実地要件が未達なら awaitingFieldRequirement が立ち、点は別の研究へ回る", () => {
+    const blocked: TechDef = { ...TECH_ALPHA, fieldRequirementCount: 4 };
+    const testContent: EngineContent = {
+      ...researchTreeContent(),
+      techDefs: new Map([
+        [blocked.id, blocked],
+        [TECH_GAMMA.id, TECH_GAMMA],
+        [TECH_BRONZE.id, TECH_BRONZE],
+      ]),
+      research: { recipeRunTicks: 15 },
+    };
+    const state = boardState([
+      // 進行度 30/30 = 点は満了。実地要件(60tick)は 0 なので完了できない。
+      research("rAlpha", blocked.id, 30),
+      research("rGamma", TECH_GAMMA.id, 0),
+    ]);
+    const store = createGameStore({ state, content: testContent });
+    const tree = store.derived.researchTree.value;
+    expect(tree.find((e) => e.techId === blocked.id)?.awaitingFieldRequirement).toBe(true);
+    // [M73/R8-04] リダイレクト追従: 点が入っているのは実地要件待ちでない方。
+    expect(tree.find((e) => e.techId === blocked.id)?.isCurrentResearchTarget).toBe(false);
+    const targets = tree.filter((e) => e.isCurrentResearchTarget).map((e) => e.techId);
+    expect(targets).toHaveLength(1);
+    expect(targets).not.toContain(blocked.id);
+    // ホームの導線(いま手を入れるところ)にも件数が出る。
+    const alert = store.derived.homeAlerts.value.alerts.find(
+      (candidate) => candidate.id === "researchFieldBlocked",
+    );
+    expect(alert?.count).toBe(1);
+    expect(alert?.screen).toBe("research");
+  });
+
+  it("実地要件を持たない tech / content では fieldRequirement は null(捏造しない)", () => {
+    const state = boardState([research("rBeta", TECH_BETA.id, 0)]);
+    const store = createGameStore({
+      state,
+      content: researchTreeContent({
+        techDefs: new Map([
+          [TECH_BETA.id, TECH_BETA],
+          [TECH_BRONZE.id, TECH_BRONZE],
+        ]),
+      }),
+    });
+    const entry = store.derived.researchTree.value.find((e) => e.techId === TECH_BETA.id);
+    expect(entry?.fieldRequirement).toBeNull();
+    expect(entry?.awaitingFieldRequirement).toBe(false);
+  });
 });
 
 describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チップ)", () => {
@@ -1220,6 +1296,8 @@ describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チ�
       techId: TECH_BETA.id,
       progressPercent: 20,
       stalled: true,
+      // [M73/R8-04] M67 実地要件を持たない content なので常に false。
+      awaitingFieldRequirement: false,
     });
   });
 
@@ -1242,6 +1320,7 @@ describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チ�
       techId: TECH_BETA.id,
       progressPercent: 20,
       stalled: false,
+      awaitingFieldRequirement: false,
     });
   });
 
@@ -1259,6 +1338,8 @@ describe("[2026-08-02裁定・台帳v10 必-1] researchChip(ヘッダ研究チ�
       techId: TECH_BETA.id,
       progressPercent: 20,
       stalled: true,
+      // [M73/R8-04] M67 実地要件を持たない content なので常に false。
+      awaitingFieldRequirement: false,
     });
   });
 

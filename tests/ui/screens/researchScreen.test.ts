@@ -147,12 +147,17 @@ describe("ResearchTechRow: 状態文言(未着手/研究中/解禁済み/停滞�
     expect(text).not.toContain("30.0");
   });
 
-  it("researching かつキュー先頭でない場合は「キュー待ち」を添える", () => {
+  it("[M73/R8-13] researching かつキュー先頭でない場合は「順番が来ると進む」ことを添える", () => {
+    // 旧文言は「(キュー待ち)」。同じカードの「前提が未解禁・押しても開始できません」
+    // (大移動後に周回跨ぎで残っていた)と食い違って見えたため、
+    // 「研究点が別の研究に入っている/順番が来れば進む」と言い切る形へ変えた。
     const vnode = ResearchTechRow({
       entry: entry({ status: "researching", progressApprox: 0, isCurrentResearchTarget: false }),
       onBeginResearch: () => undefined,
     });
-    expect(flattenText(vnode)).toContain("キュー待ち");
+    const text = flattenText(vnode);
+    expect(text).toContain("研究点は別の研究に入っています");
+    expect(text).toContain("順番が来ると進みます");
   });
 
   it("completed は「解禁済み」", () => {
@@ -207,6 +212,144 @@ describe("ResearchTechRow: 前提表示", () => {
       onBeginResearch: () => undefined,
     });
     expect(flattenText(vnode)).toContain("未解禁のものがあります");
+  });
+});
+
+// --- [M73/R8-04 fatal] M67 実地要件の表示 / [M73/R8-13] 周回跨ぎの矛盾解消 -------
+
+describe("[M73/R8-04] 実地要件(施設×回数)の表示", () => {
+  it("要件・進捗・いま数えているかを 1 行で出す", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "researching",
+        progressApprox: 10,
+        isCurrentResearchTarget: true,
+        fieldRequirement: {
+          facilityDefId: id("workbench"),
+          requiredCount: 8,
+          completedCount: 3,
+          met: false,
+          facilityRunning: true,
+        },
+      }),
+      onBeginResearch: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("実地要件");
+    expect(text).toContain("作業台");
+    expect(text).toContain("3/8回");
+    expect(text).toContain("いま数えています");
+  });
+
+  it("該当施設に就労者がいなければ「進んでいません」と正直に言う", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "researching",
+        progressApprox: 40,
+        fieldRequirement: {
+          facilityDefId: id("workbench"),
+          requiredCount: 8,
+          completedCount: 0,
+          met: false,
+          facilityRunning: false,
+        },
+      }),
+      onBeginResearch: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("就労者がいないため進んでいません");
+  });
+
+  it("研究点が満了して実地要件待ちなら「実地要件待ち」と明示する(100%表示のまま黙らない)", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "researching",
+        progressApprox: 40,
+        researchCostApprox: 40,
+        awaitingFieldRequirement: true,
+        fieldRequirement: {
+          facilityDefId: id("workbench"),
+          requiredCount: 8,
+          completedCount: 0,
+          met: false,
+          facilityRunning: false,
+        },
+      }),
+      onBeginResearch: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("実地要件待ち");
+    expect(text).toContain("研究点は満ちています");
+    expect(text).toContain("▲");
+  });
+
+  it("要件を持たない tech(fieldRequirement 省略)は実地要件の行を出さない", () => {
+    const vnode = ResearchTechRow({ entry: entry(), onBeginResearch: () => undefined });
+    expect(flattenText(vnode)).not.toContain("実地要件");
+  });
+
+  it("達成済みなら「達成済み」と出す", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "researching",
+        progressApprox: 10,
+        fieldRequirement: {
+          facilityDefId: id("workbench"),
+          requiredCount: 8,
+          completedCount: 8,
+          met: true,
+          facilityRunning: false,
+        },
+      }),
+      onBeginResearch: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("達成済み");
+  });
+});
+
+describe("[M73/R8-13] 着手済みの行に「前提が未解禁・押しても開始できません」を出さない", () => {
+  it("研究中で前提未解禁でも「押しても開始できません」を出さない(engine は選び直しに成功する)", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "researching",
+        progressApprox: 0,
+        prereqTechIds: [id("techFireStarting")],
+        prereqsMet: false,
+      }),
+      onBeginResearch: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).not.toContain("押しても開始できません");
+    // 前提の一覧そのものは参考情報として残る(表示のみ)。
+    expect(text).toContain("未解禁のものがあります");
+  });
+
+  it("未着手 + 前提未解禁は従来どおり「押しても開始できません」を出す", () => {
+    const vnode = ResearchTechRow({
+      entry: entry({
+        status: "notStarted",
+        prereqTechIds: [id("techFireStarting")],
+        prereqsMet: false,
+      }),
+      onBeginResearch: () => undefined,
+    });
+    expect(flattenText(vnode)).toContain("押しても開始できません");
+  });
+
+  it("着手済みの行のボタンは「研究点を回す」意味の文言になる", () => {
+    const waiting = flattenText(
+      ResearchTechRow({
+        entry: entry({ status: "researching", progressApprox: 0, isCurrentResearchTarget: false }),
+        onBeginResearch: () => undefined,
+      }),
+    );
+    expect(waiting).toContain("この研究に研究点を回す");
+    const current = flattenText(
+      ResearchTechRow({
+        entry: entry({ status: "researching", progressApprox: 0, isCurrentResearchTarget: true }),
+        onBeginResearch: () => undefined,
+      }),
+    );
+    expect(current).toContain("研究点を入れています");
   });
 });
 

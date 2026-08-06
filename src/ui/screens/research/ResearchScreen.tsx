@@ -45,10 +45,22 @@ function statusText(entry: ResearchTreeEntry): string {
       return "未着手";
     case "researching": {
       const progress = entry.progressApprox ?? 0;
-      const queueNote = entry.isCurrentResearchTarget ? "" : "(キュー待ち)";
+      // [M73/R8-04 fatal] 研究点が満了しても実地要件(M67)が残っていれば完了しない。
+      // 以前は「研究中: 進行度 40/40」のままだったので、100% 表示が完了を意味しない
+      // 虚偽表示になっていた(Round 8 実測: 石器が 100% のまま約29ゲーム時間静止)。
+      // [M73/R8-13] 「キュー待ち」は前提未解禁の行でも出ていて、同じカードの
+      // 「押しても開始できません」と食い違って見えた(周回跨ぎで残存)。着手済みで
+      // あることと順番待ちであることを分けて言う。
+      const queueNote = entry.isCurrentResearchTarget
+        ? ""
+        : "(研究点は別の研究に入っています。順番が来ると進みます)";
       // [M63/R4-A12/A13] 素の toFixed(1) を整形ヘルパへ統一(研究コスト30.0 の
       // ような不揃いな表記を、末尾行の「研究コスト:」表示(下記)と揃える)。
-      return `研究中: 進行度 ${formatResourceAmount(progress)}/${formatResourceAmount(entry.researchCostApprox)}${queueNote}`;
+      const progressText = `進行度 ${formatResourceAmount(progress)}/${formatResourceAmount(entry.researchCostApprox)}`;
+      if (entry.awaitingFieldRequirement === true) {
+        return `実地要件待ち: ${progressText}(研究点は満ちています。完了には下の実地要件が必要です)`;
+      }
+      return `研究中: ${progressText}${queueNote}`;
     }
     case "completed":
       return "解禁済み";
@@ -78,14 +90,59 @@ export function researchEntityIdFor(techId: EntityId): EntityId {
  * [束B/B-4] 「研究を開始」が確実に失敗する理由(前提未達/解禁済み/一回性喪失)。
  * 無ければ null。**判定ではなく表示上の予告**であり、ボタンは非活性にしない
  * (押した結果の最終判定は engine の apply が行う・architecture.md §6)。
+ *
+ * **[M73/R8-13] 前提未達を「開始できない理由」にするのは未着手の行だけ**である。
+ * engine の `applyBeginResearch` は「research entity が既にあれば前提を見ずに
+ * 選び直すだけ」で**成功する**(commands.ts)。着手済み(研究中/停滞中)の行に
+ * 「前提が未解禁・押しても開始できません」を出すのは虚偽であり、しかも同じ
+ * カードの「研究中(キュー待ち)」と食い違って見えていた(大移動後は前提が
+ * 解禁前に戻るので、周回跨ぎで残り続けた)。
  */
 function guaranteedFailureReason(entry: ResearchTreeEntry): string | null {
   if (entry.status === "completed") return "既に解禁済みです";
   if (entry.status === "lostIrreversible") {
     return "取り返しのつかない喪失で、この周回では再研究できません";
   }
-  if (!entry.prereqsMet) return "前提の技術がまだ解禁されていません";
+  if (entry.status === "notStarted" && !entry.prereqsMet) {
+    return "前提の技術がまだ解禁されていません";
+  }
   return null;
+}
+
+/**
+ * [M73/R8-13] 開始ボタンの文言。着手済みの行で `beginResearch` が実際に行うのは
+ * 「研究点の行き先をこの研究へ切り替える」ことなので(engine の
+ * `applyBeginResearch` の既存 entity 分岐)、そう書く。
+ */
+function beginButtonLabel(entry: ResearchTreeEntry): string {
+  if (entry.status === "researching" || entry.status === "lostRecoverable") {
+    return entry.isCurrentResearchTarget ? "研究点を入れています" : "この研究に研究点を回す";
+  }
+  return "研究を開始";
+}
+
+/**
+ * [M73/R8-04 fatal] 実地要件の 1 行(要件内容 + 進捗 + いま数えられているか)。
+ * `fieldRequirement` が無い(要件なしの tech / 要件機構が不活性な content)なら
+ * 何も出さない。
+ */
+export function fieldRequirementText(entry: ResearchTreeEntry): string | null {
+  const requirement = entry.fieldRequirement ?? null;
+  if (requirement === null) return null;
+  const place =
+    requirement.facilityDefId === null
+      ? "該当の施設"
+      : `${facilityLabel(requirement.facilityDefId)}での`;
+  const progress = `${String(requirement.completedCount)}/${String(requirement.requiredCount)}回`;
+  if (requirement.met) return `実地要件: ${place}稼働 ${progress}(達成済み)`;
+  // 「建ててあるのに誰も就いていないので永久に進まない」を隠さない(R8-04 の眼目)。
+  const note =
+    entry.status === "notStarted"
+      ? "研究に着手すると数え始めます"
+      : requirement.facilityRunning
+        ? "いま数えています"
+        : "この施設に就労者がいないため進んでいません";
+  return `実地要件: ${place}稼働 ${progress}(${note})`;
 }
 
 // --- 2. 1 行(hooks 不使用・直接テスト可能) ----------------------------------
@@ -107,6 +164,7 @@ export interface ResearchTechRowProps {
  */
 export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps) {
   const failureReason = guaranteedFailureReason(entry);
+  const requirementText = fieldRequirementText(entry);
   return (
     <li class="kf-research-row" data-tech-id={entry.techId} data-status={entry.status}>
       <div class="kf-research-row__head">
@@ -123,12 +181,27 @@ export function ResearchTechRow({ entry, onBeginResearch }: ResearchTechRowProps
           title={failureReason ?? undefined}
           onClick={() => onBeginResearch(entry.techId)}
         >
-          研究を開始
+          {beginButtonLabel(entry)}
         </button>
       </div>
       <p class="kf-research-row__status">{statusText(entry)}</p>
       {failureReason !== null && (
         <p class="kf-research-row__unlikely-reason">{failureReason}。押しても開始できません。</p>
+      )}
+      {/* [M73/R8-04 fatal] M67 実地要件(該当施設での稼働回数)。要件・進捗・
+          いま数えられているかを 1 行で出す(以前は全画面に 1 文字も無く、
+          「100% のまま完了しない」の理由がどこにも見えなかった)。 */}
+      {requirementText !== null && (
+        <p
+          class={
+            entry.awaitingFieldRequirement === true
+              ? "kf-research-row__field-requirement kf-research-row__field-requirement--blocking"
+              : "kf-research-row__field-requirement"
+          }
+        >
+          {entry.awaitingFieldRequirement === true ? "▲ " : ""}
+          {requirementText}
+        </p>
       )}
       <p class="kf-research-row__prereqs">
         {prereqText(entry)}
