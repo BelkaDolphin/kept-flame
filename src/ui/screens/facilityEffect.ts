@@ -283,6 +283,16 @@ export const NO_FACILITY_EFFECT_EXTRAS: FacilityEffectExtras = {
   restRecoveryText: null,
 };
 
+/**
+ * [M73/R8-02] 「1日0時間」「1時間0分」の末尾の 0 単位を落とす(表示のみ)。
+ * `formatTickSpan` は他画面(残存想定・往復所要)と共有の整形なので触らず、
+ * ここで作る 1 文だけを読みやすくする。落として空になる場合は元の文字列を返す。
+ */
+function trimZeroTailUnit(text: string): string {
+  const trimmed = text.replace(/0時間$/, "").replace(/0分$/, "");
+  return trimmed.length === 0 ? text : trimmed;
+}
+
 /** [M73/R8-02] content から {@link FacilityEffectExtras} を取り出す(判定は無い)。 */
 export function facilityEffectExtrasOf(content: EngineContent): FacilityEffectExtras {
   const raid = content.raid;
@@ -290,7 +300,8 @@ export function facilityEffectExtrasOf(content: EngineContent): FacilityEffectEx
   return {
     perimeterDefenseMulApprox:
       raid === undefined ? null : toApproxNumber(raid.perimeterDefenseMulFix),
-    restRecoveryText: care === undefined ? null : formatTickSpan(care.restRecoveryTicks),
+    restRecoveryText:
+      care === undefined ? null : trimZeroTailUnit(formatTickSpan(care.restRecoveryTicks)),
   };
 }
 

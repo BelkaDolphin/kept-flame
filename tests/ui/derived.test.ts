@@ -2126,3 +2126,40 @@ describe("[M73/R8-05] raidOutlook(襲撃の可視化・engine の読み取り専
     expect(Object.keys(store.peekState())).not.toContain("raids");
   });
 });
+
+describe("[M73/R8-04] researchChip の実地要件待ち(点の満了が前提)", () => {
+  const WITH_FIELD: TechDef = {
+    id: id("techFieldOnly"),
+    researchCostFix: fixFromInt(30),
+    eraId: "e1",
+    lossClass: "criticalRecoverable",
+    fieldFacilityId: HEARTH.id,
+    fieldRequirementCount: 4,
+  };
+
+  function fieldContent(): EngineContent {
+    return {
+      ...researchTreeContent(),
+      techDefs: new Map([[WITH_FIELD.id, WITH_FIELD]]),
+      research: { recipeRunTicks: 15 },
+    };
+  }
+
+  it("研究点がまだ満了していない(0/30)なら実地要件が未達でも「待ち」にしない", () => {
+    const state = stateOf([resident("aTest"), research("rField", WITH_FIELD.id, 0)], META);
+    const store = createGameStore({ state, content: fieldContent() });
+    const chip = store.derived.researchChip.value;
+    expect(chip?.techId).toBe(WITH_FIELD.id);
+    expect(chip?.progressPercent).toBe(0);
+    expect(chip?.awaitingFieldRequirement).toBe(false);
+  });
+
+  it("点が満了して他に受け皿が無ければ「待ち」になる(100% でも完了しないことを言う)", () => {
+    const state = stateOf([resident("aTest"), research("rField", WITH_FIELD.id, 30)], META);
+    const store = createGameStore({ state, content: fieldContent() });
+    const chip = store.derived.researchChip.value;
+    expect(chip?.techId).toBe(WITH_FIELD.id);
+    expect(chip?.progressPercent).toBe(100);
+    expect(chip?.awaitingFieldRequirement).toBe(true);
+  });
+});

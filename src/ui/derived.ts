@@ -98,6 +98,7 @@ import {
   fieldBlockedResearches,
   fieldRequirementTicks,
   isFieldRequirementMet,
+  researchRemaining,
 } from "../engine/rules/research";
 import { NEUTRAL_RESIDENT_STATS, effectiveStats, resolveTraitDefs } from "../engine/rules/stats";
 import { erasInOrder, techsOfEra } from "../engine/rules/techTree";
@@ -828,7 +829,14 @@ export interface CostLineView {
 /** コスト定義を持たない(無料の)施設のための共有の空配列。 */
 const NO_COST_LINES: readonly CostLineView[] = [];
 
-/** [M73/R8-03] Lv1 建設の全コスト行(第1行が主資源・`def.cost` 省略なら空=無料)。 */
+/**
+ * [M73/R8-03] Lv1 建設の全コスト行(第1行が主資源・`def.cost` 省略なら空=無料)。
+ *
+ * **量が 0 以下の行は落とす**——engine の `payFacilityCost`/`payExtraCostLines` も
+ * `raw <= 0` の行を引き落とさない(= 払う必要が無い)。実 content には「建設時は
+ * 0 だが増築では要る」追加行があり(探索本部の紙・鍛冶場の木炭)、素直に並べると
+ * 「コスト 薪 28・紙 0」のような払わない行が出てしまう(実プレビュー確認で発見)。
+ */
 function displayFacilityBuildCostLines(def: FacilityDef): readonly CostLineView[] {
   const cost = def.cost;
   if (cost === undefined) return NO_COST_LINES;
@@ -838,7 +846,7 @@ function displayFacilityBuildCostLines(def: FacilityDef): readonly CostLineView[
   for (const extra of cost.extraLines ?? []) {
     lines.push({ resourceId: extra.resourceId, amountApprox: toApproxNumber(extra.buildFix) });
   }
-  return lines;
+  return lines.filter((line) => line.amountApprox > 0);
 }
 
 /**
@@ -861,7 +869,8 @@ function displayFacilityUpgradeCostLines(
     if (fix === undefined) continue;
     lines.push({ resourceId: extra.resourceId, amountApprox: toApproxNumber(fix) });
   }
-  return lines;
+  // 建設側と同じ理由で 0 以下の行は落とす(engine も引き落とさない)。
+  return lines.filter((line) => line.amountApprox > 0);
 }
 
 /** コスト行 1 本の `fromLevel` → `fromLevel + 1` 増築費(index は Lv-1・配列超えは最後の段)。 */
@@ -1502,9 +1511,15 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
       const def = content.techDefs.get(current.techId);
       if (def === undefined) return null; // 参照整合は engine 側が保証するが、表示側は捏造しない。
       const stalled = !hasActiveResearchProduction(state, content);
-      // リダイレクト先が無い(全部が実地要件待ち)ときだけ立つ旗。判定は engine の
-      // `isFieldRequirementMet` をそのまま呼ぶ(UI に条件を書かない)。
-      const awaitingFieldRequirement = !isFieldRequirementMet(state, content, current);
+      // リダイレクト先が無い(全部が実地要件待ち)ときだけ立つ旗。条件は engine の
+      // `isPointsSaturated`(rules/research.ts)と同じ **2 つの重なり**であり、
+      // どちらも engine の関数をそのまま呼ぶ(UI に式を書かない)。
+      // 実プレビュー確認での発見: 実地要件の未達だけを見ると、研究点がまだ
+      // 0/30 の開始直後から「実地要件待ち」と出てしまう(点はちゃんと入っている
+      // ので虚偽)。**点が満了していること**が待ちの前提である。
+      const awaitingFieldRequirement =
+        toRaw(researchRemaining(content, current)) <= 0 &&
+        !isFieldRequirementMet(state, content, current);
       const costApprox = toApproxNumber(def.researchCostFix);
       if (costApprox <= 0) {
         return { techId: current.techId, progressPercent: 100, stalled, awaitingFieldRequirement };
