@@ -328,6 +328,20 @@ export interface ExodusBalanceContent {
   readonly startingStockResourceId: string;
 }
 
+/**
+ * [M67] 研究ペーシング(GDD 5.2 の第2ゲート = 実地要件)のパラメータ。
+ * 2026-08-06裁定・台帳v20 必-1 の最小形。
+ */
+export interface ResearchPacingContent {
+  /**
+   * `tech.fieldRequirement.count` 1 回ぶんを「該当施設での稼働 tick 数」へ
+   * 換算する係数。実地要件 = `count × recipeRunTicks` tick の稼働。
+   * recipe entity は MVP 対象外なので、レシピ 1 回の実施を**稼働時間**で
+   * 代理表現する(recipe ID は識別子のまま据え置き)。
+   */
+  readonly recipeRunTicks: number;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -335,6 +349,11 @@ export interface BalanceContent {
   readonly offlineClampTick: number;
   readonly safetyFactor: number;
   readonly recallRiskParams: RecallRiskParams;
+  /**
+   * [M67] GDD 5.2 の研究ペーシング。JSON に無ければ null
+   * (= 実地要件がゲートとして働かない = M67 以前と同じ挙動)。
+   */
+  readonly research: ResearchPacingContent | null;
   /** [M5] GDD 6.7 の保管庫パラメータ。JSON に無ければ null。 */
   readonly storage: StorageParamsContent | null;
   /** [M6] GDD 5.1 のエラ表。JSON に無ければ null(= エラという概念が無い content)。 */
@@ -1364,6 +1383,30 @@ function validateInitialRubbleCells(
   return cells;
 }
 
+/**
+ * [M67] `research`(省略可)の検証。`recipeRunTicks` は 1 以上の整数
+ * (0 を許すと「実地要件は書いてあるが常に充足済み」が静かに成立する)。
+ */
+function validateResearchPacing(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): ResearchPacingContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const recipeRunTicks = expectInteger(
+    obj["recipeRunTicks"],
+    `${path}.recipeRunTicks`,
+    issues,
+    RECIPE_RUN_TICKS_RANGE,
+  );
+  if (recipeRunTicks === undefined) return undefined;
+  return { recipeRunTicks };
+}
+
+/** [M67] レシピ 1 回の稼働 tick 換算の値域(1 tick 〜 1 ゲーム年ぶん)。 */
+const RECIPE_RUN_TICKS_RANGE: NumericRange = { min: 1, max: 525_600 };
+
 function validateReclaim(
   raw: unknown,
   path: string,
@@ -1624,6 +1667,11 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     "$.recallRiskParams",
     issues,
   );
+  const rawResearch = obj["research"];
+  const research =
+    rawResearch === undefined
+      ? null
+      : (validateResearchPacing(rawResearch, "$.research", issues) ?? undefined);
   const rawStorage = obj["storage"];
   const storage =
     rawStorage === undefined
@@ -1668,6 +1716,7 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     offlineClampTick === undefined ||
     safetyFactor === undefined ||
     recallRiskParams === undefined ||
+    research === undefined ||
     storage === undefined ||
     eras === undefined ||
     recordMedia === undefined ||
@@ -1687,6 +1736,7 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     offlineClampTick,
     safetyFactor,
     recallRiskParams,
+    research,
     storage,
     eras,
     recordMedia,

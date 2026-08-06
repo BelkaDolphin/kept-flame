@@ -61,7 +61,7 @@
       },
       {
         "resourceId": "charcoal",
-        "amount": 6,
+        "amount": 0,
         "upgradeCostCurve": [7, 8, 10, 12, 14]
       }
     ],

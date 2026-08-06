@@ -99,6 +99,7 @@
 // ---------------------------------------------------------------------------
 
 import { compareUtf16 } from "./canonicalize";
+import { FIX_ZERO, type Fix } from "./fp";
 import {
   entitiesOfKind,
   getTechMemory,
@@ -125,13 +126,20 @@ import { recordDeathMemoir } from "./rules/memoir";
 import { applyOutpostSupply, computeOutpostSupplyRates } from "./rules/outpost";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
 import { applyProduction, computeProductionRates, type ProductionRates } from "./rules/production";
-import { applyMasteryProgress, applyTechLossOnDeath } from "./rules/techMemory";
+import {
+  applyFieldRunProgress,
+  applyMasteryProgress,
+  applyTechLossOnDeath,
+} from "./rules/techMemory";
 import {
   applyResearchProgress,
   completeResearch,
   currentResearch,
+  fieldBlockedResearches,
+  fieldRequirementRemaining,
   researchRemaining,
-  ticksUntilResearchComplete,
+  ticksUntilFieldRequirement,
+  ticksUntilResearchCompleteGated,
 } from "./rules/research";
 import { evaluateRecallCoarseStep } from "./rules/recall";
 import type { AdvanceContext } from "./rules/types";
@@ -447,6 +455,19 @@ export class EventQueue {
     }
   }
 
+  /**
+   * [M67] その種別のイベントを**全件**返す(取り出さない)。`findByKind` と違い
+   * 複数件を許す種別(researchComplete は実地要件待ちで同時に複数ありうる)の
+   * 同期に使う。返す順序はヒープの内部配置に依らないよう全順序でソートする。
+   */
+  entriesOfKind(kind: SchedulerEventKind): readonly ScheduledEvent[] {
+    const found: ScheduledEvent[] = [];
+    for (const event of this.heap) {
+      if (event.kind === kind) found.push(event);
+    }
+    return found.sort(compareScheduledEvents);
+  }
+
   /** 全イベントを処理順(全順序)で返す。テスト・診断用(キューは空になる)。 */
   drainSorted(): readonly ScheduledEvent[] {
     const result: ScheduledEvent[] = [];
@@ -625,32 +646,60 @@ function pushRecallRecover(
  */
 export function syncResearchCompletionEvent(
   queue: EventQueue,
+  state: GameState,
   ctx: AdvanceContext,
   research: ResearchState | undefined,
   rates: ProductionRates,
   cursorTick: number,
 ): void {
-  let desiredTick: number | null = null;
+  // 望ましいイベント集合(entityId → tick)。M67 以前は常に高々 1 件だった。
+  const desired = new Map<EntityId, number>();
   if (research !== undefined) {
-    const ticks = ticksUntilResearchComplete(
+    // [M67] 完了は「研究点満了」と「実地要件充足」の **遅い方**(rules/research.ts §3)。
+    // 実地要件の蓄積レートも同じ (A) 区間のレート(`rates.fieldRunGains`)なので、
+    // 区間ごとに作り直すだけで済む = 新しい種類の境界は増えない。
+    const ticks = ticksUntilResearchCompleteGated(
       researchRemaining(ctx.content, research),
       rates.researchRateFix,
+      fieldRequirementRemaining(state, ctx.content, research),
+      fieldRunRateOf(rates, research.techId),
     );
-    if (ticks !== null) desiredTick = cursorTick + ticks;
+    if (ticks !== null) desired.set(research.id, cursorTick + ticks);
+  }
+  // [M67] 研究点は満了したが実地要件待ちの研究(= 点の行き先からは外れている)も
+  // 完了だけはする。要件が満ちる tick は同じ閉形式で求まる(rules/research.ts §3)。
+  for (const blocked of fieldBlockedResearches(state, ctx.content)) {
+    if (desired.has(blocked.id)) continue;
+    const ticks = ticksUntilFieldRequirement(
+      fieldRequirementRemaining(state, ctx.content, blocked),
+      fieldRunRateOf(rates, blocked.techId),
+    );
+    if (ticks !== null) desired.set(blocked.id, cursorTick + ticks);
   }
 
-  const existing = queue.findByKind("researchComplete");
-  if (
-    existing !== undefined &&
-    existing.tick === desiredTick &&
-    existing.entityId === (research?.id ?? null)
-  ) {
-    return;
+  for (const existing of queue.entriesOfKind("researchComplete")) {
+    const wanted = existing.entityId === null ? undefined : desired.get(existing.entityId);
+    if (wanted === existing.tick) {
+      // 既に正しい tick で積まれている。二重 push を避けるため望み集合から外す。
+      if (existing.entityId !== null) desired.delete(existing.entityId);
+      continue;
+    }
+    queue.remove("researchComplete", existing.entityId);
   }
-  if (existing !== undefined) queue.remove("researchComplete", existing.entityId);
-  if (desiredTick !== null && research !== undefined) {
-    queue.push({ tick: desiredTick, kind: "researchComplete", entityId: research.id });
+  for (const [entityId, tick] of desired) {
+    queue.push({ tick, kind: "researchComplete", entityId });
   }
+}
+
+/**
+ * [M67] その tech の実地稼働レート(`ProductionRates.fieldRunGains` は techId 昇順の
+ * 小さな配列。該当が無ければ 0 = 実地要件が進まない)。
+ */
+function fieldRunRateOf(rates: ProductionRates, techId: EntityId): Fix {
+  for (const gain of rates.fieldRunGains) {
+    if (gain.techId === techId) return gain.gainPerTickFix;
+  }
+  return FIX_ZERO;
 }
 
 /**
@@ -838,7 +887,9 @@ export function runSchedule(
 
     // 1〜2. (A) 区間の入口: レート確定 → (B) 予測の同期。
     const rates = computeProductionRates(next, ctx);
-    const researchTarget = currentResearch(next);
+    // [M67] 研究点の行き先は「点が満了し実地要件待ち」の研究を飛ばす
+    // (rules/research.ts §3)。content に research ブロックが無ければ従来と同一。
+    const researchTarget = currentResearch(next, ctx.content);
     // [M12/M13] bond(共働の絆)も同じ (A) 区間のレートである。生産と同じ位置で
     // 1 回だけ確定させる(区間中に共働の顔ぶれが変わらないことが (A) の前提)。
     const bondRates = computeBondRates(next, cursor);
@@ -851,7 +902,7 @@ export function runSchedule(
     // [M50] 成文化(GDD 11.7 段50)。研究と同じ「区間の入口でレート確定 →
     // (B) 予測を同期」の 2 段(rules/codify.ts §1)。
     const codifyTarget = currentCodification(next);
-    syncResearchCompletionEvent(queue, ctx, researchTarget, rates, cursor);
+    syncResearchCompletionEvent(queue, next, ctx, researchTarget, rates, cursor);
     syncCodifyCompletionEvent(queue, codifyTarget, rates, cursor);
 
     // 3. 境界の決定。イベントが toTick 以降なら地平線で切る。
@@ -877,6 +928,10 @@ export function runSchedule(
       next = applyBondProgress(next, bondRates, delta, boundary);
       // [M13] 実地稼働による定着度の蓄積(GDD 11.2 / 4)。生産と同じレート×区間長。
       next = applyMasteryProgress(next, ctx.content, rates.masteryGains, delta);
+      // [M67] 実地要件(GDD 5.2 の第2ゲート)の稼働蓄積。定着とまったく同じ
+      // 「レート × 区間長」の閉形式(rules/techMemory.ts §4b)であり、完了 tick の
+      // 予測(段40)が max(研究点満了, 実地要件充足)へ広がっただけで境界は増えない。
+      next = applyFieldRunProgress(next, rates.fieldRunGains, delta);
       // [M25] 衛星供給(GDD 9.2 / 11.7 段80)。生産と同じ「レート × 区間長」の
       // 閉形式(rules/outpost.ts の applyOutpostSupply)。既存 golden シナリオは
       // 拠点ゼロなので outpostRates.resourceRateByResourceId は常に空 = no-op。

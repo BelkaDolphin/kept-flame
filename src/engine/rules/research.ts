@@ -47,10 +47,20 @@
 //     (c) (B) 一回性喪失(`isIrreversiblyLost`)
 // ---------------------------------------------------------------------------
 
-import { addFix, floorDivInt, mulFixInt, subFix, toRaw, type Fix } from "../fp";
+import {
+  FIX_ZERO,
+  addFix,
+  fixFromInt,
+  floorDivInt,
+  mulFixInt,
+  subFix,
+  toRaw,
+  type Fix,
+} from "../fp";
 import {
   entitiesOfKind,
   getEntity,
+  getFieldRunTicks,
   requireEntity,
   type EntityId,
   type GameState,
@@ -71,15 +81,42 @@ import { RulesError, requireTechDef, type EngineContent } from "./types";
  * `criticalRecoverable` は `loss` が付いていても対象に残る = 再研究できる
  * (GDD 7.4「失っても必ず再取得可能」)。
  */
-export function currentResearch(state: GameState): ResearchState | undefined {
+export function currentResearch(
+  state: GameState,
+  content?: EngineContent,
+): ResearchState | undefined {
   const selected = selectedResearch(state);
-  if (selected !== undefined) return selected;
+  if (selected !== undefined && !isPointsSaturated(state, content, selected)) return selected;
+  let fallback: ResearchState | undefined;
   for (const research of entitiesOfKind(state, "research")) {
     if (research.completedTick !== null) continue;
     if (isIrreversiblyLost(research)) continue;
+    fallback ??= research;
+    if (isPointsSaturated(state, content, research)) continue;
     return research;
   }
-  return undefined;
+  // 全ての未完了研究が「点は満了・実地要件待ち」なら、従来どおり先頭へ入れる
+  // (点の行き先が無い state を作らない = M67 以前と同じ縮退)。
+  return fallback;
+}
+
+/**
+ * [M67] その研究が「研究点は満了しているが実地要件が未達」= **もう点を受け取れない**
+ * か(§3)。`content` 省略時 / `content.research` 不在では常に false なので、
+ * 引数 1 つの既存呼び出し(UI・テスト)は M67 以前と 1 bit も違わない。
+ *
+ * この判定が要るのは、点が入り続けても完了しない研究へ研究点を注ぎ続けると
+ * **その run の研究がまるごと止まる**ためである(実地要件が第2ゲートとして
+ * 「完了を保留する」ことの帰結は待ち時間であって、研究点の消滅ではない)。
+ */
+function isPointsSaturated(
+  state: GameState,
+  content: EngineContent | undefined,
+  research: ResearchState,
+): boolean {
+  if (content === undefined) return false;
+  if (toRaw(researchRemaining(content, research)) > 0) return false;
+  return !isFieldRequirementMet(state, content, research);
 }
 
 /**
@@ -160,11 +197,121 @@ export function applyResearchProgress(
   );
 }
 
+// --- 3. [M67] 実地要件 = 研究完了の第2ゲート(GDD 5 / 5.2) ------------------
+//
+//   2026-08-06裁定・台帳v20 必-1。**完了ゲート方式**である: 研究点が満了しても
+//   実地要件(該当施設での稼働時間)が未達なら完了しない。start-gate(要件を
+//   満たすまで研究点を入れない)にしなかったのは、研究点の行き先を変えると
+//   `currentResearch` の意味(GDD 2.2「放置しても (A) は失われない」)まで
+//   動くためで、完了だけを保留する方が既存の (B) 予測と同型に収まる。
+//
+//   完了 tick の予測は **max(研究点満了 tick, 実地要件充足 tick)** の閉形式で
+//   あり、どちらの項も「残り / レート」の切り上げ(= 既存の研究完了予測と同型)
+//   なので分割不変性が保たれる: 区間を刻んで remaining が rate×Δ だけ減れば
+//   ceil(remaining/rate) はちょうど Δ 減り、max も同じだけ減る。
+//
+//   蓄積側((A) 区間の閉形式)は `rules/techMemory.ts` §4b。
+
+/**
+ * [M67] その tech の実地要件 tick 数(= `fieldRequirementCount × recipeRunTicks`)。
+ * content に `research` ブロックが無い / tech に `fieldRequirementCount` が無い
+ * 場合は **0**(= 要件なし。M67 以前と同一挙動)。
+ */
+export function fieldRequirementTicks(content: EngineContent, techId: EntityId): number {
+  const recipeRunTicks = content.research?.recipeRunTicks;
+  if (recipeRunTicks === undefined) return 0;
+  const count = content.techDefs.get(techId)?.fieldRequirementCount;
+  if (count === undefined || count <= 0) return 0;
+  return count * recipeRunTicks;
+}
+
+/**
+ * [M67] 実地要件の残り(Fix・0 以下なら充足済み)。
+ * 蓄積は `GameState.fieldRunTicksByTechId`(tech 別の累積稼働 tick)。
+ */
+export function fieldRequirementRemaining(
+  state: GameState,
+  content: EngineContent,
+  research: ResearchState,
+): Fix {
+  const requiredTicks = fieldRequirementTicks(content, research.techId);
+  if (requiredTicks <= 0) return FIX_ZERO;
+  const accumulated = getFieldRunTicks(state, research.techId) ?? FIX_ZERO;
+  return subFix(fixFromInt(requiredTicks), accumulated);
+}
+
+/**
+ * [M67] 実地要件が充足しているか(= 残り 0 以下)。
+ * 要件が無い content / tech では常に true。
+ */
+export function isFieldRequirementMet(
+  state: GameState,
+  content: EngineContent,
+  research: ResearchState,
+): boolean {
+  return toRaw(fieldRequirementRemaining(state, content, research)) <= 0;
+}
+
+/**
+ * [M67] 実地要件が充足するまでの tick 数。レートが 0 以下なら null(到達しない
+ * = 該当施設が 1 基も稼働していない)。式は {@link ticksUntilResearchComplete} と
+ * **完全に同型**(切り上げ・残り 0 以下なら 0)。
+ */
+export function ticksUntilFieldRequirement(remainingFix: Fix, ratePerTickFix: Fix): number | null {
+  return ticksUntilResearchComplete(remainingFix, ratePerTickFix);
+}
+
+/**
+ * [M67] 「点は満了しているが実地要件待ち」の研究を tick 順・ID 順で列挙する
+ * (§3)。研究点の行き先({@link currentResearch})から外れた研究も**完了だけは
+ * するべき**なので、scheduler はこの一覧ぶんの完了イベントも同期する。
+ *
+ * `content.research` が無い content では常に空(= M67 以前と同一)。
+ */
+export function fieldBlockedResearches(
+  state: GameState,
+  content: EngineContent,
+): readonly ResearchState[] {
+  if (content.research === undefined) return NO_RESEARCHES;
+  const result: ResearchState[] = [];
+  for (const research of entitiesOfKind(state, "research")) {
+    if (research.completedTick !== null) continue;
+    if (isIrreversiblyLost(research)) continue;
+    if (toRaw(researchRemaining(content, research)) > 0) continue;
+    if (isFieldRequirementMet(state, content, research)) continue;
+    result.push(research);
+  }
+  return result;
+}
+
+/** 空の研究一覧(アロケーションを避けるための共有値)。 */
+const NO_RESEARCHES: readonly ResearchState[] = [];
+
+/**
+ * [M67] 研究完了までの tick 数(**第2ゲート込み**)。
+ * 「研究点満了 tick」と「実地要件充足 tick」の **max**。どちらか一方でも
+ * 到達しない(null)なら完了しない = null。
+ */
+export function ticksUntilResearchCompleteGated(
+  remainingResearchFix: Fix,
+  researchRatePerTickFix: Fix,
+  remainingFieldFix: Fix,
+  fieldRatePerTickFix: Fix,
+): number | null {
+  const byPoints = ticksUntilResearchComplete(remainingResearchFix, researchRatePerTickFix);
+  if (byPoints === null) return null;
+  if (toRaw(remainingFieldFix) <= 0) return byPoints;
+  const byField = ticksUntilFieldRequirement(remainingFieldFix, fieldRatePerTickFix);
+  if (byField === null) return null;
+  return byPoints > byField ? byPoints : byField;
+}
+
 /**
  * 研究を完了させる((B) イベントの状態遷移)。進行度は減らさない(切り上げ由来の
  * 余剰をそのまま残す)。
  *
- * @throws {RulesError} 既に完了している / 進行度がコストに届いていない場合
+ * @throws {RulesError} 既に完了している / 進行度がコストに届いていない /
+ *   [M67] 実地要件が未達の場合
  */
 export function completeResearch(
   state: GameState,
@@ -182,6 +329,14 @@ export function completeResearch(
     throw new RulesError(
       `completeResearch: research "${researchId}" の進行度がコストに届いていない` +
         `((B) の完了 tick 予測と実際の進行が食い違っている)`,
+    );
+  }
+  // [M67] 第2ゲート(§3)。scheduler は max(...) の tick にしか完了イベントを
+  // 積まないので、ここへ未達で来るのは予測と蓄積が食い違っている実装バグである。
+  if (!isFieldRequirementMet(state, content, research)) {
+    throw new RulesError(
+      `completeResearch: research "${researchId}" の実地要件が未達` +
+        `(残り ${String(toRaw(fieldRequirementRemaining(state, content, research)))} raw tick・GDD 5.2)`,
     );
   }
   return updateEntity(state, researchId, "research", (r) => setField(r, "completedTick", tick));

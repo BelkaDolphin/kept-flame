@@ -817,8 +817,11 @@ function toTechDef(content: TechContent, issues: IssueCollector): TechDef | unde
   // [M13] 実地要件の施設(GDD 5 の「該当施設」)。engine は
   //   (1) masteryResist(u,t) の蓄積場所
   //   (2) 想起困難の「当該 tech 関連生産」の解決
-  // に使う(rules/techMemory.ts §1)。`recipe` / `count`(N 回稼働)はレシピ系が
-  // 未実装なので**写さない**(黙って捨てるのではなく、この注記が唯一の宣言)。
+  // に使う(rules/techMemory.ts §1)。
+  // [M67] **`count` も写す**(2026-08-06裁定・台帳v20 必-1)。研究完了の第2
+  // ゲート(GDD 5.2)として `count × balance.research.recipeRunTicks` tick の
+  // 該当施設稼働を要求する。`recipe` は識別子のまま据え置きで**写さない**
+  // (recipe entity は MVP 対象外。黙って捨てるのではなくこの注記が宣言)。
   // facility の実在確認は contentBundle.ts の cross-ref が済ませている。
   return {
     id: entityIdFromString(content.id),
@@ -827,6 +830,7 @@ function toTechDef(content: TechContent, issues: IssueCollector): TechDef | unde
     lossClass: content.lossClass,
     prereqs: [...content.prereqs].sort(compareUtf16).map((id) => entityIdFromString(id)),
     fieldFacilityId: entityIdFromString(content.fieldRequirement.facility),
+    fieldRequirementCount: content.fieldRequirement.count,
   };
 }
 
@@ -2220,6 +2224,11 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
       ? null
       : (toExodusParams(bundle.balance.exodus, issues) ?? undefined);
 
+  // [M67] 研究ペーシング(GDD 5.2 の第2ゲート)。**ブロック不在なら
+  //   EngineContent へキーを足さない** = 実地要件がゲートとして働かない
+  //   (M67 以前と 1 bit も違わない・既存 conformance シナリオがこの経路)。
+  const research = bundle.balance.research;
+
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
     // engine の stochastic.ts が 1〜1440 を要求する(1 = ADR-014(3) の Fallback)。
@@ -2272,7 +2281,13 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   // [M52] 開墾(GDD 9.1)。ブロック不在なら EngineContent へキーを足さない。
   const withReclaim = reclaim === null ? withOutpost : { ...withOutpost, reclaim };
   // [M28] 大移動 / 継承点(GDD 10.2〜10.5)。同上。
-  return ok(exodus === null ? withReclaim : { ...withReclaim, exodus });
+  const withExodus = exodus === null ? withReclaim : { ...withReclaim, exodus };
+  // [M67] 研究ペーシング(GDD 5.2)。同上。
+  return ok(
+    research === null
+      ? withExodus
+      : { ...withExodus, research: { recipeRunTicks: research.recipeRunTicks } },
+  );
 }
 
 /**

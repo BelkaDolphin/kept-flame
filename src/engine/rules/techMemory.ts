@@ -72,6 +72,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+  FIX_ONE,
   FIX_ZERO,
   addFix,
   clampFix,
@@ -95,7 +96,13 @@ import {
   type ResidentState,
   type TechMemoryState,
 } from "../state/state";
-import { setField, setTechMemories, setTechMemory, updateEntity } from "../state/update";
+import {
+  setField,
+  setFieldRunTicks,
+  setTechMemories,
+  setTechMemory,
+  updateEntity,
+} from "../state/update";
 import { compareUtf16 } from "../canonicalize";
 import { isCodified } from "./codify";
 import { RulesError, lossClassOfTech, type EngineContent, type TechDef } from "./types";
@@ -454,6 +461,134 @@ export function applyMasteryProgress(
   // Map の複製を 1 枚に抑える(update.ts の setTechMemories)。gains はキー昇順で
   // 重複が無いので、1 件ずつ書いた場合と結果は同一。
   return setTechMemories(state, updates);
+}
+
+// --- 4b. [M67] 実地要件の稼働蓄積((A) 区間の閉形式・§4 と同型) -------------
+//
+//   2026-08-06裁定・台帳v20 必-1 の最小形。GDD 5「テックは前提＋researchCost＋
+//   **実地要件(該当施設で該当レシピを N 回稼働)**で解禁」の第2ゲートを、
+//   「該当施設(`TechDef.fieldFacilityId`)が `count × recipeRunTicks` tick
+//   稼働する」と読み替えて実効化する(recipe ID は識別子のまま据え置き)。
+//
+//   蓄積は §4 の mastery とまったく同じ (A) 区間の閉形式である:
+//     ・レートは区間の入口で 1 回だけ確定({@link computeFieldRunGains})
+//     ・区間ぶんは「レート × 区間長」で一括加算({@link applyFieldRunProgress})
+//   レートは**非負の整数 × FIX_ONE** なので `mulFixInt` に丸めが入らず、
+//   どこで区間を切っても総和が一致する(分割不変性・advance.ts §3)。
+//
+//   **「稼働」の単位は施設インスタンス**である: `fieldFacilityId` の施設のうち
+//   「稼働している就労者が 1 人以上いる」ものを数え、その基数を 1 tick あたりの
+//   蓄積レートにする。人数でなく基数にしたのは、実地要件が「レシピを N 回まわす」
+//   = **作業台の回転数**であって延べ人時ではないためで、同じ施設に 2 人詰めても
+//   レシピの本数は増えない(2 基建てれば 2 本並行する)。
+//
+//   **対象 tech の範囲**は「research entity があり、まだ完了していない」もの
+//   だけである(mastery が「解禁済み」に限るのと対になる)。研究に着手して
+//   いない tech の実地稼働まで先取りすると、GDD 5.2 が求める「研究しながら
+//   現場で試す」第2ゲートが、着手前の待ち時間で自動的に満たされてしまう。
+//   完了した tech はキーを増やさない(state の肥大を避ける)。
+
+/** [M67] 1 tech ぶんの実地稼働蓄積レート。 */
+export interface FieldRunGainEntry {
+  readonly techId: EntityId;
+  readonly gainPerTickFix: Fix;
+}
+
+/** {@link computeFieldRunGains} の結果(techId 昇順)。 */
+export type FieldRunGains = readonly FieldRunGainEntry[];
+
+/** 空のレート集合(アロケーションを避けるための共有値)。 */
+export const NO_FIELD_RUN_GAINS: FieldRunGains = [];
+
+/**
+ * [M67] 実地要件が有効か(content に `research.recipeRunTicks` があるか)。
+ * 無い content では蓄積もゲートも一切走らない(= M67 以前と同一挙動)。
+ */
+export function isFieldRequirementActive(content: EngineContent): boolean {
+  return content.research !== undefined;
+}
+
+/** 研究進行中(entity があり未完了・(B) 永久喪失でない)の techId 集合。 */
+function pendingResearchTechIdSet(state: GameState): ReadonlySet<EntityId> {
+  const result = new Set<EntityId>();
+  for (const research of entitiesOfKind(state, "research")) {
+    if (research.completedTick !== null) continue;
+    if (isIrreversiblyLost(research)) continue;
+    result.add(research.techId);
+  }
+  return result;
+}
+
+/**
+ * [M67] 現在の state から 1 tick あたりの実地稼働蓄積レートを計算する
+ * ((A) 区間の入口・{@link computeMasteryGains} と同型)。
+ *
+ * `isActiveWorker` は生産式とまったく同じ述語を呼び出し側(production.ts)が
+ * 渡す(「稼働」の定義が 2 か所で分岐しないようにするため)。
+ */
+export function computeFieldRunGains(
+  state: GameState,
+  content: EngineContent,
+  isActiveWorker: (resident: ResidentState, facilityDefId: EntityId) => boolean,
+): FieldRunGains {
+  if (!isFieldRequirementActive(content)) return NO_FIELD_RUN_GAINS;
+  const pending = pendingResearchTechIdSet(state);
+  if (pending.size === 0) return NO_FIELD_RUN_GAINS;
+
+  // 施設定義 ID → 稼働中の基数(就労者が 1 人以上いる施設インスタンスの数)。
+  const runningByDefId = new Map<EntityId, number>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    let running = false;
+    for (const workerId of facility.workerIds) {
+      const resident = requireEntity(state, workerId, "resident");
+      if (!isActiveWorker(resident, facility.defId)) continue;
+      running = true;
+      break;
+    }
+    if (!running) continue;
+    runningByDefId.set(facility.defId, (runningByDefId.get(facility.defId) ?? 0) + 1);
+  }
+  if (runningByDefId.size === 0) return NO_FIELD_RUN_GAINS;
+
+  const entries: FieldRunGainEntry[] = [];
+  for (const tech of content.techDefs.values()) {
+    const facilityDefId = tech.fieldFacilityId;
+    if (facilityDefId === undefined) continue;
+    if (tech.fieldRequirementCount === undefined) continue;
+    if (!pending.has(tech.id)) continue;
+    const running = runningByDefId.get(facilityDefId);
+    if (running === undefined || running <= 0) continue;
+    entries.push({ techId: tech.id, gainPerTickFix: mulFixInt(FIX_ONE, running) });
+  }
+  // `content.techDefs` はロード側が ID 昇順で作るが、依存しないよう明示ソートする(§3)。
+  return entries.sort((a, b) => compareUtf16(a.techId, b.techId));
+}
+
+/**
+ * [M67] (A) 区間ぶんの実地稼働を一括適用する(§4b)。上限クランプは無い
+ * (要件を超えて積んでも害が無く、クランプを入れると「要件を引き上げた content
+ * で既存セーブが遡って未達になる」形の壊れ方を作るため)。
+ *
+ * @throws {RulesError} deltaTicks が 1 以上の整数でない場合
+ */
+export function applyFieldRunProgress(
+  state: GameState,
+  gains: FieldRunGains,
+  deltaTicks: number,
+): GameState {
+  if (!Number.isSafeInteger(deltaTicks) || deltaTicks < 1) {
+    throw new RulesError(`applyFieldRunProgress: deltaTicks ${String(deltaTicks)} は 1 以上の整数`);
+  }
+  if (gains.length === 0) return state;
+
+  const updates: [EntityId, Fix][] = [];
+  for (const gain of gains) {
+    const before = state.fieldRunTicksByTechId.get(gain.techId) ?? FIX_ZERO;
+    const after = addFix(before, mulFixInt(gain.gainPerTickFix, deltaTicks));
+    if (toRaw(after) === toRaw(before)) continue;
+    updates.push([gain.techId, after]);
+  }
+  return setFieldRunTicks(state, updates);
 }
 
 /**

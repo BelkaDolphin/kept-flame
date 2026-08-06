@@ -4,6 +4,9 @@
   "coarseTickMinutes": 10,
   "offlineClampTick": 4320,
   "safetyFactor": 1.5,
+  "research": {
+    "recipeRunTicks": 15
+  },
   "recallRiskParams": {
     "base_p": 0.036,
     "p_max": 0.35,

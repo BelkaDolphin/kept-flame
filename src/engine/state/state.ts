@@ -1146,6 +1146,23 @@ export interface GameState extends GameStateMeta {
    * 1 bit も動かないことの根拠(既存シナリオは 1 件も選択を持たない)。
    */
   readonly selectedResearchId: EntityId | null;
+  /**
+   * [M67] tech 別の累積実地稼働 tick(GDD 5「実地要件(該当施設で該当レシピを
+   * N 回稼働)」の第2ゲート・2026-08-06裁定・台帳v20 必-1)。キーは tech 定義
+   * ID、値は「その tech の研究が進行中の間に、`TechDef.fieldFacilityId` の施設が
+   * 稼働した延べ tick」(Fix)。
+   *
+   * 蓄積は `rules/techMemory.ts` の {@link computeFieldRunGains} /
+   * `applyFieldRunProgress` が mastery とまったく同じ (A) 区間の閉形式
+   * (レート × 区間長)で行うので、advance をどこで区切っても結果が変わらない
+   * (分割不変性・advance.ts §3)。
+   *
+   * まだ 1 tick も稼働していない tech はキーを持たない(= 0 と同義・遅延
+   * 初期化。`bondByPairKey` / `techMemoryByKey` と同じ設計)。**この Map が空で
+   * ある state は M67 以前と 1 bit も違わない**(content に
+   * `research.recipeRunTicks` が無ければキーは 1 つも生えない)。
+   */
+  readonly fieldRunTicksByTechId: ReadonlyMap<EntityId, Fix>;
 }
 
 /**
@@ -1293,6 +1310,23 @@ export function getTechMemory(state: GameState, key: string): TechMemoryState | 
  */
 export function techMemoryKeys(state: GameState): readonly string[] {
   return [...state.techMemoryByKey.keys()];
+}
+
+/**
+ * [M67] tech 別の累積実地稼働 tick({@link GameState.fieldRunTicksByTechId} の
+ * doc 参照)。まだ 1 tick も稼働していない tech は undefined(遅延初期化・
+ * `getBondValue` と同じ規約)。
+ */
+export function getFieldRunTicks(state: GameState, techId: EntityId): Fix | undefined {
+  return state.fieldRunTicksByTechId.get(techId);
+}
+
+/**
+ * [M67] 実地稼働を記録している tech ID を正準順(昇順)で返す。
+ * `techMemoryKeys` と同じく Map の反復順をそのまま使う。
+ */
+export function fieldRunTechIds(state: GameState): readonly EntityId[] {
+  return [...state.fieldRunTicksByTechId.keys()];
 }
 
 /**

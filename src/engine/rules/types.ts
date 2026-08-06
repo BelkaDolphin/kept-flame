@@ -254,10 +254,23 @@ export interface TechDef {
    * となる。省略を許すのは engine のテストフィクスチャのような縮約 tech 定義でも
    * rules が動くようにするためで、実 content は必ず値を持つ(schema で必須)。
    *
-   * `fieldRequirement.recipe` / `count`(N 回稼働)は engine 未実装であり
-   * content ローダーが写さない(レシピ系が入る段の担当)。
+   * **[M67] `fieldRequirement.count` は {@link fieldRequirementCount} で実効化
+   * された**(2026-08-06裁定・台帳v20 必-1)。`recipe` は識別子のまま据え置きで、
+   * ローダーは写さない(recipe entity は MVP 対象外)。
    */
   readonly fieldFacilityId?: EntityId;
+  /**
+   * [M67] 実地要件の回数(content の `tech.fieldRequirement.count`)。
+   * GDD 5「テックは前提＋researchCost＋**実地要件(該当施設で該当レシピを N 回
+   * 稼働)**で解禁」の N であり、engine は
+   * `N × content.research.recipeRunTicks` tick の**該当施設の稼働**として
+   * 解釈する(`ResearchPacingParams`)。
+   *
+   * **省略時 / `content.research` が無い場合は実地要件が働かない**
+   * (研究点だけで完了する = M67 以前と同じ)。engine のテストフィクスチャや
+   * 既存 conformance シナリオはこの経路を通る。
+   */
+  readonly fieldRequirementCount?: number;
 }
 
 /**
@@ -1030,6 +1043,25 @@ export interface EngineContent {
    * `purchaseInheritBonus` が `contentUnsupported` で拒否)。
    */
   readonly exodus?: ExodusParams;
+  /**
+   * [M67] 研究ペーシング(GDD 5.2 の第2ゲート = 実地要件)。**省略時は実地要件が
+   * ゲートとして働かない**(= M67 以前と 1 bit も違わない)。既存 conformance
+   * シナリオはこのブロックを持たないので、golden vector の既存分は不活性。
+   */
+  readonly research?: ResearchPacingParams;
+}
+
+/**
+ * [M67] 研究ペーシングのパラメータ(2026-08-06裁定・台帳v20 必-1 の最小形)。
+ *
+ * `tech.fieldRequirement` の recipe ID は**識別子のまま据え置き**であり、
+ * 実効化するのは `count` だけである。「該当施設で該当レシピを N 回稼働」を
+ * 「該当施設(`TechDef.fieldFacilityId`)が `N × recipeRunTicks` tick 稼働する」
+ * と読み替える(recipe entity は MVP 対象外)。
+ */
+export interface ResearchPacingParams {
+  /** レシピ 1 回ぶんの稼働 tick 換算(1 以上の整数)。 */
+  readonly recipeRunTicks: number;
 }
 
 // --- 5. advance のコンテキスト ---------------------------------------------

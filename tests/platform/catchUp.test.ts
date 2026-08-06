@@ -198,6 +198,7 @@ function withEntityOrder(state: GameState, ids: readonly EntityId[]): GameState 
     progression: state.progression,
     // [M50] 同上(state.ts 不変条件 (k))。研究対象の選択は引き継ぐ。
     selectedResearchId: state.selectedResearchId,
+    fieldRunTicksByTechId: state.fieldRunTicksByTechId,
   };
 }
 
@@ -238,6 +239,7 @@ describe("assertCanonicalSnapshot", () => {
       progression: BOARD.progression,
       // [M50] 同上(state.ts 不変条件 (k))。
       selectedResearchId: BOARD.selectedResearchId,
+      fieldRunTicksByTechId: BOARD.fieldRunTicksByTechId,
     };
     expect(() => {
       assertCanonicalSnapshot(broken);

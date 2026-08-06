@@ -82,9 +82,11 @@ import {
 import { applyCappedIntake, creditWasteGain, resolveCapacityByResourceId } from "./storage";
 import {
   buildImpairmentIndex,
+  computeFieldRunGains,
   computeMasteryGains,
   indexStopsFacility,
   isTechRelatedImpaired,
+  type FieldRunGains,
   type ImpairmentIndex,
   type MasteryGains,
 } from "./techMemory";
@@ -223,6 +225,13 @@ export interface ProductionRates {
    * 判定が生産式と定着で分岐しないよう、同じ 1 パスで両方を作る。
    */
   readonly masteryGains: MasteryGains;
+  /**
+   * [M67] tech ごとの実地稼働の蓄積レート(GDD 5.2 の第2ゲート・techId 昇順)。
+   * mastery と同じ (A) 区間の閉形式で積分されるレートなのでここに載せる
+   * (rules/techMemory.ts §4b)。**`content.research` が無ければ常に空**
+   * = M67 以前と 1 bit も違わない。
+   */
+  readonly fieldRunGains: FieldRunGains;
 }
 
 /**
@@ -422,6 +431,10 @@ export function computeProductionRates(state: GameState, ctx: AdvanceContext): P
     // [M13] 定着度の蓄積レート。「稼働している就労者」の判定は生産式と同一の
     // 述語({@link isWorkerActiveAtFacility})を渡して共有する。
     masteryGains: computeMasteryGains(state, ctx.content, (resident, facilityDefId) =>
+      isWorkerActiveAtFacility(state, ctx.content, resident, facilityDefId, state.tick, impairment),
+    ),
+    // [M67] 実地要件の稼働蓄積(GDD 5.2)。「稼働」の述語は生産式・定着と同一。
+    fieldRunGains: computeFieldRunGains(state, ctx.content, (resident, facilityDefId) =>
       isWorkerActiveAtFacility(state, ctx.content, resident, facilityDefId, state.tick, impairment),
     ),
   };

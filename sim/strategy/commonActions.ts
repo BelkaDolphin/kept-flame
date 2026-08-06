@@ -701,6 +701,39 @@ export function fieldFacilityIdsNeedingStaffing(
   );
 }
 
+/**
+ * [Phase B / M67] クリティカル資源(建設/開墾コスト資源)を産出する施設定義の
+ * うち、**就労者が 1 人も居ない**ものを定義 ID 昇順で返す。
+ *
+ * M67 で実地要件が実効化されると bot は forge のような施設をわざわざ建てて
+ * 就労させるようになるが、そこで作られた鉄が foundry の建設コストに使われた
+ * 瞬間、**鉄はクリティカル資源になる**(`gdd-11.4-2a` の定義)。研究が全部
+ * 終わったあとに forge の就労者が死亡/派遣で抜けるとその資源の産出経路が
+ * run 後半で 0 になり、構造 assert が落ちる(実測 researchFirst/nightly-b:iron)。
+ * 均等配属は配属替えをしないため、無配属が居ない盤面では二度と埋まらない。
+ * 実地要件の配置替えと**同じ部品**で埋め直せるようにする。
+ */
+export function unstaffedCriticalProducerDefIds(
+  state: GameState,
+  content: EngineContent,
+): readonly EntityId[] {
+  const criticalResourceIds = criticalBuildResourceIds(state, content);
+  if (criticalResourceIds.size === 0) return [];
+  const workerCounts = workerCountByDefId(state);
+  const result: EntityId[] = [];
+  const seen = new Set<EntityId>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (seen.has(facility.defId)) continue;
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "resource") continue;
+    if (!criticalResourceIds.has(def.output.resourceId)) continue;
+    seen.add(facility.defId);
+    if ((workerCounts.get(facility.defId) ?? 0) > 0) continue;
+    result.push(facility.defId);
+  }
+  return result.sort(compareUtf16);
+}
+
 export interface FieldRequirementStaffingResult {
   readonly command: AssignResidentCommand | undefined;
   readonly recallGuardLog: readonly RecallGuardLogEntry[];
@@ -723,6 +756,7 @@ export function buildFieldRequirementStaffingCommand(
   alreadyAssignedResidentIds: ReadonlySet<EntityId>,
   tick: number,
   botId: string,
+  allowReassign = false,
 ): FieldRequirementStaffingResult {
   const def = content.facilityDefs.get(facilityId);
   if (def === undefined) return { command: undefined, recallGuardLog: [] };
@@ -740,7 +774,7 @@ export function buildFieldRequirementStaffingCommand(
   if (targetFacilityId === undefined) return { command: undefined, recallGuardLog: [] };
 
   const recallGuardLog: RecallGuardLogEntry[] = [];
-  for (const resident of livingIdleResidents(state)) {
+  for (const resident of staffingCandidates(state, content, allowReassign)) {
     if (alreadyAssignedResidentIds.has(resident.id)) continue;
     if (def.harshWork) {
       const check = recallGuardBlocks(state, content, resident, "harshAssignment", tick, botId);
@@ -755,6 +789,104 @@ export function buildFieldRequirementStaffingCommand(
     };
   }
   return { command: undefined, recallGuardLog };
+}
+
+/**
+ * [Phase B / M67] 実地要件施設へ回せる住民(**無配属が先・次に配置替え可能な
+ * 配属済み**)。ID 昇順(`entitiesOfKind` の正準順)。
+ *
+ * Phase A は「無配属の余り住民だけ」だったが、M67 で実地要件が実効化すると
+ * それでは足りないことが実測で判明した: 8 人規模の盤面では run の早い段階で
+ * 全住民が配属され、**その後に建った実地要件施設(典型は forge)が最後まで
+ * 無人のまま**になる(均等配属 `buildAssignmentCommands` は無配属の住民しか
+ * 動かさない)。結果、研究点が満了しても実地要件が永久に満たされず
+ * **researchFirst / codifyFirst が E2 で恒久停止**した(40 ゲーム日 run で
+ * `techSmelting` が field=0 のまま・`gdd-11.4-3-era3-reached` が 7/15 へ)。
+ *
+ * 配置替えの対象は 2 段で絞る(実測で 2 回作り直した):
+ *   (1) **クリティカル資源の唯一の就労者は除外**({@link soleCriticalProducerResidentIds}・
+ *       派遣保護と同じ定義を再利用)。Phase A が踏んだ「hearth の唯一の就労者を
+ *       奪って薪産出が恒久ゼロ」(`gdd-11.4-2a` 構造 fail)を防ぐ。
+ *   (2) さらに **資源産出施設(`output.kind === "resource"`)で就労者が 1 人だけ**
+ *       の住民も除外する。(1) だけでは不足だった: 実地要件の対象施設は tech が
+ *       進むたび forge ↔ workbench と入れ替わるので、「今 forge が要る」→ forge へ
+ *       移す →「次は workbench が要る」→ forge の唯一の就労者を workbench へ戻す、
+ *       という往復が起き、鉄の産出レートが run 後半の全標本で 0 になった
+ *       (`gdd-11.4-2a` 構造 fail・実測 researchFirst/nightly-b:iron)。研究点を
+ *       産む施設(`output.kind === "research"`)は盤面に何種もあるので、そちらから
+ *       1 人借りても産出経路は消えない。
+ *   (3) ただし研究点を産む施設が**盤面で 1 基しか稼働していない**なら、その
+ *       就労者も除外する({@link soleStaffedResearchProducerResidentIds})。
+ *       (2) だけだと研究点産出が全滅する逆向きの偏りが起きた。
+ * **無配属が 1 人でも居ればそちらが優先**であり、さらに `allowReassign` が false
+ * (= 研究が実際には実地要件で詰まっていない)なら配置替えは一切行わない。
+ * 通常時の挙動は Phase A と同一である。
+ */
+function staffingCandidates(
+  state: GameState,
+  content: EngineContent,
+  allowReassign: boolean,
+): readonly ResidentState[] {
+  const idle = livingIdleResidents(state);
+  if (idle.length > 0 || !allowReassign) return idle;
+  const protectedIds = new Set<EntityId>([
+    ...soleCriticalProducerResidentIds(state, content),
+    ...soleResourceProducerResidentIds(state, content),
+    ...soleStaffedResearchProducerResidentIds(state, content),
+  ]);
+  const result: ResidentState[] = [];
+  for (const resident of entitiesOfKind(state, "resident")) {
+    if (!isAliveResident(resident)) continue;
+    if (resident.dispatched) continue;
+    if (resident.assignedFacilityId === null) continue;
+    if (protectedIds.has(resident.id)) continue;
+    result.push(resident);
+  }
+  return result;
+}
+
+/**
+ * [Phase B / M67] 研究点を産む施設(`output.kind === "research"`)で就労者が
+ * 居るものが**盤面にただ 1 基**のとき、その就労者を保護する
+ * ({@link staffingCandidates} (3))。ここを抜くと「資源産出は全部保護 →
+ * 動かせるのは研究点産出だけ → 研究点産出が全滅」という逆向きの偏りが起き、
+ * 研究レートが run 後半で 0 に張り付いた(実測 greedy/nightly-b: 研究点産出
+ * 施設の就労者が 0 人・techSmelting が progress=0 のまま)。
+ */
+function soleStaffedResearchProducerResidentIds(
+  state: GameState,
+  content: EngineContent,
+): ReadonlySet<EntityId> {
+  const staffed: EntityId[][] = [];
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (facility.workerIds.length === 0) continue;
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "research") continue;
+    staffed.push([...facility.workerIds]);
+  }
+  if (staffed.length !== 1) return new Set();
+  return new Set(staffed[0]);
+}
+
+/**
+ * [Phase B / M67] 資源産出施設(`output.kind === "resource"`)のうち、その施設
+ * インスタンスの就労者が 1 人だけのものの住民 ID({@link staffingCandidates} (2))。
+ * {@link soleCriticalProducerResidentIds} と違い**定義単位ではなくインスタンス
+ * 単位**で見る(同じ定義が 2 基あっても、片方を空にすればその基の産出は 0 になる)。
+ */
+function soleResourceProducerResidentIds(
+  state: GameState,
+  content: EngineContent,
+): ReadonlySet<EntityId> {
+  const result = new Set<EntityId>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    if (facility.workerIds.length !== 1) continue;
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "resource") continue;
+    const soleWorkerId = facility.workerIds[0];
+    if (soleWorkerId !== undefined) result.add(soleWorkerId);
+  }
+  return result;
 }
 
 /**

@@ -50,6 +50,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Command } from "../../src/engine/commands";
+import { fieldBlockedResearches } from "../../src/engine/rules/research";
 import type { EngineContent } from "../../src/engine/rules/types";
 import { entityIdFromString, type EntityId, type GameState } from "../../src/engine/state/state";
 import { GAME_DAY_TICKS } from "../../src/engine/stochastic";
@@ -64,6 +65,7 @@ import {
   currentResearchTechId,
   fieldFacilityIdsNeedingConstruction,
   fieldFacilityIdsNeedingStaffing,
+  unstaffedCriticalProducerDefIds,
   pickResearchTargets,
   researchCommand,
   type AssignmentPolicy,
@@ -185,8 +187,14 @@ function decideGeneric(
       : currentResearchTechId(state);
   const fieldRequirementTechIds =
     primaryResearchTechId === undefined ? [] : [primaryResearchTechId];
+  // [Phase B / M67] **建設側だけ**は「今日バックログへ積んだ tech 全部」を見る
+  // (配属側は Phase A のとおり主対象 1 本のまま)。M67 で実地要件が実効化すると、
+  // 主対象になってから慌てて建て始める bot(研究優先)は forge の建設が数日
+  // 遅れ、壁テック到達が貪欲より遅くなる(実測: E2/E3 で逆転)。建設側の
+  // 差し込みは既存就労者を奪わない(Phase A §4b の doc)ので、対象を広げても
+  // Phase A が踏んだ構造ソフトロックは起きない。
   const fieldFacilityIdsToBuild = fieldFacilityIdsNeedingConstruction(
-    fieldRequirementTechIds,
+    researchTechIds.length > 0 ? researchTechIds : fieldRequirementTechIds,
     state,
     content,
   );
@@ -226,11 +234,22 @@ function decideGeneric(
     state,
     content,
   );
-  const fieldFacilityIdToStaff = fieldFacilityIdsToStaff[0];
+  // [Phase B / M67] 実地要件の対象が満ちていても、クリティカル資源の産出施設が
+  // 無人になっていれば同じ部品で埋め直す(commonActions.ts の
+  // `unstaffedCriticalProducerDefIds` の doc)。
+  const staffTargets =
+    fieldFacilityIdsToStaff.length > 0
+      ? fieldFacilityIdsToStaff
+      : unstaffedCriticalProducerDefIds(state, content);
+  const fieldFacilityIdToStaff = staffTargets[0];
   if (fieldFacilityIdToStaff !== undefined) {
     const alreadyAssignedResidentIds = new Set(
       assignResult.commands.map((command) => command.residentId),
     );
+    // [Phase B / M67] 実地要件が**実際に研究を止めている**ときだけ、無配属が
+    // 居なくても配置替えで 1 人回す(commonActions.ts §4b `staffingCandidates`)。
+    // 「対象施設が無人」だけを条件にすると盤面の配属が毎日入れ替わり、資源産出も
+    // 研究点産出も run 後半で 0 に張り付く(実測・§4b の doc)。
     const staffing = buildFieldRequirementStaffingCommand(
       state,
       content,
@@ -238,6 +257,7 @@ function decideGeneric(
       alreadyAssignedResidentIds,
       tick,
       botId,
+      fieldBlockedResearches(state, content).length > 0 || fieldFacilityIdsToStaff.length === 0,
     );
     if (staffing.command !== undefined) commands.push(staffing.command);
     recallGuardLog.push(...staffing.recallGuardLog);

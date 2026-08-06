@@ -509,12 +509,30 @@ function buildTechMemoryMap(
 }
 
 /**
+ * [M67] tech 別の累積実地稼働 tick の Map を techId 昇順の正準順で作る
+ * (§3 / state.ts の `GameState.fieldRunTicksByTechId`。{@link buildBondMap} と同型)。
+ */
+function buildFieldRunTicksMap(
+  entries: readonly (readonly [EntityId, Fix])[],
+): ReadonlyMap<EntityId, Fix> {
+  const map = new Map<EntityId, Fix>();
+  for (const [techId, value] of [...entries].sort((a, b) => compareUtf16(a[0], b[0]))) {
+    if (map.has(techId)) {
+      throw new StateUpdateError(`fieldRunTicks の tech ID "${techId}" が重複している`);
+    }
+    map.set(techId, value);
+  }
+  return map;
+}
+
+/**
  * GameState を作る唯一の入口。entity 列は渡された順に依らず ID 昇順の正準順で
  * Map 化される(§3)。新規セーブの生成と fromSerializable(serialize.ts)が使う。
  *
  * `rngState` を省略した場合は空(= どのドメインもまだ 1 度も引いていない)になる。
  * 遅延初期化ゆえ、空で始めても初回 draw の結果は同じである(state.ts §4)。
  * `bondByPairKey`([M12])・`techMemoryByKey`([M13])も同じ規約(省略時は空)。
+ * [M67] `fieldRunTicksByTechId` も同じ規約(省略時は空 = 実地稼働の記録なし)。
  * [M24] `outposts` も同じ規約(省略時は空 = 拠点なし)。
  * [M52] `terrain` も同じ規約で、**省略時は瓦礫ゼロ = 全 48 セル開墾済み**
  * (state.ts の `GameState.terrain` の doc)。初期盤面の瓦礫を撒くのは content を
@@ -542,6 +560,7 @@ export function createGameState(
   terrain: TerrainState = EMPTY_TERRAIN,
   progression: ProgressionState = EMPTY_PROGRESSION,
   selectedResearchId: EntityId | null = null,
+  fieldRunTicksByTechId: readonly (readonly [EntityId, Fix])[] = [],
 ): GameState {
   for (const entity of entities) {
     requireValidId(entity);
@@ -567,6 +586,7 @@ export function createGameState(
     terrain,
     progression,
     selectedResearchId,
+    fieldRunTicksByTechId: buildFieldRunTicksMap(fieldRunTicksByTechId),
   };
 }
 
@@ -757,6 +777,31 @@ export function setTechMemories(
   // なら Map.set が挿入位置を変えないので順序は不変(§3)。
   if (!hasNewKey) return setField(state, "techMemoryByKey", next);
   return setField(state, "techMemoryByKey", buildTechMemoryMap([...next.entries()]));
+}
+
+/**
+ * [M67] tech 別の累積実地稼働 tick を**まとめて**差し替える
+ * ({@link setTechMemories} と同型)。区間ごとに進行中の全 tech を同時更新する
+ * ので、Map の複製を 1 枚に抑える。
+ */
+export function setFieldRunTicks(
+  state: GameState,
+  entries: readonly (readonly [EntityId, Fix])[],
+): GameState {
+  if (entries.length === 0) return state;
+  let hasNewKey = false;
+  for (const [techId] of entries) {
+    if (!state.fieldRunTicksByTechId.has(techId)) {
+      hasNewKey = true;
+      break;
+    }
+  }
+  const next = new Map(state.fieldRunTicksByTechId);
+  for (const [techId, value] of entries) {
+    next.set(techId, value);
+  }
+  if (!hasNewKey) return setField(state, "fieldRunTicksByTechId", next);
+  return setField(state, "fieldRunTicksByTechId", buildFieldRunTicksMap([...next.entries()]));
 }
 
 /**

@@ -285,7 +285,10 @@ describe("[M65] buildCost の複数資源化 — ローダー段", () => {
     const extra = cost.extraLines?.[0];
     if (extra === undefined) throw new Error("forge の追加コスト行が無い");
     expect(extra.resourceId).toBe(entityIdFromString("charcoal"));
-    expect(toRaw(extra.buildFix)).toBe(6_000_000);
+    // 建設側は 0(= 建設のみの出口を作らない・増築で払う)。M67 の実地要件と
+    // 組み合わせると「木炭が無いと forge が建たない → 研究が恒久停止」に
+    // なることが夜間ゲートの実測で判明したため、木炭は増築側に寄せてある。
+    expect(toRaw(extra.buildFix)).toBe(0);
     expect(extra.upgradeByLevel.map((fix) => toRaw(fix))).toEqual([
       7_000_000, 8_000_000, 10_000_000, 12_000_000, 14_000_000,
     ]);

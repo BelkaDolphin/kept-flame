@@ -234,6 +234,16 @@
 //   各 research entity の `progress` は選択と独立に保存され続け、失われるのは
 //   「どれへ点を入れるか」の 1 スカラだけで、再選択 1 回で完全に元へ戻る。
 //   詳細な両論と bump したい場合の手順は M50 の★報告に記録してある。
+//
+// ===========================================================================
+// 13. [M67] `fieldRunTicksByTechId`(実地稼働の累積)は §3/§6/§8 と同型
+// ===========================================================================
+//   GDD 5.2 の第2ゲート(実地要件)の蓄積量であり、GameState 直下の
+//   `techId → Fix` の Map である。**空なら書き出さない**規約は rngState /
+//   bondByPairKey / techMemoryByKey とまったく同じで、既存セーブ・既存
+//   golden vector のバイト列が 1 bit も動かないことの根拠になる
+//   (content に `research.recipeRunTicks` が無ければキーは 1 つも生えない)。
+//
 // ---------------------------------------------------------------------------
 
 import { canonicalizeJson, compareUtf16 } from "../canonicalize";
@@ -488,6 +498,12 @@ export type SerializedGameState = {
    * キー不在 = 未選択 = 従来どおり ID 昇順先頭が対象、と解釈される。
    */
   readonly selectedResearchId?: string;
+  /**
+   * [M67] tech 別の累積実地稼働 tick(GDD 5.2 の第2ゲート・§13)。
+   * 空なら `rngState` / `bondByPairKey` / `techMemoryByKey` と同じ規約で
+   * キーごと省略される(= M67 以前のセーブとバイト同一)。
+   */
+  readonly fieldRunTicksByTechId?: { readonly [techId: string]: number };
 };
 
 /**
@@ -1108,6 +1124,14 @@ export function toSerializable(state: GameState): SerializedGameState {
   // バイト同一(= 既存 golden vector 73 本が動かないことの根拠)。
   if (state.selectedResearchId !== null) {
     optional.push(["selectedResearchId", state.selectedResearchId]);
+  }
+  // [M67] 実地稼働の累積(§13)。空なら省略 = M67 以前のセーブとバイト同一。
+  if (state.fieldRunTicksByTechId.size > 0) {
+    const fieldRunEntries: [string, number][] = [];
+    for (const [techId, value] of state.fieldRunTicksByTechId) {
+      fieldRunEntries.push([techId, toRaw(value)]);
+    }
+    optional.push(["fieldRunTicksByTechId", Object.fromEntries(fieldRunEntries)]);
   }
   const raw: SerializedGameState =
     optional.length === 0
@@ -1987,6 +2011,21 @@ function deserializeSelectedResearchId(value: unknown): EntityId | null {
   return entityIdFromString(id);
 }
 
+/**
+ * [M67] `fieldRunTicksByTechId`(§13)を読む。キーは tech 定義 ID、値は raw 整数。
+ * 形式検査は `bondByPairKey` / `techMemoryByKey` と同じ層(ID 規則のみ)。
+ */
+function deserializeFieldRunTicksByTechId(value: unknown): readonly (readonly [EntityId, Fix])[] {
+  if (value === undefined) return [];
+  const o = requireObject(value, "$.fieldRunTicksByTechId");
+  const result: (readonly [EntityId, Fix])[] = [];
+  for (const key of Object.keys(o)) {
+    const path = `$.fieldRunTicksByTechId.${key}`;
+    result.push([requireEntityId(key, path), requireFix(o[key], path)]);
+  }
+  return result;
+}
+
 /** [M21] `renderedLogs`(§9)を読む。キーが無ければ空(正準形)。 */
 function deserializeRenderedLogs(value: unknown): RenderedLogState {
   if (value === undefined) return EMPTY_RENDERED_LOGS;
@@ -2055,5 +2094,6 @@ export function fromSerializable(input: unknown): GameState {
     deserializeTerrain(root["terrain"]),
     deserializeProgression(root["progression"]),
     deserializeSelectedResearchId(root["selectedResearchId"]),
+    deserializeFieldRunTicksByTechId(root["fieldRunTicksByTechId"]),
   );
 }
