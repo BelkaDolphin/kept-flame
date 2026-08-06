@@ -523,4 +523,51 @@ export const VECTOR_PLANS: readonly VectorPlan[] = [
     60,
     ["exp-reward-waste-accounting-excluded"],
   ),
+
+  // --- sc44-care-rest(M66: 療養所の休養で持続が「休養1日」へ短縮される) ----
+  // 発生は (C) の抽選なので RNG に依存する。alpha 1 本 + 分割 1 本。
+  plan("sc44-care-rest-alpha", "sc44-care-rest", SEEDS.alpha, 5760, [
+    "care-rest-shortens-recall",
+    "care-capacity-limits-rest",
+  ]),
+  plan(
+    "sc44-care-rest-split-alpha",
+    "sc44-care-rest",
+    SEEDS.alpha,
+    5760,
+    ["care-split-at-rest-recovery"],
+    { splitTicks: "first-recall-recovery" },
+  ),
+
+  // --- sc45/sc46-raid(M66: 襲撃の勝敗を防衛係数が決める・発火/非発火の対) --
+  plan("sc45-raid-loot-alpha", "sc45-raid-loot", SEEDS.alpha, 4321, [
+    "raid-stage10-fires",
+    "raid-loot-on-defeat",
+  ]),
+  plan(
+    "sc45-raid-loot-split-alpha",
+    "sc45-raid-loot",
+    SEEDS.alpha,
+    9000,
+    ["raid-split-at-raid-tick"],
+    { splitTicks: [4320] },
+  ),
+  plan("sc46-raid-repelled-alpha", "sc46-raid-repelled", SEEDS.alpha, 4321, [
+    "raid-defense-repels",
+    "raid-perimeter-bonus",
+  ]),
+
+  // --- sc47-morale(M72: 士気の低下/回復/trait/floor) -----------------------
+  // RNG 非依存(士気は決定論のレート積分)だが、(C) の抽選は同居している。
+  plan("sc47-morale-alpha", "sc47-morale", SEEDS.alpha, 57_600, [
+    "morale-harsh-work-drop",
+    "morale-normal-work-recover",
+    "morale-routine-floor",
+    "morale-trait-optimist-pessimist",
+    "morale-idle-unchanged",
+  ]),
+  plan("sc47-morale-split-alpha", "sc47-morale", SEEDS.alpha, 57_600, ["morale-split-invariant"], {
+    // floor 到達(過酷業務)と上限 100 到達(通常業務)の**両方を跨ぐ**位置で割る。
+    splitTicks: [700, 14_400, 30_000],
+  }),
 ];

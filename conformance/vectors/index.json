@@ -1,5 +1,5 @@
 {
-  "algoVersion": 5,
+  "algoVersion": 6,
   "baseContentVectorIds": [
     "sc01-clamp-exact",
     "sc01-clamp-over",
@@ -165,6 +165,13 @@
       "file": "sc42-field-requirement-split-alpha.json",
       "vectorId": "sc42-field-requirement-split-alpha"
     },
-    { "file": "v-7df92bb2.json", "vectorId": "sc43-exp-reward-waste-accounting-alpha" }
+    { "file": "v-7df92bb2.json", "vectorId": "sc43-exp-reward-waste-accounting-alpha" },
+    { "file": "sc44-care-rest-alpha.json", "vectorId": "sc44-care-rest-alpha" },
+    { "file": "sc44-care-rest-split-alpha.json", "vectorId": "sc44-care-rest-split-alpha" },
+    { "file": "sc45-raid-loot-alpha.json", "vectorId": "sc45-raid-loot-alpha" },
+    { "file": "sc45-raid-loot-split-alpha.json", "vectorId": "sc45-raid-loot-split-alpha" },
+    { "file": "sc46-raid-repelled-alpha.json", "vectorId": "sc46-raid-repelled-alpha" },
+    { "file": "sc47-morale-alpha.json", "vectorId": "sc47-morale-alpha" },
+    { "file": "sc47-morale-split-alpha.json", "vectorId": "sc47-morale-split-alpha" }
   ]
 }

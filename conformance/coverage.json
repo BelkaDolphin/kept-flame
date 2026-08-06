@@ -1196,6 +1196,108 @@
       "refs": ["GDD 8.1⑥", "GDD 11.4-7c", "src/engine/rules/storage.ts §2c", "台帳v20 必-3(2)"],
       "observedBy": ["digest"],
       "note": "[Phase B] sc43-exp-reward-waste-accounting-alpha。薪と廃材の両方に上限を置いて『上限あり』分岐を踏ませる(sc37 は薪だけなので会計フィールドが生えなかった)"
+    },
+    {
+      "id": "care-rest-shortens-recall",
+      "title": "療養所の休養枠に入った住民は想起困難の持続が「発生 + restRecoveryTicks」へ短縮される",
+      "refs": ["GDD 11.2 回復条件", "src/engine/rules/care.ts §1(b)"],
+      "observedBy": ["digest"],
+      "note": "[M66] sc44-care-rest-alpha。patch から balance.care を外すと同じ乱数列で回復 tick が抽選値(1440〜2880)のままになり digest が動く"
+    },
+    {
+      "id": "care-capacity-limits-rest",
+      "title": "休養枠は施設の careCapacityCurve の総和までで、超える住民は休養しない(ID 昇順)",
+      "refs": ["GDD 6.1 療養所", "src/engine/rules/care.ts §1(a)"],
+      "observedBy": ["digest"],
+      "note": "[M66] sc44-care-rest-alpha(Lv1 の療養所 1 基 = 枠 1 人)"
+    },
+    {
+      "id": "care-split-at-rest-recovery",
+      "title": "分割不変性: 休養で短縮された回復 tick ちょうどで advance を区切っても一括実行と一致する",
+      "refs": ["advance.ts §3", "src/engine/rules/care.ts"],
+      "observedBy": ["split-digest"],
+      "note": "[M66] sc44-care-rest-split-alpha(splitTicks=first-recall-recovery)"
+    },
+    {
+      "id": "raid-stage10-fires",
+      "title": "襲撃が絶対グリッド(n × intervalTicks)の tick に段10 で発火する",
+      "refs": [
+        "GDD 11.7 段10",
+        "src/engine/rules/raid.ts §1(e)",
+        "src/engine/scheduler.ts PIPELINE_STAGE.raid"
+      ],
+      "observedBy": ["digest"],
+      "note": "[M66] sc45-raid-loot-alpha(tick 4320)。balance.raid を外すと一度も発火しない"
+    },
+    {
+      "id": "raid-loot-on-defeat",
+      "title": "撃退に失敗すると全資源の在庫から lootRatio ぶんが略奪される(住民は死なず施設も壊れない)",
+      "refs": ["GDD 11.1 戦闘/全滅回避フェイルセーフ", "src/engine/rules/raid.ts §1(d)"],
+      "observedBy": ["digest"],
+      "note": "[M66] sc45-raid-loot-alpha(防衛 0 の盤面)"
+    },
+    {
+      "id": "raid-split-at-raid-tick",
+      "title": "分割不変性: 襲撃 tick ちょうどで advance を区切っても一括実行と一致する",
+      "refs": ["advance.ts §3", "scheduler.ts §2"],
+      "observedBy": ["split-digest"],
+      "note": "[M66] sc45-raid-loot-split-alpha(splitTicks=[4320])"
+    },
+    {
+      "id": "raid-defense-repels",
+      "title": "Σ防衛戦力 + seededRoll が襲撃強度以上なら撃退され在庫が 1 も減らない",
+      "refs": ["GDD 11.1 戦闘", "src/engine/rules/raid.ts"],
+      "observedBy": ["digest"],
+      "note": "[M66] sc46-raid-repelled-alpha。sc45(見張り台なし)との対で防衛係数が勝敗を決めていることが反証つきで出る"
+    },
+    {
+      "id": "raid-perimeter-bonus",
+      "title": "外周セルに置かれた防衛施設には配置ボーナス(perimeterDefenseMul)が掛かる",
+      "refs": ["GDD 6.2 見張り台", "src/engine/rules/raid.ts §1(b)"],
+      "observedBy": ["digest"],
+      "note": "[M66] sc46-raid-repelled-alpha(セル 0 = 外周・Lv1 20 × 1.5 = 30 = 基準強度 30 ちょうど)"
+    },
+    {
+      "id": "morale-harsh-work-drop",
+      "title": "過酷業務(harshWork)への就労で士気が harshWorkDropPerDay のレートで低下する",
+      "refs": ["GDD 4.2", "GDD 11.2", "src/engine/rules/morale.ts §1"],
+      "observedBy": ["digest"],
+      "note": "[M72] sc47-morale-alpha。balance.morale を外すと士気が 1 も動かない"
+    },
+    {
+      "id": "morale-normal-work-recover",
+      "title": "通常業務への就労で士気が normalWorkRecoverPerDay のレートで回復し 100 で頭打ちになる",
+      "refs": ["GDD 11.2 回復条件", "src/engine/rules/morale.ts §1"],
+      "observedBy": ["digest"],
+      "note": "[M72] sc47-morale-alpha(初期 95 → 上限 100)"
+    },
+    {
+      "id": "morale-routine-floor",
+      "title": "業務由来の士気低下は routineFloor(実効士気)で止まり、GDD 11.2 の moraleW 閾値 30 を割らない",
+      "refs": ["GDD 11.2 moraleW", "src/engine/rules/morale.ts §1(c)"],
+      "observedBy": ["digest"],
+      "note": "[M72] sc47-morale-alpha(実効 35 で停止)"
+    },
+    {
+      "id": "morale-trait-optimist-pessimist",
+      "title": "trait 楽観/悲観(morale ±10)が実効士気に効き、floor が実効側に掛かるので蓄積士気の停止位置がずれる",
+      "refs": ["GDD 7.2", "src/engine/rules/morale.ts §1(d)"],
+      "observedBy": ["digest"],
+      "note": "[M72] sc47-morale-alpha(悲観の住民は蓄積 45 = 実効 35 で停止)"
+    },
+    {
+      "id": "morale-idle-unchanged",
+      "title": "無配属・派遣中の住民の士気は動かない(GDD が名指すのは過酷業務と通常業務就労だけ)",
+      "refs": ["src/engine/rules/morale.ts §1(b)"],
+      "observedBy": ["digest"],
+      "note": "[M72] sc47-morale-alpha"
+    },
+    {
+      "id": "morale-split-invariant",
+      "title": "分割不変性: floor / 上限クランプを跨ぐ位置で advance を割っても士気が一致する",
+      "refs": ["advance.ts §3", "src/engine/rules/morale.ts §3"],
+      "observedBy": ["split-digest"],
+      "note": "[M72] sc47-morale-split-alpha(splitTicks=[700,14400,30000])"
     }
   ]
 }

@@ -1,0 +1,42 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 1820,
+    "counters": {
+      "rateChangeEventCount": 0,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 5760,
+      "stochasticStepCount": 5760,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 8,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 27029036160000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 57600
+    },
+    "stateDigest": "080381359516a1a159d8403bf9e1dd85"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": [
+    "morale-harsh-work-drop",
+    "morale-normal-work-recover",
+    "morale-routine-floor",
+    "morale-trait-optimist-pessimist",
+    "morale-idle-unchanged"
+  ],
+  "scenarioId": "sc47-morale",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 57600,
+  "vectorId": "sc47-morale-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}

@@ -20,7 +20,7 @@ import { buildVector, diffVectors, loadStoredVector } from "../../tools/genGolde
 const registry = coverageJson as CoverageRegistry;
 
 describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
-  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50/M64/PhaseB 拡張のとおり 82 本ある", () => {
+  it("ベクタ計画が spec §6 + M10/M15/M20/M22/M25/M50/M64/PhaseB/PhaseC 拡張のとおり 89 本ある", () => {
     // 37 → 40: M10 で sc17-prod-full-alpha / sc18-sto-overflow-alpha /
     // sc18-sto-overflow-split-alpha の 3 本を追加(spec §9・conformance 拡張 #1)。
     // 40 → 56: M15 で住民系(sc19〜sc27・16 本)を追加(conformance 拡張 #2)。
@@ -56,7 +56,20 @@ describe("golden vectors(T7 後半・golden-vector-spec.md §6/§7)", () => {
     //   engine の観測挙動そのものは live content(`content/balance.json`)で変わるので、
     //   ADR-016(1) に従い algoVersion を 4 → 5 へ bump した(Phase B の 3 項目を
     //   1 回に束ねる裁定・台帳v20 必-5)。
-    expect(VECTOR_PLANS.length).toBe(82);
+    // 82 → 89: Phase C(2026-08-06裁定・台帳v20 必-4)で
+    //   sc44-care-rest ×2(M66 = 療養所の休養で想起困難の持続が「休養1日」へ短縮・
+    //   短縮後の回復 tick ちょうどの分割不変性)、
+    //   sc45-raid-loot ×2 / sc46-raid-repelled ×1(M66 = 襲撃(GDD 11.7 段10)の
+    //   発火と略奪・襲撃 tick ちょうどの分割不変性・**見張り台の防衛係数で撃退**
+    //   という発火/非発火の対)、
+    //   sc47-morale ×2(M72 = 士気の低下/回復/trait/floor とレート積分の分割不変性)
+    //   を追加。**既存 82 本は 1 バイトも動いていない**(実測): 凍結 content に
+    //   `balance.care` / `balance.raid` / `balance.morale` のどれも無く、
+    //   `infirmary.careCapacityCurve` / `watchtower.defenseCurve` も無いため
+    //   3 機構とも完全に不活性である。engine の観測挙動そのものは live content で
+    //   変わるので、ADR-016(1) に従い algoVersion を 5 → 6 へ bump した
+    //   (M66 + M72 を 1 回に束ねる裁定・台帳v20 必-5 の Phase C)。
+    expect(VECTOR_PLANS.length).toBe(89);
   });
 
   it("vectorId に重複が無い", () => {

@@ -461,6 +461,74 @@ function patchMasteryGainRate(
   };
 }
 
+/**
+ * [M66] 既存 facility へ Lv 別カーブを 1 本足す patch(凍結スナップショットの
+ * `infirmary.careCapacityCurve` / `watchtower.defenseCurve` を生やす)。
+ * content/*.json 側は M66 で同じフィールドを additive 追加済みだが、golden は
+ * 凍結スナップショット(M39 着手前)を入力にするのでここで足す。
+ */
+function patchFacilityCurve(
+  facilityId: string,
+  key: "careCapacityCurve" | "defenseCurve",
+  curve: readonly number[],
+): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => ({
+    ...raw,
+    facility: (clone(raw.facility) as Record<string, unknown>[]).map((entry) =>
+      entry["id"] === facilityId ? { ...entry, [key]: [...curve] } : entry,
+    ),
+  });
+}
+
+/** [M66] `balance.care`(療養所の休養・GDD 11.2)を入れる patch。 */
+function patchCare(restRecoveryTicks: number): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    return { ...raw, balance: { ...balance, care: { restRecoveryTicks } } };
+  };
+}
+
+/** [M66] `balance.raid`(襲撃・GDD 11.7 段10 / 11.1)を入れる patch。 */
+function patchRaid(): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: {
+        ...balance,
+        raid: {
+          intervalTicks: 4320,
+          baseStrength: 30,
+          strengthGrowthPerEra: 25,
+          rollRange: 40,
+          perimeterDefenseMul: 1.5,
+          lootRatio: 0.05,
+        },
+      },
+    };
+  };
+}
+
+/** [M72] `balance.morale`(士気モデル・GDD 11.2 / 7.2)を入れる patch。 */
+function patchMorale(): (raw: RawContentBundle) => RawContentBundle {
+  return (raw) => {
+    const balance = clone(raw.balance) as Record<string, unknown>;
+    return {
+      ...raw,
+      balance: {
+        ...balance,
+        morale: {
+          harshWorkDropPerDay: 2.5,
+          normalWorkRecoverPerDay: 1,
+          careRecoverPerDay: 2,
+          routineFloor: 35,
+          recallGuardThreshold: 40,
+        },
+      },
+    };
+  };
+}
+
 /** [M15] 複数の content patch を左から順に適用する合成ヘルパ。 */
 function composePatches(
   ...patches: readonly ((raw: RawContentBundle) => RawContentBundle)[]
@@ -1953,6 +2021,111 @@ function sc43BuildState(worldSeed: string): GameState {
   );
 }
 
+// --- sc44-care-rest(M66: 療養所の休養で想起困難の持続が短縮される) ----------
+
+/**
+ * [M66] GDD 11.2 の回復条件の第2枝「療養所で休養1日」。
+ *
+ * 凍結スナップショットには `balance.care` も `infirmary.careCapacityCurve` も
+ * 無い(= 休養機構が完全に不活性)ので、このシナリオだけ patch で両方入れる。
+ * 過酷業務(forge)に就く**士気 0** の住民 1 人を置き、(C) の発生確率を上げて
+ * 必ず想起困難を発生させたうえで、その回復 tick が「発生 + 1440」へ短縮される
+ * ことを状態ダイジェストに焼く。
+ *
+ * **反証(spec §9.2(3))**: patch から `patchCare(1440)` を外して生成し直すと、
+ * まったく同じ乱数列(持続の抽選は `recallDuration` ストリーム)で回復 tick が
+ * 抽選値(1440〜2880)のままになり `stateDigest` が動く —— **実測済み**
+ * (sc44-care-rest-alpha / -split-alpha の 2 本が [差分] になることを確認した)。
+ */
+function sc44BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentSmith", {
+      assignedFacilityId: "facilityForgeA",
+      morale: fixFromInt(0),
+    }),
+    mkFacility("facilityForgeA", "forge", 0, ["residentSmith"], 1, { width: 2, height: 1 }),
+    mkFacility("facilityInfirmaryA", "infirmary", 8, [], 1),
+    mkResource("resourceIron", "iron", 0),
+    mkResearch("researchFire", "techFireStarting", 0),
+  ]);
+}
+
+// --- sc45/sc46-raid(M66: 襲撃と防衛係数・発火/非発火の対) --------------------
+
+/**
+ * [M66] 襲撃(GDD 11.7 段10 / GDD 11.1 の戦闘式)。**防衛 0 の盤面**では
+ * tick 4320 の襲撃が撃退できず、全資源の在庫 5% が略奪される(= `stateDigest`
+ * と `probe.resourceStockSumRaw` に出る)。sc46 が同じ tick・同じ seed で
+ * **外周の見張り台**を 1 基だけ足した対照であり、そちらは撃退されて在庫が
+ * 1 も減らない(実測: 411,640 vs 433,300)。この 2 本の対で「防衛係数が実際に
+ * 勝敗を決めている」ことが反証つきで固定される。
+ */
+function sc45BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentKeeper", { assignedFacilityId: "facilityHearthA" }),
+    mkFacility("facilityHearthA", "hearth", 8, ["residentKeeper"], 1),
+    mkResource("resourceFirewood", "firewood", 1000),
+    mkResource("resourceClay", "clay", 200),
+  ]);
+}
+
+/** [M66] sc45 と同じ盤面 + **外周セル(0)の見張り台**(配置ボーナス ×1.5)。 */
+function sc46BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentKeeper", { assignedFacilityId: "facilityHearthA" }),
+    mkFacility("facilityHearthA", "hearth", 8, ["residentKeeper"], 1),
+    mkFacility("facilityTowerA", "watchtower", 0, [], 1),
+    mkResource("resourceFirewood", "firewood", 1000),
+    mkResource("resourceClay", "clay", 200),
+  ]);
+}
+
+// --- sc47-morale(M72: 士気の低下/回復/trait/floor とレート積分) --------------
+
+/**
+ * [M72] 士気モデル(GDD 4.2 / 7.2 / 11.2)。凍結スナップショットに
+ * `balance.morale` は無いので patch で入れる(= 既存 82 本は不活性のまま)。
+ *
+ * 4 人で 4 経路を 1 本のベクタに同居させる:
+ *   - `residentHarsh`  : 過酷業務(forge)= 低下 → routineFloor(実効 35)で停止
+ *   - `residentCalm`   : 通常業務(hearth)= 回復 → 上限 100 で停止
+ *   - `residentGloomy` : 過酷業務 + **悲観 trait**(実効 -10)= floor は実効側に
+ *     掛かるので蓄積士気は 45 で止まる(= 業務だけでは 30 を割らない)
+ *   - `residentIdle`   : 無配属 = 1 も動かない
+ * `toTick` は 40 ゲーム日(57,600)で、floor / 上限のどちらにも到達する。
+ *
+ * **反証(spec §9.2(3))**: patch から `patchMorale()` を外して生成し直すと
+ * 4 人とも初期値のまま動かず `stateDigest` が変わる —— **実測済み**
+ * (sc47-morale-alpha / -split-alpha の 2 本が [差分] になることを確認した)。
+ * split 版はクランプ(floor / 上限 100)を跨ぐ区間分割でも同じ士気になること
+ * (分割不変性)を固定する。
+ */
+function sc47BuildState(worldSeed: string): GameState {
+  return createGameState(baseMeta(worldSeed), [
+    mkResident("residentCalm", {
+      assignedFacilityId: "facilityHearthA",
+      morale: fixFromInt(95),
+    }),
+    mkResident("residentGloomy", {
+      assignedFacilityId: "facilityForgeA",
+      morale: fixFromInt(60),
+      traitIds: ["traitPessimist"],
+    }),
+    mkResident("residentHarsh", {
+      assignedFacilityId: "facilityForgeA",
+      morale: fixFromInt(60),
+    }),
+    mkResident("residentIdle", { morale: fixFromInt(60) }),
+    mkFacility("facilityForgeA", "forge", 0, ["residentGloomy", "residentHarsh"], 1, {
+      width: 2,
+      height: 1,
+    }),
+    mkFacility("facilityHearthA", "hearth", 8, ["residentCalm"], 1),
+    mkResource("resourceFirewood", "firewood", 0),
+    mkResource("resourceIron", "iron", 0),
+  ]);
+}
+
 export const SCENARIOS: readonly Scenario[] = [
   { id: "sc01-steady", contentPatch: null, buildState: sc01BuildState },
   { id: "sc02-idle", contentPatch: null, buildState: sc02BuildState },
@@ -2083,6 +2256,24 @@ export const SCENARIOS: readonly Scenario[] = [
     contentPatch: patchStorageCapacity({ firewood: 1000, waste: 100 }),
     buildState: sc43BuildState,
   },
+  {
+    id: "sc44-care-rest",
+    contentPatch: composePatches(
+      patchFacilityCurve("infirmary", "careCapacityCurve", [1, 1, 2, 2, 3]),
+      patchCare(1440),
+    ),
+    buildState: sc44BuildState,
+  },
+  { id: "sc45-raid-loot", contentPatch: patchRaid(), buildState: sc45BuildState },
+  {
+    id: "sc46-raid-repelled",
+    contentPatch: composePatches(
+      patchFacilityCurve("watchtower", "defenseCurve", [20, 23, 26.45, 30.4175, 34.980125]),
+      patchRaid(),
+    ),
+    buildState: sc46BuildState,
+  },
+  { id: "sc47-morale", contentPatch: patchMorale(), buildState: sc47BuildState },
 ];
 
 // re-export しておくと content patch の単体テスト・診断に使える。

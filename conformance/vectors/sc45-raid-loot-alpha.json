@@ -1,0 +1,36 @@
+{
+  "coarseTickMinutes": 10,
+  "elapsedMonotonicMs": null,
+  "expected": {
+    "canonicalJsonLength": 637,
+    "counters": {
+      "rateChangeEventCount": 1,
+      "recallOccurrenceCount": 0,
+      "segmentCount": 433,
+      "stochasticStepCount": 433,
+      "stochasticTrialCount": 0
+    },
+    "probe": {
+      "entityCount": 4,
+      "recallImpairedResidentCount": 0,
+      "recallImpairedUntilTickSum": 0,
+      "researchCompletedCount": 0,
+      "researchProgressSumRaw": 0,
+      "resourceStockSumRaw": 411640000000,
+      "rngStateDomainCount": 0,
+      "rngStateWordsXor": 0,
+      "tick": 4321
+    },
+    "stateDigest": "34412590a2362f2cf44b8cd281e39f20"
+  },
+  "formatVersion": 1,
+  "fromTick": 0,
+  "paths": ["raid-stage10-fires", "raid-loot-on-defeat"],
+  "scenarioId": "sc45-raid-loot",
+  "splitCounters": null,
+  "splitTicks": [],
+  "toTick": 4321,
+  "vectorId": "sc45-raid-loot-alpha",
+  "worldSeed": "seedAlpha",
+  "worldSeedU32": 3047884336
+}
