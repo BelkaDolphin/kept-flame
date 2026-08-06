@@ -381,6 +381,24 @@ export interface RaidContent {
   readonly lootRatio: number;
 }
 
+/**
+ * [M72] 士気モデル(GDD 4.2 / 7.2 / 7.3 / 11.2 / 11.5)のパラメータ。
+ * **ブロックごと省略可**(欠落は null = 士気が業務で動かない = M72 以前と同じ挙動)。
+ * 各値の設計根拠は `src/engine/rules/morale.ts` §1〜§2。
+ */
+export interface MoraleContent {
+  /** 過酷業務(`facility.harshWork`)への就労 1 日あたりの士気低下量。 */
+  readonly harshWorkDropPerDay: number;
+  /** 通常業務への就労 1 日あたりの士気回復量。 */
+  readonly normalWorkRecoverPerDay: number;
+  /** 療養所で休養している間の 1 日あたりの追加回復量。 */
+  readonly careRecoverPerDay: number;
+  /** 業務由来の低下の下限(実効士気)。GDD 11.2 の moraleW 閾値 30 を割らせない設計値。 */
+  readonly routineFloor: number;
+  /** GDD 11.5 の bot 判断閾値(士気 <40 で過酷業務・派遣に回さない)。 */
+  readonly recallGuardThreshold: number;
+}
+
 export interface BalanceContent {
   readonly fpScale: number;
   readonly algoVersion: number;
@@ -413,6 +431,8 @@ export interface BalanceContent {
   readonly care: CareContent | null;
   /** [M66] GDD 11.7 段10 の襲撃。JSON に無ければ null(襲撃が起きない)。 */
   readonly raid: RaidContent | null;
+  /** [M72] GDD 11.2/7.2 の士気モデル。JSON に無ければ null(士気が業務で動かない)。 */
+  readonly morale: MoraleContent | null;
 }
 
 /** [M5] 保管容量の保守境界(lvCurve と同じ上限)。 */
@@ -1470,6 +1490,82 @@ function validateCare(raw: unknown, path: string, issues: IssueCollector): CareC
   return { restRecoveryTicks };
 }
 
+/** [M72] 士気の 1 日あたり変化量の値域(0 = その経路では動かない、も許す)。 */
+const MORALE_RATE_RANGE: NumericRange = { min: 0, max: 100 };
+/** [M72] 士気の閾値の値域(GDD 7.1「0〜100・上限厳守」)。 */
+const MORALE_LEVEL_RANGE: NumericRange = { min: 0, max: 100 };
+
+/**
+ * [M72] `morale`(省略可)の検証。
+ *
+ * `routineFloor < recallGuardThreshold` を要求する: 逆転していると
+ * 「過酷業務者が bot 閾値を下回らない」= GDD 11.5 のジレンマが構造的に発火しない
+ * 設定になり、士気モデルを入れた意味が静かに消えるため(値の妥当性ではなく
+ * **機構が働きうるか**の検査)。
+ */
+function validateMorale(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): MoraleContent | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const harshWorkDropPerDay = expectNumber(
+    obj["harshWorkDropPerDay"],
+    `${path}.harshWorkDropPerDay`,
+    issues,
+    MORALE_RATE_RANGE,
+  );
+  const normalWorkRecoverPerDay = expectNumber(
+    obj["normalWorkRecoverPerDay"],
+    `${path}.normalWorkRecoverPerDay`,
+    issues,
+    MORALE_RATE_RANGE,
+  );
+  const careRecoverPerDay = expectNumber(
+    obj["careRecoverPerDay"],
+    `${path}.careRecoverPerDay`,
+    issues,
+    MORALE_RATE_RANGE,
+  );
+  const routineFloor = expectNumber(
+    obj["routineFloor"],
+    `${path}.routineFloor`,
+    issues,
+    MORALE_LEVEL_RANGE,
+  );
+  const recallGuardThreshold = expectNumber(
+    obj["recallGuardThreshold"],
+    `${path}.recallGuardThreshold`,
+    issues,
+    MORALE_LEVEL_RANGE,
+  );
+  if (
+    harshWorkDropPerDay === undefined ||
+    normalWorkRecoverPerDay === undefined ||
+    careRecoverPerDay === undefined ||
+    routineFloor === undefined ||
+    recallGuardThreshold === undefined
+  ) {
+    return undefined;
+  }
+  if (routineFloor >= recallGuardThreshold) {
+    issues.add(
+      `${path}.routineFloor`,
+      `routineFloor(${String(routineFloor)})は recallGuardThreshold(${String(recallGuardThreshold)})` +
+        "より小さいことが必須(GDD 11.5 の bot 判断が構造的に発火しなくなるため)",
+    );
+    return undefined;
+  }
+  return {
+    harshWorkDropPerDay,
+    normalWorkRecoverPerDay,
+    careRecoverPerDay,
+    routineFloor,
+    recallGuardThreshold,
+  };
+}
+
 /** [M66] 襲撃周期の値域(1 tick 〜 1 ゲーム年ぶん)。 */
 const RAID_INTERVAL_TICKS_RANGE: NumericRange = { min: 1, max: 525_600 };
 /** [M66] 襲撃強度 / 防衛係数 / seededRoll の値域(GDD 11.1 の戦闘式の項)。 */
@@ -1854,6 +1950,9 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
   const rawRaid = obj["raid"];
   const raid =
     rawRaid === undefined ? null : (validateRaid(rawRaid, "$.raid", issues) ?? undefined);
+  const rawMorale = obj["morale"];
+  const morale =
+    rawMorale === undefined ? null : (validateMorale(rawMorale, "$.morale", issues) ?? undefined);
 
   if (
     fpScale === undefined ||
@@ -1872,7 +1971,8 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     reclaim === undefined ||
     exodus === undefined ||
     care === undefined ||
-    raid === undefined
+    raid === undefined ||
+    morale === undefined
   ) {
     return fail(issues.list());
   }
@@ -1895,5 +1995,6 @@ export function validateBalance(raw: unknown): ValidationResult<BalanceContent> 
     exodus,
     care,
     raid,
+    morale,
   });
 }

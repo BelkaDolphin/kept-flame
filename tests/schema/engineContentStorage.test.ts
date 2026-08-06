@@ -95,15 +95,13 @@ describe("(a) trait 効果の写像(§1(e))", () => {
       "traitStrongArm",
     ]);
     // content/trait.json が使う未実装キー: researchSpeed(学者)/ health(病弱)/
-    // morale(楽観・悲観)/ recallResist(記憶巧者)。いずれも該当システムの
-    // 実装時に UNREPRESENTABLE_CONTENT_TRAIT_STATS から移す(combatPower が M7 で
+    // recallResist(記憶巧者)。いずれも該当システムの実装時に
+    // UNREPRESENTABLE_CONTENT_TRAIT_STATS から移す(combatPower が M7 で
     // 移ったのと同じ手順)。
-    expect(content.unrepresentedTraitEffects).toEqual([
-      "health",
-      "morale",
-      "recallResist",
-      "researchSpeed",
-    ]);
+    // **[M72] `morale`(楽観・悲観)はこの一覧から外れた** —— 士気の更新規則
+    // (src/engine/rules/morale.ts)が実装され、trait 加算が実効士気へ写る
+    // ようになったため(下の「morale は写る」テストが実装側を固定する)。
+    expect(content.unrepresentedTraitEffects).toEqual(["health", "recallResist", "researchSpeed"]);
   });
 
   it("未実装効果しか持たない trait は生産に一切影響しない", () => {
@@ -168,16 +166,32 @@ describe("(a) trait 効果の写像(§1(e))", () => {
   });
 
   // [M7] 派生値 combatPower(裁定 B8)は基礎ステと別名前空間で写る。
-  it("写せる対象の一覧は 基礎ステ 5 種 + 派生値 + yieldMul", () => {
+  // [M72] 士気(GDD 7.2 楽観/悲観)が予約語として加わった。
+  it("写せる対象の一覧は 基礎ステ 5 種 + 派生値 + yieldMul + morale", () => {
     expect(TRAIT_STAT_KEYS).toEqual([
       "combatPower",
       "dexterity",
       "fortitude",
       "intellect",
+      "morale",
       "vigor",
       "will",
       "yieldMul",
     ]);
+  });
+
+  // [M72] 士気は「未実装ゆえ読み飛ばし」ではなく写る(combatPower の M7 と同型)。
+  it("morale は写る(M72 で実装済み)", () => {
+    const content = load(withTraits([{ stat: "morale", op: "add", value: 10 }]));
+    expect(content.unrepresentedTraitEffects).not.toContain("morale");
+    expect(toRaw(content.traitDefs?.get("traitProbe" as never)?.moraleAddFix ?? (0 as never))).toBe(
+      10_000_000,
+    );
+  });
+
+  it('morale に op="mul" は reject(GDD 7.2 は ±10 の加算)', () => {
+    const paths = issuePaths(withTraits([{ stat: "morale", op: "mul", value: 1.2 }]));
+    expect(paths).toContain("trait.traitProbe.effects[0].op");
   });
 
   it("派生値 combatPower への効果は基礎ステと別の Map へ写る", () => {

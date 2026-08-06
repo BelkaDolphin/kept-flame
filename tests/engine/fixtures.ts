@@ -190,6 +190,11 @@ export function content(overrides: Partial<EngineContent> = {}): EngineContent {
     // [M66] 襲撃強度の「時代逓増」(GDD 11.1)を測るのに到達エラが要る。
     // 同じく渡されたときだけ素通しする(既定は「エラ概念なし」のまま)。
     ...(overrides.eraDefs !== undefined ? { eraDefs: overrides.eraDefs } : {}),
+    // [M72] trait(GDD 7.2)。士気の楽観/悲観を測るのに要る。既定は「生産へ効く
+    // trait が 1 つも無い」= rules/stats.ts §1 の中立既定のまま。
+    ...(overrides.traitDefs !== undefined ? { traitDefs: overrides.traitDefs } : {}),
+    // [M72] 士気モデル(GDD 11.2 / 7.2)。渡されたときだけ素通しする。
+    ...(overrides.morale !== undefined ? { morale: overrides.morale } : {}),
   };
 }
 

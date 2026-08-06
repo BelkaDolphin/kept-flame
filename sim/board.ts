@@ -63,6 +63,29 @@ export class SimBoardError extends Error {
 /** content patch: raw JSON バンドルへの差分(sc13-onemin と同種のやり方)。 */
 export type ContentPatch = (raw: RawContentBundle) => RawContentBundle;
 
+/**
+ * [M72] `balance.morale` ブロックを**外す** content patch(計測 #5 専用)。
+ *
+ * 計測 #5(想起困難頻度・GDD 11.4-8a)は「施設/士気/派遣の代表10パターン」を
+ * 固定点として recallRisk 式を測る計測であり、パターンの定義そのものが
+ * 「士気 10 / 25 / 60 …」という**その士気に留まっている住民**である。M72 の
+ * 士気モデルを効かせると、通常業務パターンの士気が週のあいだに上がり続けて
+ * 「士気低パターン」が士気低でなくなる = 計測器が測っている対象が変質する。
+ * よって #5 の盤面だけは士気を凍結する(実 run 側の 11.4-8b は content の
+ * ままなので、士気モデルの影響はそちらで観測される)。
+ *
+ * 副次的な効能として、(C) 単独評価と scheduler 経由の突合
+ * (`sim/recallFrequency.ts` の `crossCheckAgainstScheduler`)が
+ * 「(A) 区間の積分が (C) の入力を動かさない」という前提のまま成立し続ける。
+ */
+export function patchWithoutMorale(): ContentPatch {
+  return (raw) => {
+    const balance = { ...(raw.balance as Record<string, unknown>) };
+    delete balance["morale"];
+    return { ...raw, balance };
+  };
+}
+
 /** `balance.coarseTickMinutes` を差し替える(計測 #4 の 1分tick Fallback・ADR-014(3))。 */
 export function patchCoarseTickMinutes(coarseTickMinutes: number): ContentPatch {
   return (raw) => ({

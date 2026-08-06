@@ -60,6 +60,7 @@ import {
   resolveExodusPlan,
 } from "../../src/engine/rules/exodus";
 import { rareAssetCountOf } from "../../src/engine/rules/exploration";
+import { effectiveMoraleFix, moraleBandOf } from "../../src/engine/rules/morale";
 import { populationViewOf } from "../../src/engine/rules/population";
 import { computeProductionRates } from "../../src/engine/rules/production";
 import { colonyOverflowLossRate } from "../../src/engine/rules/storage";
@@ -196,6 +197,20 @@ export interface StrategyRunMetrics {
   readonly raidCount: number;
   /** [M66] うち撃退できた回数(見張り台の防衛係数が効いたことの証跡)。 */
   readonly raidRepelledCount: number;
+  /**
+   * [M72] 全標本・全生存住民の**実効士気**の最小値(raw)。士気モデルが
+   * 「業務由来では 30(GDD 11.2 の moraleW 閾値)を割らない」ことの証跡。
+   * 標本が 1 つも無ければ null。
+   */
+  readonly minEffectiveMoraleRaw: number | null;
+  /** [M72] 過酷業務(`harshWork`)に就いている住民だけの実効士気の最小値(raw)。 */
+  readonly minHarshWorkerMoraleRaw: number | null;
+  /** [M72] 過酷業務就労者の延べ標本数(下 2 つの分母)。 */
+  readonly harshWorkerSampleCount: number;
+  /** [M72] うち実効士気が [30,40)(= GDD 11.5 のガード帯)だった延べ標本数。 */
+  readonly harshWorkerGuardBandSampleCount: number;
+  /** [M72] うち実効士気が 30 未満(= GDD 11.2 の moraleW が乗る帯)だった延べ標本数。 */
+  readonly harshWorkerBelowMidSampleCount: number;
 }
 
 export interface StrategyRunResult {
@@ -355,6 +370,13 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
   // カウンタをそのまま積むだけで、bot の意思決定には一切影響しない。
   let raidCount = 0;
   let raidRepelledCount = 0;
+  // [M72] 士気の軌跡(検収 (a) の証跡・GDD 11.2 / 11.5)。bot の意思決定には
+  // 一切影響しない読み取り専用の観測である。
+  let minEffectiveMoraleRaw: number | null = null;
+  let minHarshWorkerMoraleRaw: number | null = null;
+  let harshWorkerSampleCount = 0;
+  let harshWorkerGuardBandSampleCount = 0;
+  let harshWorkerBelowMidSampleCount = 0;
 
   const bot = options.bot;
   const start = performance.now();
@@ -378,6 +400,26 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
       if (firstTickByEraOrder[order] === undefined) firstTickByEraOrder[order] = cursor;
     }
     samples.push(sampleOf(state, ctx, content, eraOrder));
+
+    // [M72] 士気の観測。実効士気(trait 楽観/悲観 込み)で見るのは engine の
+    // (C) 抽選・bot のガードと同じ値を証跡にするため(rules/morale.ts §1(d))。
+    for (const resident of livingResidents(state)) {
+      const moraleRaw = toRaw(effectiveMoraleFix(resident, content));
+      if (minEffectiveMoraleRaw === null || moraleRaw < minEffectiveMoraleRaw) {
+        minEffectiveMoraleRaw = moraleRaw;
+      }
+      if (resident.assignedFacilityId === null) continue;
+      const facility = state.entityStateById.get(resident.assignedFacilityId);
+      if (facility === undefined || facility.kind !== "facility") continue;
+      if (!content.facilityDefs.get(facility.defId)?.harshWork) continue;
+      harshWorkerSampleCount++;
+      if (minHarshWorkerMoraleRaw === null || moraleRaw < minHarshWorkerMoraleRaw) {
+        minHarshWorkerMoraleRaw = moraleRaw;
+      }
+      const band = moraleBandOf(effectiveMoraleFix(resident, content));
+      if (band === "guard") harshWorkerGuardBandSampleCount++;
+      else if (band === "low" || band === "critical") harshWorkerBelowMidSampleCount++;
+    }
 
     if (cursor >= targetTick) break;
 
@@ -482,6 +524,11 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     residentWeeksObserved: residentWeekTicks / (GAME_DAY_TICKS * 7),
     raidCount,
     raidRepelledCount,
+    minEffectiveMoraleRaw,
+    minHarshWorkerMoraleRaw,
+    harshWorkerSampleCount,
+    harshWorkerGuardBandSampleCount,
+    harshWorkerBelowMidSampleCount,
   };
 
   return { state, content, metrics, recallGuardLog, samples, elapsedMs };

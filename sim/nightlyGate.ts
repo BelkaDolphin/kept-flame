@@ -1235,6 +1235,14 @@ export interface NightlyGateReport {
     readonly raidCount: number;
     /** [M66] うち撃退できた回数(見張り台の防衛係数が効いた証跡)。 */
     readonly raidRepelledCount: number;
+    /** [M72] 全標本・全生存住民の実効士気の最小値(raw)。 */
+    readonly minEffectiveMoraleRaw: number | null;
+    /** [M72] 過酷業務就労者だけの実効士気の最小値(raw)。 */
+    readonly minHarshWorkerMoraleRaw: number | null;
+    /** [M72] 過酷業務就労者の延べ標本数と、そのうち [30,40) / <30 の件数。 */
+    readonly harshWorkerSampleCount: number;
+    readonly harshWorkerGuardBandSampleCount: number;
+    readonly harshWorkerBelowMidSampleCount: number;
   }[];
 }
 
@@ -1298,6 +1306,11 @@ export function runNightlyGate(options: NightlyGateOptions = {}): NightlyGateRep
       minLivingPopulation: record.result.metrics.minLivingPopulation,
       raidCount: record.result.metrics.raidCount,
       raidRepelledCount: record.result.metrics.raidRepelledCount,
+      minEffectiveMoraleRaw: record.result.metrics.minEffectiveMoraleRaw,
+      minHarshWorkerMoraleRaw: record.result.metrics.minHarshWorkerMoraleRaw,
+      harshWorkerSampleCount: record.result.metrics.harshWorkerSampleCount,
+      harshWorkerGuardBandSampleCount: record.result.metrics.harshWorkerGuardBandSampleCount,
+      harshWorkerBelowMidSampleCount: record.result.metrics.harshWorkerBelowMidSampleCount,
     })),
   };
 }

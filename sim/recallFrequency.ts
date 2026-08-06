@@ -53,6 +53,7 @@ import {
   PATTERNS,
   RESIDENTS_PER_PATTERN,
   buildPatternBoard,
+  patchWithoutMorale,
   patternIdOfResidentId,
   resolveSimContent,
 } from "./board";
@@ -192,7 +193,9 @@ export interface RecallFrequencyParams {
 /** 計測 #5 本体: 代表10パターン × 複数 seed × 1週間で発生頻度を集計する。 */
 export function measureRecallFrequency(params: RecallFrequencyParams = {}): RecallFrequencyReport {
   const seeds = params.seeds ?? defaultSeeds(DEFAULT_SEED_COUNT);
-  const content = resolveSimContent();
+  // [M72] 代表10パターンの「士気」を固定点として測る計測なので、士気モデルは
+  // 外した content で測る(sim/board.ts の `patchWithoutMorale` の doc に理由)。
+  const content = resolveSimContent(patchWithoutMorale());
 
   const occurrenceCountByPattern = new Map<string, number>();
   for (const pattern of PATTERNS) occurrenceCountByPattern.set(pattern.id, 0);

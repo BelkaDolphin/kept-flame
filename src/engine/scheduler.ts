@@ -36,6 +36,11 @@
 //   どちらも「レート × 区間長」の閉形式であり、節目(bond)の記録 tick は区間内の
 //   **解析的な到達 tick**を使うので分割不変(rules/bond.ts の crossingsInInterval)。
 //
+//   **[M72] 士気(morale)も同じ**: 業務による低下/回復・休養による回復は
+//   「レート × 区間長」の閉形式(rules/morale.ts)であり、レートを決める入力
+//   (配属・派遣・休養・生死)はすべて既存の境界でしか変わらない。士気が変えるのは
+//   (C) 抽選の確率(moraleW)であり、それは必ず粗粒度ステップ境界で評価される。
+//
 //   **[M50] 成文化を結線したが、新しい種類の境界は増えていない**: 成文化の作業は
 //   研究と同じ「レート × 区間長」の (A) 積分(`applyCodifyProgress`)で、完了は
 //   研究完了と同じ**レート依存の解析的予測**(`syncCodifyCompletionEvent`)である。
@@ -123,6 +128,7 @@ import {
 import { resolveExpedition } from "./rules/exploration";
 import { deathTickOf } from "./rules/lifespan";
 import { recordDeathMemoir } from "./rules/memoir";
+import { applyMoraleProgress, computeMoraleRates } from "./rules/morale";
 import { applyOutpostSupply, computeOutpostSupplyRates } from "./rules/outpost";
 import { nextRaidTick, resolveRaid } from "./rules/raid";
 import { applyArrival, applyResidentDeath, nextArrivalTick } from "./rules/population";
@@ -929,6 +935,11 @@ export function runSchedule(
     // 変わらない(このタスクは scheduler 内に配置/常駐コマンドを持たない)ので、
     // production と同じく区間内で変化しない = 境界イベントを新設する必要がない。
     const outpostRates = computeOutpostSupplyRates(next, ctx.content);
+    // [M72] 士気(GDD 11.2 / 7.2)も bond と同じ (A) 区間のレートである。
+    // レートを決める入力(配属・派遣・休養・生死)はすべて既存の区間境界でしか
+    // 変わらないので、新しい境界イベントは 1 つも増えない(rules/morale.ts §3)。
+    // `content.morale` が無ければ常に空 = M72 以前と 1 bit も違わない。
+    const moraleRates = computeMoraleRates(next, ctx.content, cursor);
     // [M50] 成文化(GDD 11.7 段50)。研究と同じ「区間の入口でレート確定 →
     // (B) 予測を同期」の 2 段(rules/codify.ts §1)。
     const codifyTarget = currentCodification(next);
@@ -956,6 +967,9 @@ export function runSchedule(
       // [M12] bond の蓄積と節目の記録(GDD 7.3)。節目の記録 tick は区間内の
       // **解析的な到達 tick** なので分割不変(rules/bond.ts の crossingsInInterval)。
       next = applyBondProgress(next, bondRates, delta, boundary);
+      // [M72] 士気の積分(GDD 11.2 の moraleW の入力)。bond と同型の閉形式で、
+      // クランプ(上限 100 / 業務由来の下限 routineFloor)が単調なので分割不変。
+      next = applyMoraleProgress(next, moraleRates, delta);
       // [M13] 実地稼働による定着度の蓄積(GDD 11.2 / 4)。生産と同じレート×区間長。
       next = applyMasteryProgress(next, ctx.content, rates.masteryGains, delta);
       // [M67] 実地要件(GDD 5.2 の第2ゲート)の稼働蓄積。定着とまったく同じ

@@ -27,6 +27,8 @@
 //                 − masteryResist(u,t), p_max)
 //     loadW        : 過酷業務 ×2.0 / 通常業務 ×0.5 / 無配属は 0(就労していない)
 //     moraleW      : 士気 <30 で +0.10、<15 で +0.20(強い方を採る)
+//                    [M72] 士気は**実効士気**(trait 楽観/悲観 ±10 込み・
+//                    rules/morale.ts の effectiveMoraleFix)で判定する
 //     dispatchW    : 探索派遣中 +0.15
 //     masteryResist: 実地稼働の定着度(0〜0.20)+ 記憶巧者 trait −0.15
 //   1 ステップあたり確率への変換は stochastic.ts の
@@ -96,6 +98,7 @@ import {
   type ResidentState,
 } from "../state/state";
 import { careRecipientsAt, recoveryTickWithCare } from "./care";
+import { effectiveMoraleFix } from "./morale";
 import { isTechImpaired, masteryResistBaseFix, setTechImpairedUntil } from "./techMemory";
 import { RulesError, requireFacilityDef, type AdvanceContext, type EngineContent } from "./types";
 
@@ -145,9 +148,13 @@ export function recallRiskPerDay(
   let risk = mulFix(p.basePFix, loadW);
 
   // moraleW: 下位閾値のほうが強いので、そちらに掛かったら中位は使わない。
-  if (resident.morale < p.moraleThresholdLowFix) {
+  // [M72] 判定は**実効士気**(蓄積士気 + trait 楽観/悲観の加算・GDD 7.2)で行う。
+  // trait を持たない住民・`content.traitDefs` が無い content では
+  // `resident.morale` と厳密に同値なので、M72 以前の観測挙動は変わらない。
+  const moraleFix = effectiveMoraleFix(resident, content);
+  if (moraleFix < p.moraleThresholdLowFix) {
     risk = addFix(risk, p.moraleBonusLowFix);
-  } else if (resident.morale < p.moraleThresholdMidFix) {
+  } else if (moraleFix < p.moraleThresholdMidFix) {
     risk = addFix(risk, p.moraleBonusMidFix);
   }
 

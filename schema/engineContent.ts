@@ -152,6 +152,7 @@ import type {
   OutpostHazardParams,
   OutpostParams,
   OutpostTypeDef,
+  MoraleParams,
   OutpostUpkeepParams,
   RaidParams,
   RecallRiskParams,
@@ -174,6 +175,7 @@ import type {
   EraContent,
   ExodusBalanceContent,
   ExplorationContent,
+  MoraleContent,
   OutpostBalanceContent,
   RaidContent,
   ReclaimBalanceContent,
@@ -250,6 +252,15 @@ export const UNREPRESENTABLE_CONTENT_EFFECTS: { readonly [contentEffect: string]
 export const TRAIT_YIELD_MUL_STAT_KEY = "yieldMul";
 
 /**
+ * [M72] `trait.effects[].stat` の予約語のうち **士気**(GDD 7.2 楽観/悲観)を
+ * 指すキー。基礎ステ 5 種・派生値 combatPower とは別の名前空間で、
+ * `TraitDef.moraleAddFix`(rules/stats.ts §3)へ写る。`op` は `add` のみ
+ * (content の楽観/悲観はどちらも加算であり、士気は 0〜100 の量なので倍率を
+ * 掛ける意味づけが GDD に無い)。
+ */
+export const TRAIT_MORALE_STAT_KEY = "morale";
+
+/**
  * [M7] `trait.effects[].stat` が取り得るキーの全体(エラーメッセージ用・昇順)。
  * 基礎ステ 5 種 + 派生値(`combatPower`)+ 予約語 `yieldMul`。
  */
@@ -257,6 +268,8 @@ export const TRAIT_STAT_KEYS: readonly string[] = [
   ...RESIDENT_STAT_IDS,
   ...RESIDENT_DERIVED_STAT_IDS,
   TRAIT_YIELD_MUL_STAT_KEY,
+  // [M72] 士気(GDD 7.2 楽観/悲観)。
+  TRAIT_MORALE_STAT_KEY,
 ].sort(compareUtf16);
 
 /**
@@ -282,7 +295,9 @@ export const UNREPRESENTABLE_CONTENT_TRAIT_STATS: { readonly [stat: string]: str
       "成文化を tick ループへ結線する段(M13 以降)の担当なので、それまで読み飛ばす",
     recallResist:
       "想起困難への耐性(GDD 11.2 記憶巧者)は balance.recallRiskParams.memoryKeeperResist 側で表現しており、trait effect 経由の一般化は未実装",
-    morale: "士気への効果(GDD 7.3 楽観/悲観)は士気の更新規則そのものが未実装",
+    // [M72] `morale`(GDD 7.2 楽観/悲観)はこの表から**外れた**。士気の更新規則
+    // (`src/engine/rules/morale.ts`)が実装され、trait 加算が実効士気へ写る
+    // ようになったためである(combatPower が M7 で移ったのと同じ手順)。
   });
 
 // --- 2. 人間可読値 → FP raw(§2) -----------------------------------------
@@ -748,6 +763,8 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
   const derivedMulFixById = new Map<ResidentDerivedStatId, Fix>();
   const unrepresented: string[] = [];
   let yieldMulFix = FIX_ONE;
+  // [M72] 士気(GDD 7.2 楽観/悲観)。効果が無ければ 0 のまま。
+  let moraleAddFix = FIX_ZERO;
   let failed = false;
 
   for (let i = 0; i < content.effects.length; i++) {
@@ -758,7 +775,8 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
     const statId = isResidentStatId(effect.stat) ? effect.stat : undefined;
     const derivedId = isResidentDerivedStatId(effect.stat) ? effect.stat : undefined;
     const isYieldMul = effect.stat === TRAIT_YIELD_MUL_STAT_KEY;
-    if (statId === undefined && derivedId === undefined && !isYieldMul) {
+    const isMorale = effect.stat === TRAIT_MORALE_STAT_KEY;
+    if (statId === undefined && derivedId === undefined && !isYieldMul && !isMorale) {
       const reason = UNREPRESENTABLE_CONTENT_TRAIT_STATS[effect.stat];
       if (reason === undefined) {
         issues.add(
@@ -797,6 +815,22 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
       continue;
     }
 
+    if (isMorale) {
+      // [M72] 士気は加算のみ(§1b の TRAIT_MORALE_STAT_KEY の doc)。
+      if (effect.op !== "add") {
+        issues.add(
+          `${effectPath}.op`,
+          `"${TRAIT_MORALE_STAT_KEY}"(GDD 7.2 楽観/悲観)は op="add" のみ` +
+            `(実際: "${effect.op}")`,
+        );
+        failed = true;
+        continue;
+      }
+      // 同一 trait 内に複数あれば総和(基礎ステの add と同じ合成規則)。
+      moraleAddFix = addFix(moraleAddFix, valueFix);
+      continue;
+    }
+
     if (derivedId !== undefined) {
       mergeEffect(derivedAddFixById, derivedMulFixById, derivedId, effect.op, valueFix);
       continue;
@@ -815,6 +849,7 @@ function toTraitDef(content: TraitContent, issues: IssueCollector): TraitConvers
       yieldMulFix,
       derivedAddFixById,
       derivedMulFixById,
+      moraleAddFix,
     },
     unrepresented,
   };
@@ -2108,6 +2143,62 @@ function toRaidParams(content: RaidContent, issues: IssueCollector): RaidParams 
   };
 }
 
+// --- 6g3. morale(GDD 4.2 / 7.2 / 11.2 / 11.5)— M72 ---------------------------
+
+/**
+ * [M72] `balance.morale` → engine の {@link MoraleParams}。
+ * すべて人間単位の量なので 1e6 化するだけ(設計根拠は rules/morale.ts §1〜§2)。
+ */
+function toMoraleParams(content: MoraleContent, issues: IssueCollector): MoraleParams | undefined {
+  const path = "balance.morale";
+  const harshWorkDropPerDayFix = toFix(
+    content.harshWorkDropPerDay,
+    `${path}.harshWorkDropPerDay`,
+    issues,
+    "過酷業務の士気低下",
+  );
+  const normalWorkRecoverPerDayFix = toFix(
+    content.normalWorkRecoverPerDay,
+    `${path}.normalWorkRecoverPerDay`,
+    issues,
+    "通常業務の士気回復",
+  );
+  const careRecoverPerDayFix = toFix(
+    content.careRecoverPerDay,
+    `${path}.careRecoverPerDay`,
+    issues,
+    "休養の士気回復",
+  );
+  const routineFloorFix = toFix(
+    content.routineFloor,
+    `${path}.routineFloor`,
+    issues,
+    "業務由来の士気下限",
+  );
+  const recallGuardThresholdFix = toFix(
+    content.recallGuardThreshold,
+    `${path}.recallGuardThreshold`,
+    issues,
+    "bot 想起ガードの閾値",
+  );
+  if (
+    harshWorkDropPerDayFix === undefined ||
+    normalWorkRecoverPerDayFix === undefined ||
+    careRecoverPerDayFix === undefined ||
+    routineFloorFix === undefined ||
+    recallGuardThresholdFix === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    harshWorkDropPerDayFix,
+    normalWorkRecoverPerDayFix,
+    careRecoverPerDayFix,
+    routineFloorFix,
+    recallGuardThresholdFix,
+  };
+}
+
 // --- 6h. exodus(GDD 10.2〜10.5)— M28 -----------------------------------------
 
 /**
@@ -2295,6 +2386,11 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
   const care = bundle.balance.care;
   const raid =
     bundle.balance.raid === null ? null : (toRaidParams(bundle.balance.raid, issues) ?? undefined);
+  // [M72] 士気モデル(GDD 11.2 / 7.2)。同じく省略可。
+  const morale =
+    bundle.balance.morale === null
+      ? null
+      : (toMoraleParams(bundle.balance.morale, issues) ?? undefined);
 
   const coarseTickMinutes = bundle.balance.coarseTickMinutes;
   if (coarseTickMinutes < 1 || coarseTickMinutes > GAME_DAY_TICKS) {
@@ -2318,7 +2414,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     outpost === undefined ||
     reclaim === undefined ||
     exodus === undefined ||
-    raid === undefined
+    raid === undefined ||
+    morale === undefined
   ) {
     return fail(issues.list());
   }
@@ -2360,7 +2457,8 @@ export function loadEngineContent(bundle: ContentBundle): ValidationResult<Engin
     care === null
       ? withResearch
       : { ...withResearch, care: { restRecoveryTicks: care.restRecoveryTicks } };
-  return ok(raid === null ? withCare : { ...withCare, raid });
+  const withRaid = raid === null ? withCare : { ...withCare, raid };
+  return ok(morale === null ? withRaid : { ...withRaid, morale });
 }
 
 /**

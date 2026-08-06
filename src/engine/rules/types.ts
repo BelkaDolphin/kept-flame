@@ -1075,6 +1075,41 @@ export interface EngineContent {
    * (= M66 以前と 1 bit も違わない)。`care` と同じ立場。
    */
   readonly raid?: RaidParams;
+  /**
+   * [M72] 士気の更新規則(GDD 4.2 / 7.3 / 11.2)。**省略時は士気が業務で動かない**
+   * (= M72 以前と 1 bit も違わない。士気を書き換えるのは伴侶喪失の bond ペナ
+   * だけ、という M13 以来の状態)。`care` / `raid` と同じ立場。
+   */
+  readonly morale?: MoraleParams;
+}
+
+/**
+ * [M72] 士気モデルのパラメータ(2026-08-06裁定・台帳v20 必-4)。
+ *
+ * GDD は「過酷業務・派遣・士気切れに晒すと想起困難」(4.2)・「通常業務就労かつ
+ * 士気 ≥40 を持続、または療養所で休養1日」(11.2)・「絆は士気補正+と士気回復+を
+ * 生む」(7.3)と**士気が動く前提**で書かれているが、士気を動かす規則そのものは
+ * 未実装だった。ここがその規則の content 側パラメータである
+ * (`rules/morale.ts` §1 に各値の設計根拠)。
+ */
+export interface MoraleParams {
+  /** 過酷業務(`FacilityDef.harshWork`)への就労 1 日あたりの士気低下量。 */
+  readonly harshWorkDropPerDayFix: Fix;
+  /** 通常業務への就労 1 日あたりの士気回復量。 */
+  readonly normalWorkRecoverPerDayFix: Fix;
+  /** 療養所で休養している間の 1 日あたりの追加回復量(`rules/care.ts`)。 */
+  readonly careRecoverPerDayFix: Fix;
+  /**
+   * **業務由来の低下の下限**(実効士気・人間単位)。GDD 11.2 の moraleW 閾値 30 を
+   * 日常業務では割らせないための設計値(rules/morale.ts §1(c))。
+   */
+  readonly routineFloorFix: Fix;
+  /**
+   * GDD 11.5 の bot 判断閾値(士気 <40 で過酷業務・派遣に回さない)。
+   * engine は読まないが、sim(`sim/strategy/recallGuard.ts`)が content から
+   * 読むための単一の置き場所である(ハードコード排除・台帳v20 必-4)。
+   */
+  readonly recallGuardThresholdFix: Fix;
 }
 
 /**

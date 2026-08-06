@@ -16,15 +16,33 @@
 // 士気が閾値以上、または該当技術が無い住民は素通り(ブロックもログも無し)。
 // ---------------------------------------------------------------------------
 
-import { fixFromInt, toRaw } from "../../src/engine/fp";
+import { fixFromInt, toRaw, type Fix } from "../../src/engine/fp";
 import { isCodified } from "../../src/engine/rules/codify";
+import { effectiveMoraleFix } from "../../src/engine/rules/morale";
 import { heldTechIdsOf, techHoldersOf } from "../../src/engine/rules/techMemory";
 import type { EngineContent } from "../../src/engine/rules/types";
 import type { EntityId, GameState, ResidentState } from "../../src/engine/state/state";
 import type { RecallGuardLogEntry } from "./types";
 
-/** GDD 11.5 の閾値(士気 <40・人間単位)。 */
+/**
+ * GDD 11.5 の閾値(士気 <40・人間単位)の**フォールバック**。
+ *
+ * [M72・台帳v20 必-4] 閾値の正本は content(`balance.morale.recallGuardThreshold`)へ
+ * 移した。この定数は「content に `morale` ブロックが無い(= 士気モデルが不活性な)
+ * content で bot を回す」ときの既定値としてだけ残る —— sim は content が欠けても
+ * 走り切れなければならず(縮約 content の回帰テストがある)、かつ GDD 11.5 の
+ * 40 という値そのものは engine/sim いずれかに必ず書いてある必要があるため。
+ */
 export const RECALL_GUARD_MORALE_THRESHOLD_HUMAN = 40;
+
+/**
+ * [M72] その盤面で使う想起ガード閾値(Fix)。content の
+ * `balance.morale.recallGuardThreshold` が正本で、無ければ
+ * {@link RECALL_GUARD_MORALE_THRESHOLD_HUMAN}。
+ */
+export function recallGuardThresholdFix(content: EngineContent): Fix {
+  return content.morale?.recallGuardThresholdFix ?? fixFromInt(RECALL_GUARD_MORALE_THRESHOLD_HUMAN);
+}
 
 /**
  * その住民が保持する「未成文の唯一保持技術」(techId 昇順・`heldTechIdsOf` の
@@ -58,20 +76,25 @@ export interface RecallGuardCheck {
  * 技術」を 1 つも持たなければ false。両方成り立つときだけ true を返し、
  * {@link RecallGuardLogEntry} を添える(「実際に踏まれた」ことの証跡)。
  *
- * `_content` は現状読まないが(判断は state だけで決まる)、GDD 11.5 の判断が
- * 将来 content 側のパラメータ(閾値の content 化等)を要求した場合に呼び出し側の
- * シグネチャを変えずに済むよう、他の bot 判断関数と同じ引数形に揃えてある。
+ * [M72] `content` を実際に読むようになった: 閾値は content 側
+ * ({@link recallGuardThresholdFix})、判定する士気は **実効士気**
+ * (trait 楽観/悲観 ±10 込み・`src/engine/rules/morale.ts`)である。engine の
+ * (C) 抽選(GDD 11.2 の moraleW)と bot の判断(GDD 11.5)が**同じ値**を見る
+ * ようにするための変更で、片方だけ trait を無視すると「engine では危機なのに
+ * bot は平気」という食い違いが静かに生まれる。
  */
 export function recallGuardBlocks(
   state: GameState,
-  _content: EngineContent,
+  content: EngineContent,
   resident: ResidentState,
   action: "harshAssignment" | "dispatch",
   tick: number,
   botId: string,
 ): RecallGuardCheck {
-  const thresholdFix = fixFromInt(RECALL_GUARD_MORALE_THRESHOLD_HUMAN);
-  if (toRaw(resident.morale) >= toRaw(thresholdFix)) return { blocked: false, logEntry: null };
+  const thresholdFix = recallGuardThresholdFix(content);
+  if (toRaw(effectiveMoraleFix(resident, content)) >= toRaw(thresholdFix)) {
+    return { blocked: false, logEntry: null };
+  }
 
   const techIds = soleUncodifiedHeldTechIds(state, resident.id);
   if (techIds.length === 0) return { blocked: false, logEntry: null };

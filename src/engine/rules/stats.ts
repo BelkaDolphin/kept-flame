@@ -175,6 +175,15 @@ export interface TraitDef {
   readonly derivedAddFixById?: ReadonlyMap<ResidentDerivedStatId, Fix>;
   /** [M7] 派生値への倍率効果。**省略時は 1.0**。 */
   readonly derivedMulFixById?: ReadonlyMap<ResidentDerivedStatId, Fix>;
+  /**
+   * [M72] 士気への加算効果(GDD 7.2 楽観 +10 / 悲観 -10)。**省略時は 0**。
+   *
+   * 基礎ステ・派生値のどちらとも**別の名前空間**で持つ: 士気は
+   * `ResidentState.morale` という独立した量であり、生産式にも combatPower にも
+   * 載らない(効くのは GDD 11.2 の moraleW と GDD 11.5 の bot 判断)。
+   * 合成は加算のみ(content の楽観/悲観はどちらも `op: "add"`)。
+   */
+  readonly moraleAddFix?: Fix;
 }
 
 /** trait 倍率(生産式の項)の合成後クランプ下限(§3)。 */
@@ -260,6 +269,27 @@ export function resolveTraitDefs(
   traitDefs: ReadonlyMap<EntityId, TraitDef> | undefined,
 ): readonly TraitDef[] {
   return resolveTraitDefsBy(traitIds, traitDefs, affectsProduction);
+}
+
+/**
+ * [M72] その trait が士気に影響するか(GDD 7.2 楽観/悲観)。
+ * 生産式にも combatPower にも載らない独立の効果なので、専用の述語を持つ。
+ */
+export function affectsMorale(def: TraitDef): boolean {
+  return toRaw(def.moraleAddFix ?? FIX_ZERO) !== 0;
+}
+
+/** [M72] その trait の士気加算(効果が無ければ 0)。 */
+export function traitMoraleAddFix(def: TraitDef): Fix {
+  return def.moraleAddFix ?? FIX_ZERO;
+}
+
+/** [M72] 士気に効く trait だけを引く({@link resolveTraitDefsBy})。 */
+export function resolveMoraleTraitDefs(
+  traitIds: readonly EntityId[],
+  traitDefs: ReadonlyMap<EntityId, TraitDef> | undefined,
+): readonly TraitDef[] {
+  return resolveTraitDefsBy(traitIds, traitDefs, affectsMorale);
 }
 
 /** [M7] 派生値 combatPower(§5)に効く trait だけを引く。 */

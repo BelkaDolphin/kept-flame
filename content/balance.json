@@ -10,6 +10,13 @@
   "care": {
     "restRecoveryTicks": 1440
   },
+  "morale": {
+    "harshWorkDropPerDay": 2.5,
+    "normalWorkRecoverPerDay": 1,
+    "careRecoverPerDay": 2,
+    "routineFloor": 35,
+    "recallGuardThreshold": 40
+  },
   "raid": {
     "intervalTicks": 4320,
     "baseStrength": 30,
