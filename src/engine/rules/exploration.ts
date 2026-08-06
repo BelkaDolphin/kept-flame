@@ -107,6 +107,7 @@ import {
   isAliveResident,
   livingResidents,
   requireEntity,
+  stationedOutpostOfResident,
   type DispatchEffect,
   type DispatchNode,
   type DispatchSnapshot,
@@ -1280,11 +1281,22 @@ export function dispatchedResidents(state: GameState): readonly ResidentState[] 
   return result;
 }
 
-/** 生存している派遣候補(死亡・派遣中を除く・ID 昇順)。 */
+/**
+ * 生存している派遣候補(死亡・派遣中・**衛星拠点に常駐中**を除く・ID 昇順)。
+ *
+ * [R8-01] 拠点常駐者の除外は評価Round 8(2026-08-06 実測)を受けた追加である。
+ * 常駐者を候補に残すと、派遣が成立した瞬間に「本拠就労 / 探索派遣 / 拠点常駐は
+ * 排他」(GDD 9.2)が破れ、以後**毎 tick** `rules/outpost.ts` の
+ * `assertNoDoubleStationedResidents` が RulesError を投げてゲーム内時刻が
+ * 恒久停止した(進行不能ソフトロック)。除外の判定は state.ts の
+ * {@link stationedOutpostOfResident} —— commands.ts の `dispatchExpedition`
+ * 事前 reject とまったく同じ述語を読む(候補基準と拒否基準を 2 通り書かない)。
+ */
 export function dispatchCandidates(state: GameState): readonly ResidentState[] {
   const result: ResidentState[] = [];
   for (const resident of entitiesOfKind(state, "resident")) {
     if (!isAliveResident(resident) || resident.dispatched) continue;
+    if (stationedOutpostOfResident(state, resident.id) !== undefined) continue;
     result.push(resident);
   }
   return result;

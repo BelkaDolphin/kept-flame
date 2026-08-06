@@ -1367,6 +1367,29 @@ export function allOutposts(state: GameState): readonly OutpostState[] {
 }
 
 /**
+ * [R8-01] その住民が常駐している衛星拠点(常駐していなければ undefined)。
+ * {@link isResidentOnDispatch} の拠点版であり、「本拠就労 / 探索派遣 / 拠点常駐は
+ * 排他」(GDD 9.2・rules/outpost.ts §2)を破る state を**作らせない**ための
+ * 唯一の照合口である。commands.ts の事前 reject と
+ * rules/exploration.ts の `dispatchCandidates`(候補列挙)が同じこの述語を読む
+ * ——「候補に出さない基準」と「コマンドが弾く基準」を 2 通り書かないため。
+ *
+ * 走査は拠点 ID 昇順(不変条件 (h))× 常駐者 ID 昇順で、拠点数・常駐数とも
+ * 高々数十(`OUTPOST_RESIDENTS_MAX` = 4)なので索引を作らず素直に回す。
+ */
+export function stationedOutpostOfResident(
+  state: GameState,
+  residentId: EntityId,
+): OutpostState | undefined {
+  for (const outpost of state.outpostsById.values()) {
+    for (const id of outpost.residentIds) {
+      if (id === residentId) return outpost;
+    }
+  }
+  return undefined;
+}
+
+/**
  * [M52] そのセルが未開墾の瓦礫か(GDD 9.1)。**瓦礫を持たない state では常に
  * false** = 全セル開墾済み、という既定がここに 1 箇所だけある。
  *

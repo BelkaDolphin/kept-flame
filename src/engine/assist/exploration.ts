@@ -179,10 +179,13 @@ export interface TeamAssistOptions {
 // --- 3. 候補プール -----------------------------------------------------------
 
 /**
- * 探索編成の候補住民(ID 昇順)。`dispatchCandidates`(生存・非派遣中)に
- * GDD 8.1 [2026-07-30裁定]②「寿命を持たない住民は派遣拒否」を重ねる —— この
- * フィルタを外すと、`life` 省略の住民を含む提案が `dispatchExpedition` に
- * reject される(rules/exploration.ts の doc 参照)。
+ * 探索編成の候補住民(ID 昇順)。`dispatchCandidates`(生存・非派遣中・
+ * **衛星拠点に常駐していない**)に GDD 8.1 [2026-07-30裁定]②「寿命を持たない
+ * 住民は派遣拒否」を重ねる —— このフィルタを外すと、`life` 省略の住民を含む
+ * 提案が `dispatchExpedition` に reject される(rules/exploration.ts の doc 参照)。
+ *
+ * [R8-01] 拠点常駐者の除外は `dispatchCandidates` 側で行う(このモジュールで
+ * 重ねない)。派遣候補の基準は 1 箇所に集める、という上の分担のままである。
  */
 export function explorationTeamCandidates(state: GameState): readonly ResidentState[] {
   const result: ResidentState[] = [];

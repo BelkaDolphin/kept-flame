@@ -155,7 +155,6 @@ import {
 import {
   OUTPOST_RESIDENTS_MAX,
   OUTPOST_RESIDENTS_MIN,
-  allOutposts,
   entitiesOfKind,
   firstRubbleCellIn,
   getEntity,
@@ -165,6 +164,7 @@ import {
   isInheritTrack,
   isResidentOnDispatch,
   isRubbleCell,
+  stationedOutpostOfResident,
   type DispatchStance,
   type EntityId,
   type FacilityState,
@@ -1360,6 +1360,11 @@ function applyAssignResident(
       message: `住民 "${resident.id}" は探索派遣中で本拠の就労スロットから外れている(GDD 8.1)`,
     });
   }
+  // [R8-01] 拠点常駐者を就労させると、以後毎 tick
+  //   `assertNoDoubleStationedResidents` が RulesError を投げてゲーム内時刻が
+  //   恒久停止する(§4b)。派遣側と同じ検査を同じ文言で通す。
+  const stationed = rejectIfResidentStationed(state, resident.id, "assignResident", index);
+  if (stationed !== null) return stationed;
   if (resident.assignedFacilityId === facility.id) {
     return rejected("assignResident", index, {
       code: "alreadyAssigned",
@@ -1647,6 +1652,11 @@ function applyDispatchExpedition(
         message: `住民 "${memberId}" は既に別の探索へ派遣されている(GDD 8.1)`,
       });
     }
+    // [R8-01] 衛星拠点の常駐者を混ぜると、成立した瞬間から毎 tick
+    //   `assertNoDoubleStationedResidents` が RulesError を投げてゲーム内時刻が
+    //   恒久停止する(§4b)。駐在側の `rejectIfResidentUnavailable` と対称。
+    const stationed = rejectIfResidentStationed(state, memberId, "dispatchExpedition", index);
+    if (stationed !== null) return stationed;
     if (resident.life === undefined) {
       return rejected("dispatchExpedition", index, {
         code: "residentUnavailable",
@@ -2097,18 +2107,30 @@ function applyCancelCodification(
 //   排他にすることであり、その検査 `assertNoDoubleStationedResidents` は
 //   **供給レートを計算するたび**に走る(= 破れた state を作ったら次の advance で
 //   RulesError になる)。よってコマンド層の責務は「破れた state を作らない」で
-//   あり、その手段は `assignResident` と全く同じ —— 新しい場所へ入れる前に
-//   **同じコマンドの中で**古い場所から外す。
-
-/** その住民が常駐している拠点(居なければ undefined)。走査は拠点 ID 昇順。 */
-function outpostOfResident(state: GameState, residentId: EntityId): OutpostState | undefined {
-  for (const outpost of allOutposts(state)) {
-    for (const id of outpost.residentIds) {
-      if (id === residentId) return outpost;
-    }
-  }
-  return undefined;
-}
+//   あり、その手段は 2 通りある:
+//     (a) **移す**  = 新しい場所へ入れる前に、同じコマンドの中で古い場所から
+//         外す(`establishOutpost` / `stationResident` が本拠就労を外す経路)
+//     (b) **弾く**  = そもそも受け付けない(`rejectIfResidentUnavailable`)
+//
+//   [R8-01・2026-08-06] この排他は 3 方向あるのに、当初は (a)(b) が
+//   **拠点へ入る側にしか無かった**。拠点常駐者を `dispatchExpedition` や
+//   `assignResident` へ渡すと素通りし、成立した瞬間から毎 tick
+//   `assertNoDoubleStationedResidents` が RulesError を投げてゲーム内時刻が
+//   恒久停止する進行不能ソフトロックになっていた(評価Round 8 R8-01)。
+//   両コマンドへ (b) の事前 reject を足して 3 方向すべてを閉じた:
+//
+//     就労 → 駐在  : `rejectIfResidentUnavailable` + (a) 就労を外す  [M50]
+//     派遣 → 駐在  : `rejectIfResidentUnavailable` で弾く            [M50]
+//     駐在 → 派遣  : `applyDispatchExpedition` で弾く                [R8-01]
+//     駐在 → 就労  : `applyAssignResident` で弾く                    [R8-01]
+//
+//   駐在から出る 2 方向を (a)(移す)にせず (b)(弾く)にしたのは、拠点は
+//   常駐 1 名以上が state 不変条件(update.ts の `requireValidOutpost`)であり、
+//   黙って移すと 1 人拠点が**プレイヤーの指示なく放棄される**ためである
+//   (`detachResidentFromPostsOrAbandon` の doc が「移動先が確定している
+//   明示の指示」に限って放棄を許しているのと同じ線引き)。拠点を畳むかどうかは
+//   プレイヤーの判断として残し、`unstationResident` / `abandonOutpost` を
+//   先に打たせる。
 
 /**
  * [M50] その住民を本拠の就労と拠点常駐の**両方**から外す(探索派遣は外さない
@@ -2120,7 +2142,7 @@ function outpostOfResident(state: GameState, residentId: EntityId): OutpostState
  */
 function detachResidentFromPosts(state: GameState, residentId: EntityId): GameState {
   let next = detachWorkerFromAllFacilities(state, residentId);
-  const outpost = outpostOfResident(next, residentId);
+  const outpost = stationedOutpostOfResident(next, residentId);
   if (outpost === undefined) return next;
   const residentIds = outpost.residentIds.filter((id) => id !== residentId);
   next = setOutpost(next, setField(outpost, "residentIds", residentIds));
@@ -2162,6 +2184,36 @@ function rejectIfResidentUnavailable(
     });
   }
   return null;
+}
+
+/**
+ * [R8-01] 住民 1 人が**衛星拠点に常駐していない**ことを確かめる
+ * ({@link rejectIfResidentUnavailable} の対称形。常駐から出る 2 方向 =
+ * 探索派遣 / 本拠就労 が共有する検査で、なぜ「移す」でなく「弾く」なのかは
+ * §4b の表を参照)。常駐しているなら reject、していなければ null。
+ *
+ * `code` は駐在側と同じ `residentUnavailable` を使う —— 新しい code を足すと
+ * セーブや UI の網羅テーブル(`src/ui/screens/rejectionMessages.ts`)まで
+ * 波及するのに対し、プレイヤーから見た事実は駐在側とまったく同じ
+ * 「その住民は今この操作を行えない」だからである。理由の内訳は `message` と
+ * 上記 UI 層の文言が担う。
+ */
+function rejectIfResidentStationed(
+  state: GameState,
+  residentId: EntityId,
+  kind: CommandKind,
+  index: number,
+): CommandRejected | null {
+  const outpost = stationedOutpostOfResident(state, residentId);
+  if (outpost === undefined) return null;
+  return rejected(kind, index, {
+    code: "residentUnavailable",
+    subjectId: residentId,
+    message:
+      `住民 "${residentId}" は衛星拠点 "${outpost.id}" に常駐中なので本拠の就労にも` +
+      "探索派遣にも就けない(本拠就労 / 探索派遣 / 拠点常駐は排他・GDD 9.2 / " +
+      "rules/outpost.ts §2)。先に駐在を解除するか拠点を放棄すること",
+  });
 }
 
 /** [M50] 衛星拠点の設置(GDD 9.2)。 */
@@ -2252,7 +2304,7 @@ function applyEstablishOutpost(
  * 以上その拠点に人は戻らない。
  */
 function detachResidentFromPostsOrAbandon(state: GameState, residentId: EntityId): GameState {
-  const outpost = outpostOfResident(state, residentId);
+  const outpost = stationedOutpostOfResident(state, residentId);
   if (outpost !== undefined && outpost.residentIds.length === 1) {
     return abandonOutpostState(detachWorkerFromAllFacilities(state, residentId), outpost);
   }
@@ -2362,7 +2414,7 @@ function applyUnstationResident(
       message: `住民 "${command.residentId}" が state に無い`,
     });
   }
-  const outpost = outpostOfResident(state, command.residentId);
+  const outpost = stationedOutpostOfResident(state, command.residentId);
   if (outpost === undefined) {
     return rejected("unstationResident", index, {
       code: "notStationed",
