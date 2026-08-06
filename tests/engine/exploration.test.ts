@@ -28,28 +28,38 @@ import {
   type Command,
 } from "../../src/engine/commands";
 import { FIX_SCALE, FIX_ZERO, fixFromInt, fixFromRaw, toRaw, type Fix } from "../../src/engine/fp";
+import { explorationTeamCandidates } from "../../src/engine/assist/exploration";
 import {
   DISPATCH_TEAM_MAX,
   MAX_RENDERED_LOGS,
   appendRenderedLog,
   buildDispatchSnapshot,
+  dispatchCandidates,
   explorationRoi,
   rareAssetCountOf,
   renderReturnLog,
   travelTicksFor,
 } from "../../src/engine/rules/exploration";
+import { assertNoDoubleStationedResidents } from "../../src/engine/rules/outpost";
 import { recallRiskPerDay } from "../../src/engine/rules/recall";
 import { recentMemoirHighlights } from "../../src/engine/rules/memoir";
-import type { DistanceBand, EngineContent, ExplorationParams } from "../../src/engine/rules/types";
+import type {
+  DistanceBand,
+  EngineContent,
+  ExplorationParams,
+  OutpostParams,
+  OutpostTypeDef,
+} from "../../src/engine/rules/types";
 import { fromSerializable, toSerializable } from "../../src/engine/state/serialize";
 import {
   getDispatch,
+  getOutpost,
   requireEntity,
   type DispatchSnapshot,
   type EntityId,
   type GameState,
 } from "../../src/engine/state/state";
-import { setTechMemory } from "../../src/engine/state/update";
+import { setOutpost, setTechMemory } from "../../src/engine/state/update";
 import { assertDispatchTreeBounds } from "../../src/platform/persistence";
 import { worldSeedToUint32 } from "../../src/engine/stochastic";
 
@@ -544,6 +554,124 @@ describe("派遣確定コマンド(GDD 8.1)", () => {
     const result = apply(board, engineContent, dispatchCommand(DISPATCH_TEAM_MAX + 1));
     expect(result.ok).toBe(false);
     expect(JSON.stringify(toSerializable(board))).toBe(before);
+  });
+});
+
+// --- 3b. [R8-01] 衛星拠点の常駐者は派遣できない(評価Round 8 fatal) ----------
+//
+//   常駐者を派遣候補に残していたため、派遣が成立した瞬間から毎 tick
+//   `rules/outpost.ts` の `assertNoDoubleStationedResidents` が RulesError を
+//   投げ、ゲーム内時刻が恒久停止する進行不能ソフトロックになっていた
+//   (×720 で実時間 480 秒・ゲーム時間 0 分/console error 5792 件の実測)。
+//   逆方向(就労中 / 派遣中 → 駐在)は M50 でガード済みだったので、
+//   欠けていた「駐在 → 派遣」を **コマンド事前 reject**(state 変更前)と
+//   **候補列挙の除外**の 2 層で閉じる。
+
+const OUTPOST_TYPE_FOREST: OutpostTypeDef = {
+  id: id("outpostTypeForest"),
+  resourceId: WOOD,
+  supplyPerResidentTickByLevel: [fixFromInt(1)],
+  upkeep: { baseFoodFix: FIX_ZERO, baseMoraleCareFix: FIX_ZERO },
+  hazard: {
+    intensityFix: FIX_ZERO,
+    growthPerDayFix: FIX_ZERO,
+    minFix: FIX_ZERO,
+    maxFix: fixFromInt(1),
+  },
+  shadeSensitivityFix: FIX_ZERO,
+};
+
+const OUTPOST_PARAMS_FLAT: OutpostParams = {
+  distanceBandUpkeepMulFix: {
+    near: fixFromInt(1),
+    far: fixFromInt(1),
+    deep: fixFromInt(1),
+  },
+};
+
+/** 探索 + 拠点の両ブロックを持つ content(段80 の供給が実際に走る)。 */
+function exploreOutpostContent(): EngineContent {
+  return {
+    ...exploreContent(),
+    outpostTypeDefs: new Map([[OUTPOST_TYPE_FOREST.id, OUTPOST_TYPE_FOREST]]),
+    outpost: OUTPOST_PARAMS_FLAT,
+  };
+}
+
+/** `exploreBoard(count)` の residentTeam0 を衛星拠点へ常駐させた盤面。 */
+function stationedBoard(count = 4): GameState {
+  return setOutpost(exploreBoard(count), {
+    id: id("outpostForest"),
+    outpostTypeId: OUTPOST_TYPE_FOREST.id,
+    level: 1,
+    band: "near",
+    residentIds: [id("residentTeam0")],
+    establishedTick: 0,
+  });
+}
+
+describe("[R8-01] 衛星拠点に常駐中の住民は探索へ派遣できない", () => {
+  it("常駐者を含む編成は residentUnavailable で reject される(駐在側のガードと対称)", () => {
+    const result = apply(stationedBoard(), exploreOutpostContent(), dispatchCommand(2));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("residentUnavailable");
+    expect(result.rejection.subjectId).toBe(id("residentTeam0"));
+    // 開発者向け message は「どの拠点に居るか」まで言う(UI 側の文言は
+    // src/ui/screens/rejectionMessages.ts が code から作る)。
+    expect(result.rejection.message).toContain("outpostForest");
+    expect(result.rejection.message).toContain("常駐中");
+  });
+
+  it("reject 後の state は 1 bit も動かない(§3 の原子適用)", () => {
+    const board = stationedBoard();
+    const before = JSON.stringify(toSerializable(board));
+    const result = apply(board, exploreOutpostContent(), dispatchCommand(2));
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(toSerializable(board))).toBe(before);
+    // 拠点側も無傷(常駐者を勝手に引き剥がして「移す」実装にしていない)。
+    expect(getOutpost(board, id("outpostForest"))?.residentIds).toEqual([id("residentTeam0")]);
+  });
+
+  it("常駐していない住民だけの編成は従来どおり通り、二重計上検査も通る", () => {
+    const engineContent = exploreOutpostContent();
+    const result = apply(
+      stationedBoard(),
+      engineContent,
+      dispatchCommand(2, {
+        teamResidentIds: [id("residentTeam1"), id("residentTeam2")],
+      } as Partial<Command>),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(activeDispatchCount(result.state)).toBe(1);
+    expect(() => {
+      assertNoDoubleStationedResidents(result.state);
+    }).not.toThrow();
+  });
+
+  it("常駐者は派遣候補の列挙に現れない(候補基準と拒否基準が同じ述語)", () => {
+    const board = stationedBoard(3);
+    const ids = (residents: readonly { readonly id: EntityId }[]) => residents.map((r) => r.id);
+    expect(ids(dispatchCandidates(board))).toEqual([id("residentTeam1"), id("residentTeam2")]);
+    expect(ids(explorationTeamCandidates(board))).toEqual([
+      id("residentTeam1"),
+      id("residentTeam2"),
+    ]);
+  });
+
+  it("常駐盤面で派遣を試しても時刻は止まらない(R8-01 の再現手順そのもの)", () => {
+    const engineContent = exploreOutpostContent();
+    const board = stationedBoard();
+    const result = apply(board, engineContent, dispatchCommand(2));
+    expect(result.ok).toBe(false);
+    // **プレイヤーの操作の後**の state をそのまま進める。修正前はここが
+    // 「派遣が通った壊れた state」であり、advance が毎 tick RulesError を
+    //  投げて時刻が伸びなかった(×720 で実時間 480 秒 = ゲーム時間 0 分・
+    //  console error 5792 件の実測)。同じ長さを 1 回で進めて固定する。
+    const after = result.ok ? result.state : board;
+    const advanced = advance(after, createAdvanceContext(after, engineContent), 720);
+    expect(advanced.tick).toBe(after.tick + 720);
   });
 });
 

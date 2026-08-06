@@ -1663,6 +1663,19 @@ describe("[M32] expeditionCandidates(GDD 8.1 [2026-07-30裁定]②の事前除�
     );
     expect(candidates[0]?.moraleApprox).toBe(toApproxNumber(alive.morale));
   });
+
+  // [R8-01] 衛星拠点に常駐中の住民が候補に残ると、選んで派遣した瞬間から
+  //   毎 tick RulesError(二重計上・GDD 9.2)でゲーム内時刻が恒久停止する
+  //   進行不能ソフトロックになる(評価Round 8 fatal)。engine の
+  //   `dispatchCandidates` が除外するので、⑦の候補一覧にも現れない。
+  it("[R8-01] 衛星拠点に常駐中の住民は候補に現れない", () => {
+    const free = candidateResident("aFree");
+    const stationed = candidateResident("bStationed");
+    const outpost = outpostOf("outpost1", "near", [stationed.id]);
+    const state = createGameState(META, [free, stationed], [], [], [], [], undefined, [outpost]);
+    const store = createGameStore({ state, content: m32Content() });
+    expect(store.derived.expeditionCandidates.value.map((c) => c.entityId)).toEqual([free.id]);
+  });
 });
 
 describe("[M32] expeditionDispatches / expeditionSlots(GDD 8.1「派遣枠上限＝同時2枠」)", () => {

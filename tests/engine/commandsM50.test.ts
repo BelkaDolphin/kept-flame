@@ -1016,6 +1016,46 @@ describe("[M50] 駐在割当 / 解除", () => {
     ).toBe("notStationed");
   });
 
+  // [R8-01] 「駐在 → 就労」は「駐在 → 派遣」と同じ二重計上の穴だった
+  //   (`assignResident` は拠点常駐を見ていなかった)。実測では就労させた
+  //   次の advance から毎 tick RulesError になり、⑦の派遣と同じ進行不能
+  //   ソフトロックになる。派遣側と同じ検査で閉じてあることを固定する。
+  it("[R8-01] 拠点常駐中の住民は本拠の就労に割り当てられない(residentUnavailable)", () => {
+    const board = accept(outpostBoard(), CONTENT_OUTPOST, ESTABLISH);
+    const result = apply(board, CONTENT_OUTPOST, {
+      kind: "assignResident",
+      residentId: id("bSora"),
+      facilityId: id("fHearth"),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("residentUnavailable");
+    expect(result.rejection.subjectId).toBe(id("bSora"));
+    expect(result.rejection.message).toContain("常駐中");
+    // reject 後は二重計上検査が通る state のまま(1 bit も動いていない)。
+    expect(() => {
+      assertNoDoubleStationedResidents(board);
+    }).not.toThrow();
+    // 就労者は元の 1 名(aRui)のまま = bSora は入っていない。
+    expect(requireEntity(board, id("fHearth"), "facility").workerIds).toEqual([id("aRui")]);
+  });
+
+  it("[R8-01] 常駐していない住民の就労は従来どおり通る(既存挙動を壊さない)", () => {
+    const board = accept(outpostBoard(), CONTENT_OUTPOST, ESTABLISH);
+    const next = accept(board, CONTENT_OUTPOST, {
+      kind: "assignResident",
+      residentId: id("cToki"),
+      facilityId: id("fHearth"),
+    });
+    expect(requireEntity(next, id("fHearth"), "facility").workerIds).toEqual([
+      id("aRui"),
+      id("cToki"),
+    ]);
+    expect(() => {
+      assertNoDoubleStationedResidents(next);
+    }).not.toThrow();
+  });
+
   it("駐在した住民は本拠の生産に寄与しない(GDD 9.2 の別集合)", () => {
     const before = outpostBoard();
     const after = accept(before, CONTENT_OUTPOST, {

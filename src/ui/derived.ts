@@ -1116,6 +1116,8 @@ export interface StoreDerived {
   /**
    * [M32] ⑦探索本部の派遣候補(GDD 8.1 [2026-07-30裁定]②「寿命を持たない
    * 住民は派遣拒否」を候補列挙の段階で先に除外・M27 と同じ立場)。
+   * [R8-01] 衛星拠点に常駐中の住民も同じく候補に出ない(engine の
+   * `dispatchCandidates` が除外する)。
    */
   readonly expeditionCandidates: ReadonlyComputed<readonly ExpeditionCandidateView[]>;
   /** [M32] ⑦/⑧が読む未帰還派遣一覧(派遣 ID 昇順・state.ts 不変条件(g))。 */
@@ -2568,8 +2570,14 @@ export interface OutpostOverviewView {
 
 /**
  * [M32] ⑦の派遣候補一覧。`assist/exploration.ts` の `explorationTeamCandidates`
- * (寿命なし住民の事前除外込み)をそのまま呼ぶ——候補列挙のロジックを
- * ここで書き直さない(M27 の既存実装と 2 通りの候補基準を作らないため)。
+ * (死亡 / 派遣中 / **拠点常駐中** / 寿命なし住民の事前除外込み)をそのまま
+ * 呼ぶ——候補列挙のロジックをここで書き直さない(M27 の既存実装と 2 通りの
+ * 候補基準を作らないため)。
+ *
+ * [R8-01] 拠点常駐者の除外は engine 側(`rules/exploration.ts` の
+ * `dispatchCandidates`)で行われる。ここへ `stationedOutpostIdByResident` を
+ * 使った 2 つめのフィルタを足すと、engine の事前 reject と UI の候補基準が
+ * 別々に育つので**足さない**。
  */
 function buildExpeditionCandidates(
   state: GameState,
