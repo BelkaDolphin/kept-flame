@@ -110,7 +110,24 @@ describe("FacilityWorkerRow(想起困難/派遣中/死亡tombstoneの状態表�
     const text = flattenText(vnode);
     expect(text).toContain("想起困難");
     expect(text).toContain("火起こし");
-    expect(text).toContain("想起困難の対象");
+    // [M73/R8-14] 見出しは「この施設に関わる想起困難」(④住民一覧の住民単位表示と
+    // 規則が違うことを画面上で明示する)。
+    expect(text).toContain("この施設に関わる想起困難");
+  });
+
+  it("[M73/R8-14] この施設に関わらない想起困難がある場合は件数と行き先を明示する", () => {
+    const vnode = FacilityWorkerRow({
+      worker: workerView({
+        recallImpaired: false,
+        impairedTechIds: [],
+        otherImpairedTechCount: 2,
+      }),
+    });
+    const text = flattenText(vnode);
+    // 住民一覧と食い違って見えないよう、バッジ自体は出す。
+    expect(text).toContain("想起困難");
+    expect(text).toContain("この施設と関わらない想起困難が2件");
+    expect(text).toContain("住民一覧");
   });
 
   it("impairedTechIds 省略時(既存呼び出し互換)は対象tech行を出さない", () => {

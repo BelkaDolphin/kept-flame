@@ -286,6 +286,19 @@ describe("ResidentRow: ステータス5種/trait/状態表示(GDD 7.1/7.2/7.5/11
   });
 });
 
+describe("[M73/R8-07] 士気の表示(④住民一覧・配属判断の材料)", () => {
+  it("5能力と並べて士気を出す(探索本部・大移動だけに出ていた非対称の解消)", () => {
+    const vnode = ResidentRow({
+      resident: residentView({ moraleApprox: 68.2 }),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    const text = flattenText(vnode);
+    expect(text).toContain("士気68.2");
+  });
+});
+
 describe("ResidentRow: 割当/解除(assignResident/unassignResident)", () => {
   it("施設を選ぶと onAssign(residentId, facilityId) が呼ばれる", () => {
     const onAssign = vi.fn();
@@ -314,9 +327,9 @@ describe("ResidentRow: 割当/解除(assignResident/unassignResident)", () => {
     expect(onUnassign).toHaveBeenCalledWith(id("aRui"));
   });
 
-  it("死亡/派遣中でもセレクトは活性のまま(判定は engine の residentUnavailable reject に委ねる)", () => {
+  it("派遣中/拠点常駐(一時的な不能)ではセレクトは活性のまま(判定は engine の reject に委ねる)", () => {
     const vnode = ResidentRow({
-      resident: residentView({ alive: false }),
+      resident: residentView({ dispatched: true }),
       facilityRoster: ROSTER,
       onAssign: () => undefined,
       onUnassign: () => undefined,
@@ -324,5 +337,19 @@ describe("ResidentRow: 割当/解除(assignResident/unassignResident)", () => {
     const select = findSelect(vnode);
     expect(select).not.toBeNull();
     expect((select as unknown as { props: { disabled?: boolean } }).props.disabled).toBeUndefined();
+  });
+
+  it("[M73/R8-12] 死亡(恒久的に不能)はセレクタを出さず理由を文で示す", () => {
+    // §3 の規律が守るのは「いまできないだけかもしれないこと」を隠さないことで、
+    // 死亡は成功しうる未来の state が無い恒久状態(就労枠0の施設を候補から外す
+    // のと同じ「構造的事実」)。詳細は ResidentsScreen.tsx §3 の追記参照。
+    const vnode = ResidentRow({
+      resident: residentView({ alive: false }),
+      facilityRoster: ROSTER,
+      onAssign: () => undefined,
+      onUnassign: () => undefined,
+    });
+    expect(findSelect(vnode)).toBeNull();
+    expect(flattenText(vnode)).toContain("亡くなった住民は就労できません");
   });
 });

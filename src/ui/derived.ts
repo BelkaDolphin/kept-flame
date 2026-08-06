@@ -966,6 +966,18 @@ export interface FacilityWorkerView {
    * 省略時(既存テストフィクスチャ互換)は空扱い(`?? []`)。
    */
   readonly impairedTechIds?: readonly EntityId[];
+  /**
+   * [M73/R8-14] `impairedTechIds` に**入らなかった**想起困難の件数(= この施設の
+   * 寄与は止めていない tech の想起困難)。
+   *
+   * ④住民一覧は住民単位で「想起困難」を常時出すのに、③施設詳細は当該施設に
+   * 関わる tech だけを出すため、同じ住民の状態が画面間で食い違って見えた
+   * (R8-C03)。**絞り込み自体は正しい**(③の役目は「この施設の産出が止まって
+   * いる理由」を示すことで、無関係な想起困難まで出すとこの施設が止まっている
+   * かのような誤読になる)ので、規則は変えずに「ほかに N 件ある」ことを明示して
+   * 矛盾に見えないようにする。省略時は 0 扱い。
+   */
+  readonly otherImpairedTechCount?: number;
 }
 
 /** [M30] 選択施設の詳細(③施設詳細/増築)。 */
@@ -1041,13 +1053,16 @@ function buildFacilityDetail(
     if (residentEntity === undefined || residentEntity.kind !== "resident") continue;
     // [M70/R5-A02] この施設の寄与を実際に止めている tech だけ(techImpairmentStopsFacility)。
     const impairments = residentTechImpairments(state, workerId, state.tick);
+    const impairedTechIds = impairedTechIdsAtFacility(impairments, content, def.id);
     workers.push({
       residentId: workerId,
       moraleApprox: toApproxNumber(residentEntity.morale),
       alive: isAliveResident(residentEntity),
       dispatched: residentEntity.dispatched,
       recallImpaired: residentEntity.recallImpairedUntilTick > state.tick,
-      impairedTechIds: impairedTechIdsAtFacility(impairments, content, def.id),
+      impairedTechIds,
+      // [M73/R8-14] 絞り込みで落ちた件数(④住民一覧との非対称を明示するため)。
+      otherImpairedTechCount: impairments.length - impairedTechIds.length,
     });
   }
 

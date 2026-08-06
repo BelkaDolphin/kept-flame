@@ -102,6 +102,12 @@
   color: #8c290b;
 }
 
+/* [M73/R8-14] この施設に関わらない想起困難の件数(④住民一覧との非対称の明示)。 */
+.kf-facility-detail__worker-other-impairment {
+  flex-basis: 100%;
+  color: #5b534b;
+}
+
 .kf-facility-detail__impairment-note {
   font-size: var(--kf-fs-sub);
   color: #a11334;

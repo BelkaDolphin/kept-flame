@@ -73,6 +73,20 @@
   color: #5b534b;
 }
 
+/* [M73/R8-07] 士気は日々変動する値なので、5能力(固定的な素質)と同じ列に
+   並べつつ色で区別する。 */
+.kf-resident-row__morale {
+  color: #3f5b34;
+  font-weight: 600;
+}
+
+/* [M73/R8-12] 死亡住民はセレクタを出さず理由を書く(恒久的に不能=構造的事実)。 */
+.kf-resident-row__assign-unavailable {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0;
+}
+
 .kf-resident-row__traits {
   font-size: var(--kf-fs-sub);
   margin: 0 0 0.4rem;

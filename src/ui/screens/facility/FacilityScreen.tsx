@@ -83,10 +83,14 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
   // `recallImpaired`(住民単位スカラ)とは独立の情報源なので、どちらかが
   // 立っていれば「想起困難」バッジを出す(derived.ts の doc 参照)。
   const impairedTechIds = worker.impairedTechIds ?? [];
+  // [M73/R8-14] この施設に関わらない想起困難の件数(derived.ts の doc 参照)。
+  const otherImpairedTechCount = worker.otherImpairedTechCount ?? 0;
   const badges: string[] = [];
   if (!worker.alive) badges.push("死亡");
   if (worker.dispatched) badges.push("派遣中");
-  if (worker.recallImpaired || impairedTechIds.length > 0) badges.push("想起困難");
+  if (worker.recallImpaired || impairedTechIds.length > 0 || otherImpairedTechCount > 0) {
+    badges.push("想起困難");
+  }
   return (
     <li class="kf-facility-detail__worker">
       <span class="kf-facility-detail__worker-id">{residentDisplayName(worker.residentId)}</span>
@@ -101,7 +105,16 @@ export function FacilityWorkerRow({ worker }: FacilityWorkerRowProps) {
           tech名を明示する。 */}
       {impairedTechIds.length > 0 && (
         <span class="kf-facility-detail__worker-impairment">
-          想起困難の対象: {impairedTechIds.map((techId) => techLabel(techId)).join("・")}
+          この施設に関わる想起困難: {impairedTechIds.map((techId) => techLabel(techId)).join("・")}
+        </span>
+      )}
+      {/* [M73/R8-14] ④住民一覧は住民単位で「想起困難」を常時出すのに、この画面は
+          当該施設に関わる tech だけへ絞る(この施設の産出が止まっている理由を
+          示すのが役目なので、絞り込みは正しい)。同じ住民の状態が画面間で食い
+          違って見えないよう、絞り込みで落ちた件数をここで明示する。 */}
+      {otherImpairedTechCount > 0 && (
+        <span class="kf-facility-detail__worker-other-impairment">
+          ほかに この施設と関わらない想起困難が{otherImpairedTechCount}件(住民一覧に出ます)
         </span>
       )}
     </li>

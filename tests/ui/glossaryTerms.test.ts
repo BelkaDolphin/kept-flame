@@ -24,10 +24,12 @@ const INTERNAL_ID_PATTERN =
 const RAW_TICK_PATTERN = /\b(1440|4320|432000|60000)\b/;
 
 describe("GLOSSARY_TERMS", () => {
-  it("タスク指示の10語が過不足なく揃っている", () => {
-    expect(GLOSSARY_TERMS).toHaveLength(10);
+  // [M73/R8-07] M57 の 10 語 + 「士気」= 11 語。士気(M72 で実際に動くように
+  // なった値)は④住民一覧に出していなかったうえ辞典にも項目が無かった。
+  it("M57 の10語 + 士気(計11語)が過不足なく揃っている", () => {
+    expect(GLOSSARY_TERMS).toHaveLength(11);
     const ids = new Set(GLOSSARY_TERMS.map((entry) => entry.id));
-    expect(ids.size).toBe(10);
+    expect(ids.size).toBe(11);
   });
 
   it("(A)/(B)技術・成文化・想起困難・習熟・大移動・継承点・晴天漂着・保管上限/廃材・探索の距離帯を収録", () => {
@@ -43,6 +45,7 @@ describe("GLOSSARY_TERMS", () => {
     expect(terms).toContain("保管上限");
     expect(terms).toContain("廃材");
     expect(terms).toContain("距離帯");
+    expect(terms).toContain("士気");
   });
 
   it("プレイヤー語彙のみ(丸数字・GDD番号・内部ID・tick生値を出さない)", () => {

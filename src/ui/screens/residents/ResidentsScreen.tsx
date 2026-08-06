@@ -21,6 +21,17 @@
 //   engine の `residentUnavailable` reject が返るので、そこで初めて理由を
 //   知らせる(バッジで状態を先に見せているので二度手間には見えるが、
 //   「押せない理由を UI が判定して隠す」を避ける一貫性を優先する)。
+//
+//   **[M73/R8-12] 死亡だけは例外にする(規律側を優先したうえでの線引き)**:
+//   §3 の規律が守っているのは「**いま**できないだけかもしれないことを UI が
+//   先読みして隠さない」ことである(在庫不足・上限・派遣中・拠点常駐は、時間や
+//   操作で解ける一時的な状態なので engine の reject に教えさせるのが正しい)。
+//   死亡(GDD 7.5 の tombstone)は**恒久的に不能**で、成功しうる未来の state が
+//   存在しない——「就労枠 0 の施設を候補から外す」(M70/R5-A11)と同じ
+//   「構造的事実」の側であり、判定の先読みには当たらない。よって死亡住民には
+//   セレクタ自体を出さず、理由(記録として一覧に残していること)を文で示す。
+//   一時的な不能(派遣中/拠点常駐/想起困難)はこれまでどおりセレクタを活性の
+//   まま残し、engine の reject に説明させる。
 // ---------------------------------------------------------------------------
 
 import { useState } from "preact/hooks";
@@ -107,27 +118,40 @@ export function ResidentRow({ resident, facilityRoster, onAssign, onUnassign }: 
         <li>知性{formatApproxDecimal1(resident.stats.intellectApprox)}</li>
         <li>頑健{formatApproxDecimal1(resident.stats.fortitudeApprox)}</li>
         <li>意志{formatApproxDecimal1(resident.stats.willApprox)}</li>
+        {/* [M73/R8-07] 士気(M72 で実際に動くようになった値)は探索本部・大移動には
+            出ていたのに、配属を決めるこの画面には無かった(5能力だけ)。能力値と
+            違って日々変動するので、区別できるクラスを付けて並べる。 */}
+        <li class="kf-resident-row__morale">士気{formatApproxDecimal1(resident.moraleApprox)}</li>
       </ul>
       {resident.traitIds.length > 0 && (
         <p class="kf-resident-row__traits">
           {resident.traitIds.map((traitId) => traitLabel(traitId)).join("・")}
         </p>
       )}
-      <label class="kf-resident-row__assign">
-        就労先
-        <select
-          class="kf-resident-row__select"
-          value={resident.assignedFacilityId ?? ""}
-          onChange={handleChange}
-        >
-          <option value="">(無配属)</option>
-          {assignableFacilities.map((facility) => (
-            <option key={facility.facilityId} value={facility.facilityId}>
-              {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* [M73/R8-12] 死亡は恒久的に不能(§3 の線引き)。セレクタを出さず理由を書く。
+          派遣中/拠点常駐/想起困難は一時的な状態なので従来どおりセレクタを残し、
+          engine の reject に説明させる。 */}
+      {resident.alive ? (
+        <label class="kf-resident-row__assign">
+          就労先
+          <select
+            class="kf-resident-row__select"
+            value={resident.assignedFacilityId ?? ""}
+            onChange={handleChange}
+          >
+            <option value="">(無配属)</option>
+            {assignableFacilities.map((facility) => (
+              <option key={facility.facilityId} value={facility.facilityId}>
+                {facilityLabel(facility.defId)}({cellCoordinateLabel(facility.cellId)})
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p class="kf-resident-row__assign-unavailable">
+          亡くなった住民は就労できません(歩みの記録としてこの一覧に残しています)。
+        </p>
+      )}
     </li>
   );
 }
@@ -141,6 +165,8 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
   const residents = useSignalValue(store.derived.residents);
   const facilityRoster = useSignalValue(store.derived.facilityRoster);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  // [M73/R8-12] 生存数(死亡 tombstone を除く)。判定は derived の `alive` をそのまま数える。
+  const livingCount = residents.filter((resident) => resident.alive).length;
 
   function handleAssign(residentId: EntityId, facilityId: EntityId): void {
     const result = store.dispatch({
@@ -171,7 +197,15 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
         住民の状態を確認し、就労先の施設を割り当てます。「想起困難」は技術を一時的に思い出せない
         状態で、時間が経てば回復します(記録を失ったわけではありません)。
       </p>
-      <p class="kf-residents-screen__summary">{residents.length}人</p>
+      {/* [M73/R8-12] 総数は死亡した住民(記録として残す)を含むので、ホームの
+          「生存人口」と食い違って見えた。生存を主にして、亡くなった人数は
+          別に添える(数を混ぜない)。 */}
+      <p class="kf-residents-screen__summary">
+        生存 {livingCount}人
+        {residents.length > livingCount
+          ? `(亡くなった住民 ${residents.length - livingCount}人)`
+          : ""}
+      </p>
 
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
 
