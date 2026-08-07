@@ -144,6 +144,7 @@ export function loadLiveRawContentBundle(): RawContentBundle {
     trait: readLiveContentJson("trait.json") as readonly unknown[],
     adjacency: readLiveContentJson("adjacency.json"),
     balance: readLiveContentJson("balance.json"),
+    outpostType: readLiveContentJson("outpostType.json") as readonly unknown[],
   };
 }
 

@@ -93,6 +93,7 @@ const withEventContent: ContentPatch = (raw: RawContentBundle): RawContentBundle
   trait: raw.trait,
   adjacency: raw.adjacency,
   balance: raw.balance,
+  outpostType: raw.outpostType ?? [],
   event: readEventJson(),
 });
 
