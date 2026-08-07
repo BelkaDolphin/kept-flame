@@ -49,6 +49,7 @@ import { fileURLToPath } from "node:url";
 
 import { canonicalJsonOfState, digestOfCanonicalJson } from "../conformance/goldenVector";
 
+import { compareUtf16 } from "../src/engine/canonicalize";
 import { soleKeeperRecoverabilityIssues } from "../src/engine/graph";
 import { FIX_ONE, fixFromRaw, toRaw } from "../src/engine/fp";
 import { planCodification } from "../src/engine/rules/codify";
@@ -204,6 +205,23 @@ export const EVENT_COVERAGE_SAMPLES_FULL = 1000;
 export const DETERMINISM_RUNS_FULL = 1000;
 /** GDD 11.4-7 の「オーバーフロー損失率 < 15%」。 */
 export const OVERFLOW_LOSS_RATE_MAX_FIX_RAW = 150_000;
+/**
+ * [M75] GDD 11.4-7a の拠点網 ROI 下限(**1.2**・[2026-08-07裁定・台帳v24])。
+ *
+ * GDD 11.4-7 は M74 まで ROI の数値閾値を持たず、本 assert は
+ * 「閾値が無い + bot が拠点を 1 基も建てない」の二重の理由で unverifiable
+ * だった(M39 が後者を『計測器の穴』として機械確認・台帳v22)。
+ *
+ * 1.2 の根拠: 帯平均 ROI の下限と同値に揃えた(同じ「投資に対する見返り」の
+ * 尺度に 2 通りの下限を作らない)。実測の余裕は十分ある —— content の 3 タイプ
+ * の supply/upkeep 比は 鉱山 1.60 / 農園 3.16 / 林 2.22
+ * (docs/measurements/balance-m40-e2-recalibration-2026-08-03.json)で、
+ * 最も薄い鉱山を最も高い距離帯係数(deep 1.8)で常駐 1 名で建てても 1.379。
+ * GDD 9.2 の「維持 > 供給の死重が生じない baseSupply 初期値を sim で担保」を
+ * 不等式へ落とすと下限 1.0 だが、それでは翳り率や (B) 喪失の余地が無いので
+ * 1.2 を取る。
+ */
+export const OUTPOST_NETWORK_ROI_MIN = 1.2;
 /** GDD 11.4-8 のレンジ(回/住民/週)。 */
 export const RECALL_PER_RESIDENT_WEEK_MIN = 1;
 export const RECALL_PER_RESIDENT_WEEK_MAX = 3;
@@ -835,27 +853,71 @@ function assertRoiAndOverflow(
 ): readonly NightlyAssert[] {
   const asserts: NightlyAssert[] = [];
 
-  // (a) 拠点網 ROI。
+  // (a) 拠点網 ROI。[M75] 実 run の観測へ結線した(GDD 11.4-7 [2026-08-07裁定])。
+  //     判定値は **拠点を建てた run の最小 ROI**(保守側 = 1 run でも下限を割れば
+  //     fail)。ROI の計算は engine の `outpostNetworkRoi`(GDD 9.2 の式)であり、
+  //     sim 側に再実装は無い(`runStrategy.ts` が run 終了時点の値を metrics へ載せる)。
   const outpostTypeCount = content.outpostTypeDefs?.size ?? 0;
+  const outpostRoiDetail: string[] = [];
+  let minOutpostRoi = Number.POSITIVE_INFINITY;
+  let totalOutpostCount = 0;
+  let totalStationedCount = 0;
+  const outpostTypeIdsSeen = new Set<string>();
+  const outpostBandsSeen = new Set<string>();
+  for (const record of records) {
+    const metrics = record.result.metrics;
+    totalOutpostCount += metrics.finalOutpostCount;
+    totalStationedCount += metrics.finalStationedResidentCount;
+    for (const typeId of metrics.builtOutpostTypeIds) outpostTypeIdsSeen.add(typeId);
+    for (const band of metrics.outpostBands) outpostBandsSeen.add(band);
+    if (metrics.finalOutpostCount === 0) continue;
+    const roi =
+      metrics.finalOutpostNetworkRoiRaw === null ? null : metrics.finalOutpostNetworkRoiRaw / 1e6;
+    outpostRoiDetail.push(
+      `${record.botId}/${record.seed}=${roi === null ? "null(分母0)" : roi.toFixed(4)}` +
+        `(拠点${String(metrics.finalOutpostCount)}基/常駐${String(metrics.finalStationedResidentCount)}名)`,
+    );
+    if (roi !== null && roi < minOutpostRoi) minOutpostRoi = roi;
+  }
+  const outpostRoiMeasured = Number.isFinite(minOutpostRoi) ? minOutpostRoi : 0;
+  const outpostDetail =
+    `content の outpostType 定義数 = ${String(outpostTypeCount)}。` +
+    `全 ${String(records.length)} run の拠点 ${String(totalOutpostCount)} 基 / 常駐 ` +
+    `${String(totalStationedCount)} 名(タイプ ${[...outpostTypeIdsSeen].sort(compareUtf16).join(",") || "なし"} / ` +
+    `距離帯 ${[...outpostBandsSeen].sort(compareUtf16).join(",") || "なし"})。` +
+    (outpostRoiDetail.length === 0 ? "" : `run 別 ROI: ${outpostRoiDetail.join(" ")}`);
   asserts.push(
-    makeAssert({
-      id: "gdd-11.4-7a",
-      gddRef: "GDD 11.4-7",
-      title: "拠点網ROI",
-      inequality: "拠点網ROI = Σsupply / (Σupkeep + Σ期待B喪失損失) >= 下限",
-      comparator: ">=",
-      measured: 0,
-      threshold: 0,
-      unit: "比",
-      owner: "balance",
-      detail: `content の outpostType 定義数 = ${String(outpostTypeCount)}`,
-      unverifiableReason:
-        outpostTypeCount === 0
-          ? "content に outpostType 定義が 1 件も無く(content/ に outpost カテゴリのファイルが存在しない)、拠点を 1 基も建てられない。加えて GDD 11.4-7 は ROI の数値閾値を与えていない"
-          : "GDD 11.4-7 は拠点網ROIの数値閾値を与えていない(『<15%』はオーバーフロー損失率だけに掛かる)",
-      unblockCondition:
-        "(1) content へ outpostType カテゴリを追加(GDD 9.2)し bot に拠点建設を実装、(2) GDD 11.4-7 に ROI の下限値を明記(M39〜M41 の裁定事項)",
-    }),
+    Number.isFinite(minOutpostRoi)
+      ? makeAssert({
+          id: "gdd-11.4-7a",
+          gddRef: "GDD 11.4-7",
+          title: "拠点網ROI",
+          inequality: `min_run(拠点網ROI = Σsupply / (Σupkeep + Σ期待B喪失損失)) >= ${String(OUTPOST_NETWORK_ROI_MIN)}`,
+          comparator: ">=",
+          measured: outpostRoiMeasured,
+          threshold: OUTPOST_NETWORK_ROI_MIN,
+          unit: "比",
+          owner: "balance",
+          detail: outpostDetail,
+        })
+      : makeAssert({
+          id: "gdd-11.4-7a",
+          gddRef: "GDD 11.4-7",
+          title: "拠点網ROI",
+          inequality: `min_run(拠点網ROI = Σsupply / (Σupkeep + Σ期待B喪失損失)) >= ${String(OUTPOST_NETWORK_ROI_MIN)}`,
+          comparator: ">=",
+          measured: 0,
+          threshold: OUTPOST_NETWORK_ROI_MIN,
+          unit: "比",
+          owner: "balance",
+          detail: outpostDetail,
+          unverifiableReason:
+            outpostTypeCount === 0
+              ? "content に outpostType 定義が 1 件も無く、拠点を 1 基も建てられない"
+              : "全 run で拠点が 1 基も建たず(または ROI の分母が 0 で)不等式の左辺が定義されない",
+          unblockCondition:
+            "bot の拠点方針(sim/strategy/bots.ts の OUTPOST_POLICY_*)が実 run で 1 基以上建てられる盤面にする(常駐に回せる人数 / 設置コストの在庫)",
+        }),
   );
 
   // (b) 探索 ROI((B) 喪失込み)。B 損失項が機能しているかは別 assert(11.4-11b)。
@@ -1254,6 +1316,18 @@ export interface NightlyGateReport {
     readonly harshWorkerSampleCount: number;
     readonly harshWorkerGuardBandSampleCount: number;
     readonly harshWorkerBelowMidSampleCount: number;
+    /** [M75] 衛星拠点(GDD 9.2 / 11.4-7a)。設置 / 駐在の成立本数と最終状態。 */
+    readonly outpostEstablishCount: number;
+    readonly outpostStationCount: number;
+    readonly finalOutpostCount: number;
+    readonly finalStationedResidentCount: number;
+    readonly builtOutpostTypeIds: readonly string[];
+    readonly outpostBands: readonly string[];
+    /** [M75] run 終了時点の拠点網 ROI(raw・1e6 スケール)。拠点 0 基なら null。 */
+    readonly finalOutpostNetworkRoiRaw: number | null;
+    readonly finalOutpostSupplyRaw: number;
+    readonly finalOutpostUpkeepRaw: number;
+    readonly finalOutpostRareLossRaw: number;
   }[];
 }
 
@@ -1322,6 +1396,16 @@ export function runNightlyGate(options: NightlyGateOptions = {}): NightlyGateRep
       harshWorkerSampleCount: record.result.metrics.harshWorkerSampleCount,
       harshWorkerGuardBandSampleCount: record.result.metrics.harshWorkerGuardBandSampleCount,
       harshWorkerBelowMidSampleCount: record.result.metrics.harshWorkerBelowMidSampleCount,
+      outpostEstablishCount: record.result.metrics.outpostEstablishCount,
+      outpostStationCount: record.result.metrics.outpostStationCount,
+      finalOutpostCount: record.result.metrics.finalOutpostCount,
+      finalStationedResidentCount: record.result.metrics.finalStationedResidentCount,
+      builtOutpostTypeIds: record.result.metrics.builtOutpostTypeIds,
+      outpostBands: record.result.metrics.outpostBands,
+      finalOutpostNetworkRoiRaw: record.result.metrics.finalOutpostNetworkRoiRaw,
+      finalOutpostSupplyRaw: record.result.metrics.finalOutpostSupplyRaw,
+      finalOutpostUpkeepRaw: record.result.metrics.finalOutpostUpkeepRaw,
+      finalOutpostRareLossRaw: record.result.metrics.finalOutpostRareLossRaw,
     })),
   };
 }

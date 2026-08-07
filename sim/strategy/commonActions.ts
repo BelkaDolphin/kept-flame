@@ -19,12 +19,15 @@ import {
   activeDispatchCount,
   facilityBuildCostLines,
   facilityWorkerSlots,
+  outpostBuildCostLines,
   type AssignResidentCommand,
   type BeginCodificationCommand,
   type BeginResearchCommand,
   type DispatchExpeditionCommand,
+  type EstablishOutpostCommand,
   type PlaceFacilityCommand,
   type ReclaimCellCommand,
+  type StationResidentCommand,
 } from "../../src/engine/commands";
 import { compareUtf16 } from "../../src/engine/canonicalize";
 import { toRaw, FIX_ONE } from "../../src/engine/fp";
@@ -48,6 +51,8 @@ import {
   type TeamRequest,
 } from "../../src/engine/assist/exploration";
 import { currentCodification } from "../../src/engine/rules/codify";
+import { rareAssetCountOf } from "../../src/engine/rules/exploration";
+import { stationedResidentIds } from "../../src/engine/rules/outpost";
 import { populationViewOf } from "../../src/engine/rules/population";
 import { nextReclaimCostFix } from "../../src/engine/rules/reclaim";
 import { currentResearch } from "../../src/engine/rules/research";
@@ -59,12 +64,16 @@ import {
   type DistanceBand,
   type EngineContent,
   type FacilityDef,
+  type OutpostTypeDef,
 } from "../../src/engine/rules/types";
 import {
+  allOutposts,
   entitiesOfKind,
   entityIdFromString,
   firstRubbleCellIn,
+  getOutpost,
   isAliveResident,
+  livingResidents,
   type DispatchStance,
   type EntityId,
   type FacilityState,
@@ -1353,4 +1362,185 @@ export function buildDispatchCommands(
 
   const plan = suggestExpeditionTeams(state, content, requests, { excludeResidentIds });
   return { commands: teamPlanToCommands(plan), recallGuardLog };
+}
+
+// --- 7. [M75] 衛星拠点(GDD 9.2)-----------------------------------------------
+//
+// M39 のトリアージが「`sim/strategy/` に `establishOutpost` 呼び出しが 0 件で、
+// 拠点は sim で一度も建たない」= 夜間ゲート 11.4-7a(拠点網ROI)が構造的に
+// 測れない状態だったことを機械確認した(台帳v22 の新規発見)。ここがその穴を
+// 閉じる bot 側の部品である。
+//
+// 判断材料は決定論的な state と content だけ(乱数を一切引かない)。1 tick に
+// 出すコマンドは高々 1 個(建設側の `buildFacilityCommand` と同じ「この tick で
+// やり過ぎない」規律)。
+//
+// **常駐者の選び方**(GDD 9.2 は本拠就労 / 探索派遣 / 拠点常駐を排他と定める =
+// 常駐は必ず本拠の人手を削る取引である)。実測で分かったのは「無配属の住民だけ
+// から取る」形では**拠点が 1 基も建たない**ことだった: 均等配属
+// (`buildAssignmentCommands`)が毎日 空きスロットを埋めるので、無配属の住民は
+// 常に 0〜1 人しか居らず、しかもその 1 人はその tick の配属提案が既に取っている
+// (実測: 貪欲 / nightly-a の 40 日で idle 人数が 0〜4、うち大半は同 tick 配属)。
+// よって**配属済みの住民も候補に含め、無配属を先に使う**(損失の小さい順)。
+// 代わりに、派遣側(`buildDispatchCommands`)が使っているのと**同じ保護**を掛ける:
+//   ・クリティカル資源の唯一の就労者(`soleCriticalProducerResidentIds`)
+//   ・研究が待っている作業場の唯一の就労者(`soleFieldRequirementWorkerResidentIds`)
+//   ・同じ tick に配属を提案したばかりの住民(呼び出し側が渡す)
+// これで GDD 11.4-2a(ソフトロックゼロ)と実地要件の稼働は派遣と同じ水準で守られる。
+// さらに `minHomePopulation` で本拠の人数に床を張り、拠点が人手を吸い尽くす形を
+// 構造的に防ぐ。
+//
+// **(B) レア資産の保持者は常駐させない**。GDD 9.2 の hazard の意味論は
+// [2026-07-31裁定]で「駐在員が (B) 資産を失う期待確率」と確定しており、
+// 拠点は探索と同じ (B) 喪失の場である(拠点網 ROI の分母がまさにこの
+// 期待 B 喪失損失)。GDD 11.5 が派遣について要求する判断の拠点版であり、
+// 判定には engine の `rareAssetCountOf`(GDD 8.6 と同一定義)をそのまま使う。
+
+/** [M75] 衛星拠点の方針。`typePriority` が空の bot は拠点を 1 基も建てない。 */
+export interface OutpostPolicy {
+  /** 設置候補の outpostType 定義 ID(優先順)。 */
+  readonly typePriority: readonly EntityId[];
+  /** 距離帯の巡回列(既存拠点数 % 長さ で選ぶ。維持費の距離帯係数を実測に載せる)。 */
+  readonly bands: readonly DistanceBand[];
+  /** 1 拠点あたりの目標常駐人数(GDD 9.2 の 1〜4 名)。 */
+  readonly residentsPerOutpost: number;
+  /** 盤面に置く拠点の上限基数。 */
+  readonly maxOutposts: number;
+  /** 常駐へ回したあと本拠(非常駐)に残しておきたい最低の生存人数。 */
+  readonly minHomePopulation: number;
+}
+
+function nextOutpostEntityId(state: GameState, outpostTypeId: EntityId): EntityId {
+  for (let n = 1; ; n++) {
+    const candidate = entityIdFromString(`site${capitalize(outpostTypeId)}${String(n)}`);
+    if (!state.entityStateById.has(candidate) && getOutpost(state, candidate) === undefined) {
+      return candidate;
+    }
+  }
+}
+
+/** [M75] その outpostType を今の在庫で設置できるか(engine の支払い判定と同じ行を見る)。 */
+function canAffordOutpost(state: GameState, def: OutpostTypeDef): boolean {
+  for (const line of outpostBuildCostLines(def)) {
+    if (resourceStockRaw(state, line.resourceId) < toRaw(line.costFix)) return false;
+  }
+  return true;
+}
+
+/**
+ * [M75] 常駐へ回してよい住民(**無配属を先・同順位は ID 昇順**)。保護の内訳と
+ * 「配属済みも候補に含める」理由は §7 冒頭の doc。
+ */
+function stationableResidentIds(
+  state: GameState,
+  content: EngineContent,
+  policy: OutpostPolicy,
+  want: number,
+  excludeResidentIds: ReadonlySet<EntityId>,
+): readonly EntityId[] {
+  const stationed = new Set(stationedResidentIds(state));
+  const homePopulation = livingResidents(state).length - stationed.size;
+  const spare = homePopulation - policy.minHomePopulation;
+  if (spare <= 0) return [];
+  const limit = Math.min(want, spare);
+
+  const protectedIds = new Set<EntityId>([
+    ...soleCriticalProducerResidentIds(state, content),
+    ...soleFieldRequirementWorkerResidentIds(state, content),
+  ]);
+  const idle: EntityId[] = [];
+  const working: EntityId[] = [];
+  for (const resident of livingResidents(state)) {
+    if (resident.dispatched) continue;
+    if (stationed.has(resident.id)) continue;
+    if (excludeResidentIds.has(resident.id)) continue;
+    if (protectedIds.has(resident.id)) continue;
+    if (rareAssetCountOf(state, content, [resident.id]) > 0) continue;
+    if (resident.assignedFacilityId === null) idle.push(resident.id);
+    else working.push(resident.id);
+  }
+  return [...idle, ...working].slice(0, limit);
+}
+
+/** [M75] {@link buildOutpostCommand} の返り値(設置 or 駐在の高々 1 個)。 */
+export type OutpostCommand = EstablishOutpostCommand | StationResidentCommand;
+
+/**
+ * [M75] 拠点の設置 / 駐在を 1 個だけ提案する(GDD 9.2)。
+ *
+ * 優先順は **設置 → 駐在**:
+ *   (1) 拠点が `maxOutposts` に届いていなければ、`typePriority` のうち
+ *       **現基数が最小の候補**(同数なら優先順の先頭側)を 1 基設置する。
+ *       選び方を `buildFacilityCommand` と同じ規則にしてあるのは、拠点タイプが
+ *       3 種とも実 run に現れる(= 3 種の ROI が測れる)ようにするため。
+ *   (2) 設置しないなら、常駐が目標人数に届いていない拠点(拠点 ID 昇順で最初)へ
+ *       1 人だけ駐在させる。
+ * どちらも成り立たなければ undefined(その tick は何もしない)。
+ *
+ * `excludeResidentIds` には**同じ tick に配属を提案した住民**を渡すこと。bot の
+ * 提案は 1 つの state から一括で組み立てられ適用だけが逐次なので、渡さないと
+ * 「作業場へ配属し、その同じ住民を拠点へ常駐させる」提案が出て配属が即座に
+ * 巻き戻る(`buildDispatchCommands` の (b) と同じ理由)。
+ */
+export function buildOutpostCommand(
+  state: GameState,
+  content: EngineContent,
+  policy: OutpostPolicy,
+  excludeResidentIds: ReadonlySet<EntityId> = new Set(),
+): OutpostCommand | undefined {
+  const typeDefs = content.outpostTypeDefs;
+  if (typeDefs === undefined || content.outpost === undefined) return undefined;
+  if (policy.typePriority.length === 0) return undefined;
+
+  const outposts = allOutposts(state);
+  if (outposts.length < policy.maxOutposts) {
+    const countByTypeId = new Map<EntityId, number>();
+    for (const outpost of outposts) {
+      countByTypeId.set(outpost.outpostTypeId, (countByTypeId.get(outpost.outpostTypeId) ?? 0) + 1);
+    }
+    interface Candidate {
+      readonly def: OutpostTypeDef;
+      readonly count: number;
+      readonly priorityIndex: number;
+    }
+    const candidates: Candidate[] = [];
+    for (let i = 0; i < policy.typePriority.length; i++) {
+      const typeId = policy.typePriority[i];
+      if (typeId === undefined) continue;
+      const def = typeDefs.get(typeId);
+      if (def === undefined) continue;
+      if (!canAffordOutpost(state, def)) continue;
+      candidates.push({ def, count: countByTypeId.get(typeId) ?? 0, priorityIndex: i });
+    }
+    // (現基数 昇順, 優先順 昇順)の全順序(`buildFacilityCommand` と同じ規則)。
+    candidates.sort((l, r) => l.count - r.count || l.priorityIndex - r.priorityIndex);
+    const chosen = candidates[0];
+    if (chosen !== undefined) {
+      const residentIds = stationableResidentIds(
+        state,
+        content,
+        policy,
+        policy.residentsPerOutpost,
+        excludeResidentIds,
+      );
+      const band = policy.bands[outposts.length % policy.bands.length];
+      if (residentIds.length > 0 && band !== undefined) {
+        return {
+          kind: "establishOutpost",
+          outpostId: nextOutpostEntityId(state, chosen.def.id),
+          outpostTypeId: chosen.def.id,
+          band,
+          residentIds,
+        };
+      }
+    }
+  }
+
+  for (const outpost of outposts) {
+    if (outpost.residentIds.length >= policy.residentsPerOutpost) continue;
+    const residentId = stationableResidentIds(state, content, policy, 1, excludeResidentIds)[0];
+    if (residentId === undefined) return undefined;
+    return { kind: "stationResident", residentId, outpostId: outpost.id };
+  }
+  return undefined;
 }

@@ -60,6 +60,7 @@ import {
   buildBedCommand,
   buildDispatchCommands,
   buildFacilityCommand,
+  buildOutpostCommand,
   canPlaceFacilityDef,
   buildFieldRequirementStaffingCommand,
   buildReclaimCommand,
@@ -76,6 +77,7 @@ import {
   type AssignmentPolicy,
   type BuildPolicy,
   type DispatchPolicy,
+  type OutpostPolicy,
 } from "./commonActions";
 import type { RecallGuardLogEntry, StrategyBot, StrategyDecision } from "./types";
 
@@ -147,6 +149,52 @@ const DISPATCH_EVERY_TICKS_AGGRESSIVE = GAME_DAY_TICKS;
 /** [M38] 他 4 本の派遣頻度(5 日おき)。tick の絶対グリッドで判定するので決定論。 */
 const DISPATCH_EVERY_TICKS_CONSERVATIVE = GAME_DAY_TICKS * 5;
 
+// --- 0b. [M75] 衛星拠点の方針(GDD 9.2 / 11.4-7a) -----------------------------
+//
+// **どの bot に拠点を持たせるか**は戦略の性格から決めた(全戦略一律にしない)。
+//
+//   拠点を建てる = 貪欲 / 配置戦略違い / 成文化優先
+//     貪欲は「目先の産出を最大化する」bot であり、無配属の余り住民を外へ出して
+//     資源を運ばせるのは素直にその性格である。配置戦略違いと成文化優先は
+//     **経済方針が貪欲と完全に同一**(§4 / §5 冒頭の doc)であることが存在理由
+//     (差は配置ヒューリスティックと成文化の有無だけ)なので、貪欲へ拠点を
+//     入れる以上この 2 本にも同じ方針を入れないとその不変が崩れる。
+//
+//   建てない = 研究優先 / 探索優先
+//     研究優先: 常駐は本拠就労と排他(GDD 9.2)で、研究点産出の就労枠から人を
+//       外へ出す判断は「研究点の供給そのものを厚くする」(§2 の doc)方針と逆。
+//     探索優先: 常駐者は探索候補プール(`explorationTeamCandidates`)から外れる
+//       (R8-01)ため、拠点を持つと本 bot の存在理由(派遣本数が明確に多い)が
+//       薄まる。GDD 11.4-11a(貪欲botの派遣延べ人数)の観測対象でもある。
+//
+// 拠点タイプの優先順は 3 種を全て候補に載せる(`buildOutpostCommand` が現基数
+// 最小を選ぶので 3 種とも実 run に現れ、3 種の ROI が測れる)。距離帯も 3 帯を
+// 巡回させ、M39 が「測定不能のため据え置き」とした距離帯維持費係数
+// (near 1.0 / far 1.4 / deep 1.8)を実 run の ROI に載せる。
+const OUTPOST_MINE_TYPE_ID = entityIdFromString("outpostMine");
+const OUTPOST_FARM_TYPE_ID = entityIdFromString("outpostFarm");
+const OUTPOST_FOREST_TYPE_ID = entityIdFromString("outpostForest");
+
+/** 拠点を建てる 3 本が共有する方針。 */
+const OUTPOST_POLICY_ACTIVE: OutpostPolicy = {
+  typePriority: [OUTPOST_FOREST_TYPE_ID, OUTPOST_FARM_TYPE_ID, OUTPOST_MINE_TYPE_ID],
+  bands: ["near", "far", "deep"],
+  residentsPerOutpost: 2,
+  maxOutposts: 3,
+  // 本拠に 8 人残す。派遣の閾値(teamSize 3 × 1 枠 + 温存 2 = 5)より上に取り、
+  // 拠点が派遣枠を食い潰して 11.4-11a が落ちる形にしない。
+  minHomePopulation: 8,
+};
+
+/** 拠点を建てない 2 本の方針(空の候補列 = `buildOutpostCommand` が常に undefined)。 */
+const OUTPOST_POLICY_NONE: OutpostPolicy = {
+  typePriority: [],
+  bands: ["near"],
+  residentsPerOutpost: 1,
+  maxOutposts: 0,
+  minHomePopulation: 0,
+};
+
 /** 5戦略bot 共通の方針の束。bot 間の差はこのオブジェクトの中身だけに閉じる。 */
 interface BotPolicies {
   readonly preferCriticalPathResearch: boolean;
@@ -158,6 +206,8 @@ interface BotPolicies {
   readonly reclaimMinFreeCells: number;
   /** 派遣を検討する tick 間隔([M38]・絶対グリッド `tick % n === 0` で判定)。 */
   readonly dispatchEveryTicks: number;
+  /** [M75] 衛星拠点の方針(GDD 9.2)。§0b の 2 種のどちらか。 */
+  readonly outpost: OutpostPolicy;
 }
 
 /** 共通の意思決定手順(§ 冒頭の doc)。全 bot がこの 1 関数を通る。 */
@@ -370,6 +420,27 @@ function decideGeneric(
     if (codifyCmd !== undefined) commands.push(codifyCmd);
   }
 
+  // [M75] 衛星拠点(GDD 9.2)。**配属の提案より後・派遣より前**に置く。
+  // 前でないのは、その日配属する住民を常駐へ回すと配属が即座に巻き戻るため
+  // (commonActions.ts §7 の doc)。後でないのは、常駐させた住民を同じ tick の
+  // 派遣に載せると engine が派遣を reject する(R8-01 の排他)ため。
+  const stationedByOutpost = new Set<EntityId>();
+  {
+    const excluded = new Set(alreadyAssignedResidentIds);
+    for (const command of commands) {
+      if (command.kind === "assignResident") excluded.add(command.residentId);
+    }
+    const outpostCmd = buildOutpostCommand(state, content, policies.outpost, excluded);
+    if (outpostCmd !== undefined) {
+      commands.push(outpostCmd);
+      if (outpostCmd.kind === "establishOutpost") {
+        for (const residentId of outpostCmd.residentIds) stationedByOutpost.add(residentId);
+      } else {
+        stationedByOutpost.add(outpostCmd.residentId);
+      }
+    }
+  }
+
   if (tick % policies.dispatchEveryTicks === 0) {
     // [Phase D] 同じ tick に配属したばかりの住民は派遣候補から外す
     // (commonActions.ts `buildDispatchCommands` の doc (b))。
@@ -377,6 +448,8 @@ function decideGeneric(
     for (const command of commands) {
       if (command.kind === "assignResident") justAssignedResidentIds.add(command.residentId);
     }
+    // [M75] 同じ tick に拠点へ常駐させた住民も外す(常駐と派遣は排他・GDD 9.2)。
+    for (const residentId of stationedByOutpost) justAssignedResidentIds.add(residentId);
     const dispatchResult = buildDispatchCommands(
       state,
       content,
@@ -427,6 +500,7 @@ export const greedyBot: StrategyBot = makeStrategyBot("greedy", {
   },
   reclaimMinFreeCells: RECLAIM_MIN_FREE_CELLS,
   dispatchEveryTicks: DISPATCH_EVERY_TICKS_CONSERVATIVE,
+  outpost: OUTPOST_POLICY_ACTIVE,
 });
 
 // --- 2. 研究優先(GDD 11.4-1「研究優先」) ------------------------------------
@@ -465,6 +539,7 @@ export const researchFirstBot: StrategyBot = makeStrategyBot("researchFirst", {
   },
   reclaimMinFreeCells: RECLAIM_MIN_FREE_CELLS,
   dispatchEveryTicks: DISPATCH_EVERY_TICKS_CONSERVATIVE,
+  outpost: OUTPOST_POLICY_NONE,
 });
 
 // --- 3. 探索優先(GDD 11.4-1「探索優先」) ------------------------------------
@@ -516,6 +591,7 @@ export const explorationFirstBot: StrategyBot = makeStrategyBot("explorationFirs
   },
   reclaimMinFreeCells: RECLAIM_MIN_FREE_CELLS,
   dispatchEveryTicks: DISPATCH_EVERY_TICKS_AGGRESSIVE,
+  outpost: OUTPOST_POLICY_NONE,
 });
 
 // --- 4. 配置戦略違い(GDD 11.4-1「配置戦略違い」) ----------------------------
@@ -544,6 +620,7 @@ export const placementVariantBot: StrategyBot = makeStrategyBot("placementVarian
   },
   reclaimMinFreeCells: RECLAIM_MIN_FREE_CELLS,
   dispatchEveryTicks: DISPATCH_EVERY_TICKS_CONSERVATIVE,
+  outpost: OUTPOST_POLICY_ACTIVE,
 });
 
 // --- 5. 成文化優先(GDD 11.4-1「成文化優先」) --------------------------------
@@ -584,6 +661,7 @@ export const codifyFirstBot: StrategyBot = makeStrategyBot("codifyFirst", {
   },
   reclaimMinFreeCells: RECLAIM_MIN_FREE_CELLS,
   dispatchEveryTicks: DISPATCH_EVERY_TICKS_CONSERVATIVE,
+  outpost: OUTPOST_POLICY_ACTIVE,
 });
 
 /** 5戦略bot 一覧(ID 昇順ではなく GDD 11.4-1 の記載順)。 */

@@ -51,7 +51,7 @@ import { type DifficultySeedId } from "../../src/difficulty";
 import { advanceWithReport, createAdvanceContext } from "../../src/engine/advance";
 import { compareUtf16 } from "../../src/engine/canonicalize";
 import { apply } from "../../src/engine/commands";
-import { toRaw } from "../../src/engine/fp";
+import { FIX_ZERO, toRaw } from "../../src/engine/fp";
 import { completedRecords } from "../../src/engine/rules/codify";
 import {
   earnedInheritPoints,
@@ -61,11 +61,13 @@ import {
 } from "../../src/engine/rules/exodus";
 import { rareAssetCountOf } from "../../src/engine/rules/exploration";
 import { effectiveMoraleFix, moraleBandOf } from "../../src/engine/rules/morale";
+import { outpostNetworkRoi, stationedResidentIds } from "../../src/engine/rules/outpost";
 import { populationViewOf } from "../../src/engine/rules/population";
 import { computeProductionRates } from "../../src/engine/rules/production";
 import { colonyOverflowLossRate } from "../../src/engine/rules/storage";
 import type { AdvanceContext, EngineContent } from "../../src/engine/rules/types";
 import {
+  allOutposts,
   entitiesOfKind,
   livingResidents,
   type EntityId,
@@ -212,6 +214,27 @@ export interface StrategyRunMetrics {
   readonly harshWorkerGuardBandSampleCount: number;
   /** [M72] うち実効士気が 30 未満(= GDD 11.2 の moraleW が乗る帯)だった延べ標本数。 */
   readonly harshWorkerBelowMidSampleCount: number;
+  /** [M75] 成立した `establishOutpost` の本数(GDD 9.2 / 11.4-7a)。 */
+  readonly outpostEstablishCount: number;
+  /** [M75] 成立した `stationResident` の本数(既存拠点への駐在追加)。 */
+  readonly outpostStationCount: number;
+  /** [M75] run 終了時点の拠点基数。 */
+  readonly finalOutpostCount: number;
+  /** [M75] run 終了時点の常駐者の延べ人数(`stationedResidentIds`)。 */
+  readonly finalStationedResidentCount: number;
+  /** [M75] 建てた拠点タイプの定義 ID(昇順・GDD 9.2 の 3 種のうち何種に届いたか)。 */
+  readonly builtOutpostTypeIds: readonly string[];
+  /** [M75] 建てた拠点の距離帯(昇順・維持費の距離帯係数が実測に載ったことの証跡)。 */
+  readonly outpostBands: readonly string[];
+  /**
+   * [M75] run 終了時点の**拠点網 ROI**(`outpostNetworkRoi` の raw・GDD 11.4-7a)。
+   * 拠点が 1 基も無い(または分母 0)なら null。
+   */
+  readonly finalOutpostNetworkRoiRaw: number | null;
+  /** [M75] 同じ時点の Σsupply / Σupkeep / Σ期待B喪失損失(raw・ROI の内訳)。 */
+  readonly finalOutpostSupplyRaw: number;
+  readonly finalOutpostUpkeepRaw: number;
+  readonly finalOutpostRareLossRaw: number;
 }
 
 export interface StrategyRunResult {
@@ -378,6 +401,9 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
   let harshWorkerSampleCount = 0;
   let harshWorkerGuardBandSampleCount = 0;
   let harshWorkerBelowMidSampleCount = 0;
+  // [M75] 衛星拠点(GDD 9.2 / 11.4-7a)の観測。bot の意思決定には影響しない。
+  let outpostEstablishCount = 0;
+  let outpostStationCount = 0;
 
   const bot = options.bot;
   const start = performance.now();
@@ -482,6 +508,13 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
         codifyBeginCount++;
       } else if (command.kind === "beginResearch") {
         researchSelectCount++;
+      } else if (command.kind === "establishOutpost") {
+        // [M75] 拠点の設置 / 駐在は就労者を外すだけで**施設配置は動かさない**ので、
+        // `AdvanceContext`(隣接乗数 = 施設配置依存・advance.ts §2)の作り直しは
+        // 要らない(assignResident / unassignResident と同じ扱い)。
+        outpostEstablishCount++;
+      } else if (command.kind === "stationResident") {
+        outpostStationCount++;
       }
     }
     // advance.ts §2: 配置変更コマンドを適用したらコンテキストを作り直す。
@@ -495,6 +528,19 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
   for (const sample of samples) {
     if (sample.livingPopulation < minLivingPopulation)
       minLivingPopulation = sample.livingPopulation;
+  }
+
+  // [M75] 拠点網の最終状態(GDD 11.4-7a の実測入力)。engine の
+  // `outpostNetworkRoi`(GDD 9.2 [2026-07-31裁定] の ROI 式そのもの)を呼ぶだけで、
+  // sim 側に ROI の再実装は置かない。拠点 0 基の run では全て 0 / null になる。
+  const outposts = allOutposts(state);
+  const outpostRoi =
+    outposts.length === 0 ? null : outpostNetworkRoi(state, content, state.tick, FIX_ZERO);
+  const outpostTypeIds = new Set<string>();
+  const outpostBandSet = new Set<string>();
+  for (const outpost of outposts) {
+    outpostTypeIds.add(String(outpost.outpostTypeId));
+    outpostBandSet.add(String(outpost.band));
   }
 
   const metrics: StrategyRunMetrics = {
@@ -530,6 +576,19 @@ export function runStrategyBot(options: StrategyRunOptions): StrategyRunResult {
     harshWorkerSampleCount,
     harshWorkerGuardBandSampleCount,
     harshWorkerBelowMidSampleCount,
+    outpostEstablishCount,
+    outpostStationCount,
+    finalOutpostCount: outposts.length,
+    finalStationedResidentCount: stationedResidentIds(state).length,
+    builtOutpostTypeIds: [...outpostTypeIds].sort(compareUtf16),
+    outpostBands: [...outpostBandSet].sort(compareUtf16),
+    finalOutpostNetworkRoiRaw:
+      outpostRoi?.roiFix === undefined || outpostRoi.roiFix === null
+        ? null
+        : toRaw(outpostRoi.roiFix),
+    finalOutpostSupplyRaw: outpostRoi === null ? 0 : toRaw(outpostRoi.totalSupplyValueFix),
+    finalOutpostUpkeepRaw: outpostRoi === null ? 0 : toRaw(outpostRoi.totalUpkeepValueFix),
+    finalOutpostRareLossRaw: outpostRoi === null ? 0 : toRaw(outpostRoi.totalExpectedRareLossFix),
   };
 
   return { state, content, metrics, recallGuardLog, samples, elapsedMs };
