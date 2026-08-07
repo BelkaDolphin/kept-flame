@@ -1938,6 +1938,28 @@ describe("[M32] outpostOverview(GDD 9.2 / 11.4-7・outpostNetworkRoi をその�
   });
 });
 
+describe("[M74/⑫] 研究担当の表示(residents.researchWorker)", () => {
+  it("研究点を生む施設(output.kind==='research')の就労者だけ true", () => {
+    // 学習机(STUDY_DESK)= 研究点産出 / 基準盤面のかまど fHearth(WORKER_ID が
+    // 就労)= 資源産出。同じ「就労中」でも産出先で分かれることを見る。
+    const scholar = resident("mScholar");
+    const { store } = createTestStore([
+      scholar,
+      facility("fDeskM74", STUDY_DESK.id, CELL_WEST, [scholar.id]),
+    ]);
+    const views = store.derived.residents.value;
+    expect(views.find((r) => r.entityId === scholar.id)?.researchWorker).toBe(true);
+    expect(views.find((r) => r.entityId === WORKER_ID)?.researchWorker).toBe(false);
+  });
+
+  it("どの施設にも就いていない住民は false(無配属を研究担当にしない)", () => {
+    const idle = resident("aIdle");
+    const { store } = createTestStore([idle]);
+    const view = store.derived.residents.value.find((r) => r.entityId === idle.id);
+    expect(view?.researchWorker).toBe(false);
+  });
+});
+
 describe("[M70/R5-A07] 衛星拠点常駐者の表示(residents.stationedOutpostId / homeBadges)", () => {
   it("常駐中の住民は residents.value で stationedOutpostId が立つ(GDD 9.2)", () => {
     const stationed = candidateResident("aStation");

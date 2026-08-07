@@ -19,9 +19,11 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveExodusPlan } from "../../../src/engine/rules/exodus";
 import { entityIdFromString } from "../../../src/engine/state/state";
 import {
+  exodusConfirmMessage,
   ExodusCompletedNotice,
   ExodusCrewRow,
   ExodusInheritPointsNote,
+  ExodusNextRunPreview,
   ExodusPreviewPanel,
   ExodusRecordRow,
   mediumLabel,
@@ -164,6 +166,69 @@ describe("[M70/R5-A10] ExodusInheritPointsNote(獲得予定の継承点・積み
     const text = flattenText(vnode);
     expect(text).toContain(`獲得予定の継承点: ${String(resolution.earnedInheritPoints)}`);
     expect(text).toContain("左右されません");
+  });
+});
+
+describe("[M74/⑰] ExodusNextRunPreview(次の周回の開始人口予告・GDD 10.2)", () => {
+  /** 乗員定員 = ceil(生存2 × 0.5) = 1 名になる盤面(住民2名・うち1名しか運べない)。 */
+  function twoResidentResolution() {
+    const content = exodusContent();
+    const state = boardState([
+      resident("bKaya"),
+      m33Research("researchA1", M33_TECH_A1, 100),
+      m33Research("researchB1", M33_TECH_B1, 200),
+      m33Record("codifyA1", M33_TECH_A1, "stoneTablet"),
+    ]);
+    return resolveExodusPlan(state, content, {
+      recordIds: [id("codifyA1")],
+      crewIds: [id("aRui"), id("bKaya")],
+    });
+  }
+
+  it("resolution が null なら何も出さない(算出不能を捏造しない)", () => {
+    expect(ExodusNextRunPreview({ resolution: null })).toBeNull();
+  });
+
+  it("次の周回の開始乗員数(= engine が積めると答えた人数)と獲得予定の継承点を出す", () => {
+    const resolution = twoResidentResolution();
+    const text = flattenText(ExodusNextRunPreview({ resolution }));
+    expect(text).toContain(
+      `次の周回は乗員 ${String(resolution.carriedCrewIds.length)}人 から始まります`,
+    );
+    expect(text).toContain(`いま連れて行ける上限は ${String(resolution.crewCapacity)}名`);
+    expect(text).toContain(`このとき獲得する継承点: ${String(resolution.earnedInheritPoints)}`);
+  });
+
+  it("立て直さずに繰り返すと縮むこと(GDD 10.2 の半分規則)を文で予告する", () => {
+    const text = flattenText(ExodusNextRunPreview({ resolution: twoResidentResolution() }));
+    expect(text).toContain("生存人数の半分");
+    expect(text).toContain("周回ごとに");
+    // 次周回の定員そのものは UI で計算しない(engine が答えていない数値を出さない)。
+    expect(text).not.toContain("次の周回の上限は");
+  });
+});
+
+describe("[M74/⑰] exodusConfirmMessage(確認パネル本文に数値を再掲する)", () => {
+  it("取り消せないことに加えて開始乗員と獲得継承点を数値で言う", () => {
+    const content = exodusContent();
+    const state = boardState([
+      m33Research("researchA1", M33_TECH_A1, 100),
+      m33Record("codifyA1", M33_TECH_A1, "stoneTablet"),
+    ]);
+    const resolution = resolveExodusPlan(state, content, {
+      recordIds: [id("codifyA1")],
+      crewIds: [id("aRui")],
+    });
+    const message = exodusConfirmMessage(resolution);
+    expect(message).toContain("取り消せません");
+    expect(message).toContain(`次の周回は乗員${String(resolution.carriedCrewIds.length)}人`);
+    expect(message).toContain(`継承点+${String(resolution.earnedInheritPoints)}`);
+  });
+
+  it("resolution が null なら数値を捏造せず従来の文だけを返す", () => {
+    const message = exodusConfirmMessage(null);
+    expect(message).toContain("取り消せません");
+    expect(message).not.toContain("乗員");
   });
 });
 

@@ -222,6 +222,64 @@ export function ExodusInheritPointsNote({ resolution }: ExodusInheritPointsNoteP
   );
 }
 
+// --- 4c. [M74/⑰] 次の周回の開始人口予告 ---------------------------------------
+//
+// 乗員定員は `ceil(生存 × 0.5) + 継承ボーナス`(GDD 10.2・rules/exodus.ts の
+// `crewCapacity`)なので、人口を立て直さないまま大移動を繰り返すと連れて行ける
+// 人数は周回ごとに半分ずつ縮み、継承点の生存項(`生存住民数 × 2`・GDD 10.3)も
+// 一緒に縮む。**これは仕様どおりの挙動**だが、旧 UI は「乗員 X / 定員 Y」を
+// 出すだけで、その X が**次の周回の開始人口そのもの**であることをどこにも
+// 書いていなかった(縮小の螺旋に入っていることが実行するまで分からない)。
+//
+// ここでは engine の `resolveExodusPlan` が返した値(`carriedCrewIds` /
+// `crewCapacity` / `earnedInheritPoints`)を言い換えるだけで、次周回の定員を
+// UI 側で先に計算したりはしない(半分になる規則は文で言う・数値は捏造しない)。
+
+export interface ExodusNextRunPreviewProps {
+  /** `null` = content に exodus/recordMedia ブロックが無く算出不能。 */
+  readonly resolution: ExodusResolution | null;
+}
+
+export function ExodusNextRunPreview({ resolution }: ExodusNextRunPreviewProps) {
+  if (resolution === null) return null;
+  return (
+    <section class="kf-exodus__next-run" aria-label="次の周回の見込み">
+      <p class="kf-exodus__next-run-crew" data-testid="exodus-next-run-crew">
+        次の周回は乗員 {resolution.carriedCrewIds.length}人 から始まります(いま連れて行ける上限は{" "}
+        {resolution.crewCapacity}名)。
+      </p>
+      <p class="kf-exodus__next-run-points">
+        このとき獲得する継承点: {resolution.earnedInheritPoints}
+      </p>
+      <p class="kf-exodus__next-run-note" role="note">
+        次の周回で連れて行ける上限は、その周回を終えるときの生存人数の半分(端数繰り上げ)です。
+        人口を立て直さずに大移動を続けると、連れて行ける人数も獲得できる継承点も周回ごとに
+        小さくなります。
+      </p>
+    </section>
+  );
+}
+
+/**
+ * [M74/⑰] 確認パネル(§2)の本文。取り消せないことに加えて、**次の周回の
+ * 開始乗員と獲得予定の継承点を数値で**言う——確認の瞬間に見えていないと、
+ * 上のプレビューまで戻って読み直す必要があり、実質「見ずに押す」になる。
+ * 数値は `resolveExodusPlan` の結果をそのまま読む(UI 側で計算しない)。
+ */
+export function exodusConfirmMessage(resolution: ExodusResolution | null): string {
+  if (resolution === null) {
+    return (
+      "本当によろしいですか。この操作は取り消せません。" +
+      "上のプレビューに表示された内容で確定します。"
+    );
+  }
+  return (
+    "本当によろしいですか。この操作は取り消せません。次の周回は乗員" +
+    `${String(resolution.carriedCrewIds.length)}人・継承点+${String(resolution.earnedInheritPoints)}` +
+    "で始まります(落ちるもの・永久喪失する技術は上のプレビューのとおり)。"
+  );
+}
+
 // --- 5. 画面本体(hooks を持つのはここだけ) ----------------------------------
 
 /** 実行成功直後に見せるバックアップ推奨(§3)。 */
@@ -459,6 +517,13 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
       <div ref={stickyClearance.contentRef}>
         <ExodusPreviewPanel resolution={resolution} />
 
+        {/* [M74/⑰] 次の周回の開始人口予告(§4c)。sticky の確認パネルではなく
+            その直前(押す前に必ず目に入る位置)へ置く——確認パネル自体の高さは
+            appShell.css の --kf-sticky-actions-reserve(実測値)に縛られるので、
+            そこへ 3 行足さずに本文へ出し、確認パネル側は 1 行の要約
+            (exodusConfirmMessage)で同じ数値を再掲する。 */}
+        <ExodusNextRunPreview resolution={resolution} />
+
         <label class="kf-migration-screen__seed-label">
           次の周回のシードを指定(任意)
           {/* [M70/R5-A09と同型] Preact の onChange は blur 発火(change イベント)
@@ -488,10 +553,7 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
           </button>
         ) : (
           <section class="kf-migration__confirm" role="alertdialog" aria-label="大移動の確認">
-            <p class="kf-migration__confirm-message">
-              本当によろしいですか。この操作は取り消せません。上のプレビューに表示された内容(落ちるもの・
-              永久喪失する技術・獲得予定の継承点)で確定します。
-            </p>
+            <p class="kf-migration__confirm-message">{exodusConfirmMessage(resolution)}</p>
             <div class="kf-migration__confirm-actions">
               <button
                 type="button"

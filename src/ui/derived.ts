@@ -474,6 +474,13 @@ export interface ResidentView {
    * null。省略時(既存テストフィクスチャ互換)は null 扱い(`?? null`)。
    */
   readonly stationedOutpostId?: EntityId | null;
+  /**
+   * [M74/⑫] 研究点を生む施設で就労中か(= 研究担当)。⑨衛星拠点管理が
+   * 「駐在させると研究が止まる」の事前注記を出すために使う(駐在は本拠の就労を
+   * 外す・commands.ts の `stationResident` §4b)。省略時(既存テストフィクスチャ
+   * 互換)は false 扱い(`=== true` で読む)。`researchWorkerIds` 参照。
+   */
+  readonly researchWorker?: boolean;
 }
 
 /**
@@ -564,6 +571,28 @@ function stationedOutpostIdByResident(state: GameState): ReadonlyMap<EntityId, E
     for (const residentId of outpost.residentIds) {
       result.set(residentId, outpost.id);
     }
+  }
+  return result;
+}
+
+/**
+ * [M74/⑫] 研究点を生む施設(`output.kind === "research"`)に就労している住民の集合。
+ *
+ * 「研究担当」の定義は `hasActiveResearchProduction`(§ 手前)/`buildResearchStallNotes`
+ * と**同じ 1 つの述語**(産出先が研究点の施設の `workerIds`)であり、UI に第二の
+ * 「学者」判定を作らない(rules/production.ts の `ProductionRates.codifyLaborFix`
+ * の doc が言う「研究点を生む場所で働いている人 = 学者」と同一)。
+ *
+ * ここは**稼働しているか(想起困難・派遣中)は見ない**——⑨衛星拠点管理が出す注記
+ * (駐在させると研究が止まる)は「その人を外すと研究点の産出源が減る」という
+ * 配属の事実に対する予告であって、いま実際に点が流れているかとは別の問いである。
+ */
+function researchWorkerIds(state: GameState, content: EngineContent): ReadonlySet<EntityId> {
+  const result = new Set<EntityId>();
+  for (const facility of entitiesOfKind(state, "facility")) {
+    const def = content.facilityDefs.get(facility.defId);
+    if (def === undefined || def.output.kind !== "research") continue;
+    for (const workerId of facility.workerIds) result.add(workerId);
   }
   return result;
 }
@@ -1547,6 +1576,8 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
       const content: EngineContent = sources.content.value;
       // [M70/R5-A07] 拠点常駐者の索引は 1 回だけ作って全住民で使い回す。
       const stationedByResident = stationedOutpostIdByResident(state);
+      // [M74/⑫] 研究担当(研究点産出施設の就労者)も同じく 1 回だけ集める。
+      const researchWorkers = researchWorkerIds(state, content);
       return entitiesOfKind(state, "resident").map((resident) => ({
         entityId: resident.id,
         moraleApprox: toApproxNumber(resident.morale),
@@ -1563,6 +1594,8 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
         techImpairments: residentTechImpairments(state, resident.id, state.tick),
         // [M70/R5-A07]
         stationedOutpostId: stationedByResident.get(resident.id) ?? null,
+        // [M74/⑫]
+        researchWorker: researchWorkers.has(resident.id),
       }));
     },
     { name: "residents" },

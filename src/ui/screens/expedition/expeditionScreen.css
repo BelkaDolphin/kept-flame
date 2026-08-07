@@ -186,6 +186,24 @@
   margin: 0 0 0.3rem;
 }
 
+/* [M74/⑮] 成功確率(編成人数の崖を派遣前に見せる行)。期待報酬より前に読む値
+   なので (B) 喪失リスク項と同じ強さで出すが、警告色ではなく本文色にする
+   (危険の告知ではなく、編成の手応えを測るための数値)。 */
+.kf-expedition__roi-success {
+  font-size: var(--kf-fs-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #24201c;
+  margin: 0 0 0.3rem;
+}
+
+.kf-expedition__roi-success-note {
+  display: block;
+  font-size: var(--kf-fs-sub);
+  font-weight: 400;
+  color: #5b534b;
+}
+
 /* [M32] GDD 8.6 の (B) 喪失リスク項。検収条件なので視覚的にも目立たせる。 */
 .kf-expedition__roi-loss {
   font-size: var(--kf-fs-body);

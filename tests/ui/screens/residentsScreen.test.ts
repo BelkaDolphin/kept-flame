@@ -10,7 +10,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
 import type { FacilityRosterEntry, ResidentView } from "../../../src/ui/derived";
-import { ResidentRow } from "../../../src/ui/screens/residents/ResidentsScreen";
+import {
+  isAutoAssignable,
+  planAutoAssignments,
+  ResidentRow,
+} from "../../../src/ui/screens/residents/ResidentsScreen";
 
 const id = entityIdFromString;
 
@@ -351,5 +355,126 @@ describe("ResidentRow: 割当/解除(assignResident/unassignResident)", () => {
     });
     expect(findSelect(vnode)).toBeNull();
     expect(flattenText(vnode)).toContain("亡くなった住民は就労できません");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M74/R9-C01] おまかせ配属(一括)の割り当て規則。
+//
+// engine には新しいコマンドを足していないので、ここで固定すべきは
+// 「どの住民をどの施設へ送る `assignResident` を、どの順で発行するか」だけである
+// (実際に配属が成立するかは commands.ts のテストが持つ)。決定論(同じ入力→
+// 同じ並び)と、必ず reject される住民を触らないことを検査する。
+// ---------------------------------------------------------------------------
+
+function facilityEntry(
+  facilityId: string,
+  overrides: Partial<FacilityRosterEntry> = {},
+): FacilityRosterEntry {
+  return {
+    facilityId: id(facilityId),
+    defId: id("workbench"),
+    cellIndex: 0,
+    cellId: "c0",
+    level: 1,
+    tags: [],
+    workerIds: [],
+    slotsMax: 2,
+    ...overrides,
+  };
+}
+
+describe("[M74/R9-C01] isAutoAssignable(おまかせ配属の対象住民)", () => {
+  it("生存・非派遣・非常駐・未配属なら対象", () => {
+    expect(isAutoAssignable(residentView())).toBe(true);
+  });
+
+  it("死亡・派遣中・拠点常駐は対象外(必ず reject される割り当てを作らない)", () => {
+    expect(isAutoAssignable(residentView({ alive: false }))).toBe(false);
+    expect(isAutoAssignable(residentView({ dispatched: true }))).toBe(false);
+    expect(isAutoAssignable(residentView({ stationedOutpostId: id("outpostMine1") }))).toBe(false);
+  });
+
+  it("既に就労している住民は対象外(意図した配置を一括操作で崩さない)", () => {
+    expect(isAutoAssignable(residentView({ assignedFacilityId: id("facHearth1") }))).toBe(false);
+  });
+});
+
+describe("[M74/R9-C01] planAutoAssignments(決定論的な一括割り当て)", () => {
+  it("住民は ID 昇順・施設は 1 巡ごとに 1 名ずつ(round robin)", () => {
+    const residents = [
+      residentView({ entityId: id("aRui") }),
+      residentView({ entityId: id("bKaya") }),
+      residentView({ entityId: id("cSora") }),
+    ];
+    const roster = [facilityEntry("facA", { slotsMax: 2 }), facilityEntry("facB", { slotsMax: 2 })];
+    expect(planAutoAssignments(residents, roster)).toEqual([
+      { residentId: id("aRui"), facilityId: id("facA") },
+      { residentId: id("bKaya"), facilityId: id("facB") },
+      { residentId: id("cSora"), facilityId: id("facA") },
+    ]);
+  });
+
+  it("同じ入力からは常に同じ並びを返す(乱数を使わない)", () => {
+    const residents = [
+      residentView({ entityId: id("aRui") }),
+      residentView({ entityId: id("bKaya") }),
+    ];
+    const roster = [facilityEntry("facA"), facilityEntry("facB")];
+    expect(planAutoAssignments(residents, roster)).toEqual(planAutoAssignments(residents, roster));
+  });
+
+  it("就労中の人数ぶん空きを減らし、埋まっている施設は飛ばす", () => {
+    const residents = [residentView({ entityId: id("aRui") })];
+    const roster = [
+      facilityEntry("facA", { slotsMax: 1, workerIds: [id("zOld")] }),
+      facilityEntry("facB", { slotsMax: 1 }),
+    ];
+    expect(planAutoAssignments(residents, roster)).toEqual([
+      { residentId: id("aRui"), facilityId: id("facB") },
+    ]);
+  });
+
+  it("就労枠 0 の施設(寝床/保管庫等)は割り当て先にしない", () => {
+    const residents = [residentView({ entityId: id("aRui") })];
+    expect(planAutoAssignments(residents, [facilityEntry("facBed", { slotsMax: 0 })])).toEqual([]);
+  });
+
+  it("空きが足りなければ入り切らない住民は含めない(facilitySlotsFull を踏まない)", () => {
+    const residents = [
+      residentView({ entityId: id("aRui") }),
+      residentView({ entityId: id("bKaya") }),
+    ];
+    const plan = planAutoAssignments(residents, [facilityEntry("facA", { slotsMax: 1 })]);
+    expect(plan).toEqual([{ residentId: id("aRui"), facilityId: id("facA") }]);
+  });
+
+  it("上限なし(slotsMax=null)の施設でも他の施設へ人が回る(§4 の (c) の理由)", () => {
+    const residents = [
+      residentView({ entityId: id("aRui") }),
+      residentView({ entityId: id("bKaya") }),
+    ];
+    const roster = [
+      facilityEntry("facA", { slotsMax: null }),
+      facilityEntry("facB", { slotsMax: 1 }),
+    ];
+    expect(planAutoAssignments(residents, roster)).toEqual([
+      { residentId: id("aRui"), facilityId: id("facA") },
+      { residentId: id("bKaya"), facilityId: id("facB") },
+    ]);
+  });
+
+  it("対象外の住民(死亡/派遣中/常駐/就労中)は 1 件も含まない", () => {
+    const residents = [
+      residentView({ entityId: id("aRui"), alive: false }),
+      residentView({ entityId: id("bKaya"), dispatched: true }),
+      residentView({ entityId: id("cSora"), stationedOutpostId: id("outpostMine1") }),
+      residentView({ entityId: id("dTaki"), assignedFacilityId: id("facA") }),
+    ];
+    expect(planAutoAssignments(residents, [facilityEntry("facA", { slotsMax: 4 })])).toEqual([]);
+  });
+
+  it("施設が 1 つも無ければ空(何も起きない)", () => {
+    expect(planAutoAssignments([residentView()], [])).toEqual([]);
   });
 });

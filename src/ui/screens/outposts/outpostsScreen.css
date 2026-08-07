@@ -192,6 +192,14 @@
   color: #24201c;
 }
 
+/* [M74/⑫] 駐在させると研究が止まる事前注記(⑨の 2 つのセレクタで共用するので
+   カード/設置フォームどちらにも属さない中立の class 名にしてある)。 */
+.kf-outposts__research-stop {
+  font-size: var(--kf-fs-sub);
+  color: #8c290b;
+  margin: 0 0 0.4rem;
+}
+
 /* [M32] GDD 8.6 を援用した拠点個別の (B) 喪失リスク項。検収条件。 */
 .kf-outpost-card__loss {
   font-size: var(--kf-fs-sub);

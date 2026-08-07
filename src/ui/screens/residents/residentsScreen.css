@@ -21,6 +21,35 @@
   color: #5b534b;
 }
 
+/* [M74/R9-C01] おまかせ配属(一括)。ナビボタンと同じ見た目の系譜に揃える。 */
+.kf-residents-screen__auto-assign {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #faf8f5;
+  margin: 0 0 0.6rem;
+}
+
+.kf-residents-screen__auto-assign-button {
+  width: 100%;
+  min-height: 44px;
+  font: inherit;
+  font-size: var(--kf-fs-body);
+  font-weight: 600;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #24201c;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #24201c;
+  cursor: pointer;
+}
+
+.kf-residents-screen__auto-assign-note {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0.3rem 0 0;
+}
+
 .kf-residents-screen__list {
   list-style: none;
   margin: 0 0 0.75rem;

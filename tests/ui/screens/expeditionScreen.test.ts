@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { FIX_ZERO } from "../../../src/engine/fp";
+import { FIX_ONE, FIX_ZERO, toApproxNumber } from "../../../src/engine/fp";
 import { entityIdFromString } from "../../../src/engine/state/state";
 import type {
   ExpeditionCandidateView,
@@ -145,6 +145,52 @@ describe("RoiPanel(GDD 8.6・検収条件=(B)損失リスク項が画面に出�
     expect(text).not.toContain("ROI");
     // 近似であることの注記(実際の成否は出発後に決まる)。
     expect(text).toContain("目安");
+  });
+
+  // [M74/⑮] 編成人数の崖(必要人数を下回ると成功率が急落するのに派遣前に見えない)
+  // への対応。engine の successProbabilityFix をそのまま % にして出しているか、
+  // 人数を変えたときに実際に値が動くかを確認する(UI 側で式を持たないので、
+  // 「engine の値と一致するか」が正しさの基準になる)。
+  it("[M74/⑮] engine の成功確率(successProbabilityFix)を % にして表示する", () => {
+    const member = candidateResident("aMember");
+    const state = createGameState(META, [member, resource("wStock", id("wood"))]);
+    const content = m32Content();
+    const report = previewExplorationRoi(state, content, "near", [member.id]);
+    if (report === null) throw new Error("report が null(フィクスチャの exploration ブロック欠落)");
+    const vnode = RoiPanel({ report, rewardResourceId: id("wood"), teamSize: 1 });
+    const text = flattenText(vnode);
+    expect(text).toContain("成功確率(1ノードあたり)");
+    // engine の値を UI の整形ヘルパ(小数第1位)に通したものと文字列一致する。
+    const expected = (toApproxNumber(report.successProbabilityFix) * 100).toFixed(1);
+    expect(text).toContain(`${expected}%`);
+    // 「人数を減らすと下がる」= 崖の存在そのものを文で言う(検収条件の眼目)。
+    expect(text).toContain("人数を減らすと急に下がることがあります");
+  });
+
+  // 編成が変われば engine の成功確率も動く(3名 > 2名 は
+  // tests/engine/exploration.test.ts が固定済み)。ここで確かめるのは「UI が
+  // その値を素通しして表示しているか」= 定数や別の値(全滅確率)を出していないか。
+  it("[M74/⑮] 成功確率は engine の値を素通しする(定数を出していない)", () => {
+    const member = candidateResident("aMember");
+    const state = createGameState(META, [member, resource("wStock", id("wood"))]);
+    const base = previewExplorationRoi(state, m32Content(), "near", [member.id]);
+    if (base === null) throw new Error("report が null(フィクスチャの exploration ブロック欠落)");
+    const certain = flattenText(
+      RoiPanel({
+        report: { ...base, successProbabilityFix: FIX_ONE },
+        rewardResourceId: id("wood"),
+        teamSize: 3,
+      }),
+    );
+    const hopeless = flattenText(
+      RoiPanel({
+        report: { ...base, successProbabilityFix: FIX_ZERO },
+        rewardResourceId: id("wood"),
+        teamSize: 1,
+      }),
+    );
+    expect(certain).toContain("成功確率(1ノードあたり): 100.0%");
+    expect(hopeless).toContain("成功確率(1ノードあたり): 0.0%");
   });
 });
 

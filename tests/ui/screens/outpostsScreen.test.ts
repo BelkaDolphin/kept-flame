@@ -11,7 +11,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { entityIdFromString } from "../../../src/engine/state/state";
 import type { OutpostRosterEntry, ResidentView } from "../../../src/ui/derived";
-import { OutpostCard, OutpostEstablishForm } from "../../../src/ui/screens/outposts/OutpostsScreen";
+import {
+  OutpostCard,
+  OutpostEstablishForm,
+  researchStopTargetNames,
+  residentOptionLabel,
+  stationCandidates,
+} from "../../../src/ui/screens/outposts/OutpostsScreen";
 
 const id = entityIdFromString;
 
@@ -236,6 +242,25 @@ describe("OutpostCard(⑨拠点1基・GDD 9.2・検収条件=(B)損失項が画�
     expect(handlers.onStation).toHaveBeenCalledOnce();
   });
 
+  it("[M74/⑫] 駐在セレクタで研究担当を選ぶと、押す前に研究が止まる注記を出す", () => {
+    const scholar = { ...residentView(id("bKaya")), researchWorker: true };
+    const withScholar = {
+      ...cardHandlers(),
+      residentOptions: [scholar],
+      stationSelectValue: id("bKaya"),
+    };
+    const text = flattenText(
+      OutpostCard({ outpost: outpost({ residentIds: [] }), ...withScholar }),
+    );
+    expect(text).toContain("研究担当");
+    expect(text).toContain("研究は止まります");
+    // 未選択("")のときは注記を出さない(常時警告にしない)。
+    const unselected = { ...withScholar, stationSelectValue: "" as const };
+    expect(
+      flattenText(OutpostCard({ outpost: outpost({ residentIds: [] }), ...unselected })),
+    ).not.toContain("研究は止まります");
+  });
+
   it("常駐者が0名なら「無し」を表示し、解除ボタンを1つも持たない", () => {
     const handlers = cardHandlers();
     const vnode = OutpostCard({ outpost: outpost({ residentIds: [] }), ...handlers });
@@ -309,5 +334,90 @@ describe("OutpostEstablishForm(⑨新規設置・GDD 9.2)", () => {
     expect(residentButtons).toHaveLength(2);
     (residentButtons[1]?.props.onClick as () => void)();
     expect(props.onToggleResident).toHaveBeenCalledWith("bKaya");
+  });
+
+  it("[M74/⑫] 選んだ住民に研究担当が居れば、設置する前に研究が止まる注記を出す", () => {
+    const props = {
+      ...baseProps(),
+      residentOptions: [
+        residentView(id("aRui")),
+        { ...residentView(id("bKaya")), researchWorker: true },
+      ],
+      selectedResidentIds: new Set([id("bKaya")]),
+    };
+    const text = flattenText(OutpostEstablishForm(props));
+    expect(text).toContain("BKaya");
+    expect(text).toContain("研究担当");
+    expect(text).toContain("研究は止まります");
+  });
+
+  it("[M74/⑫] 研究担当を選んでいなければ注記は出さない(常時警告にしない)", () => {
+    const props = {
+      ...baseProps(),
+      residentOptions: [
+        residentView(id("aRui")),
+        { ...residentView(id("bKaya")), researchWorker: true },
+      ],
+      selectedResidentIds: new Set([id("aRui")]),
+    };
+    expect(flattenText(OutpostEstablishForm(props))).not.toContain("研究は止まります");
+  });
+});
+
+describe("[M74/R9-A02] stationCandidates(⑦探索本部と同じ規則で常駐者を候補から外す)", () => {
+  it("既に衛星拠点へ常駐している住民は候補に残さない", () => {
+    const free = residentView(id("aRui"));
+    const stationed = { ...residentView(id("bKaya")), stationedOutpostId: id("outpostMine1") };
+    expect(stationCandidates([free, stationed]).map((entry) => entry.entityId)).toEqual([
+      id("aRui"),
+    ]);
+  });
+
+  it("死亡/派遣中は落とさない(一時的な不能は engine の reject に説明させる・§2 の本則)", () => {
+    const dead = { ...residentView(id("aRui")), alive: false };
+    const dispatched = { ...residentView(id("bKaya")), dispatched: true };
+    expect(stationCandidates([dead, dispatched])).toHaveLength(2);
+  });
+
+  it("stationedOutpostId 省略(既存フィクスチャ互換)は常駐していない扱い", () => {
+    expect(stationCandidates([residentView(id("aRui"))])).toHaveLength(1);
+  });
+
+  it("入力の並び(derived の ID 昇順)を変えない", () => {
+    const a = residentView(id("aRui"));
+    const b = residentView(id("bKaya"));
+    const c = residentView(id("cSora"));
+    expect(stationCandidates([a, b, c]).map((entry) => entry.entityId)).toEqual([
+      id("aRui"),
+      id("bKaya"),
+      id("cSora"),
+    ]);
+  });
+});
+
+describe("[M74/⑫] researchStopTargetNames / residentOptionLabel", () => {
+  const plain = residentView(id("aRui"));
+  const scholar = { ...residentView(id("bKaya")), researchWorker: true };
+
+  it("研究担当だけを拾い、並びは residents の順(選んだ順に依存しない)", () => {
+    const scholar2 = { ...residentView(id("cSora")), researchWorker: true };
+    const targets = new Set([id("cSora"), id("bKaya")]);
+    expect(researchStopTargetNames([plain, scholar, scholar2], targets)).toEqual([
+      "BKaya",
+      "CSora",
+    ]);
+  });
+
+  it("対象に含まれない研究担当は拾わない", () => {
+    expect(researchStopTargetNames([plain, scholar], new Set([id("aRui")]))).toEqual([]);
+  });
+
+  it("researchWorker 省略(既存フィクスチャ互換)は研究担当ではない扱い", () => {
+    expect(researchStopTargetNames([plain], new Set([id("aRui")]))).toEqual([]);
+  });
+
+  it("候補ラベルは研究担当だけに印を付ける(選ぶ前から見える)", () => {
+    expect(residentOptionLabel(plain)).toBe("ARui");
+    expect(residentOptionLabel(scholar)).toBe("BKaya(研究担当)");
   });
 });

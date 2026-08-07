@@ -21,6 +21,28 @@
 //   立場: 死亡/派遣中の住民でも選択自体はできる状態にし、実際に押せるかは
 //   `establishOutpost`/`stationResident` の `residentUnavailable` reject に
 //   委ねる)。常駐 1〜4 名・重複なし等も同様に先読みしない。
+//
+//   **[M74/R9-A02] 既に別の拠点へ常駐している住民だけは例外にする**。
+//   ⑦探索本部の候補(`rules/exploration.ts` の `dispatchCandidates`)は R8-01 で
+//   常駐者を除外済みなのに、同じ「住民を持ち場へ送る」操作である⑨の 2 つの
+//   セレクタ(新規設置の常駐者選択・カードの駐在セレクタ)には残っていた——
+//   同じ規則が画面ごとに違うと、プレイヤーは「誰が空いているのか」を画面ごとに
+//   数え直すことになる(R9-A02 の非対称)。除外の述語は⑦とまったく同じ
+//   「衛星拠点に常駐しているか」(engine の `stationedOutpostOfResident` を写した
+//   `ResidentView.stationedOutpostId`)であり、UI 側に第二の判定を作らない。
+//
+// ===========================================================================
+// 3. [M74/⑫] 駐在は本拠の就労を外す(研究が止まる予告)
+// ===========================================================================
+//   `stationResident`/`establishOutpost` は住民を今の持ち場から外す
+//   (commands.ts の `detachResidentFromPostsOrAbandon` → `assignedFacilityId`
+//   を null にする)。したがって研究点を生む施設で働いていた住民を駐在に回すと、
+//   その施設の就労者が減り、他に就労者が居なければ研究点の産出が 0 になって
+//   研究が止まる。これは仕様どおりだが、⑤研究画面のチップが「止まっている」と
+//   言うのは**止まった後**であり、駐在させる瞬間には何の予告も無かった。
+//   `ResidentView.researchWorker`(derived.ts・研究点産出施設の就労者)を読んで、
+//   選択肢と選択後の両方で予告する。停止するかどうかの最終判定(他に就労者が
+//   居るか)は engine 側の産出計算の話なので断定せず、注記の文で条件を言う。
 // ---------------------------------------------------------------------------
 
 import { useState } from "preact/hooks";
@@ -49,6 +71,58 @@ import "./outpostsScreen.css";
  * (deep/far/near)なので、`ExpeditionScreen.tsx` の `BAND_ORDER` と同じく
  * 表示専用にここで並べ直す。 */
 const OUTPOST_BAND_ORDER: readonly DistanceBand[] = ["near", "far", "deep"];
+
+// --- 0. 候補の絞り込みと事前注記(hooks 不使用・直接テスト可能) ---------------
+
+/**
+ * [M74/R9-A02] 駐在させられる住民の候補(§2 の例外)。⑦探索本部と同じ述語で
+ * **既に衛星拠点へ常駐している住民だけ**を落とす。死亡/派遣中/想起困難は
+ * 落とさない(一時的な不能は engine の reject に説明させる・§2 の本則)。
+ */
+export function stationCandidates(residents: readonly ResidentView[]): readonly ResidentView[] {
+  return residents.filter((resident) => (resident.stationedOutpostId ?? null) === null);
+}
+
+/**
+ * [M74/⑫] 駐在させると本拠の就労から外れる研究担当の表示名(入力順=ID昇順)。
+ * `targetIds` はこれから駐在させる住民(セレクタで選んだ 1 人 / 新規設置で
+ * 選んだ複数)。並びは `residents` の順に固定する——`Set` の反復順(挿入順)に
+ * 依存させると、選んだ順で文言が変わってしまう(表示も決定論に保つ)。
+ */
+export function researchStopTargetNames(
+  residents: readonly ResidentView[],
+  targetIds: ReadonlySet<EntityId>,
+): readonly string[] {
+  const names: string[] = [];
+  for (const resident of residents) {
+    if (!targetIds.has(resident.entityId)) continue;
+    if (resident.researchWorker !== true) continue;
+    names.push(residentDisplayName(resident.entityId));
+  }
+  return names;
+}
+
+export interface ResearchStopNoticeProps {
+  /** `researchStopTargetNames` の結果。空なら何も出さない。 */
+  readonly names: readonly string[];
+}
+
+/** [M74/⑫] 「割り当てると研究が停止する」の事前注記(§3)。 */
+export function ResearchStopNotice({ names }: ResearchStopNoticeProps) {
+  if (names.length === 0) return null;
+  return (
+    <p class="kf-outposts__research-stop" role="note" data-testid="outpost-research-stop">
+      ▲ {names.join("・")}は研究担当です。駐在させると本拠の就労から外れるため、他に研究点を生む
+      施設で働く住民がいなければ研究は止まります。
+    </p>
+  );
+}
+
+/** [M74/⑫] 候補の表示名(研究担当には印を付けて、選ぶ前から見えるようにする)。 */
+export function residentOptionLabel(resident: ResidentView): string {
+  const name = residentDisplayName(resident.entityId);
+  return resident.researchWorker === true ? `${name}(研究担当)` : name;
+}
 
 // --- 1. 拠点カード(hooks 不使用・直接テスト可能) ----------------------------
 
@@ -129,7 +203,8 @@ export function OutpostCard({
             <option value="">(住民を選ぶ)</option>
             {residentOptions.map((resident) => (
               <option key={resident.entityId} value={resident.entityId}>
-                {residentDisplayName(resident.entityId)}
+                {/* [M74/⑫] 研究担当には選ぶ前から印を付ける。 */}
+                {residentOptionLabel(resident)}
               </option>
             ))}
           </select>
@@ -138,6 +213,13 @@ export function OutpostCard({
           駐在させる
         </button>
       </div>
+      {/* [M74/⑫] 選んだ住民が研究担当なら、押す前に研究が止まることを言う(§3)。 */}
+      <ResearchStopNotice
+        names={researchStopTargetNames(
+          residentOptions,
+          new Set(stationSelectValue === "" ? [] : [stationSelectValue]),
+        )}
+      />
       <p class="kf-outpost-card__established">設置: {formatGameClock(outpost.establishedTick)}</p>
       {/* [M62/FC4・R2-D01] 内部語「/tick」を「/分」へ(tick=1分・GDD 11.1)。
           formatRatePerMinute 経由で資源在庫表示(formatResourceAmount)と桁の
@@ -282,11 +364,14 @@ export function OutpostEstablishForm({
               aria-pressed={selectedResidentIds.has(resident.entityId)}
               onClick={() => onToggleResident(resident.entityId)}
             >
-              {residentDisplayName(resident.entityId)}
+              {/* [M74/⑫] 研究担当には選ぶ前から印を付ける。 */}
+              {residentOptionLabel(resident)}
             </button>
           </li>
         ))}
       </ul>
+      {/* [M74/⑫] 選んだ住民に研究担当が居るなら、設置する前に言う(§3)。 */}
+      <ResearchStopNotice names={researchStopTargetNames(residentOptions, selectedResidentIds)} />
       <button type="button" class="kf-outposts-establish__submit-button" onClick={onSubmit}>
         設置する
       </button>
@@ -302,6 +387,9 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
 
   const overview = useSignalValue(store.derived.outpostOverview);
   const residents = useSignalValue(store.derived.residents);
+  // [M74/R9-A02] 既に別の拠点へ常駐している住民は 2 つのセレクタどちらの候補にも
+  // しない(⑦探索本部と同じ規則・§2 の例外)。
+  const candidates = stationCandidates(residents);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
   const toastStack = useToastStack();
 
@@ -472,7 +560,7 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
         onTypeChange={setEstablishTypeId}
         band={establishBand}
         onBandChange={setEstablishBand}
-        residentOptions={residents}
+        residentOptions={candidates}
         selectedResidentIds={establishResidentIds}
         onToggleResident={handleToggleEstablishResident}
         onSubmit={handleEstablish}
@@ -486,7 +574,7 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
             <OutpostCard
               key={outpost.outpostId}
               outpost={outpost}
-              residentOptions={residents}
+              residentOptions={candidates}
               stationSelectValue={stationSelections.get(outpost.outpostId) ?? ""}
               onStationSelectChange={(residentId) =>
                 handleStationSelectChange(outpost.outpostId, residentId)

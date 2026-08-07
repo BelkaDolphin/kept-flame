@@ -158,6 +158,35 @@
   color: #5b534b;
 }
 
+/* [M74/⑰] 次の周回の開始人口予告。積み込みプレビュー(いまの周回の結果)とは
+   別の時間軸の話なので、獲得予定の継承点と同じ「別枠」の見た目に揃える。 */
+.kf-exodus__next-run {
+  border: 1px solid #c9c3b8;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  background: #faf8f5;
+  margin: 0 0 0.6rem;
+}
+
+.kf-exodus__next-run-crew {
+  font-size: var(--kf-fs-body);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.3rem;
+}
+
+.kf-exodus__next-run-points {
+  font-size: var(--kf-fs-sub);
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.3rem;
+}
+
+.kf-exodus__next-run-note {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  margin: 0;
+}
+
 .kf-migration-screen__seed-label {
   display: block;
   font-size: var(--kf-fs-sub);

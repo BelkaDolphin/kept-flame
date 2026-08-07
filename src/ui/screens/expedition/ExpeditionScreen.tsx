@@ -232,6 +232,13 @@ export interface RoiPanelProps {
  *   (c) 近似値である注記が無かった。ここは事前期待値(乱数を 0..R 一様として
  *       解析的に解いた確率モデル)であって、実際の解決は決定論で 1 つに決まる
  *       (rules/exploration.ts の explorationRoi の doc)。その差を 1 行で言う。
+ *
+ * **[M74/⑮] 成功確率を先頭に出す**。engine は `explorationRoi` の
+ * `successProbabilityFix`(1 ノードの期待成功確率・R6 期に整備済み)を返していた
+ * のに、この画面は全滅確率(その裏返しに見えて実は別式=安全曲線)と期待報酬
+ * しか出していなかった。結果として「必要人数を 1 人下回った途端に成功率が急落
+ * する」という編成人数の崖が**派遣前にはどこにも見えず**、帰還後の失敗でしか
+ * 分からなかった。ここでも UI は式を持たず、engine の値を % へ直すだけである。
  */
 export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) {
   if (teamSize === 0) {
@@ -257,6 +264,16 @@ export function RoiPanel({ report, rewardResourceId, teamSize }: RoiPanelProps) 
   // 同じ rewardResourceId を付けて統一する。
   return (
     <section class="kf-expedition__roi" aria-label="派遣前の見込み">
+      {/* [M74/⑮] 編成人数の崖(§ 直前の doc)。いまの顔ぶれ・人数での成功確率を
+          期待報酬より前に置く——報酬は「成功したら」の話なので、先に成否の目安が
+          要る。人数を変えるとこの値が動くことを添えて、崖の存在自体を示す。 */}
+      <p class="kf-expedition__roi-success" data-testid="expedition-success-probability">
+        成功確率(1ノードあたり):{" "}
+        {formatApproxDecimal1(toApproxNumber(report.successProbabilityFix) * 100)}%
+        <span class="kf-expedition__roi-success-note">
+          (いまの{teamSize}名の顔ぶれでの見込み。人数を減らすと急に下がることがあります)
+        </span>
+      </p>
       <p class="kf-expedition__roi-reward">
         期待報酬: {formatResourceAmount(toApproxNumber(report.expectedRewardFix))}
         {rewardResourceId !== null ? resourceLabel(rewardResourceId) : ""}

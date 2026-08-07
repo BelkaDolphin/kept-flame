@@ -32,6 +32,28 @@
 //   セレクタ自体を出さず、理由(記録として一覧に残していること)を文で示す。
 //   一時的な不能(派遣中/拠点常駐/想起困難)はこれまでどおりセレクタを活性の
 //   まま残し、engine の reject に説明させる。
+//
+// ===========================================================================
+// 4. [M74/R9-C01] おまかせ配属(一括)は「既存コマンドの列」でしかない
+// ===========================================================================
+//   住民が増えるほど、無配属の住民を 1 人ずつセレクタで送る操作は指の作業に
+//   なる(R9-C01)。ここで足すのは**配属先を決める規則**だけであり、engine には
+//   新しいコマンドを 1 つも足さない —— `planAutoAssignments` が返す
+//   (住民, 施設) の並びを `assignResident` として順に発行するだけである。
+//   したがって「配属が成立するか」の最終判定は従来どおり engine が持ち、
+//   §3 の規律(判定を UI に書かない)も破らない。
+//
+//   規則は決定論的な安定ソートのみ(乱数を使わない・ADR-006):
+//     (a) 対象住民 = 生存・非派遣・非常駐・**未配属**を ID 昇順(derived の順)
+//     (b) 対象施設 = 就労枠が 0 でないものを ID 昇順(derived の順)
+//     (c) 施設を 1 巡ごとに 1 人ずつ埋める(round robin)
+//   (c) を採るのは、先頭の施設を満たしてから次へ移る方式だと「就労枠に上限が
+//   無い施設」(commands.ts の `facilityWorkerSlots` が undefined を返す縮約
+//   content)が全員を吸い込んでしまう一方、1 巡 1 人なら上限なしでも他の施設へ
+//   人が回るためである(実 content の facility.json は必ず slots を持つので実
+//   プレイでは前者も起きないが、規則そのものを content の形に依存させない)。
+//   常駐中など**必ず reject される割り当ては (a) の時点で候補から外す**ので、
+//   ボタン 1 回で拒否バナーが出る、ということが原理的に起きない。
 // ---------------------------------------------------------------------------
 
 import { useState } from "preact/hooks";
@@ -44,8 +66,75 @@ import { facilityLabel, residentDisplayName, techLabel, traitLabel } from "../co
 import { formatApproxDecimal1 } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
+import { useToastStack, ToastStackView } from "../Toast";
 import { useScreenMount, useSignalValue } from "../useStoreSignal";
 import "./residentsScreen.css";
+
+// --- 0. おまかせ配属の割り当て規則(hooks 不使用・直接テスト可能) -------------
+
+/** [M74/R9-C01] `assignResident` 1 件ぶんの割り当て。 */
+export interface AutoAssignment {
+  readonly residentId: EntityId;
+  readonly facilityId: EntityId;
+}
+
+/**
+ * [M74/R9-C01] おまかせ配属の割り当て一覧(§4 の規則 (a)(b)(c))。
+ *
+ * **純関数**であり、同じ入力からは常に同じ並びを返す(乱数・時刻を読まない)。
+ * 空きスロットが足りなければ入り切らなかった住民は単に含まれない(無理に
+ * 詰め込まない = engine の `facilitySlotsFull` reject を踏まない)。
+ */
+export function planAutoAssignments(
+  residents: readonly ResidentView[],
+  facilityRoster: readonly FacilityRosterEntry[],
+): readonly AutoAssignment[] {
+  const queue = residents.filter((resident) => isAutoAssignable(resident));
+  // 就労枠 0 の施設(寝床/保管庫等)は対象外。上限なし(null)は「空きが尽きない」
+  // ので、この一括操作で入りうる最大人数 = 対象住民の総数を空きとして扱う。
+  const openings = facilityRoster
+    .filter((facility) => facility.slotsMax !== 0)
+    .map((facility) => ({
+      facilityId: facility.facilityId,
+      free:
+        facility.slotsMax === null
+          ? queue.length
+          : Math.max(0, facility.slotsMax - facility.workerIds.length),
+    }));
+
+  const plan: AutoAssignment[] = [];
+  let index = 0;
+  let placedInPass = true;
+  while (index < queue.length && placedInPass) {
+    placedInPass = false;
+    for (const opening of openings) {
+      const resident = queue[index];
+      if (resident === undefined) break; // 全員配属し終えた。
+      if (opening.free <= 0) continue;
+      plan.push({ residentId: resident.entityId, facilityId: opening.facilityId });
+      opening.free -= 1;
+      index += 1;
+      placedInPass = true;
+    }
+  }
+  return plan;
+}
+
+/**
+ * [M74/R9-C01] おまかせ配属の対象になる住民か(§4 の規則 (a))。
+ *
+ * 死亡・派遣中・拠点常駐は `assignResident` が必ず reject する
+ * (commands.ts の `applyAssignResident`: `residentUnavailable` /
+ * `rejectIfResidentStationed`)ので、一括操作では最初から触らない。既に就労
+ * している住民も触らない —— 一括で配属先を掻き回すと、プレイヤーが意図して
+ * 置いた配置(隣接ボーナス狙い等)を黙って崩すことになる。
+ */
+export function isAutoAssignable(resident: ResidentView): boolean {
+  if (!resident.alive) return false;
+  if (resident.dispatched) return false;
+  if ((resident.stationedOutpostId ?? null) !== null) return false;
+  return resident.assignedFacilityId === null;
+}
 
 // --- 1. 住民 1 行(hooks 不使用・直接テスト可能) -----------------------------
 
@@ -165,8 +254,14 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
   const residents = useSignalValue(store.derived.residents);
   const facilityRoster = useSignalValue(store.derived.facilityRoster);
   const [lastRejection, setLastRejection] = useState<CommandRejection | null>(null);
+  // [M74/R9-C01] 一括配属の結果は他画面と同じ成功トーストで返す。
+  const toastStack = useToastStack();
   // [M73/R8-12] 生存数(死亡 tombstone を除く)。判定は derived の `alive` をそのまま数える。
   const livingCount = residents.filter((resident) => resident.alive).length;
+  // [M74/R9-C01] おまかせ配属の対象人数と、いまの空きスロットで実際に配属できる
+  // 割り当て(§4)。押す前に「何人が動くのか」を出すために両方を持つ。
+  const assignableCount = residents.filter((resident) => isAutoAssignable(resident)).length;
+  const autoPlan = planAutoAssignments(residents, facilityRoster);
 
   function handleAssign(residentId: EntityId, facilityId: EntityId): void {
     const result = store.dispatch({
@@ -185,6 +280,42 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
     });
     setLastRejection(
       result.command !== null && !result.command.ok ? result.command.rejection : null,
+    );
+  }
+
+  /**
+   * [M74/R9-C01] おまかせ配属(§4)。`planAutoAssignments` の並びを
+   * `assignResident` として順に発行するだけ(新しい engine コマンドは無い)。
+   * 途中で reject が返ったら**そこで止めて**理由を出す —— 残りを押し込んでも
+   * 同じ理由で落ちる可能性が高く、何件成功して何件落ちたのかが分からなくなる。
+   * 成功した件数はトーストで返す(部分適用が黙って起きないようにする)。
+   */
+  function handleAutoAssign(): void {
+    let assigned = 0;
+    for (const entry of autoPlan) {
+      const result = store.dispatch({
+        type: "commandApplied",
+        command: {
+          kind: "assignResident",
+          residentId: entry.residentId,
+          facilityId: entry.facilityId,
+        },
+      });
+      if (result.command === null) continue;
+      if (!result.command.ok) {
+        setLastRejection(result.command.rejection);
+        if (assigned > 0) toastStack.push(`${String(assigned)}名を配属した(残りは中止)`);
+        return;
+      }
+      assigned += 1;
+    }
+    setLastRejection(null);
+    if (assigned === 0) return;
+    const remaining = assignableCount - assigned;
+    toastStack.push(
+      remaining > 0
+        ? `${String(assigned)}名を配属した(空きスロットが足りず${String(remaining)}名は無配属のまま)`
+        : `${String(assigned)}名を配属した`,
     );
   }
 
@@ -207,7 +338,31 @@ export function ResidentsScreen({ store, onNavigate }: ScreenProps) {
           : ""}
       </p>
 
+      <ToastStackView toasts={toastStack.toasts} />
+
       {lastRejection !== null && <RejectionBanner rejection={lastRejection} />}
+
+      {/* [M74/R9-C01] 未配属の住民を一括で職場へ送る(§4)。既に就労している住民の
+          配置は動かさないので、押し間違えても既存の配置は壊れない。 */}
+      <section class="kf-residents-screen__auto-assign" aria-label="おまかせ配属">
+        <button
+          type="button"
+          class="kf-residents-screen__auto-assign-button"
+          onClick={handleAutoAssign}
+          disabled={autoPlan.length === 0}
+        >
+          おまかせ配属({autoPlan.length}名をまとめて配属)
+        </button>
+        <p class="kf-residents-screen__auto-assign-note">
+          無配属で配属できる住民 {assignableCount}人
+          {assignableCount > autoPlan.length
+            ? `(いまの空きスロットで入れるのは ${autoPlan.length}人まで)`
+            : ""}
+        </p>
+        <p class="kf-residents-screen__auto-assign-note">
+          空きのある職場へ ID の順で均等に割り当てます(就労中の住民は動かしません)。
+        </p>
+      </section>
 
       {residents.length === 0 ? (
         <p class="kf-residents-screen__empty">住民がいません。</p>
