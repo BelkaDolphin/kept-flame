@@ -208,7 +208,7 @@
     "eraPoints": 10,
     "codifyRatePoints": 0.5,
     "survivorPoints": 2,
-    "inheritTierCosts": [50, 75, 113, 169],
+    "inheritTierCosts": [45, 75, 113, 169],
     "inheritBonusPerTier": {
       "caravanCapacity": 2,
       "crewCapacity": 1,
