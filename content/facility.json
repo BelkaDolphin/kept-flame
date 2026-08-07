@@ -436,7 +436,7 @@
       }
     ],
     "upgradeCostCurve": [18, 22, 26, 31, 37],
-    "defenseCurve": [20, 23, 26.45, 30.4175, 34.980125]
+    "defenseCurve": [20, 23, 26, 30, 35]
   },
   {
     "id": "infirmary",
