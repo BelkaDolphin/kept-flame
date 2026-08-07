@@ -85,6 +85,31 @@ describe("outpostType が engine 内部表現へ写る", () => {
     expect(toRaw(mine.shadeSensitivityFix)).toBe(800_000);
   });
 
+  it("[M75] buildCost が engine のコスト行へ正準化される(単一形も配列形も)", () => {
+    const content = load(rawBundle());
+    // 配列形(薪 45 + 鉄 12)。
+    const mine = requireOutpostTypeDef(content, id("outpostMine"));
+    expect(mine.buildCost?.map((line) => [String(line.resourceId), toRaw(line.amountFix)])).toEqual(
+      [
+        ["firewood", 45_000_000],
+        ["iron", 12_000_000],
+      ],
+    );
+    // 単一形(薪 36)は「1 行だけの配列」へ畳まれる。
+    const forest = requireOutpostTypeDef(content, id("outpostForest"));
+    expect(
+      forest.buildCost?.map((line) => [String(line.resourceId), toRaw(line.amountFix)]),
+    ).toEqual([["firewood", 36_000_000]]);
+  });
+
+  it("[M75] buildCost を持たない outpostType では key が付かない(設置無料)", () => {
+    const bundle = rawBundle();
+    const types = JSON.parse(JSON.stringify(outpostTypeJson)) as Record<string, unknown>[];
+    for (const type of types) delete type["buildCost"];
+    const content = load({ ...bundle, outpostType: types });
+    expect(requireOutpostTypeDef(content, id("outpostMine")).buildCost).toBeUndefined();
+  });
+
   it("balance.outpost の距離帯係数が 3 帯とも写る", () => {
     const content = load(rawBundle());
     const params = requireOutpostParams(content);

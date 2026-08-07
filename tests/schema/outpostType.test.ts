@@ -110,3 +110,76 @@ describe("validateOutpostType — reject 系", () => {
     expect(validateOutpostType(raw).ok).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [M75] buildCost(GDD 9.2 [2026-08-07裁定]・schema/outpostType.ts 冒頭 [M75])
+// ---------------------------------------------------------------------------
+
+describe("validateOutpostType — [M75] buildCost", () => {
+  it("省略時は null(設置無料 = M74 以前と同一挙動)", () => {
+    const result = validateOutpostType(validContent());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.buildCost).toBeNull();
+  });
+
+  it("単一オブジェクト形が通る", () => {
+    const raw = validContent();
+    raw["buildCost"] = { resourceId: "firewood", amount: 36 };
+    const result = validateOutpostType(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.buildCost).toEqual({ resourceId: "firewood", amount: 36 });
+  });
+
+  it("配列形(複数資源)が通る", () => {
+    const raw = validContent();
+    raw["buildCost"] = [
+      { resourceId: "firewood", amount: 45 },
+      { resourceId: "iron", amount: 12 },
+    ];
+    const result = validateOutpostType(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.buildCost).toEqual([
+      { resourceId: "firewood", amount: 45 },
+      { resourceId: "iron", amount: 12 },
+    ]);
+  });
+
+  it("空配列は reject(無料と区別できない)", () => {
+    const raw = validContent();
+    raw["buildCost"] = [];
+    expect(validateOutpostType(raw).ok).toBe(false);
+  });
+
+  it("同じ資源が 2 行あれば reject", () => {
+    const raw = validContent();
+    raw["buildCost"] = [
+      { resourceId: "firewood", amount: 10 },
+      { resourceId: "firewood", amount: 20 },
+    ];
+    expect(validateOutpostType(raw).ok).toBe(false);
+  });
+
+  it("amount が負なら reject", () => {
+    const raw = validContent();
+    raw["buildCost"] = { resourceId: "firewood", amount: -1 };
+    expect(validateOutpostType(raw).ok).toBe(false);
+  });
+
+  it("resourceId 欠落は reject", () => {
+    const raw = validContent();
+    raw["buildCost"] = { amount: 10 };
+    expect(validateOutpostType(raw).ok).toBe(false);
+  });
+
+  it("実 content の 3 タイプは全て buildCost を持つ", () => {
+    for (const rawType of outpostTypeJson) {
+      const result = validateOutpostType(rawType);
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value.buildCost).not.toBeNull();
+    }
+  });
+});

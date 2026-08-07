@@ -860,6 +860,24 @@ export interface OutpostTypeDef {
   readonly hazard: OutpostHazardParams;
   /** 翳り率への感度(GDD 9.2「拠点固有shadeSensitivity」)。 */
   readonly shadeSensitivityFix: Fix;
+  /**
+   * [M75] 設置 1 基ぶんのコスト(GDD 9.2 [2026-08-07裁定]・content の記載順)。
+   * **省略 = 無料**(= M24〜M74 と 1 bit も違わない経路。`schema/outpostType.ts`
+   * 冒頭 [M75])。支払いは `commands.ts` の `applyEstablishOutpost` が行う。
+   */
+  readonly buildCost?: readonly OutpostCostLineDef[];
+}
+
+/**
+ * [M75] 拠点 1 基の設置コスト 1 行(1 資源ぶん)。{@link FacilityCostLineDef} と
+ * 違って増築費(`upgradeByLevel`)を持たない —— 拠点に増築コマンドが無いため
+ * (`schema/outpostType.ts` 冒頭 [M75])。
+ */
+export interface OutpostCostLineDef {
+  /** コストを引き落とす resource 定義 ID。 */
+  readonly resourceId: EntityId;
+  /** 設置時に払う量。 */
+  readonly amountFix: Fix;
 }
 
 /**
@@ -967,6 +985,18 @@ export interface ExodusParams {
   readonly trackBonusPerTier: { readonly [K in InheritTrack]: number };
   /** `startingStock` 系統のボーナスが積まれる resource 定義 ID。 */
   readonly startingStockResourceId: EntityId;
+  /**
+   * [M75] 大移動の最少乗員数(GDD 10.2 [2026-08-07裁定])。`executeExodus` は
+   * これを下回る乗員選抜を reject する(`commands.ts` の `applyExecuteExodus`)。
+   *
+   * **省略 = ガード不活性**(= M53 の `exodusNoCrew` = 乗員 0 の拒否だけが働く
+   * M74 以前と 1 bit も違わない)。`content/balance.json` の `exodus.minCrew` が
+   * 省略された場合はローダーが既定 1 を入れる(`schema/engineContent.ts` の
+   * `toExodusParams`)ので、実 content 経路では常に値がある。キーを省略可に
+   * しているのは engine 側テストフィクスチャ(手組みの `ExodusParams`)を
+   * 1 行も変えずに通すためである。
+   */
+  readonly minCrew?: number;
 }
 
 // --- 4. content 全体 -------------------------------------------------------

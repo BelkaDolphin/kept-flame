@@ -149,6 +149,7 @@ import type {
   FacilityDef,
   FacilityOutput,
   FacilityStorageDef,
+  OutpostCostLineDef,
   OutpostHazardParams,
   OutpostParams,
   OutpostTypeDef,
@@ -188,7 +189,7 @@ import { IssueCollector, fail, ok, type ValidationResult } from "./common";
 import type { ContentBundle } from "./contentBundle";
 import type { CondAst, EventChoice, EventContent, EventResultContent } from "./event";
 import type { FacilityBuildCostLine, FacilityContent, FacilityStatWeights } from "./facility";
-import type { OutpostTypeContent } from "./outpostType";
+import type { OutpostBuildCostLine, OutpostTypeContent } from "./outpostType";
 import type { TechContent } from "./tech";
 import type { TraitContent } from "./trait";
 
@@ -2006,6 +2007,39 @@ function toOutpostHazardParams(
   return { intensityFix, growthPerDayFix, minFix, maxFix };
 }
 
+/**
+ * [M75] `buildCost` → engine の {@link OutpostCostLineDef} 列(GDD 9.2
+ * [2026-08-07裁定])。**単一形は「1 行だけの配列」へ正準化**する
+ * (`toFacilityCost` が M65 で採った形の縮小版。schema/outpostType.ts 冒頭 [M75])。
+ *
+ * 省略(null)は「設置無料」なので undefined ではなく **null** を返し、
+ * 呼び出し側が `EngineContent` へキーを足さない分岐に使う(`exactOptionalPropertyTypes`)。
+ * 検証失敗だけが undefined である。
+ */
+function toOutpostBuildCost(
+  content: OutpostTypeContent,
+  path: string,
+  issues: IssueCollector,
+): readonly OutpostCostLineDef[] | null | undefined {
+  const buildCost = content.buildCost;
+  if (buildCost === null) return null;
+  const lines: readonly OutpostBuildCostLine[] = Array.isArray(buildCost) ? buildCost : [buildCost];
+  const converted: OutpostCostLineDef[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line === undefined) continue;
+    const amountFix = toFix(
+      line.amount,
+      `${path}.buildCost[${String(i)}].amount`,
+      issues,
+      "拠点設置コスト",
+    );
+    if (amountFix === undefined) return undefined;
+    converted.push({ resourceId: entityIdFromString(line.resourceId), amountFix });
+  }
+  return converted.length === lines.length ? converted : undefined;
+}
+
 function toOutpostTypeDef(
   content: OutpostTypeContent,
   issues: IssueCollector,
@@ -2020,15 +2054,17 @@ function toOutpostTypeDef(
     issues,
     "翳り感度",
   );
+  const buildCost = toOutpostBuildCost(content, path, issues);
   if (
     supplyPerResidentTickByLevel === undefined ||
     upkeep === undefined ||
     hazard === undefined ||
-    shadeSensitivityFix === undefined
+    shadeSensitivityFix === undefined ||
+    buildCost === undefined
   ) {
     return undefined;
   }
-  return {
+  const base = {
     id: entityIdFromString(content.id),
     // resource カテゴリ未実装のため実在確認はしない(facility.output.resourceId と
     // 同じ扱い・schema/outpostType.ts 冒頭)。本拠側と同じ ID 空間を指すことが
@@ -2039,6 +2075,9 @@ function toOutpostTypeDef(
     hazard,
     shadeSensitivityFix,
   };
+  // [M75] 設置無料の content では**キーを足さない**(キー不在 = 無料、という
+  // engine 側の契約を型でも守る。`toFacilityDef` の省略可フィールドと同じ形)。
+  return buildCost === null ? base : { ...base, buildCost };
 }
 
 /**
@@ -2277,6 +2316,9 @@ function toExodusParams(
       startingStock: stockBonus,
     },
     startingStockResourceId: entityIdFromString(content.startingStockResourceId),
+    // [M75] 省略時の既定 1(= M53 の乗員 0 拒否と同一挙動)。既定を engine 側の
+    // 呼び出し箇所に散らさず、ここで 1 箇所だけ埋める(rules/types.ts の doc)。
+    minCrew: content.minCrew ?? 1,
   };
 }
 

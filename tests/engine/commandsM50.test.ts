@@ -899,6 +899,81 @@ describe("[M50] 衛星拠点の設置 / 放棄", () => {
   });
 });
 
+// --- 5b. [M75] 拠点の設置コスト(GDD 9.2 [2026-08-07裁定]) --------------------
+
+describe("[M75] 衛星拠点の設置コスト", () => {
+  /** 薪 40 + 廃材 5 を要求する拠点タイプ(複数資源行の経路)。 */
+  const OUTPOST_WITH_COST: OutpostTypeDef = {
+    ...OUTPOST_FOREST,
+    buildCost: [
+      { resourceId: WOOD, amountFix: fixFromInt(40) },
+      { resourceId: WASTE, amountFix: fixFromInt(5) },
+    ],
+  };
+  const CONTENT_OUTPOST_COST = contentWith({
+    outpostTypeDefs: new Map([[OUTPOST_WITH_COST.id, OUTPOST_WITH_COST]]),
+    outpost: OUTPOST_PARAMS,
+  });
+
+  it("設置すると全コスト行が在庫から引かれる", () => {
+    const board = outpostBoard([resource("dStock", WASTE, 10)]);
+    const next = accept(board, CONTENT_OUTPOST_COST, ESTABLISH);
+    expect(stockOf(next, "wStock")).toBe(toRaw(fixFromInt(60)));
+    expect(stockOf(next, "dStock")).toBe(toRaw(fixFromInt(5)));
+    expect(getOutpost(next, id("oForest"))?.residentIds).toEqual([id("bSora")]);
+  });
+
+  it("主資源が足りなければ insufficientResource で拒否し state を変えない", () => {
+    const board = stateOf([
+      resident("bSora"),
+      resource("wStock", WOOD, 10),
+      resource("dStock", WASTE, 10),
+    ]);
+    const result = apply(board, CONTENT_OUTPOST_COST, ESTABLISH);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe<CommandRejectionCode>("insufficientResource");
+    expect(result.rejection.resourceId).toBe(WOOD);
+    expect(allOutposts(board)).toEqual([]);
+  });
+
+  it("2 行目の資源が足りなければ拒否する(1 行目だけ引かれた state を残さない)", () => {
+    const board = outpostBoard([resource("dStock", WASTE, 1)]);
+    const result = apply(board, CONTENT_OUTPOST_COST, ESTABLISH);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe<CommandRejectionCode>("insufficientResource");
+    expect(result.rejection.resourceId).toBe(WASTE);
+    expect(stockOf(board, "wStock")).toBe(toRaw(fixFromInt(100)));
+  });
+
+  it("構造検査(常駐人数)の reject はコスト検査より先に出る", () => {
+    const board = stateOf([resident("bSora"), resource("wStock", WOOD, 0)]);
+    expect(
+      rejectCodeOf(board, CONTENT_OUTPOST_COST, { ...ESTABLISH, residentIds: [] } as Command),
+    ).toBe("invalidArgument");
+  });
+
+  it("buildCost を持たない outpostType は無料のまま(M74 以前と同一)", () => {
+    const next = accept(outpostBoard(), CONTENT_OUTPOST, ESTABLISH);
+    expect(stockOf(next, "wStock")).toBe(toRaw(fixFromInt(100)));
+  });
+
+  it("廃材による一部代替は掛からない(GDD 6.7 の 3 出口(1) は施設のみ)", () => {
+    // storage(廃材 20% 代替)を持つ content でも、主資源の 40 が満額引かれる。
+    const withWaste = contentWith({
+      outpostTypeDefs: new Map([[OUTPOST_WITH_COST.id, OUTPOST_WITH_COST]]),
+      outpost: OUTPOST_PARAMS,
+      storage: STORAGE_WITH_WASTE,
+    });
+    const board = outpostBoard([resource("dStock", WASTE, 10)]);
+    const next = accept(board, withWaste, ESTABLISH);
+    expect(stockOf(next, "wStock")).toBe(toRaw(fixFromInt(60)));
+    // 引かれた廃材は 2 行目の 5 だけ(代替ぶんの上乗せが無い)。
+    expect(stockOf(next, "dStock")).toBe(toRaw(fixFromInt(5)));
+  });
+});
+
 describe("[M50] 駐在割当 / 解除", () => {
   const STATION: Command = {
     kind: "stationResident",

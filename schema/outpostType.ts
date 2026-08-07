@@ -18,6 +18,33 @@
 // (facility の `outputPerTickByLevel` が `base × 1.15^(Lv-1)` を折り込むのと
 // 同じ判断)。`capacityCurve[0]` は `baseSupply` と一致することを要求する
 // (二重の真実を作らない)。
+//
+// ---------------------------------------------------------------------------
+// [M75] 追加フィールド `buildCost`(GDD 9.2 [2026-08-07裁定]・台帳v24 / M39 ③)
+// ---------------------------------------------------------------------------
+// 旧裁定([2026-08-01裁定・台帳v8 追-2])は「拠点の設置コストは MVP ではゼロ。
+// 導入する場合は `outpostType` スキーマへの content 項目追加として行う」であり、
+// M39 のトリアージ(`docs/measurements/balance-m39-2026-08-07.json` の ③)が
+// 「facility の `buildCost`(M65 で単一形→複数資源形へ拡幅済み)と同じ形を
+// outpostType へ横展開する」を推奨案として出した。本フィールドがその実装である。
+//
+//   単一形: { "resourceId": "firewood", "amount": 40 }
+//   配列形: [ { "resourceId": "firewood", "amount": 40 },
+//             { "resourceId": "iron", "amount": 12 } ]
+//
+// facility 側との差は 1 点だけ:**増築コスト(`upgradeCostCurve`)を持たない**。
+// 拠点に増築コマンドが無い(`IMPLEMENTED_COMMAND_KINDS` に upgradeOutpost は
+// 無く、`establishOutpost` は常に Lv1 で据える)ため、書けても読む場所が無い
+// キーを増やさない。よって M65 の非対称規約(第1行は増築費を持てない / 第2行
+// 以降は必須)もここには無く、行は「資源 ID + 量」だけである。
+//
+// **省略可**(JSON に無ければ null = 設置は無料 = M24〜M74 と 1 bit も違わない)。
+// facility の `buildCost` がローダー必須(欠落を reject)なのに対しこちらを
+// 省略可のままにするのは、既存の conformance 凍結スナップショット
+// (`conformance/content-snapshot/outpostType.json`)と engine 側テスト
+// フィクスチャを 1 バイトも変えずに通すため(schema/facility.ts 冒頭 [T7] の
+// 二段構えを「省略 = 無料」側へ倒した形)。実 content の 3 タイプは
+// `content/outpostType.json` で全て明示している。
 // ---------------------------------------------------------------------------
 
 import {
@@ -50,6 +77,21 @@ const HAZARD_GROWTH_RANGE: NumericRange = { min: 0, max: 1 };
 /** shadeSensitivity の保守境界(GDD 9.2 の翳り率係数。1 超を許して感度差を表現可能にする)。 */
 const SHADE_SENSITIVITY_RANGE: NumericRange = { min: 0, max: 10 };
 
+/** [M75] 設置コストの値域(`schema/facility.ts` の `COST_VALUE_RANGE` と同じ境界)。 */
+const COST_VALUE_RANGE: NumericRange = { min: 0, max: 1_000_000_000 };
+
+/** [M75] 設置コスト 1 行(資源 ID + 量)。増築コストは持たない(ファイル冒頭 [M75])。 */
+export interface OutpostBuildCostLine {
+  readonly resourceId: string;
+  readonly amount: number;
+}
+
+/**
+ * [M75] `buildCost` が取りうる形。単一オブジェクト形と 1 行以上の配列形
+ * (ファイル冒頭 [M75] の節が規約の正本)。
+ */
+export type OutpostBuildCostContent = OutpostBuildCostLine | readonly OutpostBuildCostLine[];
+
 export interface OutpostUpkeepFormulaContent {
   readonly baseFood: number;
   readonly baseMoraleCare: number;
@@ -70,6 +112,11 @@ export interface OutpostTypeContent {
   readonly upkeepFormula: OutpostUpkeepFormulaContent;
   readonly hazard: OutpostHazardContent;
   readonly shadeSensitivity: number;
+  /**
+   * [M75] 設置コスト(GDD 9.2 [2026-08-07裁定])。JSON に無ければ null
+   * (= 設置は無料。ファイル冒頭 [M75] の節)。
+   */
+  readonly buildCost: OutpostBuildCostContent | null;
 }
 
 function validateCapacityCurve(
@@ -152,6 +199,52 @@ function validateHazard(
   return { intensity, growth, min, max };
 }
 
+/** [M75] 設置コスト 1 行(資源 ID + 非負の量)の検証。 */
+function validateBuildCostLine(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): OutpostBuildCostLine | undefined {
+  const obj = expectRecord(raw, path, issues);
+  if (obj === undefined) return undefined;
+  const resourceId = validateId(obj["resourceId"], `${path}.resourceId`, issues);
+  const amount = expectNumber(obj["amount"], `${path}.amount`, issues, COST_VALUE_RANGE);
+  if (resourceId === undefined || amount === undefined) return undefined;
+  return { resourceId, amount };
+}
+
+/**
+ * [M75] `buildCost`(省略可)の検証。単一オブジェクト形と配列形の union
+ * (ファイル冒頭 [M75])。配列形は 1 行以上・資源 ID の重複禁止。
+ */
+function validateBuildCost(
+  raw: unknown,
+  path: string,
+  issues: IssueCollector,
+): OutpostBuildCostContent | undefined {
+  if (!Array.isArray(raw)) return validateBuildCostLine(raw, path, issues);
+  if (raw.length === 0) {
+    issues.add(path, "buildCost の配列形は 1 行以上が必須(空配列は無料と区別できない)");
+    return undefined;
+  }
+  const lines: OutpostBuildCostLine[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const line = validateBuildCostLine(raw[i], `${path}[${String(i)}]`, issues);
+    if (line === undefined) return undefined;
+    if (seen.has(line.resourceId)) {
+      issues.add(
+        `${path}[${String(i)}].resourceId`,
+        `資源 "${line.resourceId}" が buildCost に 2 行ある(1 資源 1 行)`,
+      );
+      return undefined;
+    }
+    seen.add(line.resourceId);
+    lines.push(line);
+  }
+  return lines;
+}
+
 export function validateOutpostType(raw: unknown): ValidationResult<OutpostTypeContent> {
   const issues = new IssueCollector();
   const obj = expectRecord(raw, "$", issues);
@@ -169,6 +262,12 @@ export function validateOutpostType(raw: unknown): ValidationResult<OutpostTypeC
     issues,
     SHADE_SENSITIVITY_RANGE,
   );
+  // [M75] 省略可(欠落は null = 無料)。値があれば形を検査する。
+  const rawBuildCost = obj["buildCost"];
+  const buildCost =
+    rawBuildCost === undefined
+      ? null
+      : (validateBuildCost(rawBuildCost, "$.buildCost", issues) ?? undefined);
 
   if (
     id === undefined ||
@@ -177,7 +276,8 @@ export function validateOutpostType(raw: unknown): ValidationResult<OutpostTypeC
     capacityCurve === undefined ||
     upkeepFormula === undefined ||
     hazard === undefined ||
-    shadeSensitivity === undefined
+    shadeSensitivity === undefined ||
+    buildCost === undefined
   ) {
     return fail(issues.list());
   }
@@ -191,5 +291,14 @@ export function validateOutpostType(raw: unknown): ValidationResult<OutpostTypeC
     return fail(issues.list());
   }
 
-  return ok({ id, resource, baseSupply, capacityCurve, upkeepFormula, hazard, shadeSensitivity });
+  return ok({
+    id,
+    resource,
+    baseSupply,
+    capacityCurve,
+    upkeepFormula,
+    hazard,
+    shadeSensitivity,
+    buildCost,
+  });
 }

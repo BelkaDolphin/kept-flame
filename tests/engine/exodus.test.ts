@@ -1003,6 +1003,39 @@ describe("executeExodus / purchaseInheritBonus コマンド", () => {
     ).toBe<CommandRejectionCode>("entityNotFound");
   });
 
+  it("[M75] 最少乗員を下回る選抜は exodusNoCrew で拒否する(GDD 10.2 [2026-08-07裁定])", () => {
+    // 盤面は生存 2 名 = 乗員定員 ceil(2 × 0.5) + 継承 0 = 1 名なので、
+    // 1 名の選抜は M74 まで通っていた。minCrew = 2 でそれを止める。
+    const withMinCrew: EngineContent = { ...CONTENT, exodus: { ...EXODUS, minCrew: 2 } };
+    const result = apply(board(), withMinCrew, {
+      kind: "executeExodus",
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe<CommandRejectionCode>("exodusNoCrew");
+    expect(result.rejection.limit).toBe(2);
+    expect(result.rejection.actual).toBe(1);
+  });
+
+  it("[M75] minCrew を満たす選抜は通り、省略時(既定 1)は M74 以前と同一挙動", () => {
+    const withMinCrew: EngineContent = { ...CONTENT, exodus: { ...EXODUS, minCrew: 1 } };
+    const ok = apply(board(), withMinCrew, {
+      kind: "executeExodus",
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    expect(ok.ok).toBe(true);
+    // minCrew キーを持たない content(engine 側フィクスチャ)でも同じ 1 名が通る。
+    const omitted = apply(board(), CONTENT, {
+      kind: "executeExodus",
+      recordIds: [],
+      crewIds: [id("residentAlpha")],
+    });
+    expect(omitted.ok).toBe(true);
+  });
+
   it("成功すると state が次周のものへ差し替わる", () => {
     const result = apply(board(), CONTENT, {
       kind: "executeExodus",

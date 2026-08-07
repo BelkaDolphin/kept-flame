@@ -326,6 +326,12 @@ export interface ExodusBalanceContent {
   readonly inheritBonusPerTier: { readonly [track: string]: number };
   /** `startingStock` 系統のボーナスが積まれる resource 定義 ID。 */
   readonly startingStockResourceId: string;
+  /**
+   * [M75] 大移動の最少乗員数(GDD 10.2 [2026-08-07裁定]・台帳v24 / M39 ②)。
+   * **省略可**(JSON に無ければ null = engine 側の既定 1 = M53 の
+   * `exodusNoCrew`(乗員 0 の拒否)と 1 bit も違わない)。
+   */
+  readonly minCrew: number | null;
 }
 
 /**
@@ -1708,6 +1714,13 @@ const INHERIT_TIER_COUNT_RANGE: NumericRange = { min: 1, max: 20 };
 /** 継承系統の正本(engine の `INHERIT_TRACKS` と一致していること)。 */
 const INHERIT_TRACK_IDS: readonly string[] = ["caravanCapacity", "crewCapacity", "startingStock"];
 
+/**
+ * [M75] 最少乗員数の保守境界。1 未満は「乗員 0 を許す」意味になり M53 の
+ * `exodusNoCrew`(GDD 7.6 の人口下限保証・詰み防止)と矛盾するので 1 が下限。
+ * 上限は盤面規模(寝床上限)から見て十分大きい 100 とする。
+ */
+const EXODUS_MIN_CREW_RANGE: NumericRange = { min: 1, max: 100 };
+
 function validateExpectedTabletsByEra(
   raw: unknown,
   path: string,
@@ -1846,6 +1859,12 @@ function validateExodus(
     `${path}.startingStockResourceId`,
     issues,
   );
+  // [M75] 省略可(欠落は null = engine 既定 1)。書いてあれば整数・1 以上を要求する。
+  const rawMinCrew = obj["minCrew"];
+  const minCrew =
+    rawMinCrew === undefined
+      ? null
+      : expectInteger(rawMinCrew, `${path}.minCrew`, issues, EXODUS_MIN_CREW_RANGE);
 
   if (
     caravanRatio === undefined ||
@@ -1856,7 +1875,8 @@ function validateExodus(
     survivorPoints === undefined ||
     inheritTierCosts === undefined ||
     inheritBonusPerTier === undefined ||
-    startingStockResourceId === undefined
+    startingStockResourceId === undefined ||
+    minCrew === undefined
   ) {
     return undefined;
   }
@@ -1870,6 +1890,7 @@ function validateExodus(
     inheritTierCosts,
     inheritBonusPerTier,
     startingStockResourceId,
+    minCrew,
   };
 }
 

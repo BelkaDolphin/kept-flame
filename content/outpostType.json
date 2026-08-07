@@ -14,7 +14,11 @@
       "min": 0.05,
       "max": 0.6
     },
-    "shadeSensitivity": 0.8
+    "shadeSensitivity": 0.8,
+    "buildCost": [
+      { "resourceId": "firewood", "amount": 45 },
+      { "resourceId": "iron", "amount": 12 }
+    ]
   },
   {
     "id": "outpostFarm",
@@ -31,7 +35,11 @@
       "min": 0.03,
       "max": 0.5
     },
-    "shadeSensitivity": 1.2
+    "shadeSensitivity": 1.2,
+    "buildCost": [
+      { "resourceId": "firewood", "amount": 30 },
+      { "resourceId": "grain", "amount": 20 }
+    ]
   },
   {
     "id": "outpostForest",
@@ -48,6 +56,7 @@
       "min": 0.04,
       "max": 0.55
     },
-    "shadeSensitivity": 0.9
+    "shadeSensitivity": 0.9,
+    "buildCost": { "resourceId": "firewood", "amount": 36 }
   }
 ]

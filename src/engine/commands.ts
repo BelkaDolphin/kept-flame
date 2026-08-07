@@ -150,6 +150,7 @@ import {
   type EngineContent,
   type FacilityCostLineDef,
   type FacilityDef,
+  type OutpostTypeDef,
   type RecordMedium,
 } from "./rules/types";
 import {
@@ -1077,6 +1078,53 @@ export function facilityBuildCostLines(def: FacilityDef): readonly ResolvedCostL
 }
 
 /**
+ * [M75] 拠点 1 基の設置で払う全コスト行(content の記載順)。
+ * `def.buildCost` が無ければ空 = 無料(rules/types.ts の `OutpostTypeDef.buildCost`)。
+ *
+ * 施設側の {@link facilityBuildCostLines} と同じ `ResolvedCostLine` を返すのは、
+ * 「在庫が足りるか」を判断する側(UI の派生値・sim の bot)が施設と拠点で
+ * 2 通りの形を覚えなくて済むようにするため。
+ */
+export function outpostBuildCostLines(def: OutpostTypeDef): readonly ResolvedCostLine[] {
+  const cost = def.buildCost;
+  if (cost === undefined) return NO_COST_LINES;
+  return cost.map((line) => ({ resourceId: line.resourceId, costFix: line.amountFix }));
+}
+
+/**
+ * [M75] 拠点の設置コストを払う(§3b の 2 段: 在庫検査 → `spendResources`)。
+ *
+ * **廃材による一部代替(GDD 6.7 の 3 出口(1))は掛けない** —— あの出口は
+ * 「施設建設 / 増築コストの一部代替」であり(`balance.storage` の
+ * パラメータ名も `buildCostWasteSubstitutionMax`)、拠点は施設ではない。
+ * ここで代替を効かせると GDD 6.7 の適用範囲を engine が勝手に広げることになる
+ * (要ユーザー判断として M75 の報告に記載)。
+ */
+function payOutpostBuildCost(
+  state: GameState,
+  lines: readonly ResolvedCostLine[],
+  index: number,
+  subjectId: EntityId,
+): CommandRejected | { readonly state: GameState } {
+  // 走査順 = content の記載順(不足の報告順が決定論的に決まる・§3b)。
+  const costs = new Map<EntityId, number>();
+  const costFixes = new Map<EntityId, Fix>();
+  for (const line of lines) {
+    const raw = toRaw(line.costFix);
+    if (raw <= 0) continue;
+    costs.set(line.resourceId, (costs.get(line.resourceId) ?? 0) + raw);
+    costFixes.set(
+      line.resourceId,
+      addFix(costFixes.get(line.resourceId) ?? FIX_ZERO, line.costFix),
+    );
+  }
+  if (costs.size === 0) return { state };
+  const unaffordable = rejectIfUnaffordable(state, costs, "establishOutpost", index, subjectId);
+  if (unaffordable !== null) return unaffordable;
+  return { state: spendResources(state, costFixes) };
+}
+
+/**
  * [M65] `fromLevel` → `fromLevel + 1` の増築で払う全コスト行(第1行が主資源)。
  * `def.cost` が無ければ空 = 無料。
  */
@@ -1890,6 +1938,24 @@ function applyExecuteExodus(
         "GDD 7.6 の人口下限保証・M53 詰み防止)",
     });
   }
+  // [M75] 最少乗員ガード(GDD 10.2 [2026-08-07裁定]・台帳v24 / M39 ②)。
+  // **`exodusNoCrew` と同じ code を使う**: 新しい code を足すとセーブや UI の
+  // 網羅テーブル(`src/ui/screens/rejectionMessages.ts`)まで波及するのに対し、
+  // プレイヤーから見た事実は乗員 0 のときと同じ「連れて行く人数が足りない」で
+  // ある(`rejectIfResidentStationed` が `residentUnavailable` を共有するのと
+  // 同じ判断・§4b)。内訳は `message` と `limit`/`actual` が担う。
+  const minCrew = content.exodus?.minCrew;
+  if (minCrew !== undefined && command.crewIds.length < minCrew) {
+    return rejected("executeExodus", index, {
+      code: "exodusNoCrew",
+      limit: minCrew,
+      actual: command.crewIds.length,
+      message:
+        `乗員が最少人数 ${String(minCrew)} 名に足りない(選抜 ${String(command.crewIds.length)} 名・` +
+        "GDD 10.2「新周回の開始人口 = 乗員数」。連続大移動で人口が細り続けるのを止める" +
+        "ガードであり、乗員定員 ceil(生存人数 × 0.5) の側は超過として別に拒否する)",
+    });
+  }
 
   // 解決関数(rules/exodus.ts §1)を先に回して「何が落ちるか」を得る。
   // 1 つでも落ちるなら黙って積まずに拒否する(§3(a))。
@@ -2223,7 +2289,8 @@ function applyEstablishOutpost(
   command: EstablishOutpostCommand,
   index: number,
 ): CommandResult {
-  if (content.outpostTypeDefs?.get(command.outpostTypeId) === undefined) {
+  const typeDef = content.outpostTypeDefs?.get(command.outpostTypeId);
+  if (typeDef === undefined) {
     return rejected("establishOutpost", index, {
       code: "unknownContentDef",
       subjectId: command.outpostTypeId,
@@ -2274,8 +2341,20 @@ function applyEstablishOutpost(
     if (unavailable !== null) return unavailable;
   }
 
+  // [M75] 設置コスト(GDD 9.2 [2026-08-07裁定])。**構造検査を全て通ってから**
+  // 払うのは `applyPlaceFacility` と同じ理由(常駐させられない住民を指している
+  // のに「資源が足りない」と報告すると、プレイヤーは資源を集めてから同じ失敗を
+  // 踏む)。コスト未定義の outpostType では 1 bit も変わらない(無料)。
+  const paid = payOutpostBuildCost(
+    state,
+    outpostBuildCostLines(typeDef),
+    index,
+    command.outpostTypeId,
+  );
+  if ("ok" in paid) return paid;
+
   // 全員を本拠の就労 / 他拠点の常駐から外してから据える(§4b)。
-  let next = state;
+  let next = paid.state;
   for (const residentId of residentIds) {
     next = detachResidentFromPostsOrAbandon(next, residentId);
     next = updateEntity(next, residentId, "resident", (r) =>
