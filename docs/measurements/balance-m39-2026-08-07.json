@@ -1,0 +1,247 @@
+{
+  "task": "M39 バランス調整(台帳v22 必-3)",
+  "date": "2026-08-07",
+  "baseCommit": "0a04812",
+  "gateBaseline": "pass19 / fail0 / unverifiable6 / structuralFail0(夜間ゲート full profile・5戦略bot × 3seed = 15 run)",
+  "gateAfter": "pass19 / fail0 / unverifiable6 / structuralFail0。25 assert のうち**実測値が動いたものは 0 件**(6c の閾値のみ 50→45)",
+  "scope": "再評価対象①〜⑰ + 据え置き分(想起判定ペアの縮約 / masteryGain / M23 event 難度R / M24 拠点距離帯維持費 / M28 balance.exodus / M34 誘導バナー頻度 / recipeRunTicks=15)を 4 分類し、(b) content 数値で解けるものだけ実装した",
+  "triage": [
+    {
+      "item": "① 開始資源の量(初期薪60・M53 の floor は開墾1回分ちょうど)",
+      "class": "c",
+      "evidence": "開始在庫は content の独立ノブでない。`rules/worldGen.ts` の `ensureResourceStockFloor` が floor を `reclaimCostFix(reclaim, 0)`(= 薪 60)と `recordMedia.baseCost × stoneTablet.costMul`(= 粘土 20)として**導出**しているため、開始量だけを動かす content 項目が存在しない(reclaim.baseCost を上げると開墾コストも上がる)。実測では詰みなし(Round 9 軸A 2.00 = 全12台本満点・開始資源起因の停止報告0)",
+      "recommendation": "独立させるなら `balance.newGame.startingStock`(資源→量の map)を schema/engine へ追加。既に `exodus.startingStockResourceId` / `inheritBonusPerTier.startingStock` が同型の語彙を持つので合流できる。golden 波及あり(newGame 生成が動く)= algoVersion 判定"
+    },
+    {
+      "item": "② 大移動の実行ガード(継承点ほぼゼロ / 最少乗員数)",
+      "class": "c",
+      "evidence": "現行ガードは engine の `exodusNoCrew`(乗員0)と `exodusCapacityExceeded`(容量超過)の2本のみ。`crewRatio`(0.5)は content にあるが「最少乗員 N 人」「継承点 N 点未満は警告」を表す content 項目は無い",
+      "recommendation": "`balance.exodus.minCrew` / `minEarnedPointsWarn` を schema へ additive 追加し、engine は reject でなく**警告+確認**に留める(GDD 10.2 は任意発動を認めているため reject にすると仕様が変わる)。UI 側の予告は ⑰ の (d) と同梱が自然"
+    },
+    {
+      "item": "③ 拠点の設置コスト(現状ゼロ)",
+      "class": "c",
+      "evidence": "`schema/outpostType.ts` が読むキーは id / resource / baseSupply / capacityCurve / upkeepFormula / hazard / shadeSensitivity の7つで `buildCost` が無い(機械確認)。content 側で書いても検証器が無視する",
+      "recommendation": "facility の `buildCost`(M65 で単一形→複数資源形へ拡幅済み)と同じ形を outpostType へ横展開する。semantics-gate の §3c(既存 entity のトップレベル新規キー = additive)で既存3タイプへも足せる"
+    },
+    {
+      "item": "④ M53 の暫定数値(初期住民6名・trait 0〜2個)",
+      "class": "c",
+      "evidence": "`src/newGame.ts` の `STARTING_RESIDENT_NAMES`(6名)と `INITIAL_TRAIT_COUNT_MAX`(2)はコード定数で content に出ていない。どちらもファイル冒頭で ★要ユーザー判断 として明記されている",
+      "recommendation": "content 化するなら `balance.townParams` 配下(既に populationFloor / joinAge を持つ)へ。6名は GDD 7.6 の人口下限 absolute=6 と同値で、下げると 11.4-9(人口下限)の余裕1人がさらに縮む(現状 greedy/nightly-a で人口6/下限5)"
+    },
+    {
+      "item": "⑤ 学芸タグの成文化加速(codifySpeed)",
+      "class": "c",
+      "evidence": "`schema/engineContent.ts` の `UNREPRESENTABLE_CONTENT_EFFECTS` に codifySpeed が入っており、content に書くとローダーが reject する(`tests/schema/engineContentCodify.test.ts` が固定)。裁定N7 = MVP対象外のまま",
+      "recommendation": "据え置き(裁定N7 のまま)。実装するなら成文化所要 tick へ隣接乗数を掛ける engine 結線 = golden 波及 = algoVersion 判定。3者関係(施設×タグ×成文化)ゆえ規模は adjacency の他効果より大きい"
+    },
+    {
+      "item": "⑥ 木炭/銅の消費先接続と HUD 表示枠",
+      "class": "a",
+      "evidence": "M65(`content/facility.json` の複数資源 buildCost)で接続済みを機械確認: 木炭 = forge の増築コスト行 [7,8,10,12,14] / 銅 = watchtower の建設5 + 増築 [6,7,8,10,12]。経済プローブ実測でも銅は 99.65〜120.96 産出され、夜間ゲート実 run の 15 run 中 10 run で watchtower が実際に建っている(Phase D 申し送り『見張り台は実 run で建たない』は解消)",
+      "residual": "残余なし。全8資源(木炭/粘土/銅/薪/穀物/鉄/紙/廃材)に消費先が存在する"
+    },
+    {
+      "item": "⑦ 見張り台/療養所の効果実装",
+      "class": "a",
+      "evidence": "M66 で `defenseCurve` / `careCapacityCurve` が engine 結線済み、M73 で UI 表示も追従(Round 9 で虚偽表示0件・撃退分岐を実測)。夜間ゲート実 run で襲撃13回・撃退0〜2回",
+      "residual": "⑬ の端数だけが残っていた(`defenseCurve` の 26.45/30.4175/34.980125)→ 本タスクで整数化"
+    },
+    {
+      "item": "⑧ 粘土=貯水槽 / 紙=写字室 の産出数値",
+      "class": "b",
+      "decision": "実測の結果**据え置き**(適正と判定)",
+      "evidence": "経済プローブ 40ゲーム日の資源別会計: 粘土は産出 619〜899 で、成文化する戦略(codifyFirst)は 873 のうち 785 を消費してあふれ0、成文化しない戦略(greedy/placementVariant)だけが 281 あふれる(loss 0.31)。紙は産出 246〜559 で loss 0〜0.028。**産出を下げると codifyFirst が石板(1枚=粘土20)を焼けなくなり、成文化率→継承点(11.4-6c)→想起頻度(11.4-8b)→成文化期限(11.4-4)まで波及する**。あふれているのは『成文化しない選択』に対する圧力であり GDD 6.7 の黄警告→倉庫の導線そのもの",
+      "residual": "`storage.wasteConversionRatio` に薪しか無いため、粘土のあふれは**廃材に化けず全量破棄**される(貯水槽の `overflowCapPolicy` は convertToWaste なのに変換比が無い)。GDD 6.7 の『低次資源は超過分を一定比率で廃材へ』が薪だけに配線されている状態 → (b) 候補だが 7c の分母(cumulativeProduced)に廃材が乗るため Phase D が苦労した逆進性へ触る。次の台帳へ回す"
+    },
+    {
+      "item": "⑨ 新周回の開始資源に粘土なし",
+      "class": "a",
+      "evidence": "M68 で `rules/worldGen.ts` の `placeStartingFacilities` へ粘土 floor(石板1枚ぶん = recordMedia.baseCost × stoneTablet.costMul = 20)を引き上げ済み。初回起動と新周回が同じ生成器を通る",
+      "residual": "残余なし"
+    },
+    {
+      "item": "⑩ 保管庫の上限400の適否と storedResourceIds の絞り",
+      "class": "b",
+      "decision": "**据え置き**(本校正の結論 = 現行値が適正)。storedResourceIds は content で表現可能だが採らない",
+      "evidence": "(1) `storedResourceIds` は schema(`schema/facility.ts` の `storedResourceIds`)と engine(`rules/storage.ts:130` の `facilityStorage.resourceIds`)の両方に実装があり content で書ける = (c) ではない。semantics-gate の §3c(既存 entity のトップレベル新規キー)も通る。(2) しかし絞ると GDD 6.7 の正本『倉庫なしの基礎上限は全資源 400 + 倉庫は Lv合計×400 を線形加算』(台帳v15 追-1・ユーザー発案)と矛盾し、汎用倉庫が対象外資源に効かなくなる。(3) 400 の適否は実測で妥当: あふれ機構は実 run で生きており(7c = 0.095950 < 0.15)、倉庫は explorationFirst が実際に建てる。上限を上げると Phase D の裁量判断(2)どおり 7c が恒真化する",
+      "residual": "廃材(waste)自身も baseCapacity 400 の対象である点は据え置き。40ゲーム日の実測で廃材在庫は最大 153.98 < 400 で binding していないため、いま外すとスポンジが無限になり 7c が恒真化する側へ倒れる"
+    },
+    {
+      "item": "⑪ 夜間ゲート balance-fail 3件 + 想起リスクガードの実run不発",
+      "class": "a",
+      "evidence": "Phase A〜D で全 assert 緑(E3 到達 8〜14日/レンジ[8,16]・7c 0.0960<0.15・8b 2.8776∈[1,3])。想起ガードは M72 の士気モデルで実発火を確認: 15 run 中 11 run で `recallGuardBlockCount` 2〜5 件、最小実効士気 35(= `morale.routineFloor`)< `recallGuardThreshold` 40",
+      "residual": "**`morale.routineFloor`(35)が `recallRiskParams.moraleThresholdMid`(30)より高いため、士気による想起リスク増幅(moraleBonusMid +0.1 / moraleBonusLow +0.2)が構造的に一度も発火しない**。実測で全15run の `harshWorkerBelowMidSampleCount` = 0、最小実効士気はどの run も floor 35 ちょうど。本タスクでは触らない(floor を下げると過酷業務就労者の p_day が 0.028→0.128 相当へ跳ね、余裕 4% しかない 8b が確実に上限3を割る。base_p との同時再校正が必要)"
+    },
+    {
+      "item": "⑫ 拠点常駐が研究点施設の就労者を奪う導線",
+      "class": "d",
+      "evidence": "仕様どおりの帰結(GDD 9.2 の排他)で数値の問題ではない。R8-01 の修正で「常駐者は派遣候補に出ない」までは閉じたが、『常駐させると研究が止まる』の事前予告は無い",
+      "recommendation": "⑨拠点画面の常駐者選択に『この住民は◯◯(研究点施設)の唯一の就労者です。常駐させると研究が止まります』の事前注記。M73 の R8-03(払えないコスト表示)と同型の『reject 前の事前可視化』"
+    },
+    {
+      "item": "⑬ コスト曲線の端数の整数化",
+      "class": "b",
+      "decision": "content に残っていた唯一の整数化可能な表示端数(`watchtower.defenseCurve`)を整数化。開墾コストは (c) へ",
+      "evidence": "施設の buildCost / upgradeCostCurve は全て既に整数。`recordMedia` も 20/12/10/6 で整数。残っていたのは (a) `defenseCurve` [20,23,26.45,30.4175,34.980125] = M66 で追加された生値で M73 が表示するようになった値 → **[20,23,26,30,35] へ整数化**(夜間ゲート影響ゼロ・襲撃解決/撃退回数も15run不変 = 実 run の見張り台は Lv2 以下) (b) 開墾コスト 60×1.15^解放数 = **content では原理的に整数化不能**(60 は 20^n で割れない)",
+      "recommendation": "開墾コストは engine 側で段ごとに整数丸め(`reclaimCostFix` の各段 floor を 1e6 単位から 1 単位へ)= golden 波及 = algoVersion 判定。表示側は M71/R6-A06 で「約79薪」の整数丸めに統一済みなので優先度は低い"
+    },
+    {
+      "item": "⑭ 継承点1段目コスト 50→45 の最終化",
+      "class": "b",
+      "decision": "**45 で確定**(`inheritTierCosts` = [45, 75, 113, 169])",
+      "evidence": "初回周回の獲得点 = Round 8 手動 49 / Round 9 おまかせ 72 / Round 9 最低ケース 12(立て直さず即大移動の退化周回)/ 夜間ゲート実 run(40ゲーム日・15run)56〜98(最小56)。45 は観測された最悪の通常周回 49 を 4 点の余裕で下回る。最低ケース 12 は意図的に救わない(継承点は `cumulativeInheritPoints` に積み残るため空振りにはならない)。11.4-6c 閾値 50→45(実測84 不変)・11.4-6d 総コスト 1221→1206 点で 15 周(レンジ[10,18]内)",
+      "docs": "GDD 10.3 へ [2026-08-07裁定] 注記を追加(式 50×1.5^n は2段目以降の正本として存続・1段目のみ45)"
+    },
+    {
+      "item": "⑮ 編成人数に対する期待報酬の崖",
+      "class": "d",
+      "decision": "数値は動かさない(GDD 8.1⑤ の設計どおり)。可視化で解く",
+      "evidence": "実測の崖(帯平均期待報酬・2名→3名): 近郊 4.49→90.23(20倍)/遠隔 7.00→220.31(31倍)/深部 17.35→469.10(27倍)。R8-09 の「53倍」より緩んでいるが本質は不変。2名の ROI は 0.06〜0.09 で 1.2 の下限の 1/15 = 『無謀を咎める曲線』(GDD 8.1⑤)が効いている",
+      "recommendation": "⑦探索本部の派遣前見込みに**成功確率を出す**(engine の `ExplorationRoiReport.successProbabilityFix` は既にあるが UI が表示していない)。「この編成では成功見込みがほぼ0です(3名以上を推奨)」の一文で崖が事前に読める。数値でなく表現で解く方針は M73 の R8-13/R8-14 と同型"
+    },
+    {
+      "item": "⑯ 同一距離帯内の目的地別報酬表の分化",
+      "class": "b",
+      "decision": "帯内を「取り分の厚み × 必要人数」の梯子へ分化(実装済み)",
+      "structuralLimit": "event schema に報酬フィールドは無く、報酬は `rewardPerNode(帯共通) × ノード数(配列長=additive で変更不能) × 成功確率 × (1+rewardMod)` でしか決まらない。よって目的地ごとに動かせるのは『慎重 choice の rewardMod』と『ノード難度』の2つだけで、しかも rewardMod は GDD 8.3 の archetype(慎重 = 報酬-)より上げられない = **目的地を『難しいほど豊か』にはできない**。真の解決は per-event の報酬テーブル(schema+engine)",
+      "expectedRewardBeforeAfter": {
+        "near_4名": {
+          "灰の果樹園": "124.5 → 124.5(不変・botのアンカー)",
+          "排水路": "128.2 → 118.8",
+          "瓦礫原": "128.2 → 128.2"
+        },
+        "near_3名": {
+          "灰の果樹園": "98.5 → 98.5",
+          "排水路": "99.2 → 97.3",
+          "瓦礫原": "99.2 → 74.8"
+        },
+        "far_4名": {
+          "塩沼": "323.4 → 283.8",
+          "信号塔跡": "308.4 → 301.8",
+          "風車小屋": "316.8 → 316.8"
+        },
+        "deep_4名": {
+          "水没書庫": "701.8 → 556.6",
+          "灰の尖塔": "566.1 → 578.2",
+          "氷結坑道": "701.8 → 665.5",
+          "燠火の火庫": "701.8 → 701.8"
+        },
+        "帯内ばらつき_4名": "近郊 2.9%→7.6% / 遠隔 4.7%→11.0% / 深部 20.3%→23.2%"
+      },
+      "designPointsHeld": [
+        "帯平均 ROI(GDD 8.6 の [1.2,2.0])= 4名 近郊1.265/遠隔1.365/深部1.420、3名 1.229/1.333/1.419",
+        "meanP: 2名は全目的地で基線以下(近郊 0.074/0.028/0.020 = 基線同値)、3名 帯平均 0.734/0.744/0.772 ≈ 0.75、4名 帯平均 0.988/0.992/0.994 < 1.0",
+        "R(rollRange)は1箇所も変更なし(標準50・関門66)",
+        "bot が通う目的地(帯先頭ID = eventNearAshOrchard)を無変更にしたため夜間ゲート25assertの実測値が全て基線とバイト同一"
+      ],
+      "rejectedAttempt": "標準ノード(R=50)の難度を 8 下げる案を一度入れて撤回した。難度 153〜161 は Phase D が『2名編成の総合力 + R = 難度』の境界へ校正した値で、8 下げると 2名の成功確率が 0→0.08 へ浮き(7b detail が near/far/deep = 0.000 → 0.045/0.044/0.025)、meanP(2名)=0 の設計点を割る。以後は関門ノード(R=66)の引き下げと標準ノードの引き上げだけを使った"
+    },
+    {
+      "item": "⑰ 連続大移動での獲得点縮小",
+      "class": "d",
+      "decision": "数値は動かさない(GDD 10.2 の設計どおり)。⑩大移動画面の予告で解く",
+      "evidence": "獲得点 = round(到達エラ×10 + 成文化率%×0.5 + 生存住民数×2) で、乗員定員 ceil(生存×0.5) が効くのは第3項だけ。R9-A03 の 22→6→4→2 は『立て直さずに即大移動を繰り返す』退化ループで、緩めるとその戦略を報酬してしまう。⑭ で1段目を45にしたことで**通常の1周**は必ず1項目買える側へ寄せた",
+      "recommendation": "⑩大移動画面に『次の周回の開始人口 = 乗員数 N 人になります(いまの生存 M 人の半分)。継承点は生存人数×2 点なので、立て直してから移るほど多く稼げます』の予告。GDD 10.2 の [2026-08-02裁定]『新周回の開始人口 = 乗員数』をプレイヤーに見せる一文"
+    },
+    {
+      "item": "据え置き分: 想起判定ペアの縮約(全生存住民×全research techId)",
+      "class": "c",
+      "evidence": "縮約は `src/engine/rules/recall.ts` の判定構造そのもの(T5 の設計)。content 項目ではない",
+      "recommendation": "据え置き。tech 別停止(縮約外)を入れると (C) 区間の境界イベントが増え scheduler の中心不変条件に触る"
+    },
+    {
+      "item": "据え置き分: masteryGainPerFieldWorkDay(0.00288)",
+      "class": "b",
+      "decision": "**据え置き**(再検証済み)",
+      "evidence": "masteryResist の上限 0.2 へ到達するのに約69ゲーム日 = 40日 run では最大 0.115。11.4-8b は 2.8776 で [1,3] 内。上げると 8b は下限1方向へ動く(安全側)が、いま是正すべき逸脱が無い"
+    },
+    {
+      "item": "据え置き分: M23 event 10本の difficulty/R",
+      "class": "b",
+      "decision": "Phase D(`b152278`)で標準R=50・関門R=66へ再校正済み。本タスクは⑯の範囲でのみ difficulty を触った(R は不変)"
+    },
+    {
+      "item": "据え置き分: M24 拠点の距離帯維持費係数(near 1.0 / far 1.4 / deep 1.8)",
+      "class": "c",
+      "decision": "**測定不能のため据え置き**。原因は content でなく sim のローダー",
+      "evidence": "`conformance/scenarios.ts` の `loadLiveRawContentBundle()`(sim/夜間ゲートの唯一の content 入口)が **outpostType.json を読んでいない**(tech/facility/trait/adjacency/balance の5本のみ)。そのため夜間ゲートの `content.outpostTypeDefs` は 0 件で、11.4-7a が『content に outpostType 定義が1件も無い』と報告し、bot は拠点を1基も建てられない。実アプリ(`src/main.tsx`)と golden(`resolveScenarioContent` の M25 patch)は読んでいるので、**sim だけが拠点を見ていない**",
+      "recommendation": "`loadLiveRawContentBundle()` へ `outpostType: readLiveContentJson(\"outpostType.json\")` を1行足す(conformance/ は本タスクの触ってはならない領域なので未実施)。これで初めて 11.4-7a(拠点網ROI)・M24 の帯別維持費・台帳v16 必-2(b)の『拠点供給が保管上限を無視』が夜間ゲートで測れるようになる。**M40/M41 帯の『拠点は sim で一度も建たない』という前提そのものが計測器の穴だった可能性がある**"
+    },
+    {
+      "item": "据え置き分: M28 balance.exodus(expectedTabletsByEra / inheritBonusPerTier)",
+      "class": "b",
+      "decision": "**据え置き**(検証済み・根拠が後付けで成立した)",
+      "evidence": "`expectedTabletsByEra` {e1:8, e2:15, e3:24} は content/tech.json の**エラ別累計本数と完全一致**(e1=8本・e2=+7=15・e3=+9=24)。GDD 10.2 の『各エラのクリティカルパス＋標準想定葉テック本数からなる静的テーブル値』の定義を満たす。`caravanRatio` 0.35 も GDD 10.2 の持ち出し比率 30〜40% レンジの中央。`inheritBonusPerTier`(キャラバン+2 / 乗員+1 / 開始備蓄+25)は 11.4-6a(段ごと単調改善)pass・11.4-6b(上限クランプ 12段)pass"
+    },
+    {
+      "item": "据え置き分: M34 誘導バナー頻度定数(猶予24h/再表示7日/上限5回)",
+      "class": "c",
+      "evidence": "`src/platform/backupReminder.ts` / `installPromotion.ts` のコード定数(`DEFAULT_BACKUP_REMINDER_ELAPSED_MS` = 24h 等)で content に無い。バランスでなく UX cadence",
+      "recommendation": "据え置き。M54 の配線と Round 3〜9 の実プレイで『しつこい/出ない』の起票は0件"
+    },
+    {
+      "item": "据え置き分: recipeRunTicks = 15(Phase B 暫定値)",
+      "class": "b",
+      "decision": "**再検証済み・据え置き**",
+      "evidence": "tech 24本の fieldRequirement.count は 2〜8(count 2×5本 / 3×5 / 4×5 / 5×5 / 6×3 / 8×1)で、最大でも 8×15 = 120 tick = 2ゲーム時間。E3 到達は 15 のまま 8〜14日で GDD 11.4-3 のレンジ [8,16] に上限余裕2日を保って収まる(15 run 実測)。動かす根拠が無い"
+    }
+  ],
+  "changes": [
+    {
+      "commit": "40cdd12",
+      "file": "content/balance.json",
+      "before": "exodus.inheritTierCosts = [50, 75, 113, 169]",
+      "after": "exodus.inheritTierCosts = [45, 75, 113, 169]"
+    },
+    {
+      "commit": "4aa18c1",
+      "file": "content/event.json",
+      "detail": "21 箇所の数値(慎重 choice の rewardMod 10箇所 / ノード難度 11箇所)。灰の果樹園(bot が通う帯先頭ID)は無変更",
+      "rewardMod": {
+        "eventNearDrainageTunnel#0": "-0.1 → -0.40",
+        "eventFarSaltMarsh#0": "-0.1 → -0.70",
+        "eventFarSignalRuins#0,#1": "-0.1 → -0.15",
+        "eventDeepSunkenArchive#1,#2": "-0.1 → -0.70",
+        "eventDeepFrostboundMine#1,#2": "-0.1 → -0.25",
+        "eventDeepAshenSpire#0,#1": "-0.1 → -0.05"
+      },
+      "difficulty": {
+        "eventNearRubbleSweep#1,#2": "153→172 / 158→176",
+        "eventNearDrainageTunnel#3(関門)": "206 → 190",
+        "eventFarWindworksMill#0,#1,#3": "155 → 176",
+        "eventFarSaltMarsh#4(関門)": "206 → 196",
+        "eventDeepEmberVault#2,#3,#4": "157→178 / 157→178 / 162→182",
+        "eventDeepSunkenArchive#5(関門)": "206 → 196"
+      }
+    },
+    {
+      "commit": "e1cd908",
+      "file": "content/facility.json",
+      "before": "watchtower.defenseCurve = [20, 23, 26.45, 30.4175, 34.980125]",
+      "after": "watchtower.defenseCurve = [20, 23, 26, 30, 35]"
+    }
+  ],
+  "gates": {
+    "nightlyGateFull": "pass19 / fail0 / unverifiable6 / structuralFail0(前後で pass/fail 構成不変・実測値が動いた assert は0件)",
+    "keyMeasurements": {
+      "gdd-11.4-3-era3": "下限 8日 / 上限 14日(レンジ [8,16])— 前後不変",
+      "gdd-11.4-7c": "0.095950 < 0.15 — 前後不変",
+      "gdd-11.4-8b": "2.877554467150819 ∈ [1,3] — 前後不変",
+      "gdd-11.4-6c": "実測 84 >= 閾値 45(閾値のみ 50→45)",
+      "gdd-11.4-6d": "15 周 ∈ [10,18](総コスト 1221→1206)",
+      "gdd-11.4-10": "minHits 166 >= 20 — 前後不変(難度変更が分岐カバレッジに影響しないことの実測)"
+    },
+    "goldenCheck": "89本 差分なし(content は凍結スナップショット `conformance/content-snapshot/` を読むため不活性)",
+    "semanticsGate": "base=0a04812 との比較で additive 意味論違反0(新規ID 0 / 新規tombstone 0)",
+    "test": "149ファイル 3244件 全pass",
+    "typecheck": "clean(`npm run conformance:gen-harness-data` で生成物を用意した後)",
+    "lint": "clean",
+    "format": "clean"
+  },
+  "notes": [
+    "`npm run format` は本タスク開始時点の main で既に fail していた(docs/measurements/playtest/round-09-2026-08-07.json が prettier 未整形)。空白のみの整形で緑へ戻した",
+    "semantics-gate の §3c(既存 entity のトップレベル新規キー = additive)と §3(ネストしたキー集合の変化 = reject)の境界が、⑯ で『choice の effect へ rewardMod キーを足す』方法を封じている。既に rewardMod を持つ choice の値を動かすことだけが許される"
+  ]
+}

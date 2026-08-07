@@ -17,9 +17,28 @@
   ],
   "scores": {
     "A_task": 2.0,
-    "A_task_detail": { "T1": 2, "T2": 2, "T3": 2, "T4": 2, "T5": 2, "T6": 2, "T7": 2, "T8": 2, "T9": 2, "T10": 2, "T11": 2, "T12": 2 },
+    "A_task_detail": {
+      "T1": 2,
+      "T2": 2,
+      "T3": 2,
+      "T4": 2,
+      "T5": 2,
+      "T6": 2,
+      "T7": 2,
+      "T8": 2,
+      "T9": 2,
+      "T10": 2,
+      "T11": 2,
+      "T12": 2
+    },
     "C_heuristics": 1.94,
-    "C_groupAverages": { "home_hud": 2.0, "base": 1.9, "research_codify": 2.0, "expedition": 1.9, "cycle_settings": 1.9 },
+    "C_groupAverages": {
+      "home_hud": 2.0,
+      "base": 1.9,
+      "research_codify": 2.0,
+      "expedition": 1.9,
+      "cycle_settings": 1.9
+    },
     "D_wording": "5/5 pass",
     "E_layout": "6/6 fail 0"
   },
@@ -34,10 +53,30 @@
     ]
   },
   "acceptance_summary": {
-    "resolved": ["R8-01", "R8-02", "R8-03", "R8-04", "R8-05", "R8-06", "R8-07", "R8-10", "R8-11", "R8-13", "R8-14(軸C: クロス参照ラベル実測)"],
-    "partially_resolved": ["R8-08(和語化・注記・距離帯/方針変動=PASS。同一帯内の目的地判別=R9-A01へ)"],
-    "carried_over_by_design": ["R8-09(編成人数の崖・M39)", "継承点1段目コスト50点(M39⑭)", "襲撃の冒険記永続記録(M73申し送り)"],
-    "unmeasured_残件": ["R8-12後半(死亡住民セレクタ非活性: 死亡が全観測窓で未発生。実装はコード確認済み・ホーム生存表記はPASS)"]
+    "resolved": [
+      "R8-01",
+      "R8-02",
+      "R8-03",
+      "R8-04",
+      "R8-05",
+      "R8-06",
+      "R8-07",
+      "R8-10",
+      "R8-11",
+      "R8-13",
+      "R8-14(軸C: クロス参照ラベル実測)"
+    ],
+    "partially_resolved": [
+      "R8-08(和語化・注記・距離帯/方針変動=PASS。同一帯内の目的地判別=R9-A01へ)"
+    ],
+    "carried_over_by_design": [
+      "R8-09(編成人数の崖・M39)",
+      "継承点1段目コスト50点(M39⑭)",
+      "襲撃の冒険記永続記録(M73申し送り)"
+    ],
+    "unmeasured_残件": [
+      "R8-12後半(死亡住民セレクタ非活性: 死亡が全観測窓で未発生。実装はコード確認済み・ホーム生存表記はPASS)"
+    ]
   },
   "findings": [
     {
