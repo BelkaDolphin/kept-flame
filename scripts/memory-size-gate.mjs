@@ -46,4 +46,6 @@ if (size > WARN_BYTES) {
   process.exit(0);
 }
 
-console.log(`[memory:gate] pass: MEMORY.md は ${kb}KB(警告 ${String(WARN_BYTES / 1024)}KB / 上限 ${String(FAIL_BYTES / 1024)}KB)`);
+console.log(
+  `[memory:gate] pass: MEMORY.md は ${kb}KB(警告 ${String(WARN_BYTES / 1024)}KB / 上限 ${String(FAIL_BYTES / 1024)}KB)`,
+);
