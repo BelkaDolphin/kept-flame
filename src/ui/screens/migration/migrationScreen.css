@@ -187,6 +187,16 @@
   margin: 0;
 }
 
+/* [M76/台帳v25必-4] 乗員不足の事前表示。「実行できません」の重さを
+   .kf-exodus__preview-lost(永久喪失の警告)と同じ色+太字で示す
+   (色だけに頼らない・記号▲は文言側で付与)。 */
+.kf-exodus__crew-shortfall {
+  font-size: var(--kf-fs-body);
+  font-weight: 600;
+  color: #a11334;
+  margin: 0 0 0.6rem;
+}
+
 .kf-migration-screen__seed-label {
   display: block;
   font-size: var(--kf-fs-sub);

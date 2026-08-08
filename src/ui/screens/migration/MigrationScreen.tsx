@@ -260,6 +260,36 @@ export function ExodusNextRunPreview({ resolution }: ExodusNextRunPreviewProps) 
   );
 }
 
+// --- 4d. [M76/台帳v25必-4] 乗員不足の事前表示(GDD 10.2・M75 最少乗員ガード) --
+//
+// M75 で `content/balance.json` の `exodus.minCrew` を下回る乗員選抜が
+// `exodusNoCrew` reject になったが、旧 UI はボタンを押すまでそれを知らせな
+// かった(R8-03 と同種の「押すまで払えるか分からない」)。ここでは engine の
+// 判定述語を UI で再実装せず、`content.exodus.minCrew`(省略時 = ガード不活性
+// = 警告なし・`rules/types.ts` の `ExodusParams.minCrew` doc と同じ規約)と
+// 現在の選抜人数を比べるだけの**表示専用**の事前警告を出す。実際に押せるかは
+// 従来どおり `executeExodus` の reject(§4 の `exodusNoCrew`)に委ねる
+// (ボタンは非活性にしない・architecture.md §6 の規律)。
+
+export interface ExodusCrewShortfallWarningProps {
+  /** `content.exodus?.minCrew ?? null`。null = ガード不活性(警告を出さない)。 */
+  readonly minCrew: number | null;
+  readonly selectedCrewCount: number;
+}
+
+export function ExodusCrewShortfallWarning({
+  minCrew,
+  selectedCrewCount,
+}: ExodusCrewShortfallWarningProps) {
+  if (minCrew === null || selectedCrewCount >= minCrew) return null;
+  return (
+    <p class="kf-exodus__crew-shortfall" role="alert" data-testid="exodus-crew-shortfall">
+      ▲ 乗員が最少 {minCrew}名に足りません(選抜 {selectedCrewCount}
+      名)。このままでは大移動を実行できません。
+    </p>
+  );
+}
+
 /**
  * [M74/⑰] 確認パネル(§2)の本文。取り消せないことに加えて、**次の周回の
  * 開始乗員と獲得予定の継承点を数値で**言う——確認の瞬間に見えていないと、
@@ -368,6 +398,9 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
   const resolution: ExodusResolution | null = exodusActive
     ? resolveExodusPlan(state, content, plan)
     : null;
+  // [M76/台帳v25必-4] `exodusNoCrew` の reject と同じ値(content 直読・engine 側の
+  // 既定値展開はローダーの担当なので、ここで 1 をハードコードしない・§4d 参照)。
+  const minCrew = content.exodus?.minCrew ?? null;
 
   function toggleRecord(id: EntityId): void {
     setConfirming(false);
@@ -523,6 +556,10 @@ export function MigrationScreen({ store, onNavigate }: ScreenProps) {
             そこへ 3 行足さずに本文へ出し、確認パネル側は 1 行の要約
             (exodusConfirmMessage)で同じ数値を再掲する。 */}
         <ExodusNextRunPreview resolution={resolution} />
+
+        {/* [M76/台帳v25必-4] 乗員不足の事前表示(§4d)。ExodusNextRunPreview と
+            同じく sticky バーの直前(押す前に必ず目に入る位置)へ置く。 */}
+        <ExodusCrewShortfallWarning minCrew={minCrew} selectedCrewCount={validCrewIds.length} />
 
         <label class="kf-migration-screen__seed-label">
           次の周回のシードを指定(任意)

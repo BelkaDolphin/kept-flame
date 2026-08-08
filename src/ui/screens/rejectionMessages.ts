@@ -207,7 +207,18 @@ const MESSAGE_BUILDERS: { readonly [K in CommandRejectionCode]: MessageBuilder }
   noResearchTarget: () => "研究中の技術がありません。廃材はここでは使えません。",
   exodusCapacityExceeded: () =>
     "持ち出せる量を超えています。プレビューで何が積みきれないか確認してください。",
-  exodusNoCrew: () => "大移動には同行する住民が 1 人以上必要です。",
+  // [M76/台帳v25必-4] `exodusNoCrew` は乗員 0 の拒否(`limit`/`actual` 無し)と
+  // M75 の最少乗員ガード(`limit` = content の `exodus.minCrew`・`actual` =
+  // 選抜人数)の**2 通りの reject を共有する**(commands.ts §4b の doc「新しい
+  // code を足すと網羅テーブルまで波及する」)。旧文言は常に「1 人以上必要」と
+  // 言っていたが、M75 の最少乗員が 1 を超える content では**虚偽**になる
+  // (実際は N 人未満で reject される)。`limit`/`actual` が揃っているときは
+  // それを使った「最少N人」表示へ切り替える——N をこのファイルにハードコード
+  // しない(content の値が rejection 経由で届いたものをそのまま使う)。
+  exodusNoCrew: (r) =>
+    r.limit !== null && r.actual !== null
+      ? `大移動には乗員が最少 ${String(r.limit)} 名必要です(選抜 ${String(r.actual)} 名)。`
+      : "大移動には同行する住民が 1 人以上必要です。",
   dispatchInProgress: (r) =>
     r.actual !== null
       ? `未帰還の探索が ${String(r.actual)} 件あるあいだは大移動できません。`

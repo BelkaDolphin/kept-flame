@@ -9,10 +9,20 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { entityIdFromString } from "../../../src/engine/state/state";
-import type { OutpostRosterEntry, ResidentView } from "../../../src/ui/derived";
+import { fixFromInt } from "../../../src/engine/fp";
+import { entityIdFromString, type EntityId } from "../../../src/engine/state/state";
+import type {
+  CostLineView,
+  OutpostRosterEntry,
+  OutpostTypeCatalogEntry,
+  ResidentView,
+  ResourceView,
+} from "../../../src/ui/derived";
 import {
+  isOutpostCostInsufficient,
   OutpostCard,
+  outpostCostLinesOf,
+  outpostCostLinesText,
   OutpostEstablishForm,
   researchStopTargetNames,
   residentOptionLabel,
@@ -90,6 +100,18 @@ function residentView(entityId = id("bKaya")): ResidentView {
     },
     alive: true,
     diedTick: null,
+  };
+}
+
+/** [M76/R8-03 拠点版] 在庫チェック用の最小 ResourceView フィクスチャ。 */
+function resourceView(resourceId: EntityId, stockApprox: number): ResourceView {
+  return {
+    entityId: resourceId,
+    resourceId,
+    stockFix: fixFromInt(stockApprox),
+    stockApprox,
+    capacityApprox: null,
+    atCapacity: false,
   };
 }
 
@@ -419,5 +441,126 @@ describe("[M74/⑫] researchStopTargetNames / residentOptionLabel", () => {
   it("候補ラベルは研究担当だけに印を付ける(選ぶ前から見える)", () => {
     expect(residentOptionLabel(plain)).toBe("ARui");
     expect(residentOptionLabel(scholar)).toBe("BKaya(研究担当)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [M76/台帳v25必-4] 拠点設置コスト全行+在庫不足「▲」(施設②カタログ・
+// R8-03 と同じ表現の拠点版)。derived.ts の CostLineView/outpostTypeCatalog を
+// 結線するだけで、判定(払えるか)は再実装しない。
+// ---------------------------------------------------------------------------
+
+describe("[M76] outpostCostLinesOf / isOutpostCostInsufficient / outpostCostLinesText", () => {
+  const catalog: readonly OutpostTypeCatalogEntry[] = [
+    {
+      outpostTypeId: id("outpostMine"),
+      buildCostLines: [
+        { resourceId: id("firewood"), amountApprox: 45 },
+        { resourceId: id("iron"), amountApprox: 12 },
+      ],
+    },
+    { outpostTypeId: id("outpostFarm"), buildCostLines: [] },
+  ];
+
+  it("outpostCostLinesOf: 選択中タイプのコスト全行をカタログから引く", () => {
+    expect(outpostCostLinesOf(catalog, id("outpostMine"))).toEqual([
+      { resourceId: id("firewood"), amountApprox: 45 },
+      { resourceId: id("iron"), amountApprox: 12 },
+    ]);
+  });
+
+  it("outpostCostLinesOf: 未選択(null)は空(判定しない)", () => {
+    expect(outpostCostLinesOf(catalog, null)).toEqual([]);
+  });
+
+  it("outpostCostLinesOf: カタログに無い ID は空(捏造しない)", () => {
+    expect(outpostCostLinesOf(catalog, id("outpostUnknown"))).toEqual([]);
+  });
+
+  it("isOutpostCostInsufficient: 全行の在庫が足りていれば false", () => {
+    const lines: readonly CostLineView[] = [
+      { resourceId: id("firewood"), amountApprox: 45 },
+      { resourceId: id("iron"), amountApprox: 12 },
+    ];
+    const resources = [resourceView(id("firewood"), 100), resourceView(id("iron"), 12)];
+    expect(isOutpostCostInsufficient(lines, resources)).toBe(false);
+  });
+
+  it("isOutpostCostInsufficient: 第2行以降の不足も見る(主資源だけ見ない)", () => {
+    const lines: readonly CostLineView[] = [
+      { resourceId: id("firewood"), amountApprox: 45 },
+      { resourceId: id("iron"), amountApprox: 12 },
+    ];
+    // 薪は足りるが鉄が 0(未掲載 = 在庫 0 扱い)。
+    const resources = [resourceView(id("firewood"), 100)];
+    expect(isOutpostCostInsufficient(lines, resources)).toBe(true);
+  });
+
+  it("outpostCostLinesText: 資源名+量を「・」区切りで結合する", () => {
+    const lines: readonly CostLineView[] = [
+      { resourceId: id("firewood"), amountApprox: 45 },
+      { resourceId: id("iron"), amountApprox: 12 },
+    ];
+    expect(outpostCostLinesText(lines)).toBe("薪 45・鉄 12");
+  });
+});
+
+describe("[M76] OutpostEstablishForm: 設置コスト全行表示+在庫不足「▲」", () => {
+  function baseProps() {
+    return {
+      outpostTypeOptions: [id("outpostFarm"), id("outpostMine")],
+      selectedTypeId: id("outpostMine"),
+      onTypeChange: vi.fn(),
+      band: "near" as const,
+      onBandChange: vi.fn(),
+      residentOptions: [residentView(id("aRui"))],
+      selectedResidentIds: new Set<EntityId>(),
+      onToggleResident: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+  }
+
+  it("costLines 省略時(既存呼び出し元互換)は「設置コストはかかりません」を出す", () => {
+    const text = flattenText(OutpostEstablishForm(baseProps()));
+    expect(text).toContain("設置コストはかかりません。");
+  });
+
+  it("costLines が空配列でも同様に無料表記", () => {
+    const text = flattenText(OutpostEstablishForm({ ...baseProps(), costLines: [] }));
+    expect(text).toContain("設置コストはかかりません。");
+  });
+
+  it("[R8-03 拠点版] コスト全行を表示する(第1行だけに丸めない)", () => {
+    const text = flattenText(
+      OutpostEstablishForm({
+        ...baseProps(),
+        costLines: [
+          { resourceId: id("firewood"), amountApprox: 45 },
+          { resourceId: id("iron"), amountApprox: 12 },
+        ],
+        insufficient: false,
+      }),
+    );
+    expect(text).toContain("設置コスト: 薪 45・鉄 12");
+    expect(text).not.toContain("▲");
+  });
+
+  it("[R8-03 拠点版] 在庫不足なら「▲」を先頭に付ける(ボタンは非活性にしない)", () => {
+    const props = {
+      ...baseProps(),
+      costLines: [{ resourceId: id("firewood"), amountApprox: 45 }],
+      insufficient: true,
+    };
+    const vnode = OutpostEstablishForm(props);
+    expect(flattenText(vnode)).toContain("▲ 設置コスト: 薪 45");
+
+    const buttons: FoundElement[] = [];
+    collectByType(vnode, "button", buttons);
+    const submit = buttons.find(
+      (b) => typeof b.props.class === "string" && b.props.class.includes("submit-button"),
+    );
+    expect(submit).toBeDefined();
+    (submit?.props.onClick as () => void)();
+    expect(props.onSubmit).toHaveBeenCalledOnce();
   });
 });

@@ -51,7 +51,13 @@ import { compareUtf16 } from "../../../engine/canonicalize";
 import type { CommandRejection } from "../../../engine/commands";
 import type { DistanceBand } from "../../../engine/rules/types";
 import { type EntityId } from "../../../engine/state/state";
-import type { OutpostRosterEntry, ResidentView } from "../../derived";
+import type {
+  CostLineView,
+  OutpostRosterEntry,
+  OutpostTypeCatalogEntry,
+  ResidentView,
+  ResourceView,
+} from "../../derived";
 import {
   distanceBandLabel,
   outpostDisplayLabel,
@@ -59,7 +65,7 @@ import {
   residentDisplayName,
   resourceLabel,
 } from "../contentLabels";
-import { formatGameClock, formatRatePerMinute } from "../format";
+import { formatGameClock, formatRatePerMinute, formatResourceAmount } from "../format";
 import { RejectionBanner } from "../RejectionBanner";
 import type { ScreenProps } from "../screenProps";
 import { useToastStack, ToastStackView } from "../Toast";
@@ -122,6 +128,47 @@ export function ResearchStopNotice({ names }: ResearchStopNoticeProps) {
 export function residentOptionLabel(resident: ResidentView): string {
   const name = residentDisplayName(resident.entityId);
   return resident.researchWorker === true ? `${name}(研究担当)` : name;
+}
+
+// --- 0b. [M76/R8-03 拠点版] 拠点設置コストの全行表示+在庫不足「▲」 ------------
+//
+// 施設側(②カタログ・③増築)は M73/R8-03 で「建設コストの全行表示+在庫不足
+// ▲マーク」を持つが、⑨新規設置フォームには建設コスト自体が出ていなかった
+// (M75 で `outpostType.buildCost` が入るまで拠点設置は常に無料だったため)。
+// R8-03 と同じ再発予防(「押すまで払えるか分からない」)を拠点にも適用する。
+// 判定(払えるか)は engine の `insufficientResource` reject に委ねたまま、
+// ここでは `derived.ts` の `outpostTypeCatalog`(施設の `facilityCatalog` と
+// 同じ立場)が持つコスト行の**構造**を表示するだけ(§2 の規律どおり)。
+
+/** 選択中の拠点タイプのコスト全行(カタログに無い/未選択なら空 = 判定しない)。 */
+export function outpostCostLinesOf(
+  catalog: readonly OutpostTypeCatalogEntry[],
+  outpostTypeId: EntityId | null,
+): readonly CostLineView[] {
+  if (outpostTypeId === null) return [];
+  return catalog.find((entry) => entry.outpostTypeId === outpostTypeId)?.buildCostLines ?? [];
+}
+
+/**
+ * コスト行のどれか 1 行でも在庫が足りないか(判定ではなく表示上の目印・
+ * `GridScreen.tsx` の `isCatalogEntryInsufficient` と同型)。
+ */
+export function isOutpostCostInsufficient(
+  costLines: readonly CostLineView[],
+  resources: readonly ResourceView[],
+): boolean {
+  return costLines.some((line) => {
+    const stock =
+      resources.find((resource) => resource.resourceId === line.resourceId)?.stockApprox ?? 0;
+    return stock < line.amountApprox;
+  });
+}
+
+/** 「薪 45・鉄 12」形式のコスト表記(全行・`GridScreen.tsx` の `costLinesText` と同型)。 */
+export function outpostCostLinesText(costLines: readonly CostLineView[]): string {
+  return costLines
+    .map((line) => `${resourceLabel(line.resourceId)} ${formatResourceAmount(line.amountApprox)}`)
+    .join("・");
 }
 
 // --- 1. 拠点カード(hooks 不使用・直接テスト可能) ----------------------------
@@ -300,6 +347,18 @@ export interface OutpostEstablishFormProps {
   readonly selectedResidentIds: ReadonlySet<EntityId>;
   readonly onToggleResident: (residentId: EntityId) => void;
   readonly onSubmit: () => void;
+  /**
+   * [M76/R8-03 拠点版] 選択中タイプの設置コスト全行(`outpostCostLinesOf` の
+   * 結果をそのまま渡す・空 = 無料または未選択)。省略時は空(既存呼び出し元/
+   * 既存テストとの後方互換・`FacilityDetailPanelProps.upgradeInsufficient` と
+   * 同じ立場)。
+   */
+  readonly costLines?: readonly CostLineView[];
+  /**
+   * [M76/R8-03 拠点版] コスト行のいずれかの在庫が足りないか(表示上の目印)。
+   * 省略時は false。
+   */
+  readonly insufficient?: boolean;
 }
 
 export function OutpostEstablishForm({
@@ -312,6 +371,8 @@ export function OutpostEstablishForm({
   selectedResidentIds,
   onToggleResident,
   onSubmit,
+  costLines = [],
+  insufficient = false,
 }: OutpostEstablishFormProps) {
   if (outpostTypeOptions.length === 0) {
     return <p class="kf-outposts-establish__inactive">現在のデータでは拠点を設置できません。</p>;
@@ -338,6 +399,21 @@ export function OutpostEstablishForm({
           ))}
         </select>
       </label>
+      {/* [M76/R8-03 拠点版] 建設コストの全行表示+在庫不足「▲」(施設②カタログと
+          同じ表現)。ボタンは非活性にしない(判定は engine の
+          `insufficientResource` reject に委ねる・§2 の規律どおり)。 */}
+      <p
+        class={
+          insufficient
+            ? "kf-outposts-establish__cost kf-outposts-establish__cost--insufficient"
+            : "kf-outposts-establish__cost"
+        }
+        data-testid="outpost-establish-cost"
+      >
+        {costLines.length === 0
+          ? "設置コストはかかりません。"
+          : `${insufficient ? "▲ " : ""}設置コスト: ${outpostCostLinesText(costLines)}`}
+      </p>
       <ul class="kf-outposts-establish__band-list" aria-label="距離帯">
         {OUTPOST_BAND_ORDER.map((option) => (
           <li key={option}>
@@ -387,6 +463,10 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
 
   const overview = useSignalValue(store.derived.outpostOverview);
   const residents = useSignalValue(store.derived.residents);
+  // [M76/R8-03 拠点版] 新規設置フォームの設置コスト全行+在庫不足「▲」に使う
+  // (`derived.ts` の `outpostTypeCatalog`/`resources`・判定はしない・表示のみ)。
+  const outpostTypeCatalog = useSignalValue(store.derived.outpostTypeCatalog);
+  const resources = useSignalValue(store.derived.resources);
   // [M74/R9-A02] 既に別の拠点へ常駐している住民は 2 つのセレクタどちらの候補にも
   // しない(⑦探索本部と同じ規則・§2 の例外)。
   const candidates = stationCandidates(residents);
@@ -414,6 +494,9 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
   const [confirmingAbandonId, setConfirmingAbandonId] = useState<EntityId | null>(null);
 
   const effectiveEstablishTypeId = establishTypeId ?? outpostTypeIds[0] ?? null;
+  // [M76/R8-03 拠点版] 選択中タイプのコスト全行(未選択/カタログに無ければ空)。
+  const establishCostLines = outpostCostLinesOf(outpostTypeCatalog, effectiveEstablishTypeId);
+  const establishInsufficient = isOutpostCostInsufficient(establishCostLines, resources);
 
   function handleToggleEstablishResident(residentId: EntityId): void {
     setEstablishResidentIds((current) => {
@@ -564,6 +647,8 @@ export function OutpostsScreen({ store, onNavigate }: ScreenProps) {
         selectedResidentIds={establishResidentIds}
         onToggleResident={handleToggleEstablishResident}
         onSubmit={handleEstablish}
+        costLines={establishCostLines}
+        insufficient={establishInsufficient}
       />
 
       {overview.roster.length === 0 ? (

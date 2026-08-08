@@ -117,6 +117,7 @@ import {
   type DistanceBand,
   type EngineContent,
   type FacilityDef,
+  type OutpostTypeDef,
   type RecordMedium,
   type TechLossClass,
 } from "../engine/rules/types";
@@ -1304,6 +1305,11 @@ export interface StoreDerived {
   /** [M32] ⑨衛星拠点の一覧 + 拠点網 ROI(GDD 9.2 / 11.4-7)。 */
   readonly outpostOverview: ReadonlyComputed<OutpostOverviewView>;
   /**
+   * [M76] ⑨新規設置フォームの拠点タイプカタログ(設置コスト全行)。
+   * `facilityCatalog` と同じく content のみに依存する。
+   */
+  readonly outpostTypeCatalog: ReadonlyComputed<readonly OutpostTypeCatalogEntry[]>;
+  /**
    * [M62/FC6b・R2-A08] 人口/寝床上限(GDD 7.6/7.7)。engine の
    * `populationViewOf` をそのまま返す(新規判定なし)。①ホームハブが
    * 「住民 N/寝床上限 M」の形で表示する(以前はどの画面にも寝床上限の
@@ -1891,6 +1897,10 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     () => buildOutpostOverview(sources.state.value, sources.content.value),
     { name: "outpostOverview" },
   );
+  const outpostTypeCatalog = computed<readonly OutpostTypeCatalogEntry[]>(
+    () => buildOutpostTypeCatalog(sources.content.value),
+    { name: "outpostTypeCatalog" },
+  );
   // [M62/FC6b・R2-A08] 人口/寝床上限の表示(engine の既存 derived 呼びのみ・
   // 新規判定なし)。`populationViewOf` をそのまま呼ぶだけで、下限判定
   // (`scarce`)も含めて engine 側の 1 実装を使い回す。
@@ -1937,6 +1947,7 @@ export function createStoreDerived(sources: StoreSources): StoreDerived {
     memoirFeed,
     renderedLog,
     outpostOverview,
+    outpostTypeCatalog,
     populationSummary,
     raidOutlook,
     raidTally,
@@ -2973,6 +2984,22 @@ export interface OutpostOverviewView {
 }
 
 /**
+ * [M76/R8-03 拠点版] outpostType 定義 1 種の設置コスト全行(GDD 9.2
+ * [2026-08-07裁定]・content の記載順)。**施設側の {@link FacilityCatalogEntry}
+ * `buildCostLines` と同じ立場の意図的な複製**である(§3-2 冒頭 doc のとおり
+ * `src/ui/**` は `engine/commands.ts` の `outpostBuildCostLines` を import
+ * できない・単一入口は `store.ts` のみ)。ここで要るのは「払えるか」の判定では
+ * なく `def.buildCost` の構造(行の並び)から決まる表示専用の値であり、拒否の
+ * 権威は engine の `insufficientResource` にある(在庫と突き合わせる「▲」は
+ * 表示上の目印)。
+ */
+export interface OutpostTypeCatalogEntry {
+  readonly outpostTypeId: EntityId;
+  /** `def.buildCost` 省略時は空(= 無料)。 */
+  readonly buildCostLines: readonly CostLineView[];
+}
+
+/**
  * [M32] ⑦の派遣候補一覧。`assist/exploration.ts` の `explorationTeamCandidates`
  * (死亡 / 派遣中 / **拠点常駐中** / 寿命なし住民の事前除外込み)をそのまま
  * 呼ぶ——候補列挙のロジックをここで書き直さない(M27 の既存実装と 2 通りの
@@ -3097,6 +3124,35 @@ function buildOutpostOverview(state: GameState, content: EngineContent): Outpost
     },
     roster,
   };
+}
+
+/**
+ * [M76/R8-03 拠点版] outpostType 1 種の設置コスト全行。`displayFacilityBuildCostLines`
+ * (§3-2)と同じ「0 以下の行は落とす」規約——engine の `payOutpostBuildCost` も
+ * `raw <= 0` の行を引き落とさない(= 払う必要が無い)。
+ */
+function displayOutpostBuildCostLines(def: OutpostTypeDef): readonly CostLineView[] {
+  const cost = def.buildCost;
+  if (cost === undefined) return NO_COST_LINES;
+  return cost
+    .map((line) => ({ resourceId: line.resourceId, amountApprox: toApproxNumber(line.amountFix) }))
+    .filter((line) => line.amountApprox > 0);
+}
+
+function outpostTypeCatalogEntryOf(def: OutpostTypeDef): OutpostTypeCatalogEntry {
+  return { outpostTypeId: def.id, buildCostLines: displayOutpostBuildCostLines(def) };
+}
+
+/**
+ * [M76] 拠点タイプカタログ(⑨新規設置フォームの「何を建てるか」)。`facilityCatalog`
+ * (§3-2)と同じく content のみに依存し state を読まない(建てられる種類は
+ * 盤面と無関係)。content に outpostType ブロックが無ければ空(= 拠点設置系が
+ * 不活性・`OutpostsScreen.tsx` は既にこの省略に対応している)。
+ */
+function buildOutpostTypeCatalog(content: EngineContent): readonly OutpostTypeCatalogEntry[] {
+  const entries = Array.from(content.outpostTypeDefs?.values() ?? [], outpostTypeCatalogEntryOf);
+  entries.sort((a, b) => compareUtf16(a.outpostTypeId, b.outpostTypeId));
+  return entries;
 }
 
 /**

@@ -251,6 +251,21 @@
   color: #24201c;
 }
 
+/* [M76/R8-03 拠点版] 設置コスト全行。在庫不足は色 + 記号(▲・OutpostEstablishForm
+   側で付与)の両方で示す(GridScreen.tsx の .kf-catalog__button--insufficient と
+   同じ配色規約・色だけに頼らない)。 */
+.kf-outposts-establish__cost {
+  font-size: var(--kf-fs-sub);
+  color: #5b534b;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.5rem;
+}
+
+.kf-outposts-establish__cost--insufficient {
+  color: #a11334;
+  font-weight: 600;
+}
+
 .kf-outposts-establish__band-list,
 .kf-outposts-establish__resident-list {
   list-style: none;

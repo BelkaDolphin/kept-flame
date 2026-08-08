@@ -22,6 +22,7 @@ import {
   exodusConfirmMessage,
   ExodusCompletedNotice,
   ExodusCrewRow,
+  ExodusCrewShortfallWarning,
   ExodusInheritPointsNote,
   ExodusNextRunPreview,
   ExodusPreviewPanel,
@@ -205,6 +206,24 @@ describe("[M74/⑰] ExodusNextRunPreview(次の周回の開始人口予告・GDD
     expect(text).toContain("周回ごとに");
     // 次周回の定員そのものは UI で計算しない(engine が答えていない数値を出さない)。
     expect(text).not.toContain("次の周回の上限は");
+  });
+});
+
+describe("[M76/台帳v25必-4] ExodusCrewShortfallWarning(乗員不足の事前表示・GDD 10.2)", () => {
+  it("minCrew が null(ガード不活性)なら何も出さない(engine 側 undefined と同じ規約)", () => {
+    expect(ExodusCrewShortfallWarning({ minCrew: null, selectedCrewCount: 0 })).toBeNull();
+  });
+
+  it("選抜人数が最少人数以上なら何も出さない", () => {
+    expect(ExodusCrewShortfallWarning({ minCrew: 3, selectedCrewCount: 3 })).toBeNull();
+    expect(ExodusCrewShortfallWarning({ minCrew: 3, selectedCrewCount: 5 })).toBeNull();
+  });
+
+  it("選抜人数が最少人数を下回れば、N をハードコードせず両方の数値を出す", () => {
+    const text = flattenText(ExodusCrewShortfallWarning({ minCrew: 3, selectedCrewCount: 1 }));
+    expect(text).toContain("最少 3名");
+    expect(text).toContain("選抜 1名");
+    expect(text).toContain("実行できません");
   });
 });
 

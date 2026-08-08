@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { GRID_CELL_COUNT } from "../../src/engine/adjacency";
 import {
   FIX_ONE,
+  FIX_ZERO,
   fixFromInt,
   fixFromRaw,
   mulFix,
@@ -39,6 +40,7 @@ import type {
   EraDef,
   EventDef,
   FacilityDef,
+  OutpostTypeDef,
   ReclaimParams,
   RecordMediaParams,
   TechDef,
@@ -1935,6 +1937,65 @@ describe("[M32] outpostOverview(GDD 9.2 / 11.4-7・outpostNetworkRoi をその�
       roiApprox: null,
     });
     expect(overview.roster).toEqual([]);
+  });
+});
+
+describe("[M76] outpostTypeCatalog(⑨新規設置フォームの拠点タイプカタログ・content のみに依存)", () => {
+  it("outpostTypeDefs が ID 昇順で並び、buildCost 省略は空(無料)", () => {
+    const { store } = createTestStore();
+    // 基準盤面(boardContent)には outpostTypeDefs が無いので、まず m32Content
+    // (M32_OUTPOST_TYPE=buildCost 省略)で「無料」側を確認する。
+    const storeWithType = createGameStore({ state: boardState(), content: m32Content() });
+    const catalog = storeWithType.derived.outpostTypeCatalog.value;
+    expect(catalog).toEqual([{ outpostTypeId: M32_OUTPOST_TYPE.id, buildCostLines: [] }]);
+    // 基準盤面(拠点ブロック無し)は空カタログ(捏造しない)。
+    expect(store.derived.outpostTypeCatalog.value).toEqual([]);
+  });
+
+  it("[M76/R8-03 拠点版] buildCost の全行を CostLineView へ写す(engine の outpostBuildCostLines と同じ構造)", () => {
+    const minerWithCost: OutpostTypeDef = {
+      ...M32_OUTPOST_TYPE,
+      buildCost: [
+        { resourceId: id("firewood"), amountFix: fixFromInt(45) },
+        { resourceId: id("iron"), amountFix: fixFromInt(12) },
+      ],
+    };
+    const store = createGameStore({
+      state: boardState(),
+      content: m32Content({ outpostTypeDefs: new Map([[minerWithCost.id, minerWithCost]]) }),
+    });
+    const entry = store.derived.outpostTypeCatalog.value.find(
+      (candidate) => candidate.outpostTypeId === minerWithCost.id,
+    );
+    expect(entry?.buildCostLines).toEqual([
+      { resourceId: id("firewood"), amountApprox: 45 },
+      { resourceId: id("iron"), amountApprox: 12 },
+    ]);
+  });
+
+  it("0 以下の行は落とす(engine の payOutpostBuildCost と同じ規約・払わない行を出さない)", () => {
+    const freeLineType: OutpostTypeDef = {
+      ...M32_OUTPOST_TYPE,
+      buildCost: [
+        { resourceId: id("firewood"), amountFix: fixFromInt(45) },
+        { resourceId: id("iron"), amountFix: FIX_ZERO },
+      ],
+    };
+    const store = createGameStore({
+      state: boardState(),
+      content: m32Content({ outpostTypeDefs: new Map([[freeLineType.id, freeLineType]]) }),
+    });
+    const entry = store.derived.outpostTypeCatalog.value.find(
+      (candidate) => candidate.outpostTypeId === freeLineType.id,
+    );
+    expect(entry?.buildCostLines).toEqual([{ resourceId: id("firewood"), amountApprox: 45 }]);
+  });
+
+  it("盤面(state)が変わってもカタログの参照は変わらない(content のみ依存・facilityCatalog と同じ立場)", () => {
+    const store = createGameStore({ state: boardState(), content: m32Content() });
+    const before = store.derived.outpostTypeCatalog.value;
+    store.dispatch({ type: "ticked", toTick: 30 });
+    expect(store.derived.outpostTypeCatalog.value).toBe(before);
   });
 });
 

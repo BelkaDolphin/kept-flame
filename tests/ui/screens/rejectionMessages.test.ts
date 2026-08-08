@@ -186,6 +186,23 @@ describe("rejectionMessages: 主要 code のスポットチェック", () => {
     expect(message).not.toContain("識別子");
   });
 
+  it("[M76/台帳v25必-4] exodusNoCrew: limit/actual が無ければ従来どおり「1人以上」文言", () => {
+    // M53 の「乗員 0 名」reject(commands.ts の `command.crewIds.length === 0`
+    // 分岐)は limit/actual を持たない。
+    const message = playerRejectionMessage(rejection({ code: "exodusNoCrew" }));
+    expect(message).toBe("大移動には同行する住民が 1 人以上必要です。");
+  });
+
+  it("[M76/台帳v25必-4] exodusNoCrew: limit/actual があれば最少人数を明示する(N をハードコードしない)", () => {
+    // M75 の最少乗員ガード(minCrew)は同じ code を limit/actual 付きで返す
+    // (commands.ts §4b)。以前は minCrew が 1 を超えても「1人以上必要」の
+    // ままで、実際の最少人数を偽って伝えていた。
+    const message = playerRejectionMessage(
+      rejection({ code: "exodusNoCrew", limit: 3, actual: 1 }),
+    );
+    expect(message).toBe("大移動には乗員が最少 3 名必要です(選抜 1 名)。");
+  });
+
   it("notImplemented: ownerTask(タスクID等の開発語彙)を文言に含めない", () => {
     const message = playerRejectionMessage(rejection({ code: "notImplemented", ownerTask: "M99" }));
     expect(message).not.toContain("M99");
