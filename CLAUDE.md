@@ -13,8 +13,8 @@
 - LLMの自動実行経路(headless、GitHub Actions連携、Agent SDK、Routines)を追加しない(課金の壁。詳細はONBOARDING.md §3)
 - コンテンツはJSONのみでadditive追加。既存contentファイルの削除禁止(tombstone方式)
 - ダークモード/ダークテーマの使用禁止
-- 作業の節目で `MEMORY.md` を更新(完了/未解決/次のステップ)
+- 作業の節目で `MEMORY.md` を更新する。方式は**スナップショットの書き換え**(追記で伸ばさない): 完了タスクの詳細経緯は `docs/memory-archive/` へ移し、更新後に `npm run memory:gate` でサイズ判定(警告15KB/違反30KB)。過去の経緯はアーカイブをgrepで部分読み(全読み禁止)
 
 ## 現在地
 
-企画書・技術設計書(ADR)完成、ユーザー承認待ち。実装未着手。次の作業 = ADR承認 → Phase 0(課金確認) → 先行プロトタイプ計測12項目(ADR末尾) → 実装。
+`MEMORY.md` の「現在地」節が正(このファイルには書かない。二重管理で腐るため — 2026-08-08改訂)。
