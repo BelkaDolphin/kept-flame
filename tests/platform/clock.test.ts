@@ -20,12 +20,14 @@ import { TICK_MS } from "../../src/engine/advance";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "../../src/platform/catchUp";
 import {
   ClockError,
+  computeOfflineElapsedMs,
   createTickDriver,
   defaultTickScheduler,
   planTick,
   TICK_SCHEDULER_MAX_CONSECUTIVE_FAILURES,
   type MonotonicClock,
   type TickAnchor,
+  type TickDriver,
 } from "../../src/platform/clock";
 
 /** 手で進める偽物の単調時計。 */
@@ -401,5 +403,226 @@ describe("defaultTickScheduler(pump が投げても連鎖が切れない・§5)"
       errors.mockRestore();
       vi.useRealTimers();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [台帳v26 必-1] 起動時オフライン復帰(clock.ts §7)
+//
+// ユーザー実プレイ報告「かまど 1・薪 1 本に数時間」の真因は、**ブラウザを
+// 閉じていた時間がゲーム内から丸ごと消えていた**ことだった:
+// `performance.now()` の原点はページ読み込みのたびに 0 へ戻るので、初期アンカーを
+// `{anchorMs: clock.now(), anchorTick: セーブの tick}` と置くと起動直後の経過は
+// 必ず ≒0ms = 差分 0 になる。受け皿(72h クランプ・Worker catch-up・⑫帰還
+// ダイジェスト)は全て実装済みで、**入口の材料だけが無かった**。
+//
+// ここが固定するのは 4 点:
+//   (a) 壁時計どうしの引き算(`computeOfflineElapsedMs`)が起動経路で**投げない**
+//   (b) `startElapsedMs` 省略 / 0 は従来と 1 bit も変わらない
+//   (c) N 分の不在 → 初回 pump で N tick(端数 ms も §2 どおり持ち越す)
+//   (d) 72h 超は初回 pump が Worker 経路になり、`syncTo` 後に**残余経過が消える**
+//       (= クランプが正しく効き、二度目の catch-up を誘発しない)
+// ---------------------------------------------------------------------------
+
+describe("computeOfflineElapsedMs(壁時計どうしの引き算・§7)", () => {
+  /** 固定のエポック ms(persistence.test.ts と同じ値)。実時刻に依存させない。 */
+  const SAVED_AT_MS = 1_754_000_000_000;
+
+  it("経過はそのまま ms で返る", () => {
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, SAVED_AT_MS + 90 * TICK_MS)).toBe(90 * TICK_MS);
+  });
+
+  it("savedAtMs が不明(null)なら 0 = 台帳v26 必-1 以前と同じ挙動へ落ちる", () => {
+    expect(computeOfflineElapsedMs(null, SAVED_AT_MS)).toBe(0);
+  });
+
+  it("端末時計の巻き戻し(未来のセーブ)は 0 へ倒す(負を通さない)", () => {
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, SAVED_AT_MS - 1)).toBe(0);
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, SAVED_AT_MS)).toBe(0);
+  });
+
+  it("非有限は 0(起動経路なので決して投げない)", () => {
+    expect(computeOfflineElapsedMs(Number.NaN, SAVED_AT_MS)).toBe(0);
+    expect(computeOfflineElapsedMs(Number.NEGATIVE_INFINITY, SAVED_AT_MS)).toBe(0);
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, Number.POSITIVE_INFINITY)).toBe(0);
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, Number.NaN)).toBe(0);
+  });
+
+  it("小数 ms は floor(単調時刻側の整数化と揃える)", () => {
+    expect(computeOfflineElapsedMs(SAVED_AT_MS, SAVED_AT_MS + 1500.7)).toBe(1500);
+  });
+});
+
+describe("TickDriver の startElapsedMs(起動時オフライン復帰・§7)", () => {
+  /** 駆動源を回さない(= 実タイマに触れない)driver を組む。 */
+  function bootDriver(options: {
+    readonly startTick: number;
+    readonly startElapsedMs?: number;
+    readonly clock: MonotonicClock;
+    readonly advanced: number[];
+    readonly catchUps: number[];
+  }): TickDriver {
+    return createTickDriver({
+      startTick: options.startTick,
+      // exactOptionalPropertyTypes: 省略時は**キーごと渡さない**(= 既定 0)。
+      ...(options.startElapsedMs === undefined ? {} : { startElapsedMs: options.startElapsedMs }),
+      clock: options.clock,
+      onAdvance: (toTick) => options.advanced.push(toTick),
+      onCatchUpRequired: (toTick) => options.catchUps.push(toTick),
+      schedule: () => () => undefined,
+    });
+  }
+
+  it("省略と 0 は同じ = 従来どおりアンカーは now そのもの(初回 pump は 0 tick)", () => {
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    const omitted = bootDriver({ startTick: 7, clock: fakeClock(12_345), advanced, catchUps });
+    const zero = bootDriver({
+      startTick: 7,
+      startElapsedMs: 0,
+      clock: fakeClock(12_345),
+      advanced,
+      catchUps,
+    });
+    expect(omitted.anchor()).toEqual({ anchorMs: 12_345, anchorTick: 7 });
+    expect(zero.anchor()).toEqual(omitted.anchor());
+    omitted.pump();
+    zero.pump();
+    expect(advanced).toEqual([]);
+    expect(catchUps).toEqual([]);
+  });
+
+  it("N 分の不在は初回 pump で N tick 進む(ここが fatal の直接の修正点)", () => {
+    const clock = fakeClock(0);
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    const driver = bootDriver({
+      startTick: 100,
+      startElapsedMs: 90 * TICK_MS,
+      clock,
+      advanced,
+      catchUps,
+    });
+    // アンカーだけが過去へずれる(駆動ロジックには分岐が 1 つも増えていない)。
+    expect(driver.anchor()).toEqual({ anchorMs: -90 * TICK_MS, anchorTick: 100 });
+
+    const plan = driver.pump();
+    expect(plan.tickDelta).toBe(90);
+    expect(plan.route).toBe("main-structural-sharing");
+    expect(advanced).toEqual([190]);
+    expect(catchUps).toEqual([]);
+    expect(driver.anchor()).toEqual({ anchorMs: 0, anchorTick: 190 });
+  });
+
+  it("不在ぶんの端数 ms も捨てずに持ち越す(§2 の性質が不在にも効く)", () => {
+    const clock = fakeClock(0);
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    const driver = bootDriver({
+      startTick: 0,
+      startElapsedMs: 3 * TICK_MS + 777,
+      clock,
+      advanced,
+      catchUps,
+    });
+    driver.pump();
+    expect(advanced).toEqual([3]);
+    expect(driver.anchor()).toEqual({ anchorMs: -777, anchorTick: 3 });
+    // 端数 777ms が残っているので、次の 1 tick は TICK_MS - 777 で来る。
+    clock.set(TICK_MS - 777);
+    driver.pump();
+    expect(advanced).toEqual([3, 4]);
+  });
+
+  it("不在ぶんと画面を開いてからの経過は同じ式で足される(起動だけの特別扱いが無い)", () => {
+    const clock = fakeClock(1000);
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    const driver = bootDriver({
+      startTick: 0,
+      startElapsedMs: 5 * TICK_MS,
+      clock,
+      advanced,
+      catchUps,
+    });
+    clock.advance(3 * TICK_MS);
+    driver.pump();
+    expect(advanced).toEqual([8]);
+  });
+
+  it("負・非有限の startElapsedMs は ClockError(呼び出し側で丸める契約)", () => {
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() =>
+        createTickDriver({
+          startTick: 0,
+          startElapsedMs: bad,
+          clock: fakeClock(0),
+          onAdvance: () => undefined,
+          schedule: () => () => undefined,
+        }),
+      ).toThrow(ClockError);
+    }
+  });
+
+  it("72h 超の不在は初回 pump が Worker 経路 + syncTo 後に残余経過が消える(§7)", () => {
+    const clock = fakeClock(0);
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    /** 100 時間の不在(72h クランプの外側)。 */
+    const absenceMs = 100 * 60 * TICK_MS;
+    const driver = bootDriver({
+      startTick: 0,
+      startElapsedMs: absenceMs,
+      clock,
+      advanced,
+      catchUps,
+    });
+
+    const plan = driver.pump();
+    expect(plan.tickDelta).toBe(4320); // 72h クランプ(GDD 11.9)
+    expect(plan.route).toBe("worker-draft-snapshot");
+    expect(advanced).toEqual([]);
+    expect(catchUps).toEqual([4320]);
+    // catch-up の完了までアンカーは動かない(二重に進めないため)。
+    expect(driver.anchor()).toEqual({ anchorMs: -absenceMs, anchorTick: 0 });
+
+    // catch-up 完了報告。アンカーが**現在時刻**へ引き直され、72h を超えた
+    // 残余(28h ぶん)はここで捨てられる = クランプが正しく効いている。
+    driver.syncTo(4320);
+    expect(driver.anchor()).toEqual({ anchorMs: 0, anchorTick: 4320 });
+    const after = driver.pump();
+    expect(after.tickDelta).toBe(0);
+    expect(catchUps).toEqual([4320]);
+  });
+
+  it("⑫帰還ダイジェストのしきい値(tick 差 60)が boot 経路で満たされる", () => {
+    // `src/main.tsx` の DIGEST_MIN_ELAPSED_TICKS(= 1 ゲーム時間・ui-spec §4)。
+    const digestMinElapsedTicks = 60;
+    const bootTick = 500;
+    const savedAtMs = 1_754_000_000_000;
+    const nowWallMs = savedAtMs + 90 * TICK_MS; // 90 分ぶりの再訪
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+
+    const driver = bootDriver({
+      startTick: bootTick,
+      startElapsedMs: computeOfflineElapsedMs(savedAtMs, nowWallMs),
+      clock: fakeClock(0),
+      advanced,
+      catchUps,
+    });
+    const bootPlan = driver.pump();
+    expect(bootPlan.targetTick - bootTick).toBe(90);
+    expect(bootPlan.targetTick - bootTick).toBeGreaterThanOrEqual(digestMinElapsedTicks);
+  });
+
+  it("[回帰] 材料が無ければ同じ状況で 0 tick(修正前の壊れ方の記録)", () => {
+    const advanced: number[] = [];
+    const catchUps: number[] = [];
+    const driver = bootDriver({ startTick: 500, clock: fakeClock(0), advanced, catchUps });
+    const bootPlan = driver.pump();
+    // ページを開いた直後なので経過は 0ms。セーブ時刻を知らない限り、どれだけ
+    // 長く閉じていてもここは 0 のままになる —— これが台帳v26 必-1 の fatal。
+    expect(bootPlan.targetTick - 500).toBe(0);
   });
 });

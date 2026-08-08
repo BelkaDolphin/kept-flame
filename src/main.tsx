@@ -40,7 +40,7 @@ import {
   saveBackupReminderPromptSnapshot,
 } from "./platform/backupReminder";
 import { LIVE_ADVANCE_MAX_TICK_DELTA } from "./platform/catchUp";
-import { createTickDriver, performanceClock } from "./platform/clock";
+import { computeOfflineElapsedMs, createTickDriver, performanceClock } from "./platform/clock";
 import {
   createInstallPromotionTracker,
   isStandaloneDisplayMode,
@@ -66,6 +66,7 @@ import {
   loadPromotionPromptSnapshot,
   PromotionPromptTracker,
   savePromotionPromptSnapshot,
+  systemWallClock,
 } from "./platform/promotionPrompt";
 import { createBrowserRouterHost, createHashRouter } from "./platform/router";
 import { SaveScheduler, attachLifecycleFlush } from "./platform/saveScheduler";
@@ -139,6 +140,11 @@ interface BootState {
    * 区別しないと「初めて遊ぶ人」にまで「読み込みに失敗しました」を誤表示する。
    */
   readonly loadFailed: boolean;
+  /**
+   * [台帳v26 必-1] 読めたセーブが持っていた壁時計時刻(`persistence.ts` §4)。
+   * `null` = 不明(新規ゲーム / 読込失敗 / 台帳v26 必-1 以前のセーブ)。
+   */
+  readonly savedAtMs: number | null;
 }
 
 function freshNewGameState(content: EngineContent): GameState {
@@ -152,7 +158,12 @@ async function loadOrCreateState(
   if (db !== null) {
     try {
       const restored = await loadLatestSave(db);
-      return { state: restored.state, source: "save", loadFailed: false };
+      return {
+        state: restored.state,
+        source: "save",
+        loadFailed: false,
+        savedAtMs: restored.savedAtMs,
+      };
     } catch (error) {
       if (error instanceof SaveNotFoundError) {
         // 初回起動(まだ何も保存していない)。黙って新規開始する(M29 以来の挙動)。
@@ -162,11 +173,21 @@ async function loadOrCreateState(
         // それだけでは「進行状況が消えた」ことにその場で気づけない(M29 申し送り)
         // ので、`loadFailed: true` を立てて呼び出し側(AppShell)にバナーを出させる
         // (ロードマップ M54 行「起動失敗のその場通知」)。boot 自体は続行する。
-        return { state: freshNewGameState(content), source: "newGame", loadFailed: true };
+        return {
+          state: freshNewGameState(content),
+          source: "newGame",
+          loadFailed: true,
+          savedAtMs: null,
+        };
       }
     }
   }
-  return { state: freshNewGameState(content), source: "newGame", loadFailed: false };
+  return {
+    state: freshNewGameState(content),
+    source: "newGame",
+    loadFailed: false,
+    savedAtMs: null,
+  };
 }
 
 async function boot(): Promise<void> {
@@ -232,12 +253,30 @@ async function boot(): Promise<void> {
   //
   // [M59] `createTickDriver` へ渡す clock だけを倍速ラッパ(`timeScale.ts`)で
   // 包む。**セーブ/バックアップ推奨/PWA 誘導/このあとの起動時オフライン復帰
-  // 計算(`bootPlan`)には絶対に触れない**——それらは `performanceClock`/壁時計を
+  // 計算(`bootElapsedMs`)には絶対に触れない**——それらは `performanceClock`/壁時計を
   // 個別に読んでおり(saveScheduler.ts の `systemSaveClock` 等)、ここでは
   // tick 駆動の 1 箇所だけを差し替える。既定 speed=1 なので、通常時は
   // `performanceClock` と完全に同じ値を返す(挙動不変)。
   const scaledClock = createScaledClock(performanceClock);
   const testplaySpeed = createTestplaySpeedController(scaledClock);
+
+  // [台帳v26 必-1] 起動時オフライン復帰の**入口**(clock.ts §7)。
+  //
+  // `performance.now()` の原点はページ読み込みのたびに 0 へ戻るので、
+  // セーブの tick をそのままアンカーにすると「ブラウザを閉じていた時間」が
+  // ゲーム内から消える(= かまどが数時間ぶん動いていない、という実プレイ報告の
+  // 真因)。不在 ms は**壁時計どうしの引き算**で出し(異なる時計の値を混ぜない・
+  // M54 の backupReminder.ts と同じ線引き)、tick への変換は engine の式
+  // (72h クランプ込み)に任せる。
+  //
+  // 経過を注入するのは `source === "save"` のときだけである:
+  //   - 新規ゲーム / 読込失敗 → 埋めるべき不在が無い(`savedAtMs` も null)
+  //   - インポート / 最初からやり直す → `handleWorldLoaded` が `syncTo` のみを
+  //     呼ぶ設計(下のコメント参照)であり、ここでも catch-up の材料にしない
+  // 端末時計の巻き戻り(負)や壊れた savedAtMs は `computeOfflineElapsedMs` が
+  // 0 へ倒すので、最悪でも台帳v26 必-1 以前と同じ挙動にしかならない。
+  const bootElapsedMs =
+    booted.source === "save" ? computeOfflineElapsedMs(booted.savedAtMs, systemWallClock.now()) : 0;
 
   let catchUpInFlight = false;
   /**
@@ -250,6 +289,7 @@ async function boot(): Promise<void> {
 
   const driver = createTickDriver({
     startTick: store.peekState().tick,
+    startElapsedMs: bootElapsedMs,
     clock: scaledClock,
     onAdvance: (toTick) => {
       const result = store.dispatch({ type: "ticked", toTick });
@@ -471,6 +511,11 @@ async function boot(): Promise<void> {
   // 判定は **plan の targetTick** で行う。長期不在(> 600 tick)は Worker 経路が
   // 非同期に適用されるので、この時点の `store.peekState().tick` はまだ動いておらず、
   // それを見ると「不在が長いほど⑫が出ない」という逆さまの挙動になる。
+  //
+  // [台帳v26 必-1] `bootPlan` は `startElapsedMs`(= 不在 ms)を織り込んだ
+  // アンカーから計算されるので、この差は**ブラウザを閉じていた時間**そのものに
+  // なる。以前は起動直後の経過が常に ≒0ms だったため、`bootTick` を catch-up の
+  // 前に取る仕組みがありながら⑫は事実上出なかった(材料が無かった)。
   const elapsedTicks = bootPlan.targetTick - bootTick;
   if (booted.source === "save" && elapsedTicks >= DIGEST_MIN_ELAPSED_TICKS) {
     router.replace(RETURN_DIGEST_SCREEN_ID);

@@ -20,6 +20,7 @@ import {
   encodeSaveRecord,
   LATEST_SAVE_KEY,
   PersistenceError,
+  readSavedAtMs,
   SAVE_DB_NAME,
   SAVE_FORMAT_VERSION,
   SAVE_STORE_NAME,
@@ -225,5 +226,115 @@ describe("定数", () => {
     expect(SAVE_DB_NAME).toBe("kept-flame");
     expect(SAVE_STORE_NAME).toBe("saves");
     expect(LATEST_SAVE_KEY).toBe("latest");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. [台帳v26 必-1] savedAtMs(起動時オフライン復帰の材料・persistence.ts §4)
+//
+// 起動時にブラウザを閉じていた時間を埋めるための唯一の材料が、このエンベロープ
+// フィールドである。ここが固定するのは 3 点:
+//   (a) 書いた壁時計時刻が往復で保存される(IDB の構造化複製でも JSON でも)
+//   (b) **既存セーブが読めなくなっていない**: フィールドを持たない旧エンベロープ
+//       はそのまま読め、`savedAtMs` は「不明 = null」になる(= 経過 0 =
+//       台帳v26 必-1 以前と同一挙動)。読めない値でも例外にしない
+//   (c) **checksum の対象は payload だけのまま**(§2/§4(b))。savedAtMs を
+//       足しても払っても payload バイト列も checksum も 1 bit も動かない
+//       —— golden vector / セーブ正準化 / export テキストへの波及がゼロである
+//       ことの機械的な証明になる。
+//
+// IDB そのもの(= `saveGameState` が壁時計を 1 回読む経路)は Node に無いので
+// ここでは扱わない(このファイルの冒頭方針どおり)。壁時計を読む場所が
+// `saveGameState` 1 箇所に閉じていることは `encodeSaveRecord` が**純関数のまま**
+// である(下の「渡さなければキーごと存在しない」)ことで担保する。
+// ---------------------------------------------------------------------------
+
+/** 固定のエポック ms(2025-08-01T00:00:00Z 付近)。実時刻に依存させない。 */
+const SAVED_AT_MS = 1_754_000_000_000;
+
+/** savedAtMs だけを差し替えた**未検証の**エンベロープを作る(`tamperChecksum` と同型)。 */
+function withSavedAtMs(record: SaveRecord, savedAtMs: unknown): unknown {
+  return {
+    saveFormatVersion: record.saveFormatVersion,
+    integrityChecksum: record.integrityChecksum,
+    payload: record.payload,
+    savedAtMs,
+  };
+}
+
+describe("[台帳v26 必-1] savedAtMs", () => {
+  it("渡さなければキーごと存在しない(encodeSaveRecord は時計に触れない純関数)", () => {
+    const record = encodeSaveRecord(STATE);
+    expect(record.savedAtMs).toBeUndefined();
+    // export テキスト(exchange.ts)はこの形をそのまま stringify する。
+    expect(JSON.stringify(record)).not.toContain("savedAtMs");
+  });
+
+  it("渡せばエンベロープに載り、往復して読み戻せる", () => {
+    const record = encodeSaveRecord(STATE, { savedAtMs: SAVED_AT_MS });
+    expect(record.savedAtMs).toBe(SAVED_AT_MS);
+    // IDB は構造化複製・export は JSON 文字列。どちらの往復でも生き残る。
+    expect(readSavedAtMs(JSON.parse(JSON.stringify(record)))).toBe(SAVED_AT_MS);
+  });
+
+  it("payload も checksum も savedAtMs の有無で 1 bit も変わらない(§4(a)(b))", () => {
+    const without = encodeSaveRecord(STATE);
+    const withStamp = encodeSaveRecord(STATE, { savedAtMs: SAVED_AT_MS });
+    expect(withStamp.payload).toBe(without.payload);
+    expect(withStamp.integrityChecksum).toBe(without.integrityChecksum);
+    expect(withStamp.saveFormatVersion).toBe(SAVE_FORMAT_VERSION);
+  });
+
+  it("checksum の対象は payload のみ = savedAtMs を書き換えても検証は通る", () => {
+    const record = encodeSaveRecord(STATE, { savedAtMs: SAVED_AT_MS });
+    expect(verifySaveRecord(withSavedAtMs(record, SAVED_AT_MS + 999_999))).toBe(record.payload);
+  });
+
+  it("旧エンベロープ(savedAtMs 無し)はそのまま読め、経過は「不明」になる", () => {
+    // 台帳v26 必-1 以前のビルドが書いたレコードと同じ形。
+    const legacy = encodeSaveRecord(STATE);
+    expect(verifySaveRecord(legacy)).toBe(legacy.payload);
+    expect(readSavedAtMs(legacy)).toBeNull();
+    expect(decodeSaveRecord(legacy).tick).toBe(STATE.tick);
+  });
+
+  it("読めない savedAtMs は例外でなく null(checksum 外の未検証値・§4(b))", () => {
+    const record = encodeSaveRecord(STATE);
+    for (const bad of [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_VALUE,
+      "0",
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(readSavedAtMs(withSavedAtMs(record, bad))).toBeNull();
+    }
+    for (const bad of [null, undefined, 42, "text", [1, 2]]) {
+      expect(readSavedAtMs(bad)).toBeNull();
+    }
+  });
+
+  it("savedAtMs が壊れていてもセーブは失われない(1 フィールドに拒否権を与えない)", () => {
+    const broken = withSavedAtMs(encodeSaveRecord(STATE), Number.NaN);
+    expect(decodeSaveRecord(broken).tick).toBe(STATE.tick);
+    expect(readSavedAtMs(broken)).toBeNull();
+  });
+
+  it("書込側は狭い: エポック ms(0 以上の安全整数)でなければ止める", () => {
+    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE]) {
+      expect(() => encodeSaveRecord(STATE, { savedAtMs: bad })).toThrow(PersistenceError);
+    }
+    expect(() => encodeSaveRecord(STATE, { savedAtMs: 0 })).not.toThrow();
+  });
+
+  it("savedAtMs を載せても復元される state は同一(decodeSaveRecord は見ない)", () => {
+    const record = encodeSaveRecord(STATE, { savedAtMs: SAVED_AT_MS });
+    const restored = decodeSaveRecord(record);
+    expect(JSON.stringify(toSerializable(restored))).toBe(record.payload);
+    expect([...restored.entityStateById.keys()]).toEqual([...STATE.entityStateById.keys()]);
   });
 });

@@ -19,6 +19,8 @@
 //                  localStorage ミラー(`localStorageMirror.ts`)・バックアップ
 //                  リマインド(`backupReminder.ts`)は同じ M4 だが**別ファイル**
 //                  (この層に「1 回の書込」以上の責務を足さないため)。
+//   台帳v26 必-1 : エンベロープの `savedAtMs`(最後に書いた壁時計時刻)。
+//                  起動時オフライン復帰の**唯一の材料**である(§4)。
 //
 // ===========================================================================
 // 1. なぜ「エンベロープ + payload 文字列」なのか(ADR-012 の記述との差)
@@ -66,6 +68,43 @@
 //   返す。呼び出し側(bench/perfMain.ts)は関数呼び出しの**直前直後**でも
 //   時刻を取り、`marks` との差を `callOverhead` として明示的に計上することで
 //   「下位区間は親を過不足なく分割する」(perf-boundaries §2 R7)を保つ。
+//
+// ===========================================================================
+// 4. [台帳v26 必-1] savedAtMs — 「最後に遊んだ実時刻」をエンベロープに持つ
+// ===========================================================================
+//   ADR-026 の tick 駆動(`clock.ts`)は `performance.now()` 基準であり、
+//   その原点は**ページを読み込むたびに 0 へ戻る**。よってセーブに壁時計の
+//   時刻が 1 つも無いと、起動直後のアンカーは「今 = セーブ時の tick」となり、
+//   ブラウザを閉じていた時間がゲーム内から丸ごと消える(オフライン復帰の
+//   受け皿 —— 72h クランプ・Worker catch-up・⑫帰還ダイジェスト —— は全て
+//   実装済みなのに、**入口の材料だけが無かった**)。その材料がこの 1 フィールド
+//   である。同型の問題と同型の解は M54 の `backupReminder.ts`(`performance.now()`
+//   → 壁時計への切り替え)に前例がある。
+//
+//   (a) **payload には入れない**。payload は engine の直列化形そのもの(決定論
+//       バイト列)であり、時刻を混ぜた瞬間に「同じ state から同じ payload」が
+//       壊れて golden vector / checksum / セーブ正準化の全てが揺れる。
+//       よって置き場所はエンベロープ側だけである。
+//   (b) **checksum の対象外**(checksum は payload 文字列のみ・§2 のまま)。
+//       つまり savedAtMs は**検証されていない値**である。読めない値(数でない・
+//       非有限・負)が入っていても復帰そのものは止めず「不明」として扱う
+//       ({@link readSavedAtMs} が `null` を返し、呼び出し側は経過 0 =
+//       台帳v26 必-1 以前と同じ挙動へ落ちる)。検証できない 1 フィールドに
+//       「セーブ全体を読めなくする」権限を与えないための線引きである。
+//   (c) **省略可**。台帳v26 必-1 以前に書かれたエンベロープは持っていないので、
+//       「無ければ経過 0」で読む(下の {@link readSavedAtMs})。
+//   (d) **エンベロープ版(`saveFormatVersion`)は上げない**。判断の根拠は
+//       `migration.ts` §0(i) の「[台帳v26 必-1] savedAtMs は版を上げない」節に
+//       書いた(この軸の版差は前後どちらの向きにも**ハード拒否**になるため、
+//       省略可・checksum 外・欠けても旧挙動に落ちるだけのフィールドに対しては
+//       代償が釣り合わない)。
+//   (e) **書込の瞬間に読む**。壁時計を読むのは {@link saveGameState} だけで、
+//       {@link encodeSaveRecord} は渡された値を載せるだけの純関数のままにする
+//       (これを崩すと export テキスト `exchange.ts` が呼ぶたびに違うバイト列に
+//       なり、「同じ state からは常に同じバイト列」という T11 以来の性質が
+//       失われる)。export/import に savedAtMs は載らない —— インポートは
+//       「昔の状態へ戻す」操作であって不在時間の catch-up ではないため
+//       (`src/main.tsx` の `handleWorldLoaded` が catch-up しないのと同じ理由)。
 // ---------------------------------------------------------------------------
 
 import {
@@ -79,6 +118,7 @@ import { fnv1a32 } from "../engine/rng/fnv1a32";
 import { fromSerializable, toSerializable } from "../engine/state/serialize";
 import type { GameState } from "../engine/state/state";
 import { migrateSavePayload, migrateStoredSave, SAVE_FORMAT_VERSION } from "./migration";
+import { systemWallClock, type WallClock } from "./promotionPrompt";
 import { checkSaveCapacity, SAVE_SIZE_ABORT_BYTES, type SaveCapacityCheck } from "./saveCapacity";
 
 // --- 1. 定数とエラー -------------------------------------------------------
@@ -176,6 +216,49 @@ export interface SaveRecord {
   readonly integrityChecksum: number;
   /** 正準化済み JSON 文字列(= JSON.stringify(toSerializable(state)))。 */
   readonly payload: string;
+  /**
+   * [台帳v26 必-1] このレコードを書いた壁時計時刻(エポック ms・§4)。
+   *
+   * **省略可**である: 台帳v26 必-1 以前に書かれたセーブは持たず、export
+   * テキスト(`exchange.ts`)にも載らない(§4(e))。読出側は
+   * {@link readSavedAtMs} を通し、無ければ「不明 = 経過 0」として扱う。
+   */
+  readonly savedAtMs?: number;
+}
+
+/** {@link encodeSaveRecord} の任意入力。 */
+export interface EncodeSaveOptions {
+  /**
+   * [台帳v26 必-1] エンベロープへ載せる壁時計時刻(§4(e))。**呼び出し側が
+   * 読んだ値を渡す**(この関数は時計に触れない = 純関数のまま)。
+   */
+  readonly savedAtMs?: number;
+}
+
+/**
+ * [台帳v26 必-1] savedAtMs として書ける値(エポック ms = 0 以上の安全整数)か。
+ * `Date.now()` は常にこれを満たす。満たさない値は**書込側で**止める
+ * (読出側は §4(b) のとおり止めずに「不明」へ倒す —— 書けるものを狭く、
+ * 読めるものを広く、が破損検出の基本形である)。
+ */
+function isWritableSavedAtMs(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * [台帳v26 必-1] エンベロープから `savedAtMs` を読む。**検証されていない値**
+ * (checksum の対象外・§4(b))なので、読めなければ例外ではなく `null` を返す。
+ *
+ * `null` の意味は「最後に遊んだ実時刻が分からない」であり、呼び出し側
+ * (`src/main.tsx`)はそれを**経過 0**、すなわち台帳v26 必-1 以前とまったく
+ * 同じ起動挙動へ落とす。ここで投げると、遊べるはずのセーブが「時刻が壊れて
+ * いる」だけの理由で読めなくなる。
+ */
+export function readSavedAtMs(value: unknown): number | null {
+  if (!isRecordObject(value)) return null;
+  const savedAtMs = value["savedAtMs"];
+  if (typeof savedAtMs !== "number" || !isWritableSavedAtMs(savedAtMs)) return null;
+  return savedAtMs;
 }
 
 /**
@@ -187,25 +270,38 @@ export function computeIntegrityChecksum(payload: string): number {
 }
 
 /**
- * GameState を保存レコードへ符号化する。
+ * GameState を保存レコードへ符号化する。**時計に触れない純関数**である
+ * (壁時計を読むのは {@link saveGameState} だけ・§4(e))。
  *
  * `toSerializable` が正準化(キー順を UTF-16 昇順へ固定)まで済ませているので、
  * 同じ内容の state からは必ず同じ payload バイト列 = 同じ checksum が出る。
+ * `savedAtMs` を渡してもこの性質は変わらない —— checksum の対象は payload
+ * 文字列だけであり(§2/§4(b))、載る場所はエンベロープ側だからである。
  *
  * @throws {SerializeError} state が直列化できない場合(engine 側の契約違反)
  * @throws {SaveBoundsError} 分岐木ノード上界を破っている場合
+ * @throws {PersistenceError} `savedAtMs` がエポック ms(0 以上の安全整数)でない場合
  */
-export function encodeSaveRecord(state: GameState): SaveRecord {
+export function encodeSaveRecord(state: GameState, options?: EncodeSaveOptions): SaveRecord {
   const serialized = toSerializable(state);
   // 上界検査は**書込側**に置く。書込は復帰経路の外なので B2 の予算に
   // 影響せず、かつ「有界でないものを永続化させない」という一番早い停止点になる。
   assertDispatchTreeBounds(serialized);
   const payload = JSON.stringify(serialized);
-  return {
+  const record: SaveRecord = {
     saveFormatVersion: SAVE_FORMAT_VERSION,
     integrityChecksum: computeIntegrityChecksum(payload),
     payload,
   };
+  const savedAtMs = options?.savedAtMs;
+  if (savedAtMs === undefined) return record;
+  if (!isWritableSavedAtMs(savedAtMs)) {
+    // 壊れた時計をそのまま焼き付けない(次回起動の経過計算が狂う)。
+    throw new PersistenceError(
+      `savedAtMs ${String(savedAtMs)} がエポック ms(0 以上の安全整数)でない`,
+    );
+  }
+  return { ...record, savedAtMs };
 }
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
@@ -511,6 +607,19 @@ export interface SavePutResult {
  * 中止しきい値(4MB)は {@link SaveCapacityError} を投げて **`put` を呼ばない**
  * (QuotaExceededError を待たず自前で止める・ADR-012(2)「書込中止」)。
  *
+ * **[台帳v26 必-1] 壁時計を読む唯一の場所**(§4(e))。ここで読んだ時刻が
+ * エンベロープの `savedAtMs` になり、次回起動の不在時間の材料になる。
+ * `clock` を差し替えられるのは他の platform モジュール(`backupReminder.ts` /
+ * `promotionPrompt.ts`)と同じ流儀であり、時計抽象も `WallClock` を再利用する
+ * (新しい時計の型を作らない)。
+ *
+ * **(tick, 壁時計) の対**が同じレコードに入ることが重要である: 次回起動の
+ * 経過は「このレコードの tick から、この壁時計時刻からの不在ぶん」として
+ * 計算される。`saveScheduler.ts` のデバウンス(2秒 / 絶対フラッシュ 15秒)で
+ * `state` が最大 15 秒古いことはあるが、savedAtMs は**書いた瞬間**なので
+ * ずれは常に「経過を少なく見積もる」方向(≤15秒 < 1 tick = 60秒)であり、
+ * 不在時間を水増しする方向には決してぶれない。
+ *
  * @throws {SaveBoundsError} 分岐木ノード上界超過(`encodeSaveRecord` 内)
  * @throws {SaveCapacityError} payload が 4MB 中止しきい値以上
  */
@@ -518,9 +627,10 @@ export async function saveGameState(
   db: IDBDatabase,
   state: GameState,
   key: string = LATEST_SAVE_KEY,
+  clock: WallClock = systemWallClock,
 ): Promise<SavePutResult> {
   const e0 = performance.now();
-  const record = encodeSaveRecord(state);
+  const record = encodeSaveRecord(state, { savedAtMs: clock.now() });
   const e1 = performance.now();
   const capacity = checkSaveCapacity(record.payload);
   if (capacity.level === "abort") {
@@ -578,6 +688,15 @@ export interface SaveRestoreResult {
   readonly saveFormatVersion: number;
   /** 適用したマイグレーション段の説明(現行版なら空配列)。 */
   readonly appliedMigrations: readonly string[];
+  /**
+   * [台帳v26 必-1] このセーブを書いた壁時計時刻(§4)。`null` = **不明**
+   * (台帳v26 必-1 以前に書かれたセーブ / 値が読めなかった場合)。
+   *
+   * 呼び出し側(`src/main.tsx`)はこれと現在の壁時計の差を
+   * `createTickDriver` の `startElapsedMs` へ渡す。`null` のときは経過 0 =
+   * 台帳v26 必-1 以前とまったく同じ起動挙動になる。
+   */
+  readonly savedAtMs: number | null;
 }
 
 /**
@@ -630,6 +749,12 @@ export async function loadLatestSave(
     marks: { enter, afterIdbGet, afterChecksum, afterParse, afterDeserialize },
     saveFormatVersion: migrated.fromVersion,
     appliedMigrations: migrated.appliedSteps,
+    // [台帳v26 必-1] **最後のマーク(afterDeserialize)より後**で読む。
+    // savedAtMs は復帰の計算に使う値だが B2 の 3 演算(get/parse/deserialize)
+    // ではないので、区間の意味を変えないよう内側へ入れない(§3・
+    // perf-boundaries §2 R7)。実体は型判定 1 回で、bench 側の `callOverhead`
+    // に定数として乗る。
+    savedAtMs: readSavedAtMs(migrated.value),
   };
 }
 
@@ -659,4 +784,11 @@ export async function loadLatestSave(
 //        parse したプレーン値に対して version 順に純関数を適用する
 //        (`migration.ts` の `migrateSavePayload`)。エンベロープ版の連鎖は
 //        checksum 検証より前(`migrateStoredSave`)。
+//  (e) 起動時オフライン復帰の材料(壁時計・ADR-026 / GDD 11.9)
+//      → **[台帳v26 必-1 済]** 書込側は `saveGameState`(`WallClock` を 1 回
+//        読んで `encodeSaveRecord` へ渡す)、読出側は `loadLatestSave` の
+//        戻り値 `savedAtMs`(§4)。**経過をどう使うかはこの層の責務ではない**:
+//        tick への変換は `clock.ts` の `createTickDriver({startElapsedMs})`、
+//        起動時の結線は `src/main.tsx` が持つ(この層は「1 回の書込 / 1 回の
+//        読出」以上を知らない、という T11 以来の線引きを保つ)。
 // ---------------------------------------------------------------------------

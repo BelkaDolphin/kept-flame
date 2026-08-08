@@ -81,6 +81,36 @@
 //   結線の実体は composition root(`src/main.tsx`)にあり、ストアの
 //   `onWorldLoaded` 通知から `syncTo` を呼ぶ形で**構造的に**取りこぼしを
 //   防いでいる(世界の入れ替えは `worldLoaded` イベント 1 種類しかない)。
+//
+// ===========================================================================
+// 7. [台帳v26 必-1] 起動時オフライン復帰 — `startElapsedMs`
+// ===========================================================================
+//   §1 の式は「単調時刻の経過」だけを見る。ところが `performance.now()` の
+//   原点は**ページを読み込むたびに 0 へ戻る**ので、初期アンカーを素直に
+//   `{anchorMs: clock.now(), anchorTick: セーブの tick}` と置くと、
+//   起動直後の pump は必ず経過 0 = 差分 0 になる —— **ブラウザを閉じていた
+//   時間がゲーム内から丸ごと消える**(ユーザー実プレイ報告「かまど 1・薪 1 本に
+//   数時間」の真因。engine 側の 72h クランプも Worker catch-up も⑫帰還
+//   ダイジェストも実装済みで、入口の材料だけが欠けていた)。
+//
+//   材料は「最後に遊んだ壁時計時刻」であり、セーブのエンベロープが持つ
+//   (`persistence.ts` §4 の `savedAtMs`)。それを現在の壁時計と引いた
+//   **不在 ms** を {@link TickDriverOptions.startElapsedMs} として渡すと、
+//   初期アンカーが `clock.now() - startElapsedMs` になり、以後は §1 の式が
+//   何も知らないまま不在ぶんを埋める。**駆動ロジックには 1 行も分岐を足さない**
+//   (「起動直後だけ特別扱い」を作ると、pump の回数非依存性を壊しかねない)。
+//
+//   壁時計と単調時刻の関係: 引き算は**壁時計どうし**で行い(`computeOfflineElapsedMs`)、
+//   その差 ms だけを単調時刻の座標系へ持ち込む。異なる 2 つの時計の値を直接
+//   比較しない、という M54(`backupReminder.ts`)以来の線引きである。
+//
+//   **72h クランプとの相互作用**(意図した情報落ち・§2):
+//   不在が 72h を超えると初回 pump の tickDelta は 4320 へクランプされ、
+//   4320 > 600 なので Worker 経路(§3)に入る。catch-up 完了後に呼び出し側が
+//   `syncTo(state.tick)` を呼ぶと、アンカーは**現在時刻**へ引き直される
+//   ——すなわち 72h を超えたぶんの残余経過はそこで捨てられ、二度目の
+//   catch-up を誘発しない。これが GDD 11.9「72h 以上放置しても 72h ぶん」の
+//   実装上の帰結であり、tests/platform/clock.test.ts が固定する。
 // ---------------------------------------------------------------------------
 
 import { TICK_MS, computeTargetTick } from "../engine/advance";
@@ -258,9 +288,42 @@ export const defaultTickScheduler: TickScheduler = (pump) => {
   return stop;
 };
 
+/**
+ * [台帳v26 必-1] 「最後に遊んだ壁時計時刻」と「今の壁時計」から**不在 ms** を
+ * 出す(§7)。{@link TickDriverOptions.startElapsedMs} へそのまま渡せる形。
+ *
+ * **決して投げない**。ここは起動経路であり、例外はゲームが起動しないことを
+ * 意味する。一方 `savedAtMs` は checksum の外にある未検証の値であり
+ * (`persistence.ts` §4(b))、端末の時計はユーザーがいつでも変更できる。
+ * よって読めない値・巻き戻り(負の差)は全て **0 = 不在なし** へ倒す:
+ * 台帳v26 必-1 以前とまったく同じ挙動に落ちるだけで、失われるのは
+ * 「不在ぶんを埋める」という上乗せの利得だけである。逆向き(でたらめに
+ * 大きな経過)は 72h クランプ(§7)が受け止める。
+ *
+ * @param savedAtMs 最後に書いたセーブの壁時計時刻。`null` = 不明。
+ * @param nowWallMs 現在の壁時計(`systemWallClock.now()`)。
+ */
+export function computeOfflineElapsedMs(savedAtMs: number | null, nowWallMs: number): number {
+  if (savedAtMs === null) return 0;
+  if (!Number.isFinite(savedAtMs) || !Number.isFinite(nowWallMs)) return 0;
+  const elapsedMs = nowWallMs - savedAtMs;
+  // 端末時計の巻き戻し(手動変更・NTP 補正)は「不在なし」として扱う。
+  if (!(elapsedMs > 0)) return 0;
+  return Math.floor(elapsedMs);
+}
+
 export interface TickDriverOptions {
   /** 起点のゲーム内 tick(通常はロード直後の `state.tick`)。 */
   readonly startTick: number;
+  /**
+   * [台帳v26 必-1] 起点の tick に対して**既に経過している**実時間(ms)。
+   * 既定 0(= 台帳v26 必-1 以前と同一挙動)。
+   *
+   * 初期アンカーを `clock.now() - startElapsedMs` に置くだけで、最初の
+   * {@link TickDriver.pump} が不在ぶんを §1 の式どおりに回収する(§7)。
+   * 値は {@link computeOfflineElapsedMs} が作る想定。
+   */
+  readonly startElapsedMs?: number;
   /** メイン経路で進められるとき(≤600 tick)に呼ばれる。 */
   readonly onAdvance: (toTick: number) => void;
   /** Worker 経路が要るとき(>600 tick)に呼ばれる。省略時は何もしない。 */
@@ -295,16 +358,29 @@ export interface TickDriver {
 /**
  * フォアグラウンド tick 駆動を作る(ADR-026)。アプリ 1 起動につき 1 個。
  *
- * @throws {ClockError} startTick が 0 以上の整数でない場合
+ * @throws {ClockError} startTick が 0 以上の整数でない場合 /
+ *         startElapsedMs が 0 以上の有限数でない場合
  */
 export function createTickDriver(options: TickDriverOptions): TickDriver {
   if (!Number.isSafeInteger(options.startTick) || options.startTick < 0) {
     throw new ClockError(`startTick ${String(options.startTick)} が 0 以上の整数でない`);
   }
+  const startElapsedMs = options.startElapsedMs ?? 0;
+  // [台帳v26 必-1] 負(= 未来から来たセーブ)や非有限をアンカーへ通すと、以後
+  // 全ての pump が壊れた基準点で計算される。呼び出し側で丸めるべき値なので
+  // (`computeOfflineElapsedMs` が 0 へ倒す)、ここまで来たら契約違反として止める。
+  if (!Number.isFinite(startElapsedMs) || startElapsedMs < 0) {
+    throw new ClockError(`startElapsedMs ${String(startElapsedMs)} が 0 以上の有限数でない`);
+  }
   const clock = options.clock ?? performanceClock;
   const schedule = options.schedule ?? defaultTickScheduler;
 
-  let anchor: TickAnchor = { anchorMs: clock.now(), anchorTick: options.startTick };
+  // 不在ぶんだけアンカーを過去へずらす(§7)。startElapsedMs が 0 なら
+  // 従来と 1 bit も変わらない `{anchorMs: clock.now(), …}` になる。
+  let anchor: TickAnchor = {
+    anchorMs: clock.now() - startElapsedMs,
+    anchorTick: options.startTick,
+  };
   let stopSchedule: (() => void) | null = null;
   let pumpCount = 0;
 
